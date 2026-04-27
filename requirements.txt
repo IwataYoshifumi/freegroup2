@@ -1,0 +1,8 @@
+Django==6.0.2
+django-crispy-forms
+crispy-bootstrap5
+django-debug-toolbar
+icecream
+Pillow
+python-dotenv
+anthropic
