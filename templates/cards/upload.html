@@ -1,0 +1,41 @@
+{% extends "cards/app_base.html" %}
+
+{% block title %}名刺アップロード — FreeGroup2{% endblock %}
+
+{% block content %}
+  <div class="app-page-header">
+    <div>
+      <div class="app-breadcrumb">名刺管理 / アップロード</div>
+      <h1>名刺アップロード</h1>
+    </div>
+  </div>
+
+  <section class="app-card">
+    <p class="app-muted">対応形式: JPEG / PNG（5MB まで）</p>
+    <form method="post" enctype="multipart/form-data">
+      {% csrf_token %}
+
+      <div class="app-form-grid">
+        <div class="app-form__group app-form__group--full">
+          <label class="app-form__label" for="{{ form.image.id_for_label }}">{{ form.image.label }}</label>
+          {{ form.image }}
+          {% if form.image.errors %}
+            <div class="app-form__error">
+              {% for error in form.image.errors %}{{ error }}<br>{% endfor %}
+            </div>
+          {% endif %}
+        </div>
+      </div>
+
+      {% if form.non_field_errors %}
+        <div class="app-message app-message--warning">
+          {{ form.non_field_errors }}
+        </div>
+      {% endif %}
+
+      <div class="app-action-area">
+        <button type="submit" class="app-btn app-btn--primary">アップロード</button>
+      </div>
+    </form>
+  </section>
+{% endblock %}

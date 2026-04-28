@@ -1,0 +1,127 @@
+{% extends "cards/app_base.html" %}
+{% load back_tags %}
+
+{% block title %}元画像一覧 — FreeGroup2{% endblock %}
+
+{% block content %}
+  <div class="app-page-header">
+    <div>
+      <div class="app-breadcrumb">名刺管理 / 元画像一覧</div>
+      <h1>元画像一覧</h1>
+    </div>
+  </div>
+
+  <section class="app-card">
+    <form method="get" class="app-form-grid-edit">
+      <div class="app-form-grid">
+        <div class="app-form__group app-form__group--full">
+          <label class="app-form__label">ステータス</label>
+          {% for value, label in status_choices %}
+            <label style="margin-right: 12px;">
+              <input type="checkbox" name="status" value="{{ value }}" {% if value in selected_statuses %}checked{% endif %}>
+              {{ label }}
+            </label>
+          {% endfor %}
+        </div>
+
+        <div class="app-form__group">
+          <label class="app-form__label" for="id_date_from">開始日</label>
+          <input type="date" id="id_date_from" name="date_from" value="{{ date_from }}" class="app-input">
+        </div>
+
+        <div class="app-form__group">
+          <label class="app-form__label" for="id_date_to">終了日</label>
+          <input type="date" id="id_date_to" name="date_to" value="{{ date_to }}" class="app-input">
+        </div>
+
+        <div class="app-form__group">
+          <label class="app-form__label" for="id_per_page">表示件数</label>
+          <select id="id_per_page" name="per_page" class="app-input">
+            <option value="20" {% if per_page == "20" %}selected{% endif %}>20件</option>
+            <option value="50" {% if per_page == "50" %}selected{% endif %}>50件</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="app-action-area app-action-area--search">
+        <button type="submit" class="app-btn app-btn--primary">検索</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="app-card">
+    <div class="app-table-wrapper">
+      <table class="app-table app-table--nowrap">
+        <thead>
+          <tr>
+            <th class="app-table__col--action">操作</th>
+            <th>ステータス</th>
+            <th>検出枚数</th>
+            <th>アップロード日時</th>
+            <th>エラーメッセージ</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for image in originals %}
+            <tr>
+              <td class="app-table__col--action">
+                {% url 'originals:original_detail' pk=image.id as detail_url %}
+                <a href="{% append_back_url detail_url back %}" class="app-icon-btn" aria-label="詳細">
+                  <span class="app-icon--detail"></span>
+                </a>
+              </td>
+              <td>
+                {% if image.status == "pending" %}
+                  <span class="app-status-badge app-status-badge--info">処理中</span>
+                {% elif image.status == "extracted" %}
+                  <span class="app-status-badge app-status-badge--success">完了</span>
+                {% elif image.status == "garbage" %}
+                  <span class="app-status-badge app-status-badge--muted">無効画像</span>
+                {% elif image.status == "failed" %}
+                  <span class="app-status-badge app-status-badge--error">処理失敗</span>
+                {% else %}
+                  <span class="app-status-badge">{{ image.status }}</span>
+                {% endif %}
+              </td>
+              <td>{% if image.detected_count %}{{ image.detected_count }}{% else %}-{% endif %}</td>
+              <td>{{ image.created_at|date:"Y/m/d H:i" }}</td>
+              <td>
+                {% if image.error_message %}
+                  <span class="app-ellipsis" data-tooltip="{{ image.error_message }}">{{ image.error_message|truncatechars:50 }}</span>
+                {% else %}
+                  -
+                {% endif %}
+              </td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="5" class="app-muted">元画像がまだありません。</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    {% if is_paginated %}
+      <nav class="app-pagination" aria-label="ページネーション">
+        {% if page_obj.has_previous %}
+          <a href="?{% for s in selected_statuses %}status={{ s }}&{% endfor %}date_from={{ date_from }}&date_to={{ date_to }}&per_page={{ per_page }}&page={{ page_obj.previous_page_number }}" class="app-pagination__button">‹</a>
+        {% else %}
+          <button type="button" class="app-pagination__button" disabled>‹</button>
+        {% endif %}
+
+        {% for num in paginator.page_range %}
+          {% if num == page_obj.number %}
+            <button type="button" class="app-pagination__button is-active">{{ num }}</button>
+          {% else %}
+            <a href="?{% for s in selected_statuses %}status={{ s }}&{% endfor %}date_from={{ date_from }}&date_to={{ date_to }}&per_page={{ per_page }}&page={{ num }}" class="app-pagination__button">{{ num }}</a>
+          {% endif %}
+        {% endfor %}
+
+        {% if page_obj.has_next %}
+          <a href="?{% for s in selected_statuses %}status={{ s }}&{% endfor %}date_from={{ date_from }}&date_to={{ date_to }}&per_page={{ per_page }}&page={{ page_obj.next_page_number }}" class="app-pagination__button">›</a>
+        {% else %}
+          <button type="button" class="app-pagination__button" disabled>›</button>
+        {% endif %}
+      </nav>
+    {% endif %}
+  </section>
+{% endblock %}

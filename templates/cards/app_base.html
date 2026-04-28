@@ -1,0 +1,18 @@
+{# 名刺管理アプリ用ベース。base.html を継承し、サイドバー（cards/_sidebar.html）を組み込む。 #}
+{% extends "base.html" %}
+
+{% block app_name %}名刺管理{% endblock %}
+{% block drawer_title %}名刺管理{% endblock %}
+
+{% block app_content %}
+  <div class="app-main-area">
+    {% include "cards/_sidebar.html" %}
+    <main class="app-main">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+{% endblock %}
+
+{% block drawer_content %}
+  {% include "cards/_sidebar.html" %}
+{% endblock %}

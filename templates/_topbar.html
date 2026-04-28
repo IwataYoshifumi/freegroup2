@@ -1,0 +1,26 @@
+{# トップバー部品（include 専用）。base.html から呼ばれる。 #}
+<header class="app-topbar">
+  <div class="app-topbar__left">
+    <button type="button" class="app-btn--icon app-topbar__menu-btn" data-action="toggle-drawer" aria-label="メニューを開く">≡</button>
+    <div>
+      <div class="app-topbar__system-name">FreeGroup2</div>
+      <div class="app-topbar__current-app">{% block app_name %}{% endblock %}</div>
+    </div>
+  </div>
+
+  <nav class="app-app-switcher" aria-label="アプリ切り替え">
+    {% block app_switcher %}
+      <a href="{% url 'cards:card_upload' %}" class="{% if active_app == 'cards' %}is-active{% endif %}">名刺管理</a>
+    {% endblock %}
+  </nav>
+
+  <div class="app-user-menu" id="userMenu">
+    <button type="button" class="app-topbar__user-btn" data-action="toggle-user-menu" aria-haspopup="true">
+      {{ user.username|default:"ゲスト" }}
+    </button>
+    <div class="app-user-dropdown" role="menu">
+      <a href="#" role="menuitem">プロフィール</a>
+      <a href="#" role="menuitem">ログアウト</a>
+    </div>
+  </div>
+</header>
