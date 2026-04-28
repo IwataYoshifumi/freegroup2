@@ -5,7 +5,11 @@ from django.db import models
 
 
 class OriginalImage(models.Model):
-    """原画像DB（仕様書 v1.1.0 §4.2）。ユーザーがアップロードした画像本体を保管する。"""
+    """原画像DB（仕様書 v1.2.1 §4.2）。
+
+    ユーザーがアップロードした画像本体を保管する。OCR 結果 JSON 全体（cards 配列含む）
+    も raw_json に集約して保存する（v1.2.0 で導入）。
+    """
 
     STATUS_PENDING = "pending"
     STATUS_EXTRACTED = "extracted"
@@ -29,6 +33,7 @@ class OriginalImage(models.Model):
         choices=STATUS_CHOICES,
         default=STATUS_PENDING,
     )
+    raw_json = models.JSONField(null=True, blank=True)
     error_message = models.TextField(blank=True, default="")
     detected_count = models.IntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -39,37 +44,37 @@ class OriginalImage(models.Model):
 
 
 class BusinessCard(models.Model):
-    """名刺DB（仕様書 v1.1.0 §4.3）。raw_json は不変データ。bbox は raw_json.card_meta に含む。"""
+    """名刺DB（仕様書 v1.2.1 §4.3）。
 
-    OCR_STATUS_PENDING = "pending"
-    OCR_STATUS_PROCESSING = "processing"
-    OCR_STATUS_SUCCESS = "success"
-    OCR_STATUS_FAILED = "failed"
-    OCR_STATUS_CHOICES = [
-        (OCR_STATUS_PENDING, "未実行"),
-        (OCR_STATUS_PROCESSING, "実行中"),
-        (OCR_STATUS_SUCCESS, "OCR完了"),
-        (OCR_STATUS_FAILED, "失敗"),
-    ]
+    1 OriginalImage から検出された各名刺を表す。raw_json / ocr_status / error_message は
+    持たず、OriginalImage.raw_json["cards"][card_index] の該当要素を参照する。
+    切り抜き失敗時は card_image=null で作成する（v1.2.1）。
+    """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     original_image = models.ForeignKey(
         OriginalImage,
         on_delete=models.CASCADE,
     )
-    card_image = models.ImageField(upload_to="cards/%Y/%m/%d/")
-    raw_json = models.JSONField()
-    ocr_status = models.CharField(
-        max_length=20,
-        choices=OCR_STATUS_CHOICES,
-        default=OCR_STATUS_PENDING,
+    card_image = models.ImageField(
+        upload_to="cards/%Y/%m/%d/",
+        null=True,
+        blank=True,
     )
-    error_message = models.TextField(blank=True, default="")
+    card_index = models.IntegerField()
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["original_image", "card_index"],
+                name="unique_original_image_card_index",
+            ),
+        ]
+
     def __str__(self):
-        return f"{self.id} ({self.ocr_status})"
+        return f"{self.id} (card_index={self.card_index})"
 
 
 class Person(models.Model):
