@@ -57,8 +57,8 @@
 
 - schema_version: "1.0.0"
 - ocr_meta:
-  - engine: "claude-haiku-4-5"
-  - version: "20251001"
+  - engine: "claude-sonnet-4-6"
+  - version: "20260217"
   - timestamp: 現在時刻（ISO 8601 形式）
   - raw_text: 画像から実際に視認できた全テキスト
     - 視認できないなら空文字列 ""
