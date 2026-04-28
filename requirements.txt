@@ -6,3 +6,4 @@ icecream
 Pillow
 python-dotenv
 anthropic
+jsonschema>=4.0
