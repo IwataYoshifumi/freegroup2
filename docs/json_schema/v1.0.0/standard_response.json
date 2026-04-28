@@ -1,0 +1,194 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://freegroup2.example.com/schemas/v1.0.0/standard_response.json",
+  "title": "FreeGroup2 OCR Standard Response",
+  "description": "名刺画像取り込みOCRの標準レスポンスJSON。すべてのOCRバックエンドはこの形式で結果を返す。",
+  "type": "object",
+  "required": ["schema_version", "ocr_meta", "cards"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0.0",
+      "description": "JSON 構造のバージョン"
+    },
+    "ocr_meta": {
+      "$ref": "#/$defs/OcrMeta"
+    },
+    "cards": {
+      "type": "array",
+      "description": "検出された名刺ごとのデータ配列。0件以上。",
+      "items": {
+        "$ref": "#/$defs/Card"
+      }
+    }
+  },
+  "$defs": {
+    "OcrMeta": {
+      "type": "object",
+      "description": "OCR エンジン情報・処理時刻・原文テキスト",
+      "required": ["engine", "version", "timestamp", "raw_text"],
+      "additionalProperties": false,
+      "properties": {
+        "engine": {
+          "type": "string",
+          "description": "使用した OCR エンジン名（例: 'claude-haiku-4-5'）"
+        },
+        "version": {
+          "type": "string",
+          "description": "エンジンのバージョン番号"
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "OCR 実行時刻（ISO 8601 形式）"
+        },
+        "raw_text": {
+          "type": "string",
+          "description": "OCR が認識した生テキスト全文（再解析用の証跡）"
+        }
+      }
+    },
+    "Card": {
+      "type": "object",
+      "description": "1枚の名刺データ",
+      "required": ["card_meta", "fields", "fields_array"],
+      "additionalProperties": false,
+      "properties": {
+        "card_meta": {
+          "$ref": "#/$defs/CardMeta"
+        },
+        "fields": {
+          "$ref": "#/$defs/Fields"
+        },
+        "fields_array": {
+          "$ref": "#/$defs/FieldsArray"
+        }
+      }
+    },
+    "CardMeta": {
+      "type": "object",
+      "description": "名刺判定情報・bbox",
+      "required": ["is_business_card", "bbox"],
+      "additionalProperties": false,
+      "properties": {
+        "is_business_card": {
+          "type": "boolean",
+          "description": "名刺かどうか（false なら BusinessCard を作成しない）"
+        },
+        "multiple_cards_detected": {
+          "type": "boolean",
+          "description": "複数枚検出されたか（任意）"
+        },
+        "bbox": {
+          "$ref": "#/$defs/BBox"
+        }
+      }
+    },
+    "BBox": {
+      "type": "object",
+      "description": "元画像内での名刺位置",
+      "required": ["x", "y", "width", "height"],
+      "additionalProperties": false,
+      "properties": {
+        "x": { "type": "number", "minimum": 0 },
+        "y": { "type": "number", "minimum": 0 },
+        "width": { "type": "number", "minimum": 1 },
+        "height": { "type": "number", "minimum": 1 }
+      }
+    },
+    "Fields": {
+      "type": "object",
+      "description": "単一値フィールド。各値は ConfidenceValue 構造。",
+      "additionalProperties": false,
+      "properties": {
+        "full_name": { "$ref": "#/$defs/ConfidenceValue" },
+        "last_name": { "$ref": "#/$defs/ConfidenceValue" },
+        "first_name": { "$ref": "#/$defs/ConfidenceValue" },
+        "salutation_name": { "$ref": "#/$defs/ConfidenceValue" },
+        "company": { "$ref": "#/$defs/ConfidenceValue" },
+        "department": { "$ref": "#/$defs/ConfidenceValue" },
+        "title": { "$ref": "#/$defs/ConfidenceValue" },
+        "address": { "$ref": "#/$defs/ConfidenceValue" },
+        "notes": { "$ref": "#/$defs/ConfidenceValue" }
+      }
+    },
+    "FieldsArray": {
+      "type": "object",
+      "description": "配列フィールド。OCR が複数検出した場合に全部記録する。",
+      "additionalProperties": false,
+      "properties": {
+        "emails": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ConfidenceValue" }
+        },
+        "phones": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ConfidenceValue" }
+        },
+        "mobiles": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ConfidenceValue" }
+        },
+        "fax": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ConfidenceValue" }
+        },
+        "websites": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ConfidenceValue" }
+        },
+        "social_media": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/TypedConfidenceValue" }
+        },
+        "alt_names": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/TypedConfidenceValue" }
+        },
+        "additional_names": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/TypedConfidenceValue" }
+        }
+      }
+    },
+    "ConfidenceValue": {
+      "type": "object",
+      "description": "値と信頼度のペア",
+      "required": ["value", "confidence"],
+      "additionalProperties": false,
+      "properties": {
+        "value": {
+          "type": ["string", "null"],
+          "description": "抽出された値。読み取れなかった場合は null"
+        },
+        "confidence": {
+          "$ref": "#/$defs/Confidence"
+        }
+      }
+    },
+    "TypedConfidenceValue": {
+      "type": "object",
+      "description": "type 付きの値と信頼度（SNS、別名等）",
+      "required": ["type", "value", "confidence"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "種別（例: twitter, linkedin, kana, romanization）"
+        },
+        "value": {
+          "type": ["string", "null"]
+        },
+        "confidence": {
+          "$ref": "#/$defs/Confidence"
+        }
+      }
+    },
+    "Confidence": {
+      "type": "string",
+      "enum": ["high", "medium", "low"],
+      "description": "信頼度。high=高信頼、medium=確認推奨、low=要確認"
+    }
+  }
+}
