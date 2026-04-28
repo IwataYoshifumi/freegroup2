@@ -8,6 +8,19 @@
   <script src="{% static 'js/app.js' %}" defer></script>
 </head>
 <body>
-  {% block content %}{% endblock %}
+  <div class="app-shell">
+    {% include "_topbar.html" %}
+
+    {% block app_content %}{% endblock %}
+
+    <aside class="app-drawer" id="drawer" aria-hidden="true">
+      <div class="app-drawer__header">
+        <strong>{% block drawer_title %}メニュー{% endblock %}</strong>
+        <button type="button" class="app-btn--icon" data-action="close-drawer" aria-label="閉じる">×</button>
+      </div>
+      {% block drawer_content %}{% endblock %}
+    </aside>
+    <div class="app-backdrop" data-action="close-drawer"></div>
+  </div>
 </body>
 </html>

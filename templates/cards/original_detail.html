@@ -1,0 +1,110 @@
+{% extends "cards/app_base.html" %}
+{% load back_tags %}
+
+{% block title %}元画像詳細 — FreeGroup2{% endblock %}
+
+{% block content %}
+  <div class="app-page-header">
+    <div>
+      <div class="app-breadcrumb">名刺管理 / 元画像一覧 / 詳細</div>
+      <h1>元画像詳細</h1>
+    </div>
+    <div class="app-action-area">
+      {% if back.back_exist %}
+        <a href="{% back_url back %}" class="app-btn app-btn--secondary">
+          <span class="app-icon--back"></span> 戻る
+        </a>
+      {% endif %}
+    </div>
+  </div>
+
+  <section class="app-card">
+    <div class="app-detail-grid">
+      <div class="app-detail-item">
+        <div class="app-detail-label">ステータス</div>
+        <div class="app-detail-value">
+          {% if original.status == "pending" %}
+            <span class="app-status-badge app-status-badge--info">処理中</span>
+          {% elif original.status == "extracted" %}
+            <span class="app-status-badge app-status-badge--success">完了</span>
+          {% elif original.status == "garbage" %}
+            <span class="app-status-badge app-status-badge--muted">無効画像</span>
+          {% elif original.status == "failed" %}
+            <span class="app-status-badge app-status-badge--error">処理失敗</span>
+          {% else %}
+            <span class="app-status-badge">{{ original.status }}</span>
+          {% endif %}
+        </div>
+      </div>
+      <div class="app-detail-item">
+        <div class="app-detail-label">検出枚数</div>
+        <div class="app-detail-value">{% if original.detected_count %}{{ original.detected_count }}{% else %}-{% endif %}</div>
+      </div>
+      <div class="app-detail-item">
+        <div class="app-detail-label">アップロード日時</div>
+        <div class="app-detail-value">{{ original.created_at|date:"Y/m/d H:i:s" }}</div>
+      </div>
+      <div class="app-detail-item">
+        <div class="app-detail-label">更新日時</div>
+        <div class="app-detail-value">{{ original.updated_at|date:"Y/m/d H:i:s" }}</div>
+      </div>
+    </div>
+
+    {% if original.error_message %}
+      <div class="app-message app-message--warning">
+        <strong>エラーメッセージ</strong>
+        <pre>{{ original.error_message }}</pre>
+      </div>
+    {% endif %}
+  </section>
+
+  <section class="app-card">
+    <div class="app-section__header">
+      <h2>元画像</h2>
+    </div>
+    {% if original.image_file %}
+      <img src="{{ original.image_file.url }}" alt="元画像" style="max-width: 100%; height: auto;">
+    {% else %}
+      <p class="app-muted">画像がありません。</p>
+    {% endif %}
+  </section>
+
+  <section class="app-card">
+    <div class="app-section__header">
+      <h2>検出された名刺</h2>
+    </div>
+
+    {% if original.status == "pending" %}
+      <p class="app-muted">処理待ちです。</p>
+    {% elif original.status == "garbage" %}
+      <p class="app-muted">名刺が検出されませんでした。</p>
+    {% elif original.status == "failed" %}
+      <p class="app-muted">処理に失敗しました。</p>
+    {% elif original.status == "extracted" %}
+      <div class="app-table-wrapper">
+        <table class="app-table app-table--nowrap">
+          <thead>
+            <tr>
+              <th>名刺 ID</th>
+              <th>OCR ステータス</th>
+              <th>作成日時</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for card in business_cards %}
+              <tr>
+                <td>{{ card.id|stringformat:"s"|slice:":8" }}...</td>
+                <td>{{ card.get_ocr_status_display }}</td>
+                <td>{{ card.created_at|date:"Y/m/d H:i" }}</td>
+              </tr>
+            {% empty %}
+              <tr><td colspan="3" class="app-muted">名刺レコードがありません。</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="app-muted">処理中です。</p>
+    {% endif %}
+  </section>
+{% endblock %}
