@@ -1,6 +1,12 @@
 from django.contrib import admin
 
-from .models import BusinessCard, Contact, OriginalImage, Person
+from .models import (
+    BusinessCard,
+    Contact,
+    ContactFieldConfidence,
+    OriginalImage,
+    Person,
+)
 
 
 @admin.register(OriginalImage)
@@ -42,6 +48,16 @@ class ContactAdmin(admin.ModelAdmin):
         "company",
         "department",
         "title",
+        "email",
     )
+    readonly_fields = ("id", "created_at", "updated_at")
+    ordering = ("-created_at",)
+
+
+@admin.register(ContactFieldConfidence)
+class ContactFieldConfidenceAdmin(admin.ModelAdmin):
+    list_display = ("id", "contact", "field_name", "confidence", "confirmed_at", "created_at")
+    list_filter = ("confidence", "confirmed_at", "created_at")
+    search_fields = ("id", "field_name", "contact__full_name")
     readonly_fields = ("id", "created_at", "updated_at")
     ordering = ("-created_at",)
