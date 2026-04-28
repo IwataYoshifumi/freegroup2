@@ -109,3 +109,63 @@ freegroup2/
 - フェーズ4: tasks（pipeline_coordinator / ocr_service / card_cropper）
 - フェーズ5: 管理コマンド（process_pending / retry_failed_ocr）
 - フェーズ6: views / templates / urls
+
+## 関数命名規則と性質明記
+
+### 関数の3分類
+
+- 純関数：DB を一切触らない、副作用なし、同じ入力で同じ出力
+- 準関数：DB を読むが書かない、外部世界に副作用なし
+- 副作用あり関数：DB 書き込み・例外送出・API 呼び出し・ファイル書き込みなど
+
+### プレフィックス（推奨）
+
+| プレフィックス | 性質 | 例 |
+|---|---|---|
+| normalize_* / to_* / calc_* / is_* / has_* | 純関数 | normalize_to_contact_dict |
+| find_* / get_* / search_* | 準関数（DB読み取り） | find_matching_person |
+| validate_* | 副作用あり（例外） | validate_image |
+| convert_* / save_* / create_* / update_* / delete_* | 副作用あり（変換・DB書込） | convert_to_jpeg, save_contact |
+| run_* / process_* / send_* | 副作用あり（複合処理） | run_ocr |
+
+### docstring 性質明記の強制範囲
+
+| 配置 | 強制度 | 内容 |
+|---|---|---|
+| services/ の公開関数 | 必須 | レベル2（性質 + 入出力） |
+| tasks/ の公開関数 | 必須 | レベル2 |
+| management/commands/ で外から呼ばれる関数 | 必須 | レベル2 |
+| 内部ヘルパー（_ で始まる） | 任意 | レベル1（性質1行）で十分 |
+| View / Model / Django 標準メソッド | 不要 | - |
+
+### docstring の書き方
+
+レベル1（最小）：性質1行のみ
+```
+"""
+[性質] 副作用あり（ValidationError を raise）
+"""
+```
+
+レベル2（標準・必須範囲で書く形）：
+```
+"""
+raw_json を Contact フィールド辞書に変換する。
+
+[性質] 純関数（DB操作なし・副作用なし）
+[入力] raw_json: dict（Claude API の Tool Use 結果）
+[出力] dict（Contact のフィールド辞書）
+"""
+```
+
+### 迷ったときのルール
+
+- 迷ったら必須側に倒す
+- 他のファイルから import するなら必須
+- 1関数が複数のプレフィックスに当てはまるなら、責務を分けて関数を分割する
+
+### 重複チェックは Contact DB ベース
+
+raw_json に対して重複チェックは行わない。
+Contact DB（保存済みレコード）に対して行う。
+理由：OCR バックエンド非依存・既存データとの比較容易性。
