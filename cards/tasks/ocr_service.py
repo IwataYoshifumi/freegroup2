@@ -23,9 +23,9 @@ class OcrService:
     実装の差し替え範囲を限定するため（v1.2.x では Claude Haiku 4.5 のみ）。
     """
 
-    DEFAULT_MODEL = "claude-haiku-4-5-20251001"
-    DEFAULT_ENGINE = "claude-haiku-4-5"
-    DEFAULT_MODEL_VERSION = "20251001"
+    DEFAULT_MODEL = "claude-sonnet-4-6"
+    DEFAULT_ENGINE = "claude-sonnet-4-6"
+    DEFAULT_MODEL_VERSION = "20260217"
     DEFAULT_MAX_TOKENS = 4096
     TOOL_NAME = "extract_business_cards"
 
