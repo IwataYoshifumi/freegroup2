@@ -1,0 +1,135 @@
+{% extends "cards/app_base.html" %}
+{% load back_tags %}
+
+{% block title %}名刺一覧 — FreeGroup2{% endblock %}
+
+{% block content %}
+  <div class="app-page-header">
+    <div>
+      <div class="app-breadcrumb">名刺管理 / 名刺一覧</div>
+      <h1>名刺一覧</h1>
+    </div>
+  </div>
+
+  <section class="app-card">
+    <form method="get" class="app-form-grid-edit">
+      <div class="app-form-grid">
+        <div class="app-form__group app-form__group--full">
+          <label class="app-form__label" for="id_q">キーワード検索</label>
+          <input type="text" id="id_q" name="q" value="{{ q }}" class="app-input"
+                 placeholder="氏名 / 会社 / 部署 / 役職 / メール / 住所 / メモ">
+        </div>
+      </div>
+
+      <div class="app-action-area app-action-area--search">
+        <button type="submit" class="app-btn app-btn--primary">検索</button>
+        {% if q %}
+          <a href="{% url 'cards:card_list' %}" class="app-btn app-btn--secondary">クリア</a>
+        {% endif %}
+      </div>
+    </form>
+  </section>
+
+  <section class="app-card">
+    <div class="app-table-wrapper">
+      <table class="app-table app-table--nowrap">
+        <thead>
+          <tr>
+            <th class="app-table__col--action">操作</th>
+            <th>サムネイル</th>
+            <th class="app-table__col--name">氏名</th>
+            <th class="app-table__col--company">会社</th>
+            <th>役職</th>
+            <th>主要連絡先</th>
+            <th class="app-table__col--date">作成日時</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for card in cards %}
+            {% url 'cards:card_detail' pk=card.id as detail_url %}
+            <tr>
+              <td class="app-table__col--action">
+                <a href="{% append_back_url detail_url back %}" class="app-icon-btn" aria-label="詳細">
+                  <span class="app-icon--detail"></span>
+                </a>
+              </td>
+              <td>
+                {% if card.card_image %}
+                  <img src="{{ card.card_image.url }}" alt="名刺" style="max-height: 48px; max-width: 100px; border-radius: 4px;">
+                {% else %}
+                  <span class="app-muted">画像未取得</span>
+                {% endif %}
+              </td>
+              <td>{{ card.contact.full_name|default:"-" }}</td>
+              <td>
+                {% if card.contact.company %}
+                  <span class="app-ellipsis" data-tooltip="{{ card.contact.company }}">{{ card.contact.company|truncatechars:30 }}</span>
+                {% else %}-{% endif %}
+              </td>
+              <td>{{ card.contact.title|default:"-" }}</td>
+              <td>
+                {% if card.contact.email %}{{ card.contact.email }}
+                {% elif card.contact.phone %}{{ card.contact.phone }}
+                {% else %}-{% endif %}
+              </td>
+              <td>{{ card.created_at|date:"Y/m/d H:i" }}</td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="7" class="app-muted">
+              {% if q %}検索条件に一致する名刺がありません。{% else %}名刺がまだありません。{% endif %}
+            </td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="app-card-list">
+      {% for card in cards %}
+        {% url 'cards:card_detail' pk=card.id as detail_url %}
+        <a href="{% append_back_url detail_url back %}" class="app-list-card" style="display: block; text-decoration: none; color: inherit;">
+          <div class="app-list-card__main">
+            <strong>{{ card.contact.full_name|default:"(氏名なし)" }}</strong>
+            {% if card.contact.company %}<div>{{ card.contact.company }}</div>{% endif %}
+            {% if card.contact.title %}<div class="app-muted">{{ card.contact.title }}</div>{% endif %}
+          </div>
+          <div class="app-list-card__sub">
+            <span>
+              {% if card.contact.email %}{{ card.contact.email }}
+              {% elif card.contact.phone %}{{ card.contact.phone }}
+              {% else %}-{% endif %}
+            </span>
+            <span>{{ card.created_at|date:"Y/m/d" }}</span>
+          </div>
+        </a>
+      {% empty %}
+        <p class="app-muted">
+          {% if q %}検索条件に一致する名刺がありません。{% else %}名刺がまだありません。{% endif %}
+        </p>
+      {% endfor %}
+    </div>
+
+    {% if is_paginated %}
+      <nav class="app-pagination" aria-label="ページネーション">
+        {% if page_obj.has_previous %}
+          <a href="?q={{ q }}&page={{ page_obj.previous_page_number }}" class="app-pagination__button">‹</a>
+        {% else %}
+          <button type="button" class="app-pagination__button" disabled>‹</button>
+        {% endif %}
+
+        {% for num in paginator.page_range %}
+          {% if num == page_obj.number %}
+            <button type="button" class="app-pagination__button is-active">{{ num }}</button>
+          {% else %}
+            <a href="?q={{ q }}&page={{ num }}" class="app-pagination__button">{{ num }}</a>
+          {% endif %}
+        {% endfor %}
+
+        {% if page_obj.has_next %}
+          <a href="?q={{ q }}&page={{ page_obj.next_page_number }}" class="app-pagination__button">›</a>
+        {% else %}
+          <button type="button" class="app-pagination__button" disabled>›</button>
+        {% endif %}
+      </nav>
+    {% endif %}
+  </section>
+{% endblock %}
