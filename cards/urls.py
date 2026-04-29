@@ -5,6 +5,7 @@ from . import views
 app_name = "cards"
 
 urlpatterns = [
+    path("", views.CardListView.as_view(), name="card_list"),
     path("upload/", views.UploadView.as_view(), name="card_upload"),
-    path("list/", views.placeholder_view, name="card_list"),
+    path("<uuid:pk>/", views.CardDetailView.as_view(), name="card_detail"),
 ]

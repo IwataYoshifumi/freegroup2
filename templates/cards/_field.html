@@ -1,0 +1,13 @@
+{# 名刺詳細画面のフィールド1行を表示する部品。 #}
+{# 引数: label（表示ラベル）, value（値）, confidence（'low' / 'medium' / 空文字）。 #}
+<div class="app-detail-item">
+  <div class="app-detail-label">{{ label }}</div>
+  <div class="app-detail-value">
+    {{ value }}
+    {% if confidence == 'medium' %}
+      <span class="app-status-dot app-status-dot--warning" title="信頼度: 中" aria-label="信頼度: 中"></span>
+    {% elif confidence == 'low' %}
+      <span class="app-status-dot app-status-dot--error" title="信頼度: 低" aria-label="信頼度: 低"></span>
+    {% endif %}
+  </div>
+</div>
