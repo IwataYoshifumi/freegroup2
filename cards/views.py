@@ -133,7 +133,8 @@ class CardListView(ListView):
     """名刺一覧画面（仕様書 v1.2.2 / Phase 4）。
 
     BusinessCard を Contact 情報とともに一覧表示する。
-    検索ボックス1個で Contact の主要フィールドを OR 全文検索する。
+    7フィールドの AND 検索（name / company / department / title / email / tel / address）。
+    tel は phone / mobile / fax の OR 一致。
     """
 
     model = BusinessCard
@@ -141,15 +142,7 @@ class CardListView(ListView):
     context_object_name = "cards"
     paginate_by = 20
 
-    SEARCH_FIELDS = (
-        "contact__full_name",
-        "contact__company",
-        "contact__department",
-        "contact__title",
-        "contact__email",
-        "contact__address",
-        "contact__notes",
-    )
+    _SEARCH_PARAMS = ("name", "company", "department", "title", "email", "tel", "address")
 
     def get_queryset(self):
         user = get_current_user(self.request)
@@ -158,12 +151,26 @@ class CardListView(ListView):
             .select_related("original_image", "contact")
         )
 
-        keyword = self.request.GET.get("q", "").strip()
-        if keyword:
-            condition = Q()
-            for field in self.SEARCH_FIELDS:
-                condition |= Q(**{f"{field}__icontains": keyword})
-            qs = qs.filter(condition)
+        p = self.request.GET
+        if p.get("name", "").strip():
+            qs = qs.filter(contact__full_name__icontains=p["name"].strip())
+        if p.get("company", "").strip():
+            qs = qs.filter(contact__company__icontains=p["company"].strip())
+        if p.get("department", "").strip():
+            qs = qs.filter(contact__department__icontains=p["department"].strip())
+        if p.get("title", "").strip():
+            qs = qs.filter(contact__title__icontains=p["title"].strip())
+        if p.get("email", "").strip():
+            qs = qs.filter(contact__email__icontains=p["email"].strip())
+        if p.get("tel", "").strip():
+            tel = p["tel"].strip()
+            qs = qs.filter(
+                Q(contact__phone__icontains=tel)
+                | Q(contact__mobile__icontains=tel)
+                | Q(contact__fax__icontains=tel)
+            )
+        if p.get("address", "").strip():
+            qs = qs.filter(contact__address__icontains=p["address"].strip())
 
         return qs.order_by("-created_at")
 
@@ -171,12 +178,16 @@ class CardListView(ListView):
         context = super().get_context_data(**kwargs)
 
         back = BackNavigator(self.request)
-        back.push_current("名刺一覧", ["q", "page"])
+        back.push_current(
+            "名刺一覧",
+            ["name", "company", "department", "title", "email", "tel", "address", "page"],
+        )
         context["back"] = back
 
         context["active_app"] = "cards"
         context["active_menu"] = "cards:card_list"
-        context["q"] = self.request.GET.get("q", "")
+        for key in self._SEARCH_PARAMS:
+            context[key] = self.request.GET.get(key, "")
         return context
 
 

@@ -7,7 +7,14 @@
   <div class="app-page-header">
     <div>
       <div class="app-breadcrumb">名刺管理 / 名刺一覧 / 詳細</div>
-      <h1>名刺詳細</h1>
+      {# 2-1: h1 とアップロードボタンを横並び #}
+      <div style="display:flex; align-items:center; gap:12px;">
+        <h1>名刺詳細</h1>
+        <a href="{% url 'cards:card_upload' %}"
+           class="app-btn app-btn--secondary app-btn--sm">
+          名刺画像アップロード
+        </a>
+      </div>
     </div>
     <div class="app-action-area">
       {% if back.back_exist %}
@@ -23,10 +30,16 @@
       {# 左カラム：画像と元画像情報 #}
       <div>
         <div class="app-section__header"><h2>名刺画像</h2></div>
+
+        {# 2-2: サムネイル（最大幅300px、クリックでモーダル） #}
         {% if card.card_image %}
-          <img src="{{ card.card_image.url }}" alt="名刺画像" style="max-width: 100%; height: auto; border-radius: 6px;">
+          <img src="{{ card.card_image.url }}"
+               alt="名刺画像"
+               style="max-width:300px; width:100%; cursor:pointer; border-radius:8px;"
+               data-action="open-modal"
+               data-target="cardImageModal">
         {% else %}
-          <p class="app-muted">画像未取得</p>
+          <p class="app-muted">画像なし</p>
         {% endif %}
 
         <div style="margin-top: var(--app-space-md);">
@@ -34,11 +47,18 @@
             <div class="app-detail-label">アップロード日時</div>
             <div class="app-detail-value">{{ card.original_image.created_at|date:"Y/m/d H:i:s" }}</div>
           </div>
-          <div class="app-detail-item">
-            <div class="app-detail-label">元画像</div>
-            <div class="app-detail-value">
+
+          {# 2-3: 元画像リンクを折りたたみ式に #}
+          <div class="app-collapsible">
+            <button class="app-collapsible__header"
+                    data-action="toggle-collapsible"
+                    aria-expanded="false">
+              元画像
+              <span class="app-collapsible__icon">▸</span>
+            </button>
+            <div class="app-collapsible-body">
               {% url 'originals:original_detail' pk=card.original_image.id as original_url %}
-              <a href="{% append_back_url original_url back %}">元画像詳細を見る</a>
+              <a href="{% append_back_url original_url back %}">元画像の詳細画面へ</a>
             </div>
           </div>
         </div>
@@ -147,7 +167,7 @@
               {% if sibling.card_image %}
                 <img src="{{ sibling.card_image.url }}" alt="名刺サムネイル" style="max-height: 56px; max-width: 120px; border-radius: 4px;">
               {% else %}
-                <span class="app-muted" style="display: inline-block; min-width: 96px; text-align: center;">画像未取得</span>
+                <span class="app-muted" style="display: inline-block; min-width: 96px; text-align: center;">画像なし</span>
               {% endif %}
             </div>
             <div class="app-list-card__main" style="margin: 0; flex: 1 1 auto;">
@@ -158,5 +178,28 @@
         {% endfor %}
       </div>
     </section>
+  {% endif %}
+
+  {# 2-4: 右下戻るボタン #}
+  <div class="app-action-area" style="margin-top:24px;">
+    {% if back.back_exist %}
+      <a href="{% back_url back %}" class="app-btn app-btn--secondary">＜ 戻る</a>
+    {% endif %}
+  </div>
+
+  {# 2-2: モーダル（card_image がある場合のみ） #}
+  {% if card.card_image %}
+    <div class="app-modal-backdrop" hidden></div>
+    <div class="app-modal" id="cardImageModal" hidden>
+      <div class="app-modal__panel" style="width:min(800px,95vw);">
+        <div class="app-modal__header">
+          <h2>名刺画像</h2>
+          <button class="app-btn app-btn--sm" data-action="close-modal">閉じる</button>
+        </div>
+        <div class="app-modal__body" style="text-align:center;">
+          <img src="{{ card.card_image.url }}" alt="名刺画像" style="max-width:100%;">
+        </div>
+      </div>
+    </div>
   {% endif %}
 {% endblock %}
