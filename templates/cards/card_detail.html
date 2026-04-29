@@ -4,7 +4,7 @@
 {% block title %}名刺詳細 — FreeGroup2{% endblock %}
 
 {% block content %}
-  <div class="app-page-header">
+  <div class="app-page-header" style="max-width:1100px;">
     <div>
       <div class="app-breadcrumb">名刺管理 / 名刺一覧 / 詳細</div>
       {# 2-1: h1 とアップロードボタンを横並び #}
@@ -25,8 +25,8 @@
     </div>
   </div>
 
-  <section class="app-card">
-    <div class="app-detail-grid">
+  <section class="app-card" style="max-width:1100px;">
+    <div class="app-detail-grid" style="grid-template-columns: minmax(320px, 420px) 1fr;">
       {# 左カラム：画像と元画像情報 #}
       <div>
         <div class="app-section__header"><h2>名刺画像</h2></div>
@@ -68,14 +68,10 @@
       <div>
         {% if contact %}
           {# 氏名グループ #}
-          {% if contact.full_name or contact.salutation_name or contact.last_name and contact.first_name %}
+          {% if contact.full_name or contact.salutation_name %}
             <div class="app-section__header"><h2>氏名</h2></div>
             {% if contact.full_name %}
               {% include "cards/_field.html" with label="氏名" value=contact.full_name confidence=confidence_map.full_name %}
-            {% endif %}
-            {% if contact.last_name and contact.first_name %}
-              {% include "cards/_field.html" with label="姓" value=contact.last_name confidence=confidence_map.last_name %}
-              {% include "cards/_field.html" with label="名" value=contact.first_name confidence=confidence_map.first_name %}
             {% endif %}
             {% if contact.salutation_name %}
               {% include "cards/_field.html" with label="敬称付き氏名" value=contact.salutation_name confidence=confidence_map.salutation_name %}
@@ -102,11 +98,11 @@
             {% if contact.email %}
               {% include "cards/_field.html" with label="メール" value=contact.email confidence=confidence_map.email %}
             {% endif %}
-            {% if contact.phone %}
-              {% include "cards/_field.html" with label="電話" value=contact.phone confidence=confidence_map.phone %}
-            {% endif %}
             {% if contact.mobile %}
               {% include "cards/_field.html" with label="携帯" value=contact.mobile confidence=confidence_map.mobile %}
+            {% endif %}
+            {% if contact.phone %}
+              {% include "cards/_field.html" with label="電話" value=contact.phone confidence=confidence_map.phone %}
             {% endif %}
             {% if contact.fax %}
               {% include "cards/_field.html" with label="FAX" value=contact.fax confidence=confidence_map.fax %}
@@ -181,7 +177,7 @@
   {% endif %}
 
   {# 2-4: 右下戻るボタン #}
-  <div class="app-action-area" style="margin-top:24px;">
+  <div class="app-action-area" style="margin-top:24px; max-width:1100px;">
     {% if back.back_exist %}
       <a href="{% back_url back %}" class="app-btn app-btn--secondary">＜ 戻る</a>
     {% endif %}
