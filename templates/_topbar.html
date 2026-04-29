@@ -10,7 +10,7 @@
 
   <nav class="app-app-switcher" aria-label="アプリ切り替え">
     {% block app_switcher %}
-      <a href="{% url 'cards:card_upload' %}" class="{% if active_app == 'cards' %}is-active{% endif %}">名刺管理</a>
+      <a href="{% url 'cards:card_list' %}" class="{% if active_app == 'cards' %}is-active{% endif %}">名刺管理</a>
     {% endblock %}
   </nav>
 
