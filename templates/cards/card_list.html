@@ -13,19 +13,41 @@
 
   <section class="app-card">
     <form method="get" class="app-form-grid-edit">
-      <div class="app-form-grid">
-        <div class="app-form__group app-form__group--full">
-          <label class="app-form__label" for="id_q">キーワード検索</label>
-          <input type="text" id="id_q" name="q" value="{{ q }}" class="app-input"
-                 placeholder="氏名 / 会社 / 部署 / 役職 / メール / 住所 / メモ">
+      <div class="app-form-grid" style="grid-template-columns: repeat(4, 1fr);">
+        <div class="app-form__group">
+          <label class="app-form__label" for="id_name">氏名</label>
+          <input type="text" id="id_name" name="name" value="{{ name }}" class="app-input">
+        </div>
+        <div class="app-form__group">
+          <label class="app-form__label" for="id_company">会社名</label>
+          <input type="text" id="id_company" name="company" value="{{ company }}" class="app-input">
+        </div>
+        <div class="app-form__group">
+          <label class="app-form__label" for="id_department">部署名</label>
+          <input type="text" id="id_department" name="department" value="{{ department }}" class="app-input">
+        </div>
+        <div class="app-form__group">
+          <label class="app-form__label" for="id_title">役職</label>
+          <input type="text" id="id_title" name="title" value="{{ title }}" class="app-input">
+        </div>
+
+        <div class="app-form__group">
+          <label class="app-form__label" for="id_email">メール</label>
+          <input type="text" id="id_email" name="email" value="{{ email }}" class="app-input">
+        </div>
+        <div class="app-form__group">
+          <label class="app-form__label" for="id_tel">電話</label>
+          <input type="text" id="id_tel" name="tel" value="{{ tel }}" class="app-input">
+        </div>
+        <div class="app-form__group" style="grid-column: span 2;">
+          <label class="app-form__label" for="id_address">住所</label>
+          <input type="text" id="id_address" name="address" value="{{ address }}" class="app-input">
         </div>
       </div>
 
       <div class="app-action-area app-action-area--search">
         <button type="submit" class="app-btn app-btn--primary">検索</button>
-        {% if q %}
-          <a href="{% url 'cards:card_list' %}" class="app-btn app-btn--secondary">クリア</a>
-        {% endif %}
+        <a href="{% url 'cards:card_list' %}" class="app-btn app-btn--secondary">リセット</a>
       </div>
     </form>
   </section>
@@ -39,8 +61,8 @@
             <th>サムネイル</th>
             <th class="app-table__col--name">氏名</th>
             <th class="app-table__col--company">会社</th>
-            <th>役職</th>
-            <th>主要連絡先</th>
+            <th class="app-table__col--dept">役職</th>
+            <th class="app-table__col--email">主要連絡先</th>
             <th class="app-table__col--date">作成日時</th>
           </tr>
         </thead>
@@ -57,7 +79,7 @@
                 {% if card.card_image %}
                   <img src="{{ card.card_image.url }}" alt="名刺" style="max-height: 48px; max-width: 100px; border-radius: 4px;">
                 {% else %}
-                  <span class="app-muted">画像未取得</span>
+                  <span class="app-muted">画像なし</span>
                 {% endif %}
               </td>
               <td>{{ card.contact.full_name|default:"-" }}</td>
@@ -76,7 +98,7 @@
             </tr>
           {% empty %}
             <tr><td colspan="7" class="app-muted">
-              {% if q %}検索条件に一致する名刺がありません。{% else %}名刺がまだありません。{% endif %}
+              該当する名刺がありません。
             </td></tr>
           {% endfor %}
         </tbody>
@@ -102,16 +124,14 @@
           </div>
         </a>
       {% empty %}
-        <p class="app-muted">
-          {% if q %}検索条件に一致する名刺がありません。{% else %}名刺がまだありません。{% endif %}
-        </p>
+        <p class="app-muted">該当する名刺がありません。</p>
       {% endfor %}
     </div>
 
     {% if is_paginated %}
       <nav class="app-pagination" aria-label="ページネーション">
         {% if page_obj.has_previous %}
-          <a href="?q={{ q }}&page={{ page_obj.previous_page_number }}" class="app-pagination__button">‹</a>
+          <a href="?name={{ name }}&company={{ company }}&department={{ department }}&title={{ title }}&email={{ email }}&tel={{ tel }}&address={{ address }}&page={{ page_obj.previous_page_number }}" class="app-pagination__button">‹</a>
         {% else %}
           <button type="button" class="app-pagination__button" disabled>‹</button>
         {% endif %}
@@ -120,12 +140,12 @@
           {% if num == page_obj.number %}
             <button type="button" class="app-pagination__button is-active">{{ num }}</button>
           {% else %}
-            <a href="?q={{ q }}&page={{ num }}" class="app-pagination__button">{{ num }}</a>
+            <a href="?name={{ name }}&company={{ company }}&department={{ department }}&title={{ title }}&email={{ email }}&tel={{ tel }}&address={{ address }}&page={{ num }}" class="app-pagination__button">{{ num }}</a>
           {% endif %}
         {% endfor %}
 
         {% if page_obj.has_next %}
-          <a href="?q={{ q }}&page={{ page_obj.next_page_number }}" class="app-pagination__button">›</a>
+          <a href="?name={{ name }}&company={{ company }}&department={{ department }}&title={{ title }}&email={{ email }}&tel={{ tel }}&address={{ address }}&page={{ page_obj.next_page_number }}" class="app-pagination__button">›</a>
         {% else %}
           <button type="button" class="app-pagination__button" disabled>›</button>
         {% endif %}
