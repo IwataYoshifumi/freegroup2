@@ -56,13 +56,12 @@ def calc_orientation_adjusted_confidence_map(contact_dict, confidence_map, orien
     [備考] normal 以外の orientation では OCR の high 判定を下方補正する。
            値が空のフィールドは補正対象外。raw_json は変更しない（生 JSON 不変原則）。
     """
-    if orientation == "normal":
-        return dict(confidence_map)
-
     if orientation in ("rotate_90_cw", "rotate_90_ccw"):
         downgrade = _CONFIDENCE_DOWNGRADE_90
-    else:
+    elif orientation in ("rotate_180", "mirror"):
         downgrade = _CONFIDENCE_DOWNGRADE_180
+    else:
+        return dict(confidence_map)
 
     result = {}
     for field, value in contact_dict.items():

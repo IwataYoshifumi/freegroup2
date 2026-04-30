@@ -50,8 +50,18 @@ class PipelineCoordinator:
         [性質] 副作用あり（DB 書き込み・ファイル書き込み・API 呼び出し）
         [入力] なし（self.original_image を使う）
         [出力] None（status / error_message / detected_count / raw_json を OriginalImage に保存）
+        [前提] process_pending._claim_lock により status=processing に遷移済みであること
         [方針] 例外を外に漏らさない。失敗は status と error_message に集約する。
+               正常・異常いずれのパスでも processing → extracted/garbage/failed に遷移する。
+               pending に戻る経路はない。
         """
+        if self.original_image.status != OriginalImage.STATUS_PROCESSING:
+            logger.warning(
+                "run_pipeline: status=%s（processing が期待値）: OriginalImage %s",
+                self.original_image.status,
+                self.original_image.id,
+            )
+
         detections = []
         try:
             detections = detect_cards(self.original_image.image_file.path)
@@ -72,7 +82,7 @@ class PipelineCoordinator:
                 )
 
             raw_json = {
-                "schema_version": "1.2.0",
+                "schema_version": "1.3.0",
                 "ocr_meta": {
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                 },
@@ -234,7 +244,7 @@ class PipelineCoordinator:
                 settings.BASE_DIR
                 / "docs"
                 / "json_schema"
-                / "v1.2.0"
+                / "v1.3.0"
                 / "combined_response.json"
             )
             with open(schema_path, encoding="utf-8") as f:
