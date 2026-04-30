@@ -96,7 +96,10 @@ def retry_failed_ocr(target_id=None, limit=None, dry_run=False, stdout=None):
     if dry_run:
         return target_ids
 
-    OriginalImage.objects.filter(id__in=target_ids).update(
+    OriginalImage.objects.filter(
+        id__in=target_ids,
+        status=OriginalImage.STATUS_FAILED,
+    ).update(
         status=OriginalImage.STATUS_PENDING,
         raw_json=None,
         error_message="",
