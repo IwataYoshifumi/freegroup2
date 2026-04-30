@@ -12,11 +12,13 @@ class OriginalImage(models.Model):
     """
 
     STATUS_PENDING = "pending"
+    STATUS_PROCESSING = "processing"
     STATUS_EXTRACTED = "extracted"
     STATUS_GARBAGE = "garbage"
     STATUS_FAILED = "failed"
     STATUS_CHOICES = [
-        (STATUS_PENDING, "処理中"),
+        (STATUS_PENDING, "処理待ち"),
+        (STATUS_PROCESSING, "処理中"),
         (STATUS_EXTRACTED, "完了"),
         (STATUS_GARBAGE, "無効画像"),
         (STATUS_FAILED, "処理失敗"),
@@ -33,6 +35,7 @@ class OriginalImage(models.Model):
         choices=STATUS_CHOICES,
         default=STATUS_PENDING,
     )
+    claimed_at = models.DateTimeField(null=True, blank=True, default=None)
     raw_json = models.JSONField(null=True, blank=True)
     error_message = models.TextField(blank=True, default="")
     detected_count = models.IntegerField(default=0)
@@ -51,6 +54,19 @@ class BusinessCard(models.Model):
     切り抜き失敗時は card_image=null で作成する（v1.2.1）。
     """
 
+    ORIENTATION_NORMAL = "normal"
+    ORIENTATION_90_CW = "rotate_90_cw"
+    ORIENTATION_90_CCW = "rotate_90_ccw"
+    ORIENTATION_180 = "rotate_180"
+    ORIENTATION_MIRROR = "mirror"
+    ORIENTATION_CHOICES = [
+        (ORIENTATION_NORMAL,  "正位"),
+        (ORIENTATION_90_CW,   "時計回り90°"),
+        (ORIENTATION_90_CCW,  "反時計回り90°"),
+        (ORIENTATION_180,     "180°回転"),
+        (ORIENTATION_MIRROR,  "鏡像"),
+    ]
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     original_image = models.ForeignKey(
         OriginalImage,
@@ -62,7 +78,11 @@ class BusinessCard(models.Model):
         blank=True,
     )
     card_index = models.IntegerField()
-    orientation = models.CharField(max_length=20, default="normal")
+    orientation = models.CharField(
+        max_length=20,
+        choices=ORIENTATION_CHOICES,
+        default=ORIENTATION_NORMAL,
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
