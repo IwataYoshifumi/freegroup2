@@ -104,9 +104,31 @@ class PipelineCoordinator:
             )
             self.original_image.status = OriginalImage.STATUS_FAILED
             self.error_messages.append(f"想定外のエラー: {type(e).__name__}: {e}")
+            # 処理済み card が存在する場合は部分的な raw_json を組み立てて保存する。
+            # raw_json=None のまま BusinessCard が残ると不変条件が壊れるため。
+            if self._cards_by_index:
+                self.original_image.raw_json = {
+                    "schema_version": "1.3.0",
+                    "ocr_meta": {
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    },
+                    "api_response": self._last_api_response or {},
+                    "cards": [
+                        self._cards_by_index.get(i) for i in range(len(detections))
+                    ],
+                }
         finally:
             self.original_image.error_message = "\n".join(self.error_messages)
-            self.original_image.save()
+            with transaction.atomic():
+                self.original_image.save(
+                    update_fields=[
+                        "status",
+                        "raw_json",
+                        "error_message",
+                        "detected_count",
+                        "updated_at",
+                    ]
+                )
 
     def _process_card(self, warped_image, card_index, polygon):
         """[性質] 副作用あり（API 呼び出し・DB 書き込み・ファイル書き込み）"""
