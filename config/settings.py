@@ -138,6 +138,9 @@ MEDIA_ROOT = BASE_DIR / "media"
 # Card detector backend ("opencv" | "ai")
 CARD_DETECTOR_BACKEND = os.getenv("CARD_DETECTOR_BACKEND", "opencv")
 
+# OCR pipeline: processing 状態が stuck と判断するまでの分数（stuck sweeper 用）
+OCR_STUCK_THRESHOLD_MINUTES = 30
+
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/6.0/ref/settings/#default-auto-field

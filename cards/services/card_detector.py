@@ -27,11 +27,11 @@ class Polygon(TypedDict):
 
 class CardDetectionResult(TypedDict):
     polygon: Polygon
-    warped_image: Image.Image  # 透視変換済み横長画像
+    warped_image: Image.Image  # 透視変換済み画像（向き補正なし）
 
 
 def detect_cards(image_path: str) -> list[CardDetectionResult]:
-    """画像から名刺を検出し、透視変換済み横長画像と4隅座標を返す。
+    """画像から名刺を検出し、透視変換済み画像（向き補正なし）と4隅座標を返す。
 
     [性質] 副作用あり（バックエンドに委譲）
     [入力] image_path: 元画像のファイルパス
