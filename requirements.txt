@@ -7,3 +7,4 @@ Pillow
 python-dotenv
 anthropic
 jsonschema>=4.0
+opencv-python-headless

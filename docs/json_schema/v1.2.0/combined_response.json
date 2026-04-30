@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CombinedResponse",
+  "description": "raw_json 保存フォーマット v1.2.0（schema_version / ocr_meta / api_response / cards）",
+  "type": "object",
+  "required": ["schema_version", "ocr_meta", "api_response", "cards"],
+  "properties": {
+    "schema_version": {
+      "const": "1.2.0"
+    },
+    "ocr_meta": {
+      "type": "object",
+      "required": ["timestamp"],
+      "properties": {
+        "timestamp": { "type": "string" }
+      }
+    },
+    "api_response": {
+      "type": "object",
+      "required": ["model", "stop_reason", "usage"],
+      "properties": {
+        "model":       { "type": "string" },
+        "stop_reason": { "type": "string" },
+        "usage": {
+          "type": "object",
+          "properties": {
+            "input_tokens":                { "type": "integer" },
+            "output_tokens":               { "type": "integer" },
+            "cache_read_input_tokens":     { "type": "integer" },
+            "cache_creation_input_tokens": { "type": "integer" }
+          }
+        }
+      }
+    },
+    "cards": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["card_meta", "fields", "fields_array"],
+        "additionalProperties": false,
+        "properties": {
+          "card_meta": {
+            "type": "object",
+            "required": ["is_business_card", "orientation"],
+            "additionalProperties": false,
+            "properties": {
+              "is_business_card": { "type": "boolean" },
+              "orientation": {
+                "type": "string",
+                "enum": ["normal", "rotate_180", "rotate_90_cw", "rotate_90_ccw", "mirror"]
+              }
+            }
+          },
+          "fields":       { "$ref": "#/$defs/Fields" },
+          "fields_array": { "$ref": "#/$defs/FieldsArray" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "ConfidenceValue": {
+      "type": "object",
+      "required": ["value", "confidence"],
+      "additionalProperties": false,
+      "properties": {
+        "value":      { "type": ["string", "null"] },
+        "confidence": { "$ref": "#/$defs/Confidence" }
+      }
+    },
+    "TypedConfidenceValue": {
+      "type": "object",
+      "required": ["type", "value", "confidence"],
+      "additionalProperties": false,
+      "properties": {
+        "type":       { "type": "string" },
+        "value":      { "type": ["string", "null"] },
+        "confidence": { "$ref": "#/$defs/Confidence" }
+      }
+    },
+    "Confidence": {
+      "type": "string",
+      "enum": ["high", "medium", "low"]
+    },
+    "Fields": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "full_name":       { "$ref": "#/$defs/ConfidenceValue" },
+        "last_name":       { "$ref": "#/$defs/ConfidenceValue" },
+        "first_name":      { "$ref": "#/$defs/ConfidenceValue" },
+        "salutation_name": { "$ref": "#/$defs/ConfidenceValue" },
+        "company":         { "$ref": "#/$defs/ConfidenceValue" },
+        "department":      { "$ref": "#/$defs/ConfidenceValue" },
+        "title":           { "$ref": "#/$defs/ConfidenceValue" },
+        "qualification":   { "$ref": "#/$defs/ConfidenceValue" },
+        "catchphrase":     { "$ref": "#/$defs/ConfidenceValue" },
+        "branch":          { "$ref": "#/$defs/ConfidenceValue" },
+        "address":         { "$ref": "#/$defs/ConfidenceValue" },
+        "notes":           { "$ref": "#/$defs/ConfidenceValue" }
+      }
+    },
+    "FieldsArray": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "emails":           { "type": "array", "items": { "$ref": "#/$defs/ConfidenceValue" } },
+        "phones":           { "type": "array", "items": { "$ref": "#/$defs/ConfidenceValue" } },
+        "mobiles":          { "type": "array", "items": { "$ref": "#/$defs/ConfidenceValue" } },
+        "fax":              { "type": "array", "items": { "$ref": "#/$defs/ConfidenceValue" } },
+        "websites":         { "type": "array", "items": { "$ref": "#/$defs/ConfidenceValue" } },
+        "social_media":     { "type": "array", "items": { "$ref": "#/$defs/TypedConfidenceValue" } },
+        "alt_names":        { "type": "array", "items": { "$ref": "#/$defs/TypedConfidenceValue" } },
+        "additional_names": { "type": "array", "items": { "$ref": "#/$defs/TypedConfidenceValue" } }
+      }
+    }
+  }
+}

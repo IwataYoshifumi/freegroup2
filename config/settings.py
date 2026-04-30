@@ -34,7 +34,9 @@ SECRET_KEY = os.getenv(
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv("DEBUG", "True").lower() in ("1", "true", "yes", "on")
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ["127.0.0.1", "localhost", "192.168.3.135"]
+
+INTERNAL_IPS = ["127.0.0.1", "192.168.3.135"]
 
 
 # Application definition
@@ -69,6 +71,7 @@ TEMPLATES = [
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
+                "django.template.context_processors.debug",
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
@@ -131,6 +134,9 @@ STATICFILES_DIRS = [BASE_DIR / "static"]
 # Media files
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
+
+# Card detector backend ("opencv" | "ai")
+CARD_DETECTOR_BACKEND = os.getenv("CARD_DETECTOR_BACKEND", "opencv")
 
 
 # Default primary key field type
