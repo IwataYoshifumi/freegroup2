@@ -60,7 +60,7 @@ class OcrService:
             raise OcrApiError(f"anthropic SDK のインポートに失敗: {e}")
 
         if self._client is None:
-            self._client = Anthropic(api_key=self._api_key)
+            self._client = Anthropic(api_key=self._api_key, timeout=60.0)
 
         try:
             response = self._client.messages.create(
