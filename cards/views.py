@@ -4,9 +4,11 @@ View 層の責務は HTTP リクエスト/レスポンス処理とテンプレ�
 ビジネスロジックは services 層・tasks 層に委譲する。
 """
 
+import json
+
 from django.contrib.auth import get_user_model
 from django.core.files.base import ContentFile
-from django.db.models import Q
+from django.db.models import Exists, OuterRef, Q
 from django.http import HttpResponse
 from django.shortcuts import redirect, render
 from django.utils.dateparse import parse_date
@@ -15,7 +17,7 @@ from django.views.generic import DetailView, FormView, ListView
 from back_navigator.back_navigator import BackNavigator
 
 from .forms import UploadForm
-from .models import BusinessCard, OriginalImage
+from .models import BusinessCard, ContactFieldConfidence, OriginalImage
 from .services.image_processor import convert_to_jpeg
 
 User = get_user_model()
@@ -149,6 +151,20 @@ class CardListView(ListView):
         qs = (
             BusinessCard.objects.filter(original_image__user=user)
             .select_related("original_image", "contact")
+            .annotate(
+                has_low=Exists(
+                    ContactFieldConfidence.objects.filter(
+                        contact__business_card=OuterRef("pk"),
+                        confidence=ContactFieldConfidence.CONFIDENCE_LOW,
+                    )
+                ),
+                has_medium=Exists(
+                    ContactFieldConfidence.objects.filter(
+                        contact__business_card=OuterRef("pk"),
+                        confidence=ContactFieldConfidence.CONFIDENCE_MEDIUM,
+                    )
+                ),
+            )
         )
 
         p = self.request.GET
@@ -233,4 +249,14 @@ class CardDetailView(DetailView):
             .order_by("card_index")
         )
         context["sibling_cards"] = sibling_cards
+
+        raw_json = self.object.original_image.raw_json
+        card_json_str = None
+        if raw_json:
+            cards = raw_json.get("cards", [])
+            idx = self.object.card_index
+            if 0 <= idx < len(cards):
+                card_json_str = json.dumps(cards[idx], ensure_ascii=False, indent=2)
+        context["card_json_str"] = card_json_str
+
         return context

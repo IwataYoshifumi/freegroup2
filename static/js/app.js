@@ -80,6 +80,17 @@
     loadingOverlay.hidden = !loadingOverlay.hidden;
   }
 
+  function copyToClipboard(event, trigger) {
+    const targetId = trigger.getAttribute('data-target');
+    const el = targetId ? document.getElementById(targetId) : null;
+    if (!el) return;
+    navigator.clipboard.writeText(el.textContent).then(function () {
+      const original = trigger.textContent;
+      trigger.textContent = 'コピーしました';
+      setTimeout(function () { trigger.textContent = original; }, 1500);
+    });
+  }
+
   const actions = {
     'toggle-drawer': openDrawer,
     'close-drawer': closeDrawer,
@@ -89,7 +100,8 @@
     'open-modal': openModal,
     'close-modal': closeModal,
     'show-toast': showToast,
-    'toggle-loading': toggleLoading
+    'toggle-loading': toggleLoading,
+    'copy-to-clipboard': copyToClipboard
   };
 
   document.addEventListener('click', function (event) {

@@ -58,6 +58,7 @@
         <thead>
           <tr>
             <th class="app-table__col--action">操作</th>
+            <th style="width:28px;"></th>
             <th>サムネイル</th>
             <th class="app-table__col--name">氏名</th>
             <th class="app-table__col--company">会社</th>
@@ -71,16 +72,29 @@
             {% url 'cards:card_detail' pk=card.id as detail_url %}
             <tr>
               <td class="app-table__col--action">
-                <a href="{% append_back_url detail_url back %}" class="app-icon-btn" aria-label="詳細">
-                  <span class="app-icon--detail"></span>
-                </a>
+                <a href="{% append_back_url detail_url back %}" class="app-btn app-btn--secondary app-btn--sm">詳細</a>
+              </td>
+              <td style="text-align:center; vertical-align:middle;">
+                {% if card.has_low %}🔴{% elif card.has_medium %}🟡{% endif %}
               </td>
               <td>
-                {% if card.card_image %}
-                  <img src="{{ card.card_image.url }}" alt="名刺" style="max-height: 48px; max-width: 100px; border-radius: 4px;">
-                {% else %}
-                  <span class="app-muted">画像なし</span>
-                {% endif %}
+                <div style="display:flex;align-items:flex-start;gap:6px;">
+                  {% if card.card_image %}
+                    <button type="button" data-action="open-modal" data-target="card-img-modal-{{ card.id }}"
+                            style="background:none;border:none;padding:0;cursor:zoom-in;flex-shrink:0;">
+                      <img src="{{ card.card_image.url }}" alt="名刺" style="max-height:96px;max-width:200px;border-radius:4px;display:block;">
+                    </button>
+                  {% else %}
+                    <span class="app-muted">画像なし</span>
+                  {% endif %}
+                  {% if card.orientation != "normal" %}
+                    <span class="app-status-badge app-status-badge--warning">
+                      {% if card.orientation == "rotate_90_cw" %}右90°
+                      {% elif card.orientation == "rotate_90_ccw" %}左90°
+                      {% else %}180°{% endif %}
+                    </span>
+                  {% endif %}
+                </div>
               </td>
               <td>{{ card.contact.full_name|default:"-" }}</td>
               <td>
@@ -97,7 +111,7 @@
               <td>{{ card.created_at|date:"Y/m/d H:i" }}</td>
             </tr>
           {% empty %}
-            <tr><td colspan="7" class="app-muted">
+            <tr><td colspan="8" class="app-muted">
               該当する名刺がありません。
             </td></tr>
           {% endfor %}
@@ -110,7 +124,7 @@
         {% url 'cards:card_detail' pk=card.id as detail_url %}
         <a href="{% append_back_url detail_url back %}" class="app-list-card" style="display: block; text-decoration: none; color: inherit;">
           <div class="app-list-card__main">
-            <strong>{{ card.contact.full_name|default:"(氏名なし)" }}</strong>
+            <strong>{% if card.has_low %}🔴{% elif card.has_medium %}🟡{% endif %}{{ card.contact.full_name|default:"(氏名なし)" }}</strong>
             {% if card.contact.company %}<div>{{ card.contact.company }}</div>{% endif %}
             {% if card.contact.title %}<div class="app-muted">{{ card.contact.title }}</div>{% endif %}
           </div>
@@ -152,4 +166,21 @@
       </nav>
     {% endif %}
   </section>
+
+<div class="app-modal-backdrop" data-action="close-modal" hidden></div>
+{% for card in cards %}
+  {% if card.card_image %}
+    <div class="app-modal" id="card-img-modal-{{ card.id }}" hidden role="dialog" aria-modal="true">
+      <div class="app-modal__panel" style="width:min(900px,95vw);">
+        <div class="app-modal__header">
+          <h2>{{ card.contact.full_name|default:"名刺画像" }}</h2>
+          <button type="button" class="app-btn--icon" data-action="close-modal" aria-label="閉じる">×</button>
+        </div>
+        <div class="app-modal__body" style="text-align:center;">
+          <img src="{{ card.card_image.url }}" alt="名刺画像" style="max-width:100%;max-height:75vh;border-radius:4px;">
+        </div>
+      </div>
+    </div>
+  {% endif %}
+{% endfor %}
 {% endblock %}

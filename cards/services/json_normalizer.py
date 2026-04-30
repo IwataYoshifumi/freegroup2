@@ -17,6 +17,9 @@ _SCALAR_FIELDS = (
     "company",
     "department",
     "title",
+    "qualification",
+    "catchphrase",
+    "branch",
     "address",
     "notes",
 )
@@ -36,6 +39,39 @@ _SOCIAL_MEDIA_TYPES = ("twitter", "linkedin", "facebook", "github", "instagram")
 # 防御的処理の既定 confidence
 _FALLBACK_CONFIDENCE = "low"
 _VALID_CONFIDENCES = ("high", "medium", "low")
+
+
+_CONFIDENCE_DOWNGRADE_90 = {"high": "medium", "medium": "medium", "low": "low"}
+_CONFIDENCE_DOWNGRADE_180 = {"high": "low",    "medium": "low",    "low": "low"}
+
+
+def calc_orientation_adjusted_confidence_map(contact_dict, confidence_map, orientation):
+    """orientation に応じて confidence_map を補正して返す。
+
+    [性質] 純関数（DB操作なし・副作用なし）
+    [入力] contact_dict: Contact フィールド辞書（normalize_to_contact_dict の出力）
+           confidence_map: フィールド名 → 'high'/'medium'/'low'（normalize_to_contact_dict の出力）
+           orientation: OCR の orientation 文字列
+    [出力] 補正後の confidence_map（ContactFieldConfidence に保存する値のみ含む）
+    [備考] normal 以外の orientation では OCR の high 判定を下方補正する。
+           値が空のフィールドは補正対象外。raw_json は変更しない（生 JSON 不変原則）。
+    """
+    if orientation == "normal":
+        return dict(confidence_map)
+
+    if orientation in ("rotate_90_cw", "rotate_90_ccw"):
+        downgrade = _CONFIDENCE_DOWNGRADE_90
+    else:
+        downgrade = _CONFIDENCE_DOWNGRADE_180
+
+    result = {}
+    for field, value in contact_dict.items():
+        if not value:
+            continue
+        adjusted = downgrade[confidence_map.get(field, "high")]
+        if adjusted in ("low", "medium"):
+            result[field] = adjusted
+    return result
 
 
 def normalize_to_contact_dict(raw_json, card_index):
@@ -71,6 +107,8 @@ def normalize_to_contact_dict(raw_json, card_index):
         fields = {}
     for name in _SCALAR_FIELDS:
         value, confidence = _extract_value_and_confidence(fields.get(name))
+        if value == "" and confidence == "high":
+            continue
         contact_dict[name] = value
         if confidence is not None:
             confidence_map[name] = confidence
@@ -85,6 +123,8 @@ def normalize_to_contact_dict(raw_json, card_index):
         if not isinstance(arr, list) or not arr:
             continue
         value, confidence = _extract_value_and_confidence(arr[0])
+        if value == "" and confidence == "high":
+            continue
         contact_dict[contact_field] = value
         if confidence is not None:
             confidence_map[contact_field] = confidence
@@ -105,6 +145,8 @@ def normalize_to_contact_dict(raw_json, card_index):
                 # 同一 type が複数ある場合は最初の1つを採用（後勝ちにしない）
                 continue
             value, confidence = _extract_value_and_confidence(entry)
+            if value == "" and confidence == "high":
+                continue
             contact_dict[entry_type] = value
             if confidence is not None:
                 confidence_map[entry_type] = confidence
@@ -120,7 +162,7 @@ def _extract_value_and_confidence(field):
       呼び出し側で confidence_map に記録しない。
     - field が dict 以外（None 以外）：("", "low") を返す。構造想定外として
       防御的に低信頼で記録する。
-    - field が dict で value=null / value キー欠落：("", "low") を返す。
+    - field が dict で value=null：("", confidence) を返す。confidence が想定外なら ("", "low")。
     - field が dict で confidence が想定外の値：(value.strip(), "low") を返す。
     - field が dict で正常：(value.strip(), confidence) を返す。
     """
@@ -130,6 +172,9 @@ def _extract_value_and_confidence(field):
         return "", _FALLBACK_CONFIDENCE
     raw_value = field.get("value")
     if raw_value is None:
+        raw_confidence = field.get("confidence")
+        if raw_confidence in _VALID_CONFIDENCES:
+            return "", raw_confidence
         return "", _FALLBACK_CONFIDENCE
     value = str(raw_value).strip()
     raw_confidence = field.get("confidence")

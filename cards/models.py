@@ -62,6 +62,7 @@ class BusinessCard(models.Model):
         blank=True,
     )
     card_index = models.IntegerField()
+    orientation = models.CharField(max_length=20, default="normal")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -116,6 +117,9 @@ class Contact(models.Model):
     company = models.CharField(max_length=255, blank=True, default="")
     department = models.CharField(max_length=255, blank=True, default="")
     title = models.CharField(max_length=255, blank=True, default="")
+    qualification = models.CharField(max_length=500, blank=True, default="")
+    catchphrase = models.CharField(max_length=500, blank=True, default="")
+    branch = models.CharField(max_length=255, blank=True, default="")
     address = models.CharField(max_length=500, blank=True, default="")
 
     email = models.CharField(max_length=255, blank=True, default="")
