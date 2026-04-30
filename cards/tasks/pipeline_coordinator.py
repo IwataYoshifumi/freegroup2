@@ -2,7 +2,7 @@
 
 ① detect_cards で名刺を検出・透視変換済み横長画像を取得
 ② warped_image ごとに ocr_service.run_ocr でフィールドを取得
-③ normalize_to_contact_dict → has_minimum_info → save_card_image で保存
+③ normalize_to_contact_dict → has_minimum_info → save_card_image_tmp で保存
 ④ BusinessCard / Contact / Person 保存
 
 【トランザクション境界】card 単位（1 card の失敗で他 card に影響しない）。
@@ -24,8 +24,8 @@ from cards.services.json_normalizer import (
     calc_orientation_adjusted_confidence_map,
     normalize_to_contact_dict,
 )
-from cards.tasks.card_cropper import save_card_image
-from cards.tasks.ocr_service import OcrApiError, OcrService
+from cards.tasks.card_cropper import save_card_image_tmp
+from cards.tasks.ocr_service import OcrService
 
 logger = logging.getLogger(__name__)
 
@@ -113,11 +113,11 @@ class PipelineCoordinator:
         # ① DEBUG 保存
         self._save_dev_image(warped_image, card_index)
 
-        # ② OCR
+        # ② OCR（想定外の例外も含め全て捕捉し 1 card の失敗が全体に波及しないようにする）
         try:
             ocr_result = self._ocr_service.run_ocr(warped_image)
-        except OcrApiError as e:
-            self.error_messages.append(f"card_index={card_index}: OCR失敗 ({e})")
+        except Exception as e:
+            self.error_messages.append(f"card_index={card_index}: OCR失敗 ({type(e).__name__}: {e})")
             return
 
         # ③ api_response を保存
@@ -164,28 +164,14 @@ class PipelineCoordinator:
         if not has_minimum_info(contact_dict):
             return
 
-        # ⑩ 画像保存
-        try:
-            crop_success, card_image_path, crop_error = save_card_image(
-                warped_image,
-                str(self.original_image.id),
-                card_index,
-            )
-        except Exception as e:
-            crop_success, card_image_path, crop_error = False, None, str(e)
-
-        if not crop_success:
-            self.error_messages.append(
-                f"card_index={card_index}: 画像保存失敗 ({crop_error})"
-            )
-
-        # ⑪ DB 保存（BusinessCard / Contact / Person を1トランザクションで）
+        # ⑩ DB先・ファイル後：card_image=None で DB 先行作成 → 一時ファイル保存 → on_commit でリネーム
+        tmp_abs = None
         try:
             with transaction.atomic():
                 person = Person.objects.create()
                 business_card = BusinessCard.objects.create(
                     original_image=self.original_image,
-                    card_image=card_image_path or None,
+                    card_image=None,
                     card_index=card_index,
                     orientation=orientation,
                 )
@@ -201,13 +187,62 @@ class PipelineCoordinator:
                             field_name=field_name,
                             confidence=conf,
                         )
+
+                # 一時パスに JPEG を書き込む（DB コミット前）
+                try:
+                    crop_success, tmp_abs, final_rel, crop_error = save_card_image_tmp(
+                        warped_image, str(self.original_image.id), card_index,
+                    )
+                except Exception as e:
+                    crop_success, tmp_abs, final_rel, crop_error = False, None, None, str(e)
+
+                if not crop_success:
+                    self.error_messages.append(
+                        f"card_index={card_index}: 画像保存失敗 ({crop_error})"
+                    )
+                else:
+                    # コミット後に tmp → final にリネーム、card_image パスを UPDATE
+                    _bc_id = business_card.id
+                    _tmp = tmp_abs
+                    _final_rel = final_rel
+                    _final_abs = os.path.join(settings.MEDIA_ROOT, final_rel)
+
+                    def _finalize_card_image(
+                        bc_id=_bc_id, ta=_tmp, fr=_final_rel, fa=_final_abs
+                    ):
+                        renamed = False
+                        try:
+                            os.rename(ta, fa)
+                            renamed = True
+                            BusinessCard.objects.filter(id=bc_id).update(card_image=fr)
+                        except Exception as exc:
+                            logger.warning(
+                                "card_image finalize failed for BusinessCard %s: %s",
+                                bc_id,
+                                exc,
+                            )
+                            cleanup_path = fa if renamed else ta
+                            try:
+                                os.unlink(cleanup_path)
+                            except OSError:
+                                pass
+
+                    transaction.on_commit(_finalize_card_image)
+                    tmp_abs = None  # on_commit に委譲済みなので例外ハンドラではクリーンアップ不要
+
             self.created_count += 1
+
         except Exception as e:
             self.failed_db_count += 1
             self.error_messages.append(
                 f"card_index={card_index}: DB保存失敗 ({type(e).__name__}: {e})"
             )
-            self._cleanup_card_image(card_image_path)
+            # ロールバック時に一時ファイルが残っていれば削除
+            if tmp_abs:
+                try:
+                    os.unlink(tmp_abs)
+                except OSError as ue:
+                    logger.warning("tmp cleanup failed for %s: %s", tmp_abs, ue)
 
     def _save_dev_image(self, warped_image, card_index):
         """[性質] 副作用あり（ファイル書き込み）/ DEBUG=True のときのみ保存する。"""
@@ -225,17 +260,6 @@ class PipelineCoordinator:
             logger.debug("dev image saved: %s", rel)
         except Exception as e:
             logger.warning("dev image save failed for card_index=%s: %s", card_index, e)
-
-    def _cleanup_card_image(self, card_image_path):
-        """[性質] 副作用あり（ファイル削除）/ DB 失敗で残ったファイルを削除する。"""
-        if not card_image_path:
-            return
-        try:
-            absolute_path = os.path.join(settings.MEDIA_ROOT, card_image_path)
-            if os.path.exists(absolute_path):
-                os.remove(absolute_path)
-        except OSError as e:
-            logger.warning("card_image cleanup failed for %s: %s", card_image_path, e)
 
     def _load_combined_schema(self):
         """[性質] 副作用あり（ファイル読み込み・キャッシュ）"""
