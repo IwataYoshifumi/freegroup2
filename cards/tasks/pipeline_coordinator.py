@@ -55,12 +55,25 @@ class PipelineCoordinator:
                正常・異常いずれのパスでも processing → extracted/garbage/failed に遷移する。
                pending に戻る経路はない。
         """
+        # === 防御チェック（v1.3.1 追加） ===
         if self.original_image.status != OriginalImage.STATUS_PROCESSING:
-            logger.warning(
-                "run_pipeline: status=%s（processing が期待値）: OriginalImage %s",
-                self.original_image.status,
+            current_status = self.original_image.status
+            logger.error(
+                "run_pipeline called with status=%s, expected processing. Aborting. "
+                "OriginalImage %s",
+                current_status,
                 self.original_image.id,
             )
+            self.original_image.status = OriginalImage.STATUS_FAILED
+            self.original_image.error_message = (
+                f"run_pipeline が status={current_status} で呼ばれました。"
+                "CAS が成立していない可能性があります。"
+            )
+            with transaction.atomic():
+                self.original_image.save(
+                    update_fields=["status", "error_message", "updated_at"]
+                )
+            return
 
         detections = []
         try:

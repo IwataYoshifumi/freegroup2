@@ -6,13 +6,15 @@ cron で 1〜5 分間隔で起動される想定。
 """
 
 import logging
+import os
 from datetime import timedelta
 
 from django.conf import settings
 from django.core.management.base import BaseCommand
+from django.db import transaction
 from django.utils import timezone
 
-from cards.models import OriginalImage
+from cards.models import BusinessCard, Contact, OriginalImage, Person
 from cards.tasks.pipeline_coordinator import PipelineCoordinator
 
 logger = logging.getLogger(__name__)
@@ -44,21 +46,25 @@ class Command(BaseCommand):
 
         # ── stuck sweeper ────────────────────────────────────────────────
         # processing のまま claimed_at がしきい値を超えたレコードは
-        # プロセス異常終了等で放置されたと判断し pending に差し戻す。
+        # プロセス異常終了等で放置されたと判断し、BusinessCard を削除して
+        # クリーンスタートできる状態で pending に差し戻す。
         threshold_minutes = getattr(settings, "OCR_STUCK_THRESHOLD_MINUTES", 30)
         cutoff = timezone.now() - timedelta(minutes=threshold_minutes)
-        stuck_count = OriginalImage.objects.filter(
-            status=OriginalImage.STATUS_PROCESSING,
-            claimed_at__lt=cutoff,
-        ).update(
-            status=OriginalImage.STATUS_PENDING,
-            claimed_at=None,
-            updated_at=timezone.now(),
+        stuck_records = list(
+            OriginalImage.objects.filter(
+                status=OriginalImage.STATUS_PROCESSING,
+                claimed_at__lt=cutoff,
+            )
         )
-        if stuck_count:
+        if stuck_records:
+            cleaned = 0
+            for stuck in stuck_records:
+                _cleanup_stuck_record(stuck)
+                cleaned += 1
             logger.warning(
-                "process_pending: stuck レコード %d 件を pending に差し戻しました（しきい値 %d 分）",
-                stuck_count,
+                "process_pending: stuck レコード %d 件をクリーンアップし pending に差し戻しました"
+                "（しきい値 %d 分）",
+                cleaned,
                 threshold_minutes,
             )
         # ─────────────────────────────────────────────────────────────────
@@ -116,6 +122,77 @@ class Command(BaseCommand):
             f"process_pending: targets={len(target_ids)}, processed={processed}, "
             f"skipped={skipped}"
         ))
+
+
+def _cleanup_stuck_record(original_image):
+    """stuck OriginalImage を再処理可能な状態にクリーンアップして pending に差し戻す。
+
+    [性質] 副作用あり（DB 書き込み・ファイル削除）
+    [入力] original_image: OriginalImage インスタンス（status=processing が期待値）
+    [出力] None（例外は外に漏らさない）
+    [方針] 全操作を transaction.atomic() で保護する。
+           途中失敗は logger.error に記録して処理続行（次回 sweeper で再試行される）。
+    """
+    try:
+        with transaction.atomic():
+            # atomic 内で status を再確認（他 worker が先に完了済みなら何もしない）
+            refreshed = OriginalImage.objects.get(id=original_image.id)
+            if refreshed.status != OriginalImage.STATUS_PROCESSING:
+                logger.info(
+                    "stuck cleanup skipped (status=%s): OriginalImage %s",
+                    refreshed.status,
+                    original_image.id,
+                )
+                return
+
+            # Person 削除候補の person_id を収集しながら BusinessCard を削除
+            person_ids_to_check = set()
+            for bc in BusinessCard.objects.filter(original_image=original_image):
+                # Contact から person_id を収集（BusinessCard 削除前に取得）
+                for c in Contact.objects.filter(business_card=bc):
+                    if c.person_id is not None:
+                        person_ids_to_check.add(c.person_id)
+                # card_image ファイルを削除（FileNotFoundError は無視）
+                if bc.card_image:
+                    try:
+                        os.unlink(bc.card_image.path)
+                    except FileNotFoundError:
+                        pass
+                    except OSError as e:
+                        logger.warning(
+                            "stuck cleanup: file unlink failed %s: %s",
+                            bc.card_image.path, e,
+                        )
+                # BusinessCard 削除（CASCADE で Contact / ContactFieldConfidence も削除）
+                bc.delete()
+
+            # 孤立 Person を削除（BusinessCard 削除後にチェック）
+            deleted_persons = 0
+            for person_id in person_ids_to_check:
+                if not Contact.objects.filter(person_id=person_id).exists():
+                    Person.objects.filter(id=person_id).delete()
+                    deleted_persons += 1
+            if deleted_persons > 0:
+                logger.info("orphan Person deleted: %d records", deleted_persons)
+
+            # OriginalImage をクリーンな pending 状態にリセット
+            original_image.raw_json = None
+            original_image.error_message = ""
+            original_image.status = OriginalImage.STATUS_PENDING
+            original_image.claimed_at = None
+            original_image.detected_count = 0
+            original_image.save(
+                update_fields=[
+                    "status", "claimed_at", "raw_json",
+                    "error_message", "detected_count", "updated_at",
+                ]
+            )
+    except Exception as e:
+        logger.error(
+            "stuck cleanup failed for OriginalImage %s: %s",
+            original_image.id,
+            e,
+        )
 
 
 def _claim_lock(target_id):
