@@ -156,13 +156,13 @@ class CardListView(ListView):
                 has_low=Exists(
                     ContactFieldConfidence.objects.filter(
                         contact__business_card=OuterRef("pk"),
-                        confidence=ContactFieldConfidence.CONFIDENCE_LOW,
+                        confidence=ContactFieldConfidence.Confidence.LOW,
                     )
                 ),
                 has_medium=Exists(
                     ContactFieldConfidence.objects.filter(
                         contact__business_card=OuterRef("pk"),
-                        confidence=ContactFieldConfidence.CONFIDENCE_MEDIUM,
+                        confidence=ContactFieldConfidence.Confidence.MEDIUM,
                     )
                 ),
             )

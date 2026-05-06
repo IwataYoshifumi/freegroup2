@@ -2,13 +2,22 @@ import uuid
 
 from django.conf import settings
 from django.db import models
+from django.db.models import CheckConstraint, Q, UniqueConstraint
+from django.utils.translation import gettext_lazy as _
 
 from cards.models import BusinessCard
 from persons.models import Person
 
 
 class Contact(models.Model):
-    """連絡先DB（仕様書 v1.1.0 §4.4）。1名刺=1Contact。配列フィールドは持たず、すべて単独 CharField。"""
+    """連絡先DB（仕様書 v1.4.2 §4.4）。1 名刺 = 1 Contact のスナップショット設計（§4.4.0）。"""
+
+    class Status(models.TextChoices):
+        """Contact のステータス（仕様書 §4.4.2 / 別表 C.10）。"""
+
+        PRIMARY = "primary", _("主コンタクト")
+        ACTIVE = "active", _("副コンタクト")
+        INACTIVE = "inactive", _("非アクティブ")
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     business_card = models.OneToOneField(
@@ -19,6 +28,36 @@ class Contact(models.Model):
         Person,
         on_delete=models.CASCADE,
     )
+
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+    )
+    previous_person = models.ForeignKey(
+        Person,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+    )
+    previous_status = models.CharField(max_length=20, null=True, blank=True)
+    duplicate_checked_at = models.DateTimeField(null=True, blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+    )
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+    )
+    lang = models.CharField(max_length=10, default="ja")
+    postal_code = models.CharField(max_length=20, blank=True, default="")
 
     full_name = models.CharField(max_length=255, blank=True, default="")
     last_name = models.CharField(max_length=255, blank=True, default="")
@@ -50,24 +89,31 @@ class Contact(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    class Meta:
+        constraints = [
+            UniqueConstraint(
+                fields=["person"],
+                condition=Q(status="primary"),
+                name="unique_primary_contact_per_person",
+            ),
+        ]
+
     def __str__(self):
         return self.full_name or f"Contact {self.id}"
 
 
 class ContactFieldConfidence(models.Model):
-    """信頼度メタDB（仕様書 v1.1.0 §4.6、新規）。
+    """信頼度メタDB（仕様書 v1.4.2 §4.6）。
 
-    Contact のフィールドのうち、OCR の信頼度が low または medium のものだけをレコード生成する。
-    high のフィールドはレコードを作らない（レコードがない=high と解釈）。
-    confirmed_at / confirmed_by の値の埋め込みは v1.0.2 で実装予定（v1.1.0 では NULL のまま）。
+    OCR で取り込まれた Contact のフィールドのうち、low / medium のものだけレコード化する。
+    high は記録対象外（疑似インスタンスとしてのみ生成、DB 保存しない、§4.6.1）。
     """
 
-    CONFIDENCE_LOW = "low"
-    CONFIDENCE_MEDIUM = "medium"
-    CONFIDENCE_CHOICES = [
-        (CONFIDENCE_LOW, "低"),
-        (CONFIDENCE_MEDIUM, "中"),
-    ]
+    class Confidence(models.TextChoices):
+        """信頼度（仕様書 §4.6 / 別表 C.3）。high は記録対象外。"""
+
+        LOW = "low", _("低")
+        MEDIUM = "medium", _("中")
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     contact = models.ForeignKey(
@@ -76,7 +122,7 @@ class ContactFieldConfidence(models.Model):
         related_name="confidences",
     )
     field_name = models.CharField(max_length=50)
-    confidence = models.CharField(max_length=10, choices=CONFIDENCE_CHOICES)
+    confidence = models.CharField(max_length=10, choices=Confidence.choices)
     confirmed_at = models.DateTimeField(null=True, blank=True)
     confirmed_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -89,11 +135,23 @@ class ContactFieldConfidence(models.Model):
 
     class Meta:
         constraints = [
-            models.UniqueConstraint(
+            UniqueConstraint(
                 fields=["contact", "field_name"],
                 name="unique_contact_field_name",
             ),
+            CheckConstraint(
+                condition=Q(confidence__in=["low", "medium"]),
+                name="confidence_low_or_medium",
+            ),
         ]
+
+    def save(self, *args, **kwargs):
+        if self.confidence == "high":
+            raise ValueError(
+                "ContactFieldConfidence with confidence='high' must not be saved. "
+                "high values are pseudo-instances only."
+            )
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.contact_id} {self.field_name} ({self.confidence})"
