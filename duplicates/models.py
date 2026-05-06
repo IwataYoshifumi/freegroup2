@@ -343,3 +343,176 @@ class PersonMergeLog(models.Model):
 
     def __str__(self):
         return f"{self.merged_person_id} → {self.surviving_person_id} ({self.status})"
+
+    # ------------------------------------------------------------------
+    # クラスメソッド（仕様書 §10.8.1）
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def _get_for_person(cls, person, status=None):
+        """person を起点に（任意で status で絞り込んで）ログを返す内部ヘルパー。
+
+        [性質] 準関数（DB 読み取りのみ）
+        [入力] person: Person / status: str | None（None なら全状態を返す）
+        [出力] QuerySet[PersonMergeLog]
+
+        surviving_person / merged_person の OR 検索で、Person を起点とするログを取得する。
+        get_for_person / get_undoable で共通利用する（DuplicateCandidate._get_by_status と同じ
+        共通化方針）。
+        """
+        qs = cls.objects.filter(
+            Q(surviving_person=person) | Q(merged_person=person)
+        )
+        if status is not None:
+            qs = qs.filter(status=status)
+        return qs
+
+    @classmethod
+    def create(cls, surviving_person, merged_person, user):
+        """マージ実行のためのログレコードを作成（仕様書 §10.8.1 / §10.8.4）。
+
+        [性質] 副作用あり（DB 書込：新規 PersonMergeLog レコードを作成）
+        [入力] surviving_person: Person（マージで残る側）
+               merged_person: Person（マージで統合される側）
+               user: User（マージ実行者、executed_by に記録）
+        [出力] PersonMergeLog（save 済みインスタンス）
+
+        2回 save 方式：本メソッドは最低限のログレコードを作るだけ。duplicate_candidate /
+        note 等のマージ処理文脈に依存する値は呼び出し側（マージ実行サービス層、B ブロック以降）
+        が後から `merge_log.duplicate_candidate = candidate; merge_log.note = ...;
+        merge_log.save(update_fields=['duplicate_candidate', 'note'])` で部分 save する想定。
+
+        executed_at は明示的に timezone.now() を設定する（フィールド定義は auto_now_add=True
+        ではなく素の DateTimeField のため、§4.8 の仕様書定義通り）。status は default='undoable'、
+        note は default='' が効くので明示しない。
+        """
+        return cls.objects.create(
+            surviving_person=surviving_person,
+            merged_person=merged_person,
+            executed_by=user,
+            executed_at=timezone.now(),
+        )
+
+    @classmethod
+    def lock_past_logs(cls, merged_person):
+        """過去のログを locked 状態に変更（仕様書 §10.8.1 / §9.3.1 手順8 / §9.6）。
+
+        [性質] 副作用あり（DB 書込：自モデル集合を一括 update）
+        [入力] merged_person: Person（**今のマージで merged 側になる Person**。過去ログでは
+               `surviving_person` フィールドに入っていた Person を指す）
+        [出力] None（QuerySet.update() の戻り値は捨てる）
+
+        引数名 `merged_person` と検索条件 `surviving_person=merged_person` の非対称性は
+        意図したもの。仕様書 §9.3.1 手順8「過去のマージログを locked に変更（merged_person を
+        surviving とする undoable なログ）」の表記通り。
+
+        シナリオ：T1 で A→B（ML1: surviving=B, merged=A, status='undoable'）。続いて T2 で
+        B→C を実行する際、`lock_past_logs(merged_person=B)` を呼ぶ。`surviving_person=B`
+        かつ `status='undoable'` の ML1 がヒットして locked 化される。Contact の
+        `previous_person` は T2 で B→C のマージにより上書きされ、A→B の復元はもうできない
+        （直近1段階分しか保持しない）ため、ML1 を locked にする必要がある。
+
+        既に `locked` / `undone` のログには影響しない（フィルタ条件 `status='undoable'`）。
+        """
+        cls.objects.filter(
+            surviving_person=merged_person,
+            status=cls.Status.UNDOABLE,
+        ).update(status=cls.Status.LOCKED)
+
+    @classmethod
+    def get_for_person(cls, person):
+        """Person 単位のログ一覧取得（仕様書 §10.8.1）。マージログ一覧画面用。
+
+        [性質] 準関数（DB 読み取りのみ）
+        [入力] person: Person
+        [出力] QuerySet[PersonMergeLog]（surviving / merged どちら側のログも含む。
+               status による絞り込みは行わない）
+        """
+        return cls._get_for_person(person)
+
+    @classmethod
+    def get_undoable(cls, person):
+        """復元可能なログ取得（仕様書 §10.8.1）。
+
+        [性質] 準関数（DB 読み取りのみ）
+        [入力] person: Person
+        [出力] QuerySet[PersonMergeLog]（status='undoable' のもの。surviving / merged
+               どちら側でも返す）
+        """
+        return cls._get_for_person(person, status=cls.Status.UNDOABLE)
+
+    # ------------------------------------------------------------------
+    # インスタンスメソッド（仕様書 §10.8.2）
+    # ------------------------------------------------------------------
+
+    def is_undoable(self):
+        """復元可能かどうかの判定（仕様書 §10.8.2）。
+
+        [性質] 純関数（DB 操作なし・自身の status フィールドを読むだけ）
+        [入力] なし
+        [出力] bool（status='undoable' なら True）
+
+        status フィールドが「現時点で復元可能か」の唯一の真実。多重マージで巻き込まれた場合は
+        `lock_past_logs()` で `status='locked'` に、復元実行された場合は `mark_as_undone()`
+        で `status='undone'` に、それぞれ起きた時点で反映済み。実行時に他のフィールドを再
+        チェックする必要はない（複合判定にしない、§3.4 設計思想）。
+        """
+        return self.status == self.Status.UNDOABLE
+
+    def mark_as_undone(self, user):
+        """自身の状態遷移：undone 化（仕様書 §10.8.2）。
+
+        [性質] 副作用あり（自身のフィールド更新のみ）
+        [入力] user: User（復元実行者、undone_by に記録）
+        [出力] None
+
+        事前条件チェック（status が undoable かどうか）は呼び出し側（復元実行サービス層、
+        B ブロック以降）が `is_undoable()` で行う責務。本メソッドは「自身の状態遷移を実行する」
+        責務に絞る。Contact の `previous_*` 戻し等の復元処理本体も B ブロック以降の責務。
+        """
+        self.status = self.Status.UNDONE
+        self.undone_by = user
+        self.undone_at = timezone.now()
+        self.save(update_fields=["status", "undone_by", "undone_at", "updated_at"])
+
+    def get_undo_preview(self):
+        """復元後の予測状態を返す（仕様書 §10.8.2 / §10.8.3）。確認画面表示用。
+
+        [性質] 準関数（DB 読み取りのみ・SELECT のみ発行する読み取り専用メソッド）
+        [入力] なし
+        [出力] dict（以下のキーを持つ）
+               - 'merged_person': Person（self.merged_person）
+               - 'contacts_to_restore': QuerySet[Contact]（merged_person に戻る Contact）
+               - 'contacts_remaining_in_surviving': QuerySet[Contact]（surviving 側に残る
+                 Contact）
+
+        スナップショットは取っていない。Contact モデル自身が `previous_person` /
+        `previous_status` フィールドで「マージ前の状態」を保持する設計（§9.4.2）のため、
+        `previous_person` を読むだけで「復元したらどう動くか」を予測できる。
+
+        判定ロジック：
+          - 「今 surviving 配下にあって `previous_person == merged_person`」=
+            このマージで動いた Contact = 復元すると merged_person に戻る
+          - 「今 surviving 配下にあって `previous_person != merged_person`」=
+            元から surviving 配下にいた、または別マージで動いた Contact = 復元しても動かない
+
+        実際の復元処理（Contact の person / status 戻し、PersonMergeLog の status='undone'
+        化など）はマージ実行サービス層（B ブロック以降）の責務。本メソッドでは DB を一切
+        変更しない。
+        """
+        from contacts.models import Contact  # 循環 import を避けるため遅延 import
+
+        contacts_to_restore = Contact.objects.filter(
+            person=self.surviving_person,
+            previous_person=self.merged_person,
+        )
+        contacts_remaining_in_surviving = Contact.objects.filter(
+            person=self.surviving_person,
+        ).exclude(
+            previous_person=self.merged_person,
+        )
+        return {
+            "merged_person": self.merged_person,
+            "contacts_to_restore": contacts_to_restore,
+            "contacts_remaining_in_surviving": contacts_remaining_in_surviving,
+        }
