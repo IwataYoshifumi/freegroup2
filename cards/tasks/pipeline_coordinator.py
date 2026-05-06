@@ -205,7 +205,8 @@ class PipelineCoordinator:
         tmp_abs = None
         try:
             with transaction.atomic():
-                person = Person.objects.create()
+                # 仕様書 §15.4：循環 FK を 3 段階で解決する
+                person = Person.objects.create(status=Person.Status.ACTIVE)
                 business_card = BusinessCard.objects.create(
                     original_image=self.original_image,
                     card_image=None,
@@ -215,8 +216,12 @@ class PipelineCoordinator:
                 contact = Contact.objects.create(
                     business_card=business_card,
                     person=person,
+                    status=Contact.Status.PRIMARY,
+                    created_by=self.original_image.user,
                     **contact_dict,
                 )
+                person.primary_contact = contact
+                person.save()
                 for field_name, conf in confidence_map.items():
                     if conf in ("low", "medium"):
                         ContactFieldConfidence.objects.create(
