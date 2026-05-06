@@ -1,6 +1,6 @@
 import uuid
 
-from django.db import models
+from django.db import models, transaction
 from django.utils.translation import gettext_lazy as _
 
 
@@ -46,3 +46,109 @@ class Person(models.Model):
         if contact and contact.full_name:
             return contact.full_name
         return f"Person {self.id}"
+
+    # ------------------------------------------------------------------
+    # インスタンスメソッド（仕様書 §10.4.1）
+    # ------------------------------------------------------------------
+
+    def mark_as_merged(self, surviving_person):
+        """自身の状態遷移：merged 化（仕様書 §10.4.1）。
+
+        [性質] 副作用あり（自身のフィールド更新のみ）
+        [入力] surviving_person: Person（マージで残る側）
+        [出力] None
+
+        Contact 側のフィールド（status / person FK）には一切触らない（仕様書 §10.2）。
+        Contact の付け替えは transfer_contacts_to() の責務。
+        """
+        with transaction.atomic():
+            self.status = self.Status.MERGED
+            self.merged_into = surviving_person
+            self.primary_contact = None
+            self.save(
+                update_fields=["status", "merged_into", "primary_contact", "updated_at"]
+            )
+
+    def set_primary_contact(self, new_contact, old_primary_new_status="active"):
+        """primary_contact 切り替え（派生情報の同期、仕様書 §10.4.3）。
+
+        [性質] 副作用あり（自身と Contact の派生情報を同期更新）
+        [入力] new_contact: Contact（self 配下の Contact、既に save 済み）
+               old_primary_new_status: 'active' or 'inactive'（旧 primary の遷移先）
+        [出力] None
+        [例外] ValueError（new_contact が self 配下でない場合）
+
+        前提条件：new_contact は self 配下の Contact。他 Person 配下の Contact を渡された場合は
+        ValueError を上げる（v1.4.2 の実運用では発生しないケース。誤呼び出しを早期検知する）。
+        """
+        from contacts.models import Contact  # 循環 import を避けるため遅延 import
+
+        if new_contact.person_id != self.id:
+            raise ValueError(
+                f"new_contact.person_id ({new_contact.person_id}) does not match "
+                f"self.id ({self.id}). set_primary_contact() requires new_contact to be "
+                f"already linked to this Person. Move the Contact under this Person "
+                f"before calling set_primary_contact()."
+            )
+
+        with transaction.atomic():
+            # Step 1: 旧 primary の status を old_primary_new_status に変更
+            if (
+                self.primary_contact_id is not None
+                and self.primary_contact_id != new_contact.pk
+            ):
+                old = self.primary_contact
+                old.status = old_primary_new_status
+                old.save(update_fields=["status", "updated_at"])
+
+            # Step 2: 新 primary の status を 'primary' に変更
+            new_contact.status = Contact.Status.PRIMARY
+            new_contact.save(update_fields=["status", "updated_at"])
+
+            # Step 3 (FK 付け替え) は前提条件チェックで担保済みのため実装しない（A-2a 方針）
+
+            # Step 4: self.primary_contact = new_contact に更新
+            self.primary_contact = new_contact
+            self.save(update_fields=["primary_contact", "updated_at"])
+
+    def get_active_contacts(self):
+        """status='active' の Contact 一覧（QuerySet）を返す（仕様書 §10.4.1）。
+
+        [性質] 準関数（DB 読み取りのみ）
+        [入力] なし
+        [出力] QuerySet[Contact]（status='active' のもの。'primary' は含まない）
+        """
+        return self.contact_set.filter(status="active")
+
+    def get_inactive_contacts(self):
+        """status='inactive' の Contact 一覧（QuerySet）を返す（仕様書 §10.4.1）。
+
+        [性質] 準関数（DB 読み取りのみ）
+        [入力] なし
+        [出力] QuerySet[Contact]（status='inactive' のもの）
+        """
+        return self.contact_set.filter(status="inactive")
+
+    # ------------------------------------------------------------------
+    # クラスメソッド（仕様書 §10.4.2）
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def get_active(cls):
+        """status='active' の Person 一覧（QuerySet）を返す（仕様書 §10.4.2）。
+
+        [性質] 準関数（DB 読み取りのみ）
+        [入力] なし
+        [出力] QuerySet[Person]（status='active' のもの。merged / archived は含まない）
+        """
+        return cls.objects.filter(status=cls.Status.ACTIVE)
+
+    @classmethod
+    def get_archived(cls):
+        """status='archived' の Person 一覧（QuerySet）を返す（仕様書 §10.4.2）。
+
+        [性質] 準関数（DB 読み取りのみ）
+        [入力] なし
+        [出力] QuerySet[Person]（status='archived' のもの。active / merged は含まない）
+        """
+        return cls.objects.filter(status=cls.Status.ARCHIVED)
