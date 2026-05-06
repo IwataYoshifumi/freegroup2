@@ -128,6 +128,13 @@ class OriginalDetailView(DetailView):
         context["active_menu"] = "originals:original_list"
         context["business_cards"] = self.object.businesscard_set.all().order_by("created_at")
         context["back"] = BackNavigator(self.request)
+
+        raw_json = self.object.raw_json
+        raw_json_str = None
+        if raw_json:
+            raw_json_str = json.dumps(raw_json, ensure_ascii=False, indent=2)
+        context["raw_json_str"] = raw_json_str
+
         return context
 
 

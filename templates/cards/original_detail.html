@@ -86,7 +86,9 @@
           <thead>
             <tr>
               <th>名刺 ID</th>
-              <th>OCR ステータス</th>
+              <th>card_index</th>
+              <th>向き</th>
+              <th>切り抜き画像</th>
               <th>作成日時</th>
             </tr>
           </thead>
@@ -94,17 +96,30 @@
             {% for card in business_cards %}
               <tr>
                 <td>{{ card.id|stringformat:"s"|slice:":8" }}...</td>
-                <td>{{ card.get_ocr_status_display }}</td>
+                <td>{{ card.card_index }}</td>
+                <td>{{ card.get_orientation_display }}</td>
+                <td>{% if card.card_image %}あり{% else %}<span class="app-muted">なし</span>{% endif %}</td>
                 <td>{{ card.created_at|date:"Y/m/d H:i" }}</td>
               </tr>
             {% empty %}
-              <tr><td colspan="3" class="app-muted">名刺レコードがありません。</td></tr>
+              <tr><td colspan="5" class="app-muted">名刺レコードがありません。</td></tr>
             {% endfor %}
           </tbody>
         </table>
       </div>
     {% else %}
       <p class="app-muted">処理中です。</p>
+    {% endif %}
+  </section>
+
+  <section class="app-card">
+    <div class="app-section__header">
+      <h2>OCR 結果 JSON</h2>
+    </div>
+    {% if raw_json_str %}
+      <pre style="overflow-x: auto; max-height: 600px;">{{ raw_json_str }}</pre>
+    {% else %}
+      <p class="app-muted">OCR 結果 JSON はまだありません。</p>
     {% endif %}
   </section>
 {% endblock %}
