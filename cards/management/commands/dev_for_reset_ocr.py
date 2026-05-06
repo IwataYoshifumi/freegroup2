@@ -17,7 +17,9 @@ import uuid
 
 from django.core.management.base import BaseCommand, CommandError
 
-from cards.models import BusinessCard, Contact, OriginalImage, Person
+from cards.models import BusinessCard, OriginalImage
+from contacts.models import Contact
+from persons.models import Person
 
 
 class Command(BaseCommand):

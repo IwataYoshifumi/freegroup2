@@ -17,8 +17,9 @@ from django.views.generic import DetailView, FormView, ListView
 from back_navigator.back_navigator import BackNavigator
 
 from .forms import UploadForm
-from .models import BusinessCard, ContactFieldConfidence, OriginalImage
+from .models import BusinessCard, OriginalImage
 from .services.image_processor import convert_to_jpeg
+from contacts.models import ContactFieldConfidence
 
 User = get_user_model()
 

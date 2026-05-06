@@ -17,7 +17,7 @@ import jsonschema
 from django.conf import settings
 from django.db import transaction
 
-from cards.models import BusinessCard, Contact, ContactFieldConfidence, OriginalImage, Person
+from cards.models import BusinessCard, OriginalImage
 from cards.services.card_detector import detect_cards
 from cards.services.has_minimum_info import has_minimum_info
 from cards.services.json_normalizer import (
@@ -26,6 +26,8 @@ from cards.services.json_normalizer import (
 )
 from cards.tasks.card_cropper import save_card_image_tmp
 from cards.tasks.ocr_service import OcrService
+from contacts.models import Contact, ContactFieldConfidence
+from persons.models import Person
 
 logger = logging.getLogger(__name__)
 
