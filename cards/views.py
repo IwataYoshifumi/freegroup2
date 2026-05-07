@@ -23,7 +23,7 @@ from django.views.generic import DetailView, FormView, ListView
 from back_navigator.back_navigator import BackNavigator
 
 from .forms import UploadForm
-from .models import BusinessCard, ContactFieldConfidence, OriginalImage
+from .models import BusinessCard, Contact, ContactFieldConfidence, OriginalImage
 from .services.detectors.opencv_detector import detect_cards_with_debug
 from .services.image_processor import convert_to_jpeg
 from .services.opencv_debug_cache import clear_debug_cache, save_debug_data
@@ -432,7 +432,10 @@ class CardListView(ListView):
     def get_queryset(self):
         user = get_current_user(self.request)
         qs = (
-            BusinessCard.objects.filter(original_image__user=user)
+            BusinessCard.objects.filter(
+                original_image__user=user,
+                ocr_result=BusinessCard.OcrResult.BUSINESS_CARD,
+            )
             .select_related("original_image", "contact")
             .annotate(
                 has_low=Exists(
@@ -517,7 +520,10 @@ class CardDetailView(DetailView):
         context["active_menu"] = "cards:card_list"
         context["back"] = BackNavigator(self.request)
 
-        contact = getattr(self.object, "contact", None)
+        try:
+            contact = self.object.contact
+        except Contact.DoesNotExist:
+            contact = None
         confidence_map = {}
         if contact is not None:
             for entry in contact.confidences.all():

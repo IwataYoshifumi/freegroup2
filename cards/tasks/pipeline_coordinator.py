@@ -177,51 +177,58 @@ class PipelineCoordinator:
             return
 
         card_meta = card_data.get("card_meta") or {}
-
-        # ⑥ is_business_card チェック
-        if not card_meta.get("is_business_card", True):
-            return
-
-        # ⑦ フィールド正規化
         orientation = card_meta.get("orientation", "normal")
-        try:
-            contact_dict, confidence_map = normalize_to_contact_dict(ocr_result, 0)
-        except Exception as e:
-            self.error_messages.append(f"card_index={card_index}: 正規化失敗 ({e})")
-            return
 
-        # ⑧ orientation に応じた confidence 補正
-        confidence_map = calc_orientation_adjusted_confidence_map(
-            contact_dict, confidence_map, orientation
-        )
+        # ⑥ ocr_result 値の判定（is_business_card / has_minimum_info で分岐）
+        contact_dict = None
+        confidence_map = None
 
-        # ⑨ 最低情報チェック
-        if not has_minimum_info(contact_dict):
-            return
+        if not card_meta.get("is_business_card", True):
+            ocr_result_value = BusinessCard.OcrResult.NOT_BUSINESS_CARD
+        else:
+            try:
+                contact_dict, confidence_map = normalize_to_contact_dict(ocr_result, 0)
+            except Exception as e:
+                self.error_messages.append(f"card_index={card_index}: 正規化失敗 ({e})")
+                return
+
+            confidence_map = calc_orientation_adjusted_confidence_map(
+                contact_dict, confidence_map, orientation
+            )
+
+            if not has_minimum_info(contact_dict):
+                ocr_result_value = BusinessCard.OcrResult.INSUFFICIENT_INFO
+                contact_dict = None
+                confidence_map = None
+            else:
+                ocr_result_value = BusinessCard.OcrResult.BUSINESS_CARD
 
         # ⑩ DB先・ファイル後：card_image=None で DB 先行作成 → 一時ファイル保存 → on_commit でリネーム
+        # contact_dict が None の場合は Contact / Person を作成しない（BC のみ残置）
         tmp_abs = None
         try:
             with transaction.atomic():
-                person = Person.objects.create()
                 business_card = BusinessCard.objects.create(
                     original_image=self.original_image,
                     card_image=None,
                     card_index=card_index,
                     orientation=orientation,
+                    ocr_result=ocr_result_value,
                 )
-                contact = Contact.objects.create(
-                    business_card=business_card,
-                    person=person,
-                    **contact_dict,
-                )
-                for field_name, conf in confidence_map.items():
-                    if conf in ("low", "medium"):
-                        ContactFieldConfidence.objects.create(
-                            contact=contact,
-                            field_name=field_name,
-                            confidence=conf,
-                        )
+                if contact_dict is not None:
+                    person = Person.objects.create()
+                    contact = Contact.objects.create(
+                        business_card=business_card,
+                        person=person,
+                        **contact_dict,
+                    )
+                    for field_name, conf in confidence_map.items():
+                        if conf in ("low", "medium"):
+                            ContactFieldConfidence.objects.create(
+                                contact=contact,
+                                field_name=field_name,
+                                confidence=conf,
+                            )
 
                 # 一時パスに JPEG を書き込む（DB コミット前）
                 try:

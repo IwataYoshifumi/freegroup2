@@ -72,6 +72,13 @@ class BusinessCard(models.Model):
         (ORIENTATION_MIRROR,  "鏡像"),
     ]
 
+    class OcrResult(models.TextChoices):
+        BUSINESS_CARD = "business_card", "名刺"
+        NOT_BUSINESS_CARD = "not_business_card", "名刺ではない"
+        INSUFFICIENT_INFO = "insufficient_info", "情報不足"
+        OCR_FAILED = "ocr_failed", "OCR失敗"
+        OTHERS = "others", "その他"
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     original_image = models.ForeignKey(
         OriginalImage,
@@ -87,6 +94,11 @@ class BusinessCard(models.Model):
         max_length=20,
         choices=ORIENTATION_CHOICES,
         default=ORIENTATION_NORMAL,
+    )
+    ocr_result = models.CharField(
+        max_length=20,
+        choices=OcrResult.choices,
+        default=OcrResult.BUSINESS_CARD,
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
