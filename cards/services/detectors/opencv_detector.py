@@ -126,6 +126,16 @@ def detect_cards_with_debug(image_path: str) -> dict:
         ],
 
         "error_message": str,  # 失敗時のみ例外メッセージ。成功時は空文字列
+
+        "mask_white_ratios": {
+            # 5 マスクそれぞれの白画素率（mask > 0 の比率, 0.0〜1.0）。
+            # mask 番号 → キーの対応は opencv_debug_cache._MASK_FILE_ORDER と一致。
+            "mask_1": float,  # mask_diff
+            "mask_2": float,  # mask_edge
+            "mask_3": float,  # mask_sat
+            "mask_4": float,  # mask_or
+            "mask_5": float,  # mask_closed
+        },
       }
 
       検出処理で例外が発生した場合は次を返す（例外を外に漏らさない）：
@@ -248,6 +258,19 @@ def _detect_with_debug(image_path: str) -> dict:
             "warped_image": Image.fromarray(warped_rgb),
         })
 
+    # マスク白画素率（mask > 0 の比率）。numpy 配列のうちに計算する。
+    # キーの順序・対応は opencv_debug_cache._MASK_FILE_ORDER と一致させる。
+    def _white_ratio(arr):
+        return float((arr > 0).sum() / arr.size) if arr.size else 0.0
+
+    mask_white_ratios = {
+        "mask_1": _white_ratio(masks_np["mask_diff"]),
+        "mask_2": _white_ratio(masks_np["mask_edge"]),
+        "mask_3": _white_ratio(masks_np["mask_sat"]),
+        "mask_4": _white_ratio(masks_np["mask_or"]),
+        "mask_5": _white_ratio(masks_np["mask_closed"]),
+    }
+
     return {
         "results": results,
         "image_size": {"width": int(w), "height": int(h), "area": int(image_area)},
@@ -263,6 +286,7 @@ def _detect_with_debug(image_path: str) -> dict:
         "candidates_dedup": candidates_dedup,
         "warp_failures": warp_failures,
         "error_message": "",
+        "mask_white_ratios": mask_white_ratios,
     }
 
 

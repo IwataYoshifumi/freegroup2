@@ -1305,6 +1305,13 @@ select.app-input {
   vector-effect: non-scaling-stroke;
 }
 
+/* 巨大候補（results 内 area_ratio 中央値の 1.5 倍以上）= 統合疑い警告 */
+.app-debug-polygon--giant {
+  fill: rgba(244, 63, 94, 0.22);
+  stroke: rgb(244, 63, 94);
+  stroke-width: 6;
+}
+
 .app-debug-polygon__label {
   fill: #ffffff;
   stroke: rgba(0, 0, 0, 0.65);
@@ -1313,6 +1320,31 @@ select.app-input {
   font-size: 120px;
   font-weight: 800;
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+.app-debug-polygon__label--giant {
+  fill: #fef3c7;
+  stroke: rgba(120, 0, 30, 0.85);
+}
+
+/* 検出失敗警告ストライプ（セクション 1 の上に表示） */
+.app-warning-stripe {
+  background: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
+  border-left: 5px solid #dc2626;
+  padding: 12px 14px;
+  border-radius: 8px;
+  margin-bottom: var(--app-space-md);
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.app-warning-stripe__items {
+  font-weight: 500;
 }
 
 /* セクション 3: マスク画像 5 枚グリッド */

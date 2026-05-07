@@ -18,6 +18,14 @@
     </div>
   </div>
 
+  {# ========== 警告ストライプ（OpenCV 検出失敗の可能性） ========== #}
+  {% if warning_stripe %}
+    <div class="app-warning-stripe" role="alert">
+      <strong>OpenCV 検出失敗の可能性：</strong>
+      <span class="app-warning-stripe__items">{{ warning_stripe|join:" / " }}</span>
+    </div>
+  {% endif %}
+
   {# ========== セクション 1: 元画像 + polygon オーバーレイ ========== #}
   <section class="app-card">
     <div class="app-section__header">
@@ -32,8 +40,9 @@
                preserveAspectRatio="xMidYMid meet"
                xmlns="http://www.w3.org/2000/svg">
             {% for p in overlay_polygons %}
-              <polygon class="app-debug-polygon" points="{{ p.points_str }}"></polygon>
-              <text class="app-debug-polygon__label"
+              <polygon class="app-debug-polygon{% if p.is_giant %} app-debug-polygon--giant{% endif %}"
+                       points="{{ p.points_str }}"></polygon>
+              <text class="app-debug-polygon__label{% if p.is_giant %} app-debug-polygon__label--giant{% endif %}"
                     x="{{ p.centroid_x|floatformat:1 }}"
                     y="{{ p.centroid_y|floatformat:1 }}"
                     text-anchor="middle"
@@ -116,6 +125,18 @@
         <div class="app-detail-item">
           <div class="app-detail-label">最終検出名刺数</div>
           <div class="app-detail-value">{{ debug_summary.results_count }} 件</div>
+        </div>
+        <div class="app-detail-item">
+          <div class="app-detail-label">reject_reason 別件数</div>
+          <div class="app-detail-value">{{ debug_summary.reject_reason_str }}</div>
+        </div>
+        <div class="app-detail-item">
+          <div class="app-detail-label">has_minimum_info NG 数 (full_name 欠損)</div>
+          <div class="app-detail-value">{{ debug_summary.has_min_info_ng_str }}</div>
+        </div>
+        <div class="app-detail-item">
+          <div class="app-detail-label">検出 vs BC 化ギャップ</div>
+          <div class="app-detail-value">{{ debug_summary.detection_gap_str }}</div>
         </div>
         <div class="app-detail-item">
           <div class="app-detail-label">最終計算日時</div>

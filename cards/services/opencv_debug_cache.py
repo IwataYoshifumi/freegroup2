@@ -122,4 +122,5 @@ def _build_debug_json(debug_result: dict) -> dict:
         "results": results_meta,
         "error_message": debug_result.get("error_message", ""),
         "computed_at": timezone.now().isoformat(),
+        "mask_white_ratios": debug_result.get("mask_white_ratios") or {},
     }
