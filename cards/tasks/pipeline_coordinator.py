@@ -1,6 +1,6 @@
 """名刺画像の切り出しパイプライン（OpenCV 検出・透視変換 → Claude OCR 方式）。
 
-① detect_cards で名刺を検出・透視変換済み横長画像を取得
+① detect_cards_with_debug で名刺を検出・透視変換済み横長画像を取得（debug_json も保存）
 ② warped_image ごとに ocr_service.run_ocr でフィールドを取得
 ③ normalize_to_contact_dict → has_minimum_info → save_card_image_tmp で保存
 ④ BusinessCard / Contact / Person 保存
@@ -18,12 +18,13 @@ from django.conf import settings
 from django.db import transaction
 
 from cards.models import BusinessCard, Contact, ContactFieldConfidence, OriginalImage, Person
-from cards.services.card_detector import detect_cards
+from cards.services.detectors.opencv_detector import detect_cards_with_debug
 from cards.services.has_minimum_info import has_minimum_info
 from cards.services.json_normalizer import (
     calc_orientation_adjusted_confidence_map,
     normalize_to_contact_dict,
 )
+from cards.services.opencv_debug_cache import save_debug_data
 from cards.tasks.card_cropper import save_card_image_tmp
 from cards.tasks.ocr_service import OcrService
 
@@ -77,8 +78,18 @@ class PipelineCoordinator:
 
         detections = []
         try:
-            detections = detect_cards(self.original_image.image_file.path)
+            debug_result = detect_cards_with_debug(self.original_image.image_file.path)
+            detections = debug_result.get("results") or []
             self.original_image.detected_count = len(detections)
+
+            # debug_json 保存は失敗しても OCR を止めない（debug は副次情報のため）
+            try:
+                save_debug_data(self.original_image, debug_result)
+            except Exception as e:
+                logger.warning(
+                    "save_debug_data failed for OriginalImage %s: %s",
+                    self.original_image.id, e,
+                )
 
             if not detections:
                 self.original_image.status = OriginalImage.STATUS_GARBAGE

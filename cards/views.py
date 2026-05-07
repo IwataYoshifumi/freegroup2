@@ -8,9 +8,7 @@ import json
 import logging
 import statistics
 from collections import Counter
-from pathlib import Path
 
-from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.files.base import ContentFile
 from django.db.models import Exists, OuterRef, Q
@@ -23,7 +21,7 @@ from django.views.generic import DetailView, FormView, ListView
 from back_navigator.back_navigator import BackNavigator
 
 from .forms import UploadForm
-from .models import BusinessCard, Contact, ContactFieldConfidence, OriginalImage
+from .models import BusinessCard, Contact, ContactFieldConfidence, DebugMask, OriginalImage
 from .services.detectors.opencv_detector import detect_cards_with_debug
 from .services.image_processor import convert_to_jpeg
 from .services.opencv_debug_cache import clear_debug_cache, save_debug_data
@@ -132,17 +130,6 @@ class OriginalDetailView(DetailView):
         user = get_current_user(self.request)
         return OriginalImage.objects.filter(user=user)
 
-    def get(self, request, *args, **kwargs):
-        self.object = self.get_object()
-        if self.object.debug_json is None:
-            logger.info("opencv-debug: COMPUTE for OriginalImage %s", self.object.id)
-            result = detect_cards_with_debug(self.object.image_file.path)
-            save_debug_data(self.object, result)
-        else:
-            logger.info("opencv-debug: CACHE HIT for OriginalImage %s", self.object.id)
-        context = self.get_context_data(object=self.object)
-        return self.render_to_response(context)
-
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context["active_app"] = "cards"
@@ -156,15 +143,21 @@ class OriginalDetailView(DetailView):
         context["raw_json"] = raw_json
 
         debug_json = self.object.debug_json
+        debug_masks = list(self.object.debug_masks.all())
+        mask_white_ratios = {
+            m.mask_type: m.metadata.get("white_ratio")
+            for m in debug_masks
+            if isinstance(m.metadata, dict) and m.metadata.get("white_ratio") is not None
+        }
         context["debug_json"] = debug_json
         context["debug_summary"] = _build_debug_summary(
             debug_json, raw_json=raw_json, bc_count=business_cards.count()
         )
-        context["mask_urls"] = _build_mask_urls(self.object)
+        context["mask_urls"] = _build_mask_urls(debug_masks)
         context["candidates_passed"] = _candidates_passed(debug_json)
         context["candidates_all"] = _candidates_all(debug_json)
         context["overlay_polygons"] = _build_overlay_polygons(debug_json)
-        context["warning_stripe"] = _build_warning_stripe(debug_json)
+        context["warning_stripe"] = _build_warning_stripe(debug_json, mask_white_ratios)
 
         return context
 
@@ -237,20 +230,23 @@ def _has_minimum_info_ng_count(raw_json):
     return ng
 
 
-def _build_warning_stripe(debug_json):
+def _build_warning_stripe(debug_json, mask_white_ratios=None):
     """検出失敗の警告ストライプに表示する条件メッセージリスト（立った条件のみ列挙）。
 
+    [入力]
+      debug_json         : OriginalImage.debug_json
+      mask_white_ratios  : {mask_type: white_ratio} 形式の dict（DebugMask.metadata 由来）
     [出力] list[str]: 立った条件のメッセージ。1 つも該当しなければ空リスト。
     """
     if not debug_json:
         return []
     msgs = []
 
-    # 条件1: mask_5 (closed) 白画素率 ≥ 80%
-    mwr = debug_json.get("mask_white_ratios") or {}
-    mask5 = mwr.get("mask_5")
-    if mask5 is not None and mask5 >= 0.80:
-        msgs.append(f"マスク白画素率が異常 ({mask5 * 100:.1f}%)")
+    # 条件1: closed マスク白画素率 ≥ 80%
+    mwr = mask_white_ratios or {}
+    closed_ratio = mwr.get(DebugMask.MaskType.CLOSED)
+    if closed_ratio is not None and closed_ratio >= 0.80:
+        msgs.append(f"マスク白画素率が異常 ({closed_ratio * 100:.1f}%)")
 
     # 条件2: passed = 0
     cf = debug_json.get("candidates_filter") or []
@@ -266,21 +262,18 @@ def _build_warning_stripe(debug_json):
     return msgs
 
 
-def _build_mask_urls(original_image):
-    """5枚のマスク画像 (label, url) のリスト。ファイル不在時は url=None。"""
-    labels = (
-        "mask_1: 輝度差 (diff)",
-        "mask_2: エッジ (edge)",
-        "mask_3: 彩度 (sat)",
-        "mask_4: OR 合成 (or)",
-        "mask_5: クロージング後 (closed)",
-    )
-    cache_dir = Path(settings.MEDIA_ROOT) / "debug_cache" / str(original_image.id)
-    base_url = f"{settings.MEDIA_URL.rstrip('/')}/debug_cache/{original_image.id}"
+def _build_mask_urls(debug_masks):
+    """5枚のマスク画像 (label, url) のリスト。DebugMask レコード経由で取得。
+
+    [入力] debug_masks: DebugMask の iterable（同一 OriginalImage 配下）
+    [出力] list[(label, url|None)]、長さ常に5、TextChoices の定義順（diff→edge→sat→or→closed）
+    """
+    by_type = {m.mask_type: m for m in debug_masks}
     items = []
-    for n, label in enumerate(labels, start=1):
-        f = cache_dir / f"mask_{n}.png"
-        url = f"{base_url}/mask_{n}.png" if f.exists() else None
+    for idx, (mask_type, verbose) in enumerate(DebugMask.MaskType.choices, start=1):
+        label = f"mask_{idx}: {verbose}"
+        rec = by_type.get(mask_type)
+        url = rec.mask_image.url if rec else None
         items.append((label, url))
     return items
 
@@ -400,10 +393,10 @@ def _build_overlay_polygons(debug_json):
 
 
 class RecalcDebugView(View):
-    """OpenCV デバッグキャッシュを破壊し、元画像詳細にリダイレクトする（POST 専用）。
+    """OpenCV デバッグキャッシュを再計算し、元画像詳細にリダイレクトする（POST 専用）。
 
-    実際の再計算は OriginalDetailView の GET ハンドラに任せる。本 View は
-    debug_cache ディレクトリの削除と debug_json のクリアのみを行う。
+    既存の debug_cache ディレクトリと debug_json をクリアした上で、
+    detect_cards_with_debug() を即時実行し save_debug_data() で結果を保存する。
     GET / その他メソッドは Django 標準の 405 応答（method_not_allowed）が返る。
     """
 
@@ -411,6 +404,8 @@ class RecalcDebugView(View):
         user = get_current_user(request)
         original = get_object_or_404(OriginalImage, pk=pk, user=user)
         clear_debug_cache(original)
+        result = detect_cards_with_debug(original.image_file.path)
+        save_debug_data(original, result)
         return redirect("originals:original_detail", pk=original.id)
 
 

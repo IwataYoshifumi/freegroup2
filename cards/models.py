@@ -180,6 +180,52 @@ class Contact(models.Model):
         return self.full_name or f"Contact {self.id}"
 
 
+def _debug_mask_upload_path(instance, filename):
+    """[性質] 純関数 / DebugMask の ImageField の保存先を組み立てる。
+
+    保存先：MEDIA_ROOT/debug_masks/<original_image_id>/<mask_type>.png
+    filename 引数は無視し、mask_type に基づいた固定名を使う。
+    """
+    return f"debug_masks/{instance.original_image_id}/{instance.mask_type}.png"
+
+
+class DebugMask(models.Model):
+    """OpenCV 検出のデバッグ用マスク画像（5種類）。
+
+    OriginalImage に紐付き、検出時に save_debug_data() から書き込まれる。
+    DBが1次ソース、mask_image の FS 実体は post_delete シグナル経由で削除される。
+    """
+
+    class MaskType(models.TextChoices):
+        DIFF = "diff", "輝度差 (diff)"
+        EDGE = "edge", "エッジ (edge)"
+        SAT = "sat", "彩度 (sat)"
+        OR = "or", "OR 合成 (or)"
+        CLOSED = "closed", "クロージング (closed)"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    original_image = models.ForeignKey(
+        OriginalImage,
+        on_delete=models.CASCADE,
+        related_name="debug_masks",
+    )
+    mask_type = models.CharField(max_length=10, choices=MaskType.choices)
+    mask_image = models.ImageField(upload_to=_debug_mask_upload_path)
+    metadata = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["original_image", "mask_type"],
+                name="unique_original_image_mask_type",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.original_image_id} {self.mask_type}"
+
+
 class ContactFieldConfidence(models.Model):
     """信頼度メタDB（仕様書 v1.1.0 §4.6、新規）。
 
