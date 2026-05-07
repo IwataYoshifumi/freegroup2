@@ -37,6 +37,11 @@ class OriginalImage(models.Model):
     )
     claimed_at = models.DateTimeField(null=True, blank=True, default=None)
     raw_json = models.JSONField(null=True, blank=True)
+    debug_json = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="OpenCV 検出のデバッグ情報（中間データ）。None なら次回 GET 時に再計算される",
+    )
     error_message = models.TextField(blank=True, default="")
     detected_count = models.IntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)

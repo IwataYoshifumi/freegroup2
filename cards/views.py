@@ -5,20 +5,26 @@ View 層の責務は HTTP リクエスト/レスポンス処理とテンプレ�
 """
 
 import json
+import logging
 
 from django.contrib.auth import get_user_model
 from django.core.files.base import ContentFile
 from django.db.models import Exists, OuterRef, Q
 from django.http import HttpResponse
-from django.shortcuts import redirect, render
+from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.dateparse import parse_date
+from django.views import View
 from django.views.generic import DetailView, FormView, ListView
 
 from back_navigator.back_navigator import BackNavigator
 
 from .forms import UploadForm
 from .models import BusinessCard, ContactFieldConfidence, OriginalImage
+from .services.detectors.opencv_detector import detect_cards_with_debug
 from .services.image_processor import convert_to_jpeg
+from .services.opencv_debug_cache import clear_debug_cache, save_debug_data
+
+logger = logging.getLogger(__name__)
 
 User = get_user_model()
 
@@ -122,6 +128,17 @@ class OriginalDetailView(DetailView):
         user = get_current_user(self.request)
         return OriginalImage.objects.filter(user=user)
 
+    def get(self, request, *args, **kwargs):
+        self.object = self.get_object()
+        if self.object.debug_json is None:
+            logger.info("opencv-debug: COMPUTE for OriginalImage %s", self.object.id)
+            result = detect_cards_with_debug(self.object.image_file.path)
+            save_debug_data(self.object, result)
+        else:
+            logger.info("opencv-debug: CACHE HIT for OriginalImage %s", self.object.id)
+        context = self.get_context_data(object=self.object)
+        return self.render_to_response(context)
+
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context["active_app"] = "cards"
@@ -135,7 +152,24 @@ class OriginalDetailView(DetailView):
             raw_json_str = json.dumps(raw_json, ensure_ascii=False, indent=2)
         context["raw_json_str"] = raw_json_str
 
+        context["debug_json"] = self.object.debug_json
+
         return context
+
+
+class RecalcDebugView(View):
+    """OpenCV デバッグキャッシュを破壊し、元画像詳細にリダイレクトする（POST 専用）。
+
+    実際の再計算は OriginalDetailView の GET ハンドラに任せる。本 View は
+    debug_cache ディレクトリの削除と debug_json のクリアのみを行う。
+    GET / その他メソッドは Django 標準の 405 応答（method_not_allowed）が返る。
+    """
+
+    def post(self, request, pk):
+        user = get_current_user(request)
+        original = get_object_or_404(OriginalImage, pk=pk, user=user)
+        clear_debug_cache(original)
+        return redirect("originals:original_detail", pk=original.id)
 
 
 class CardListView(ListView):
