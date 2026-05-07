@@ -77,3 +77,36 @@ DUPLICATE_GENERIC_EMAIL_LOCALPARTS = [
     "customer",
     "reception",
 ]
+
+# 重複検出のスコア配点（仕様書 §8.3 / 初期値、運用後にチューニング想定）。
+# 各フィールドの「両 Contact で confidence='high' 扱い かつ 完全一致」時の加算点数。
+# email は個人メール / 代表メールで点数が異なるため別定数に分け、サービス層で
+# DUPLICATE_GENERIC_EMAIL_LOCALPARTS による判定後にどちらを使うかを決める。
+# branch（支店・営業所）は配点なし（所属5フィールド判定にのみ参加）。
+DUPLICATE_FIELD_SCORES = {
+    "full_name": 40,
+    "company": 10,
+    "department": 10,
+    "title": 5,
+    "address": 10,
+    "phone": 5,
+    "mobile": 80,
+}
+DUPLICATE_SCORE_EMAIL_PERSONAL = 80
+DUPLICATE_SCORE_EMAIL_GENERIC = 5
+
+# ランク判定の閾値（仕様書 §19.3 / 初期値、運用後にチューニング想定）。
+POSSIBLE_LOW_MIN_SCORE = 40
+POSSIBLE_MID_MIN_SCORE = 120
+POSSIBLE_HIGH_MIN_SCORE = 200
+
+# 所属5フィールド（仕様書 §8.4 exact_match の「両方一致 or 両方空」判定用）。
+# DUPLICATE_CHECK_FIELDS 9 項目から個人系（full_name / email / phone / mobile）を
+# 除いた 5 項目。
+DUPLICATE_LOCATION_FIELDS = [
+    "company",
+    "department",
+    "title",
+    "branch",
+    "address",
+]
