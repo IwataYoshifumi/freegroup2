@@ -18,7 +18,48 @@
     </div>
   </div>
 
+  {# ========== セクション 1: 元画像 + polygon オーバーレイ ========== #}
   <section class="app-card">
+    <div class="app-section__header">
+      <h2>元画像</h2>
+    </div>
+    {% if original.image_file %}
+      <div class="app-original-overlay">
+        <img class="app-original-overlay__img" src="{{ original.image_file.url }}" alt="元画像">
+        {% if debug_json and debug_json.image_size and overlay_polygons %}
+          <svg class="app-original-overlay__svg"
+               viewBox="0 0 {{ debug_json.image_size.width }} {{ debug_json.image_size.height }}"
+               preserveAspectRatio="xMidYMid meet"
+               xmlns="http://www.w3.org/2000/svg">
+            {% for p in overlay_polygons %}
+              <polygon class="app-debug-polygon" points="{{ p.points_str }}"></polygon>
+              <text class="app-debug-polygon__label"
+                    x="{{ p.centroid_x|floatformat:1 }}"
+                    y="{{ p.centroid_y|floatformat:1 }}"
+                    text-anchor="middle"
+                    dominant-baseline="central">{{ p.card_index }}</text>
+            {% endfor %}
+          </svg>
+        {% endif %}
+      </div>
+    {% else %}
+      <p class="app-muted">画像がありません。</p>
+    {% endif %}
+  </section>
+
+  {# ========== セクション 2: ステータス・処理情報・検出統計サマリー + 再計算ボタン ========== #}
+  <section class="app-card">
+    <div class="app-section__header">
+      <h2>ステータス・処理情報・検出統計</h2>
+      <form method="post" action="{% url 'originals:recalc_debug' pk=original.id %}"
+            class="js-recalc-debug-form" style="margin: 0;">
+        {% csrf_token %}
+        <button type="submit" class="app-btn app-btn--secondary app-btn--sm js-recalc-debug-btn">
+          OpenCV 検出を再計算
+        </button>
+      </form>
+    </div>
+
     <div class="app-detail-grid">
       <div class="app-detail-item">
         <div class="app-detail-label">ステータス</div>
@@ -37,7 +78,7 @@
         </div>
       </div>
       <div class="app-detail-item">
-        <div class="app-detail-label">検出枚数</div>
+        <div class="app-detail-label">検出枚数 (BusinessCard)</div>
         <div class="app-detail-value">{% if original.detected_count %}{{ original.detected_count }}{% else %}-{% endif %}</div>
       </div>
       <div class="app-detail-item">
@@ -48,27 +89,244 @@
         <div class="app-detail-label">更新日時</div>
         <div class="app-detail-value">{{ original.updated_at|date:"Y/m/d H:i:s" }}</div>
       </div>
+
+      {% if debug_summary %}
+        <div class="app-detail-item">
+          <div class="app-detail-label">画像サイズ (W × H)</div>
+          <div class="app-detail-value">
+            {{ debug_summary.image_size.width }} × {{ debug_summary.image_size.height }}
+          </div>
+        </div>
+        <div class="app-detail-item">
+          <div class="app-detail-label">輪郭検出数</div>
+          <div class="app-detail-value">{{ debug_summary.contours_count }}</div>
+        </div>
+        <div class="app-detail-item">
+          <div class="app-detail-label">フィルタ通過 / 全候補</div>
+          <div class="app-detail-value">{{ debug_summary.passed_count }} / {{ debug_summary.candidates_total }}</div>
+        </div>
+        <div class="app-detail-item">
+          <div class="app-detail-label">重複除去後 / 通過候補</div>
+          <div class="app-detail-value">{{ debug_summary.kept_count }} / {{ debug_summary.dedup_total }}</div>
+        </div>
+        <div class="app-detail-item">
+          <div class="app-detail-label">透視変換失敗</div>
+          <div class="app-detail-value">{{ debug_summary.warp_failures_count }} 件</div>
+        </div>
+        <div class="app-detail-item">
+          <div class="app-detail-label">最終検出名刺数</div>
+          <div class="app-detail-value">{{ debug_summary.results_count }} 件</div>
+        </div>
+        <div class="app-detail-item">
+          <div class="app-detail-label">最終計算日時</div>
+          <div class="app-detail-value">{{ debug_summary.computed_at }}</div>
+        </div>
+      {% endif %}
     </div>
 
     {% if original.error_message %}
       <div class="app-message app-message--warning">
-        <strong>エラーメッセージ</strong>
+        <strong>エラーメッセージ (OriginalImage)</strong>
         <pre>{{ original.error_message }}</pre>
+      </div>
+    {% endif %}
+
+    {% if debug_summary.error_message %}
+      <div class="app-message app-message--warning">
+        <strong>エラーメッセージ (OpenCV 検出)</strong>
+        <pre>{{ debug_summary.error_message }}</pre>
       </div>
     {% endif %}
   </section>
 
-  <section class="app-card">
-    <div class="app-section__header">
-      <h2>元画像</h2>
+  {# ========== セクション 3: OpenCV マスク画像 5 枚 ========== #}
+  <section class="app-card app-collapsible is-open">
+    <button type="button" class="app-collapsible__header" data-action="toggle-collapsible" aria-expanded="true">
+      <span>OpenCV マスク画像 5 枚</span>
+      <span class="app-collapsible__icon">▾</span>
+    </button>
+    <div class="app-collapsible-body">
+      <div class="app-mask-grid">
+        <div class="app-mask-grid__row">
+          {% for label, url in mask_urls|slice:":3" %}
+            <div class="app-mask-grid__item">
+              <div class="app-mask-grid__label">{{ label }}</div>
+              {% if url %}
+                <a href="{{ url }}" target="_blank" rel="noopener">
+                  <img class="app-mask-grid__img" src="{{ url }}" alt="{{ label }}">
+                </a>
+              {% else %}
+                <p class="app-muted">マスク画像なし</p>
+              {% endif %}
+            </div>
+          {% endfor %}
+        </div>
+        <div class="app-mask-grid__row">
+          {% for label, url in mask_urls|slice:"3:" %}
+            <div class="app-mask-grid__item">
+              <div class="app-mask-grid__label">{{ label }}</div>
+              {% if url %}
+                <a href="{{ url }}" target="_blank" rel="noopener">
+                  <img class="app-mask-grid__img" src="{{ url }}" alt="{{ label }}">
+                </a>
+              {% else %}
+                <p class="app-muted">マスク画像なし</p>
+              {% endif %}
+            </div>
+          {% endfor %}
+        </div>
+      </div>
     </div>
-    {% if original.image_file %}
-      <img src="{{ original.image_file.url }}" alt="元画像" style="max-width: 100%; height: auto;">
-    {% else %}
-      <p class="app-muted">画像がありません。</p>
-    {% endif %}
   </section>
 
+  {# ========== セクション 4: OpenCV 候補一覧テーブル ========== #}
+  <section class="app-card app-collapsible is-open">
+    <button type="button" class="app-collapsible__header" data-action="toggle-collapsible" aria-expanded="true">
+      <span>OpenCV 候補一覧テーブル</span>
+      <span class="app-collapsible__icon">▾</span>
+    </button>
+    <div class="app-collapsible-body">
+      {% if candidates_all %}
+        <div class="app-candidates-toolbar">
+          <label class="app-candidates-toggle">
+            <input type="checkbox" class="js-show-rejected">
+            除外候補も表示する
+          </label>
+          <span class="app-candidates-counter">
+            表示中：<span class="js-candidates-visible">{{ candidates_passed|length }}</span> 件
+            / 全 <span class="js-candidates-total">{{ candidates_all|length }}</span> 件
+          </span>
+        </div>
+        <div class="app-table-wrapper">
+          <table class="app-table app-candidates-table"
+                 data-passed-count="{{ candidates_passed|length }}"
+                 data-all-count="{{ candidates_all|length }}">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>面積 (比率)</th>
+                <th>中心 (x, y)</th>
+                <th>サイズ (W × H)</th>
+                <th>角度</th>
+                <th>縦横比</th>
+                <th>結果</th>
+                <th>除外理由</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for c in candidates_all %}
+                <tr class="{% if not c.passed %}is-rejected{% endif %}">
+                  <td>{{ c.index }}</td>
+                  <td>{{ c.area_str }} ({{ c.area_ratio_pct_str }}%)</td>
+                  <td>({{ c.rect_cx_str }}, {{ c.rect_cy_str }})</td>
+                  <td>{{ c.rect_w_str }} × {{ c.rect_h_str }}</td>
+                  <td>{{ c.rect_angle_str }}°</td>
+                  <td>{{ c.aspect_ratio_str }}</td>
+                  <td>
+                    {% if c.passed %}
+                      <span class="app-status-badge app-status-badge--success">✓ 通過</span>
+                    {% else %}
+                      <span class="app-status-badge app-status-badge--error">✗ 除外</span>
+                    {% endif %}
+                  </td>
+                  <td>{% if c.reject_reason %}{{ c.reject_reason }}{% else %}-{% endif %}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="app-muted">候補がありません。</p>
+      {% endif %}
+    </div>
+  </section>
+
+  {# ========== セクション 5: 重複除去結果 ========== #}
+  <section class="app-card app-collapsible">
+    <button type="button" class="app-collapsible__header" data-action="toggle-collapsible" aria-expanded="false">
+      <span>OpenCV 重複除去結果</span>
+      <span class="app-collapsible__icon">▸</span>
+    </button>
+    <div class="app-collapsible-body">
+      {% if debug_json.candidates_dedup %}
+        <div class="app-table-wrapper">
+          <table class="app-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>bbox (x, y, w, h)</th>
+                <th>面積</th>
+                <th>結果</th>
+                <th>重複相手</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for d in debug_json.candidates_dedup %}
+                <tr>
+                  <td>{{ forloop.counter0 }}</td>
+                  <td>({{ d.bbox.0 }}, {{ d.bbox.1 }}, {{ d.bbox.2 }}, {{ d.bbox.3 }})</td>
+                  <td>{{ d.area|floatformat:0 }}</td>
+                  <td>
+                    {% if d.kept %}
+                      <span class="app-status-badge app-status-badge--success">✓ 採用</span>
+                    {% else %}
+                      <span class="app-status-badge app-status-badge--error">✗ 除外</span>
+                    {% endif %}
+                  </td>
+                  <td>{% if d.overlap_with is not None %}{{ d.overlap_with }}{% else %}-{% endif %}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="app-muted">重複除去対象がありません。</p>
+      {% endif %}
+    </div>
+  </section>
+
+  {# ========== セクション 6: warp 失敗候補（warp_failures が空なら出さない） ========== #}
+  {% if debug_json.warp_failures %}
+    <section class="app-card app-collapsible">
+      <button type="button" class="app-collapsible__header" data-action="toggle-collapsible" aria-expanded="false">
+        <span>透視変換失敗候補 ({{ debug_json.warp_failures|length }} 件)</span>
+        <span class="app-collapsible__icon">▸</span>
+      </button>
+      <div class="app-collapsible-body">
+        <div class="app-table-wrapper">
+          <table class="app-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>polygon (TL → TR → BR → BL)</th>
+                <th>計算幅</th>
+                <th>計算高</th>
+                <th>必要最小 (W, H)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for w in debug_json.warp_failures %}
+                <tr>
+                  <td>{{ forloop.counter0 }}</td>
+                  <td class="app-warp-polygon-cell">
+                    TL=({{ w.polygon.top_left.x|floatformat:0 }}, {{ w.polygon.top_left.y|floatformat:0 }})
+                    TR=({{ w.polygon.top_right.x|floatformat:0 }}, {{ w.polygon.top_right.y|floatformat:0 }})
+                    BR=({{ w.polygon.bottom_right.x|floatformat:0 }}, {{ w.polygon.bottom_right.y|floatformat:0 }})
+                    BL=({{ w.polygon.bottom_left.x|floatformat:0 }}, {{ w.polygon.bottom_left.y|floatformat:0 }})
+                  </td>
+                  <td>{{ w.computed_width }}</td>
+                  <td>{{ w.computed_height }}</td>
+                  <td>({{ w.min_required.0 }}, {{ w.min_required.1 }})</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  {% endif %}
+
+  {# ========== セクション 7: 検出された名刺（既存維持） ========== #}
   <section class="app-card">
     <div class="app-section__header">
       <h2>検出された名刺</h2>
@@ -112,14 +370,102 @@
     {% endif %}
   </section>
 
-  <section class="app-card">
-    <div class="app-section__header">
-      <h2>OCR 結果 JSON</h2>
+  {# ========== セクション 8: OCR 結果 raw_json (json-viewer) ========== #}
+  <section class="app-card app-collapsible">
+    <button type="button" class="app-collapsible__header" data-action="toggle-collapsible" aria-expanded="false">
+      <span>OCR 結果 raw_json</span>
+      <span class="app-collapsible__icon">▸</span>
+    </button>
+    <div class="app-collapsible-body">
+      {% if raw_json %}
+        {{ raw_json|json_script:"raw-json-data" }}
+        <andypf-json-viewer id="raw-json-viewer"
+                            indent="2"
+                            theme="default-light"
+                            show-data-types="true"
+                            show-toolbar="true"
+                            show-copy="true"
+                            show-size="true"
+                            expanded="2"></andypf-json-viewer>
+      {% else %}
+        <p class="app-muted">OCR 結果 JSON はまだありません。</p>
+      {% endif %}
     </div>
-    {% if raw_json_str %}
-      <pre style="overflow-x: auto; max-height: 600px;">{{ raw_json_str }}</pre>
-    {% else %}
-      <p class="app-muted">OCR 結果 JSON はまだありません。</p>
-    {% endif %}
   </section>
+
+  {# ========== セクション 9: debug_json 全体 (json-viewer) ========== #}
+  <section class="app-card app-collapsible">
+    <button type="button" class="app-collapsible__header" data-action="toggle-collapsible" aria-expanded="false">
+      <span>debug_json 全体</span>
+      <span class="app-collapsible__icon">▸</span>
+    </button>
+    <div class="app-collapsible-body">
+      {% if debug_json %}
+        {{ debug_json|json_script:"debug-json-data" }}
+        <andypf-json-viewer id="debug-json-viewer"
+                            indent="2"
+                            theme="default-light"
+                            show-data-types="true"
+                            show-toolbar="true"
+                            show-copy="true"
+                            show-size="true"
+                            expanded="1"></andypf-json-viewer>
+      {% else %}
+        <p class="app-muted">debug_json はまだありません。</p>
+      {% endif %}
+    </div>
+  </section>
+
+  {# ===== このブランチ専用スクリプト（A 側マージ時に共通化判断） ===== #}
+  <script src="https://cdn.jsdelivr.net/npm/@andypf/json-viewer@2.4.0/dist/iife/index.js"></script>
+  <script>
+    (function () {
+      // 候補一覧テーブルの除外候補トグル
+      const toggle = document.querySelector('.js-show-rejected');
+      const table = document.querySelector('.app-candidates-table');
+      const visEl = document.querySelector('.js-candidates-visible');
+      if (toggle && table) {
+        const passedCount = parseInt(table.dataset.passedCount, 10) || 0;
+        const allCount = parseInt(table.dataset.allCount, 10) || 0;
+        toggle.addEventListener('change', function () {
+          table.classList.toggle('is-show-rejected', toggle.checked);
+          if (visEl) visEl.textContent = toggle.checked ? allCount : passedCount;
+        });
+      }
+
+      // 再計算ボタン: confirm + disable + ラベル変更
+      const recalcForm = document.querySelector('.js-recalc-debug-form');
+      if (recalcForm) {
+        recalcForm.addEventListener('submit', function (event) {
+          if (!window.confirm('OpenCV 検出を再計算します。よろしいですか？')) {
+            event.preventDefault();
+            return;
+          }
+          const btn = recalcForm.querySelector('.js-recalc-debug-btn');
+          if (btn) {
+            btn.disabled = true;
+            btn.textContent = '処理中...';
+          }
+        });
+      }
+
+      // <andypf-json-viewer> へ JSON データを流し込む
+      function feedJsonViewer(viewerId, dataScriptId) {
+        const viewer = document.getElementById(viewerId);
+        const dataNode = document.getElementById(dataScriptId);
+        if (!viewer || !dataNode) return;
+        viewer.setAttribute('data', dataNode.textContent);
+      }
+      function loadAllViewers() {
+        feedJsonViewer('raw-json-viewer', 'raw-json-data');
+        feedJsonViewer('debug-json-viewer', 'debug-json-data');
+      }
+      if (window.customElements && customElements.whenDefined) {
+        customElements.whenDefined('andypf-json-viewer').then(loadAllViewers);
+      } else {
+        // フォールバック（非対応環境）
+        document.addEventListener('DOMContentLoaded', loadAllViewers);
+      }
+    })();
+  </script>
 {% endblock %}

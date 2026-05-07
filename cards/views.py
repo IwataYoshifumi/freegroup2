@@ -6,7 +6,9 @@ View 層の責務は HTTP リクエスト/レスポンス処理とテンプレ�
 
 import json
 import logging
+from pathlib import Path
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.files.base import ContentFile
 from django.db.models import Exists, OuterRef, Q
@@ -146,15 +148,134 @@ class OriginalDetailView(DetailView):
         context["business_cards"] = self.object.businesscard_set.all().order_by("created_at")
         context["back"] = BackNavigator(self.request)
 
-        raw_json = self.object.raw_json
-        raw_json_str = None
-        if raw_json:
-            raw_json_str = json.dumps(raw_json, ensure_ascii=False, indent=2)
-        context["raw_json_str"] = raw_json_str
+        # raw_json は dict のまま渡す（json_script フィルタで埋め込み、json-viewer で表示）
+        context["raw_json"] = self.object.raw_json
 
-        context["debug_json"] = self.object.debug_json
+        debug_json = self.object.debug_json
+        context["debug_json"] = debug_json
+        context["debug_summary"] = _build_debug_summary(debug_json)
+        context["mask_urls"] = _build_mask_urls(self.object)
+        context["candidates_passed"] = _candidates_passed(debug_json)
+        context["candidates_all"] = _candidates_all(debug_json)
+        context["overlay_polygons"] = _build_overlay_polygons(debug_json)
 
         return context
+
+
+def _build_debug_summary(debug_json):
+    if not debug_json:
+        return None
+    cf = debug_json.get("candidates_filter") or []
+    cd = debug_json.get("candidates_dedup") or []
+    return {
+        "image_size": debug_json.get("image_size") or {},
+        "contours_count": debug_json.get("contours_count", 0),
+        "passed_count": sum(1 for x in cf if x.get("passed")),
+        "candidates_total": len(cf),
+        "kept_count": sum(1 for x in cd if x.get("kept")),
+        "dedup_total": len(cd),
+        "warp_failures_count": len(debug_json.get("warp_failures") or []),
+        "results_count": len(debug_json.get("results") or []),
+        "error_message": debug_json.get("error_message") or "",
+        "computed_at": debug_json.get("computed_at") or "",
+    }
+
+
+def _build_mask_urls(original_image):
+    """5枚のマスク画像 (label, url) のリスト。ファイル不在時は url=None。"""
+    labels = (
+        "mask_1: 輝度差 (diff)",
+        "mask_2: エッジ (edge)",
+        "mask_3: 彩度 (sat)",
+        "mask_4: OR 合成 (or)",
+        "mask_5: クロージング後 (closed)",
+    )
+    cache_dir = Path(settings.MEDIA_ROOT) / "debug_cache" / str(original_image.id)
+    base_url = f"{settings.MEDIA_URL.rstrip('/')}/debug_cache/{original_image.id}"
+    items = []
+    for n, label in enumerate(labels, start=1):
+        f = cache_dir / f"mask_{n}.png"
+        url = f"{base_url}/mask_{n}.png" if f.exists() else None
+        items.append((label, url))
+    return items
+
+
+def _format_candidate(c):
+    """候補一覧テーブル表示用の整形済み文字列フィールドを付与した dict。"""
+    area = c.get("area") or 0
+    ratio = c.get("area_ratio") or 0
+    rect_size = c.get("rect_size") or [0, 0]
+    rect_center = c.get("rect_center") or [0, 0]
+    rw = rect_size[0] if len(rect_size) > 0 else 0
+    rh = rect_size[1] if len(rect_size) > 1 else 0
+    cx = rect_center[0] if len(rect_center) > 0 else 0
+    cy = rect_center[1] if len(rect_center) > 1 else 0
+    aspect = c.get("aspect_ratio")
+    return {
+        **c,
+        "area_str": f"{area:,.0f}",
+        "area_ratio_pct_str": f"{ratio * 100:.1f}",
+        "rect_w_str": f"{rw:.0f}",
+        "rect_h_str": f"{rh:.0f}",
+        "rect_cx_str": f"{cx:.0f}",
+        "rect_cy_str": f"{cy:.0f}",
+        "rect_angle_str": f"{(c.get('rect_angle') or 0):.1f}",
+        "aspect_ratio_str": (f"{aspect:.2f}" if aspect is not None else "-"),
+    }
+
+
+def _candidates_passed(debug_json):
+    if not debug_json:
+        return []
+    cf = debug_json.get("candidates_filter") or []
+    return [
+        _format_candidate(c)
+        for c in sorted(
+            (x for x in cf if x.get("passed")),
+            key=lambda x: -(x.get("area") or 0),
+        )
+    ]
+
+
+def _candidates_all(debug_json):
+    """passed 優先 → area 降順。"""
+    if not debug_json:
+        return []
+    cf = debug_json.get("candidates_filter") or []
+    return [
+        _format_candidate(c)
+        for c in sorted(
+            cf,
+            key=lambda x: (
+                0 if x.get("passed") else 1,
+                -(x.get("area") or 0),
+            ),
+        )
+    ]
+
+
+def _build_overlay_polygons(debug_json):
+    """SVG polygon 用の points 文字列と重心を事前計算したリスト。"""
+    if not debug_json:
+        return []
+    items = []
+    keys = ("top_left", "top_right", "bottom_right", "bottom_left")
+    for r in debug_json.get("results") or []:
+        polygon = r.get("polygon") or {}
+        coords = []
+        for k in keys:
+            p = polygon.get(k) or {}
+            coords.append((p.get("x", 0), p.get("y", 0)))
+        points_str = " ".join(f"{x:.1f},{y:.1f}" for x, y in coords)
+        cx = sum(c[0] for c in coords) / 4.0
+        cy = sum(c[1] for c in coords) / 4.0
+        items.append({
+            "card_index": r.get("card_index"),
+            "points_str": points_str,
+            "centroid_x": cx,
+            "centroid_y": cy,
+        })
+    return items
 
 
 class RecalcDebugView(View):
