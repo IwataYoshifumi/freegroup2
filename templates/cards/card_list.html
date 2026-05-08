@@ -1,5 +1,6 @@
 {% extends "cards/app_base.html" %}
 {% load back_tags %}
+{% load ui_tags %}
 
 {% block title %}名刺一覧 — FreeGroup2{% endblock %}
 
@@ -42,6 +43,16 @@
         <div class="app-form__group" style="grid-column: span 2;">
           <label class="app-form__label" for="id_address">住所</label>
           <input type="text" id="id_address" name="address" value="{{ address }}" class="app-input">
+        </div>
+
+        <div class="app-form__group app-form__group--full" style="grid-column: 1 / -1;">
+          <label class="app-form__label">ステータス（OCR結果）</label>
+          {% for value, label in ocr_result_choices %}
+            <label style="margin-right: 12px;">
+              <input type="checkbox" name="ocr_result" value="{{ value }}" {% if value in selected_ocr_results %}checked{% endif %}>
+              {{ label }}
+            </label>
+          {% endfor %}
         </div>
       </div>
 
@@ -87,13 +98,16 @@
                   {% else %}
                     <span class="app-muted">画像なし</span>
                   {% endif %}
-                  {% if card.orientation != "normal" %}
-                    <span class="app-status-badge app-status-badge--warning">
-                      {% if card.orientation == "rotate_90_cw" %}右90°
-                      {% elif card.orientation == "rotate_90_ccw" %}左90°
-                      {% else %}180°{% endif %}
-                    </span>
-                  {% endif %}
+                  <div style="display:flex;flex-direction:column;gap:4px;">
+                    {% if card.orientation != "normal" %}
+                      <span class="app-status-badge app-status-badge--warning">
+                        {% if card.orientation == "rotate_90_cw" %}右90°
+                        {% elif card.orientation == "rotate_90_ccw" %}左90°
+                        {% else %}180°{% endif %}
+                      </span>
+                    {% endif %}
+                    {% ocr_result_badge card %}
+                  </div>
                 </div>
               </td>
               <td>{{ card.contact.full_name|default:"-" }}</td>
@@ -145,7 +159,7 @@
     {% if is_paginated %}
       <nav class="app-pagination" aria-label="ページネーション">
         {% if page_obj.has_previous %}
-          <a href="?name={{ name }}&company={{ company }}&department={{ department }}&title={{ title }}&email={{ email }}&tel={{ tel }}&address={{ address }}&page={{ page_obj.previous_page_number }}" class="app-pagination__button">‹</a>
+          <a href="?name={{ name }}&company={{ company }}&department={{ department }}&title={{ title }}&email={{ email }}&tel={{ tel }}&address={{ address }}{% for v in selected_ocr_results %}&ocr_result={{ v }}{% endfor %}&page={{ page_obj.previous_page_number }}" class="app-pagination__button">‹</a>
         {% else %}
           <button type="button" class="app-pagination__button" disabled>‹</button>
         {% endif %}
@@ -154,12 +168,12 @@
           {% if num == page_obj.number %}
             <button type="button" class="app-pagination__button is-active">{{ num }}</button>
           {% else %}
-            <a href="?name={{ name }}&company={{ company }}&department={{ department }}&title={{ title }}&email={{ email }}&tel={{ tel }}&address={{ address }}&page={{ num }}" class="app-pagination__button">{{ num }}</a>
+            <a href="?name={{ name }}&company={{ company }}&department={{ department }}&title={{ title }}&email={{ email }}&tel={{ tel }}&address={{ address }}{% for v in selected_ocr_results %}&ocr_result={{ v }}{% endfor %}&page={{ num }}" class="app-pagination__button">{{ num }}</a>
           {% endif %}
         {% endfor %}
 
         {% if page_obj.has_next %}
-          <a href="?name={{ name }}&company={{ company }}&department={{ department }}&title={{ title }}&email={{ email }}&tel={{ tel }}&address={{ address }}&page={{ page_obj.next_page_number }}" class="app-pagination__button">›</a>
+          <a href="?name={{ name }}&company={{ company }}&department={{ department }}&title={{ title }}&email={{ email }}&tel={{ tel }}&address={{ address }}{% for v in selected_ocr_results %}&ocr_result={{ v }}{% endfor %}&page={{ page_obj.next_page_number }}" class="app-pagination__button">›</a>
         {% else %}
           <button type="button" class="app-pagination__button" disabled>›</button>
         {% endif %}

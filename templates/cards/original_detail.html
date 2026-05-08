@@ -1,5 +1,6 @@
 {% extends "cards/app_base.html" %}
 {% load back_tags %}
+{% load ui_tags %}
 
 {% block title %}元画像詳細 — FreeGroup2{% endblock %}
 
@@ -364,24 +365,39 @@
         <table class="app-table app-table--nowrap">
           <thead>
             <tr>
+              <th class="app-table__col--action">操作</th>
+              <th>サムネイル</th>
               <th>名刺 ID</th>
               <th>card_index</th>
               <th>向き</th>
+              <th>OCR結果</th>
               <th>切り抜き画像</th>
               <th>作成日時</th>
             </tr>
           </thead>
           <tbody>
             {% for card in business_cards %}
+              {% url 'cards:card_detail' pk=card.id as card_detail_url %}
               <tr>
+                <td class="app-table__col--action">
+                  <a href="{% append_back_url card_detail_url back %}" class="app-btn app-btn--secondary app-btn--sm">詳細</a>
+                </td>
+                <td>
+                  {% if card.card_image %}
+                    <img src="{{ card.card_image.url }}" alt="名刺サムネイル" style="max-height:96px;max-width:200px;border-radius:4px;display:block;">
+                  {% else %}
+                    <span class="app-muted">画像なし</span>
+                  {% endif %}
+                </td>
                 <td>{{ card.id|stringformat:"s"|slice:":8" }}...</td>
                 <td>{{ card.card_index }}</td>
                 <td>{{ card.get_orientation_display }}</td>
+                <td>{% ocr_result_badge card %}</td>
                 <td>{% if card.card_image %}あり{% else %}<span class="app-muted">なし</span>{% endif %}</td>
                 <td>{{ card.created_at|date:"Y/m/d H:i" }}</td>
               </tr>
             {% empty %}
-              <tr><td colspan="5" class="app-muted">名刺レコードがありません。</td></tr>
+              <tr><td colspan="8" class="app-muted">名刺レコードがありません。</td></tr>
             {% endfor %}
           </tbody>
         </table>

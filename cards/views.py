@@ -409,6 +409,23 @@ class RecalcDebugView(View):
         return redirect("originals:original_detail", pk=original.id)
 
 
+class CardDeleteView(View):
+    """BusinessCard を削除し、元画像詳細にリダイレクトする（POST 専用）。
+
+    削除対象は本人所有の BC のみ（user スコープで絞り込み）。
+    Contact / ContactFieldConfidence は CASCADE で自動削除、card_image の FS 実体は
+    post_delete シグナルで自動削除される。OriginalImage.raw_json は温存される。
+    GET / その他メソッドは Django 標準の 405 応答（method_not_allowed）が返る。
+    """
+
+    def post(self, request, pk):
+        user = get_current_user(request)
+        bc = get_object_or_404(BusinessCard, pk=pk, original_image__user=user)
+        original_image_id = bc.original_image_id
+        bc.delete()
+        return redirect("originals:original_detail", pk=original_image_id)
+
+
 class CardListView(ListView):
     """名刺一覧画面（仕様書 v1.2.2 / Phase 4）。
 
@@ -424,12 +441,26 @@ class CardListView(ListView):
 
     _SEARCH_PARAMS = ("name", "company", "department", "title", "email", "tel", "address")
 
+    def _selected_ocr_results(self):
+        """有効な ocr_result 値のリストを返す。0 件なら BUSINESS_CARD のみのデフォルト扱い。
+
+        [性質] 純関数（DB操作なし、request.GET の読み取りのみ）
+        [入力] self.request.GET（ocr_result マルチ値）
+        [出力] list[str]: 有効な OcrResult.values の部分集合
+        """
+        valid = set(BusinessCard.OcrResult.values)
+        raw = self.request.GET.getlist("ocr_result")
+        selected = [v for v in raw if v in valid]
+        if not selected:
+            return [BusinessCard.OcrResult.BUSINESS_CARD]
+        return selected
+
     def get_queryset(self):
         user = get_current_user(self.request)
         qs = (
             BusinessCard.objects.filter(
                 original_image__user=user,
-                ocr_result=BusinessCard.OcrResult.BUSINESS_CARD,
+                ocr_result__in=self._selected_ocr_results(),
             )
             .select_related("original_image", "contact")
             .annotate(
@@ -477,7 +508,7 @@ class CardListView(ListView):
         back = BackNavigator(self.request)
         back.push_current(
             "名刺一覧",
-            ["name", "company", "department", "title", "email", "tel", "address", "page"],
+            ["name", "company", "department", "title", "email", "tel", "address", "ocr_result", "page"],
         )
         context["back"] = back
 
@@ -485,6 +516,8 @@ class CardListView(ListView):
         context["active_menu"] = "cards:card_list"
         for key in self._SEARCH_PARAMS:
             context[key] = self.request.GET.get(key, "")
+        context["ocr_result_choices"] = BusinessCard.OcrResult.choices
+        context["selected_ocr_results"] = self._selected_ocr_results()
         return context
 
 
