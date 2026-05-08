@@ -55,20 +55,31 @@
         <thead>
           <tr>
             <th class="app-table__col--action">操作</th>
+            <th>サムネイル</th>
             <th>ステータス</th>
+            <th>アップロード者</th>
             <th>検出枚数</th>
+            <th>名刺</th>
+            <th>その他</th>
             <th>アップロード日時</th>
             <th>エラーメッセージ</th>
           </tr>
         </thead>
         <tbody>
           {% for image in originals %}
+            {% url 'originals:original_detail' pk=image.id as detail_url %}
             <tr>
               <td class="app-table__col--action">
-                {% url 'originals:original_detail' pk=image.id as detail_url %}
-                <a href="{% append_back_url detail_url back %}" class="app-icon-btn" aria-label="詳細">
-                  <span class="app-icon--detail"></span>
-                </a>
+                <a href="{% append_back_url detail_url back %}" class="app-btn app-btn--secondary app-btn--sm">詳細</a>
+              </td>
+              <td>
+                {% if image.image_file %}
+                  <a href="{% append_back_url detail_url back %}">
+                    <img src="{{ image.image_file.url }}" alt="元画像サムネイル" style="max-height:96px;max-width:200px;border-radius:4px;display:block;">
+                  </a>
+                {% else %}
+                  <span class="app-muted">画像なし</span>
+                {% endif %}
               </td>
               <td>
                 {% if image.status == "pending" %}
@@ -83,7 +94,10 @@
                   <span class="app-status-badge">{{ image.status }}</span>
                 {% endif %}
               </td>
+              <td>{{ image.user.username|default:"-" }}</td>
               <td>{% if image.detected_count %}{{ image.detected_count }}{% else %}-{% endif %}</td>
+              <td>{% if image.bc_business_card_count %}{{ image.bc_business_card_count }}{% else %}-{% endif %}</td>
+              <td>{% if image.bc_other_count %}{{ image.bc_other_count }}{% else %}-{% endif %}</td>
               <td>{{ image.created_at|date:"Y/m/d H:i" }}</td>
               <td>
                 {% if image.error_message %}
@@ -94,7 +108,7 @@
               </td>
             </tr>
           {% empty %}
-            <tr><td colspan="5" class="app-muted">元画像がまだありません。</td></tr>
+            <tr><td colspan="9" class="app-muted">元画像がまだありません。</td></tr>
           {% endfor %}
         </tbody>
       </table>

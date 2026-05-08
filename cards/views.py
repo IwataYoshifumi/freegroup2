@@ -11,7 +11,7 @@ from collections import Counter
 
 from django.contrib.auth import get_user_model
 from django.core.files.base import ContentFile
-from django.db.models import Exists, OuterRef, Q
+from django.db.models import Count, Exists, OuterRef, Q
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.dateparse import parse_date
@@ -84,7 +84,20 @@ class OriginalListView(ListView):
 
     def get_queryset(self):
         user = get_current_user(self.request)
-        qs = OriginalImage.objects.filter(user=user)
+        qs = (
+            OriginalImage.objects.filter(user=user)
+            .select_related("user")
+            .annotate(
+                bc_business_card_count=Count(
+                    "businesscard",
+                    filter=Q(businesscard__ocr_result=BusinessCard.OcrResult.BUSINESS_CARD),
+                ),
+                bc_other_count=Count(
+                    "businesscard",
+                    filter=~Q(businesscard__ocr_result=BusinessCard.OcrResult.BUSINESS_CARD),
+                ),
+            )
+        )
 
         statuses = self.request.GET.getlist("status")
         valid_statuses = {value for value, _ in OriginalImage.STATUS_CHOICES}
