@@ -241,6 +241,32 @@ def generate_duplicate_candidates_for_contact(contact):
         # (2) 重複候補のタプル列
         tuples = find_duplicate_contacts(contact, excluded_persons=excluded_persons)
 
+        # (2.5) 事前フィルタ（X-3）：既に pending DC として contact.person と組まれている
+        # 相手 Person を集合で取得し、同 Person を相手とする候補を除外する。partial unique
+        # constraint(person_a, person_b, where review_status='pending') 違反を未然回避する。
+        # 先勝ち方針：score / rank の差異に関わらず既存の pending を尊重（仕様書 §12.8.4
+        # 「補助レコードに完璧な整合性を求めず UX 優先」と整合）。
+        # SQLite 3.51.2 planner bug 回避のため Q(person_a=p)|Q(person_b=p) を使わず、
+        # person_a / person_b 別々の 2 クエリで集合を作る（申し送りメモ §5）。
+        if tuples:
+            pending_status = DuplicateCandidate.ReviewStatus.PENDING
+            already_paired_person_ids = set(
+                DuplicateCandidate.objects
+                .filter(person_a=contact.person, review_status=pending_status)
+                .values_list("person_b_id", flat=True)
+            )
+            already_paired_person_ids |= set(
+                DuplicateCandidate.objects
+                .filter(person_b=contact.person, review_status=pending_status)
+                .values_list("person_a_id", flat=True)
+            )
+            if already_paired_person_ids:
+                tuples = [
+                    (cand_contact, score, rank)
+                    for cand_contact, score, rank in tuples
+                    if cand_contact.person_id not in already_paired_person_ids
+                ]
+
         # (3) 空ならスキップ、(7) へ
         if tuples:
             # (4) assigned_to を 1 度だけ計算
