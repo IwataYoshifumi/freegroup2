@@ -116,6 +116,8 @@ def _build_debug_json(debug_result: dict) -> dict:
     candidates_filter には cross-reference 用の "index" を付与する。
     results は card_index と polygon のみのメタ情報に縮約する（warped 画像本体は
     BusinessCard.card_image 経由で参照可能）。
+    sat_fallback はそのまま転記する（フォールバック判定結果の永続化）。
+    or_inversion もそのまま転記する（反転リトライ判定結果の永続化）。
     """
     candidates_filter = []
     for i, c in enumerate(debug_result.get("candidates_filter") or []):
@@ -138,6 +140,8 @@ def _build_debug_json(debug_result: dict) -> dict:
         "candidates_dedup": candidates_dedup,
         "warp_failures": warp_failures,
         "results": results_meta,
+        "sat_fallback": debug_result.get("sat_fallback"),
+        "or_inversion": debug_result.get("or_inversion"),
         "error_message": debug_result.get("error_message", ""),
         "computed_at": timezone.now().isoformat(),
     }
