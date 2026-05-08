@@ -6,3 +6,5 @@ media/
 .vscode/
 .idea/
 .claude/
+_scratch/
+logs/
