@@ -26,6 +26,7 @@ class Contact(models.Model):
         BusinessCard,
         on_delete=models.CASCADE,
         null=True,
+        blank=True,
     )
     person = models.ForeignKey(
         Person,
