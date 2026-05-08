@@ -25,6 +25,7 @@ class Contact(models.Model):
     business_card = models.OneToOneField(
         BusinessCard,
         on_delete=models.CASCADE,
+        null=True,
     )
     person = models.ForeignKey(
         Person,
