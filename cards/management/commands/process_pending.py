@@ -3,18 +3,25 @@
 cron で 1〜5 分間隔で起動される想定。
 多重起動対策に CAS 方式（filter+update で status を processing に遷移させて競合を排除）を採用。
 1 回の起動で最大 N 件処理（暫定 N=10）。
+
+--opencv-only フラグ（フェーズ2 追加・開発用）：
+  OCR を走らせず OpenCV 検出と debug データ更新だけを再実行する。
+  対象は status=extracted（デフォルト）。--id 指定時は status 不問の 1 件のみ。
+  status / BusinessCard / raw_json は一切触らない（debug_json と DebugMask のみ更新）。
 """
 
 import logging
 import os
+import uuid
 from datetime import timedelta
 
 from django.conf import settings
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.utils import timezone
 
 from cards.models import BusinessCard, Contact, OriginalImage, Person
+from cards.services.opencv_debug_cache import recalc_opencv_debug
 from cards.tasks.pipeline_coordinator import PipelineCoordinator
 
 logger = logging.getLogger(__name__)
@@ -35,13 +42,38 @@ class Command(BaseCommand):
             default=self.DEFAULT_LIMIT,
             help=f"1 回の起動で処理する最大件数（デフォルト: {self.DEFAULT_LIMIT}）",
         )
+        parser.add_argument(
+            "--opencv-only",
+            action="store_true",
+            help=(
+                "OCR を走らせず OpenCV 検出と debug データ更新のみ再実行する（開発用）。"
+                "対象は status=extracted。--id 指定時は status 不問の 1 件のみ。"
+                "status / BusinessCard / raw_json は触らない。"
+            ),
+        )
+        parser.add_argument(
+            "--id",
+            type=str,
+            default=None,
+            help=(
+                "対象 OriginalImage を UUID で 1 件指定する。"
+                "--opencv-only と組み合わせると status 不問で対象にする（--limit は無視）。"
+            ),
+        )
 
     def handle(self, *args, **options):
         """[性質] 副作用あり（複合処理: DB 書き込み・API 呼び出し）
 
-        [入力] --limit: 最大処理件数
+        [入力]
+          --limit: 最大処理件数
+          --opencv-only: OpenCV 検出だけ再実行する開発用フラグ
+          --id: 対象 OriginalImage の UUID（--opencv-only と組み合わせて使う想定）
         [出力] None（処理結果は stdout に出力、status は OriginalImage に保存）
         """
+        if options["opencv_only"]:
+            self._handle_opencv_only(options)
+            return
+
         limit = max(1, options["limit"])
 
         # ── stuck sweeper ────────────────────────────────────────────────
@@ -122,6 +154,76 @@ class Command(BaseCommand):
             f"process_pending: targets={len(target_ids)}, processed={processed}, "
             f"skipped={skipped}"
         ))
+
+    def _handle_opencv_only(self, options):
+        """[性質] 副作用あり（DB 書込・ファイル書込）/ OpenCV-only 経路の本体。
+
+        [前提] options["opencv_only"] is True
+        [方針]
+          - status / BusinessCard / raw_json は触らない（recalc_opencv_debug のみ実行）
+          - CAS / 多重起動対策はかけない（save_debug_data の delete→create が idempotent）
+          - stuck sweeper は呼ばない（status を触らないので衝突しない）
+          - PipelineCoordinator は使わない
+        """
+        target_ids = self._opencv_only_target_ids(options)
+        if not target_ids:
+            self.stdout.write("process_pending --opencv-only: 対象なし")
+            return
+
+        self.stdout.write(
+            f"process_pending --opencv-only: {len(target_ids)} 件を試行"
+        )
+
+        processed = 0
+        for target_id in target_ids:
+            try:
+                original = OriginalImage.objects.get(id=target_id)
+            except OriginalImage.DoesNotExist:
+                self.stdout.write(self.style.WARNING(f"  消失: {target_id}"))
+                continue
+
+            try:
+                recalc_opencv_debug(original)
+            except Exception as e:
+                self.stderr.write(self.style.ERROR(
+                    f"  recalc 例外 {target_id}: {type(e).__name__}: {e}"
+                ))
+                continue
+
+            self.stdout.write(
+                f"  done {target_id}: status={original.status}（不変）"
+            )
+            processed += 1
+
+        self.stdout.write(self.style.SUCCESS(
+            f"process_pending --opencv-only: targets={len(target_ids)}, "
+            f"processed={processed}"
+        ))
+
+    def _opencv_only_target_ids(self, options):
+        """[性質] 準関数（DB 読み取りのみ）/ --opencv-only の対象 id リストを返す。
+
+        [入力] options: handle() に渡された argparse 結果
+        [出力] list[UUID]: 処理対象の OriginalImage.id リスト
+        [挙動]
+          - --id 指定時: その UUID 1 件（status 不問、--limit は無視）。UUID 形式不正なら CommandError。
+          - --id 未指定時: status=extracted を created_at 昇順で --limit 件
+        """
+        if options["id"]:
+            try:
+                target_id = uuid.UUID(options["id"])
+            except (ValueError, TypeError):
+                raise CommandError(
+                    f"--id の値が UUID 形式ではありません: {options['id']}"
+                )
+            return [target_id]
+
+        limit = max(1, options["limit"])
+        return list(
+            OriginalImage.objects.filter(status=OriginalImage.STATUS_EXTRACTED)
+            .order_by("created_at")
+            .values_list("id", flat=True)[:limit]
+        )
 
 
 def _cleanup_stuck_record(original_image):

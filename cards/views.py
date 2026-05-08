@@ -22,9 +22,8 @@ from back_navigator.back_navigator import BackNavigator
 
 from .forms import UploadForm
 from .models import BusinessCard, Contact, ContactFieldConfidence, DebugMask, OriginalImage
-from .services.detectors.opencv_detector import detect_cards_with_debug
 from .services.image_processor import convert_to_jpeg
-from .services.opencv_debug_cache import clear_debug_cache, save_debug_data
+from .services.opencv_debug_cache import recalc_opencv_debug
 
 logger = logging.getLogger(__name__)
 
@@ -395,17 +394,15 @@ def _build_overlay_polygons(debug_json):
 class RecalcDebugView(View):
     """OpenCV デバッグキャッシュを再計算し、元画像詳細にリダイレクトする（POST 専用）。
 
-    既存の debug_cache ディレクトリと debug_json をクリアした上で、
-    detect_cards_with_debug() を即時実行し save_debug_data() で結果を保存する。
+    recalc_opencv_debug() で 3 ステップ（clear → detect → save）を実行する。
+    OriginalImage.status / BusinessCard / raw_json は触らない。
     GET / その他メソッドは Django 標準の 405 応答（method_not_allowed）が返る。
     """
 
     def post(self, request, pk):
         user = get_current_user(request)
         original = get_object_or_404(OriginalImage, pk=pk, user=user)
-        clear_debug_cache(original)
-        result = detect_cards_with_debug(original.image_file.path)
-        save_debug_data(original, result)
+        recalc_opencv_debug(original)
         return redirect("originals:original_detail", pk=original.id)
 
 

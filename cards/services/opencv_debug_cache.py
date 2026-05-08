@@ -5,8 +5,9 @@ masks（PIL.Image 群）は DebugMask レコードとして保存する。
 DebugMask.mask_image の FS 実体は post_delete シグナル経由で削除される。
 
 呼び出し元：
-- pipeline_coordinator.run_pipeline ：detect_cards_with_debug の結果を save_debug_data() で保存
-- RecalcDebugView.post              ：clear_debug_cache() → detect_cards_with_debug() → save_debug_data()
+- pipeline_coordinator.run_pipeline                 ：detect_cards_with_debug の結果を save_debug_data() で保存
+- RecalcDebugView.post                              ：recalc_opencv_debug() 経由
+- process_pending --opencv-only 管理コマンド        ：recalc_opencv_debug() 経由
 """
 
 import logging
@@ -16,6 +17,7 @@ from django.core.files.base import ContentFile
 from django.utils import timezone
 
 from cards.models import DebugMask
+from cards.services.detectors.opencv_detector import detect_cards_with_debug
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +71,26 @@ def save_debug_data(original_image, debug_result: dict) -> None:
     original_image.debug_json = _build_debug_json(debug_result)
     original_image.save(update_fields=["debug_json"])
     logger.info("opencv-debug: saved debug_json for OriginalImage %s", original_image.id)
+
+
+def recalc_opencv_debug(original_image) -> None:
+    """OpenCV 検出を再実行し、debug_json と DebugMask を最新化する（idempotent）。
+
+    [性質] 副作用あり（DB 書込・ファイル書込）
+    [入力] original_image: OriginalImage インスタンス
+    [出力] None
+
+    実行内容（3 ステップ）：
+      1. clear_debug_cache(original_image)      ：既存の debug_json と DebugMask を削除
+      2. detect_cards_with_debug(<image_path>)  ：OpenCV 検出を再実行
+      3. save_debug_data(original_image, ...)   ：debug_json と DebugMask を再生成
+
+    OriginalImage.status / BusinessCard / raw_json / Contact / Person /
+    ContactFieldConfidence は一切触らない（OCR 結果由来のレコードは不変）。
+    """
+    clear_debug_cache(original_image)
+    result = detect_cards_with_debug(original_image.image_file.path)
+    save_debug_data(original_image, result)
 
 
 def clear_debug_cache(original_image) -> None:
