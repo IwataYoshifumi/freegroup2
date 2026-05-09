@@ -12,6 +12,8 @@ from django.db.models import Q, UniqueConstraint
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
+from config.constants import DuplicateMergeReason
+
 
 class DuplicateCandidate(models.Model):
     """重複候補DB（仕様書 v1.4.2 §4.7）。
@@ -283,13 +285,11 @@ class DuplicateCandidate(models.Model):
             ]
         )
 
-    def record_different_person_action(self, user, different_reason=""):
+    def record_different_person_action(self, user):
         """自身の別人判定操作を ActionLog に記録（仕様書 §10.7.2 / §4.11.3）。
 
         [性質] 副作用あり（DB 書込：ActionLog レコードを作成。自身は変更しない）
         [入力] user: User（操作したユーザー、ActionLog.user に記録）
-               different_reason: str（DifferentPersonReason の値、§14.3.4 / 別表 C.9。
-                 'same_name' / 'ocr_error' / 'other_different'）
         [出力] None
 
         単一責任：ActionLog に書き込むだけ。自身の状態（review_status / reviewed_by 等）は
@@ -300,8 +300,20 @@ class DuplicateCandidate(models.Model):
         FK で取れるので冗長コピーしない（指示書 §3.3 / §4.7「FK で取れる情報を data に
         冗長コピーしない原則」）。content_object=self で candidate への参照を持つので、
         ActionLog から `select_related` で参照可能。
+
+        different_reason の組み立てルール（X-5 指示書 §3.2）：
+          - `'additional_role' in self.review_result` なら 'additional_role'
+          - それ以外は `','.join(self.review_result)`
+          DifferentPersonReason には additional_role 値はないが、record_merge_action と
+          共通の変換ルールとして適用する。
         """
         from actionlogs.models import ActionLog  # 循環 import を避けるため遅延 import
+
+        review_result = self.review_result or []
+        if DuplicateMergeReason.ADDITIONAL_ROLE in review_result:
+            different_reason = DuplicateMergeReason.ADDITIONAL_ROLE.value
+        else:
+            different_reason = ",".join(review_result)
 
         ActionLog.record(
             user=user,
@@ -544,37 +556,47 @@ class PersonMergeLog(models.Model):
             "contacts_remaining_in_surviving": contacts_remaining_in_surviving,
         }
 
-    def record_merge_action(self, user, merge_reason="", updated_fields=None):
+    def record_merge_action(self, user):
         """マージ実行を ActionLog に記録（仕様書 §10.8.2 / §4.11.3）。
 
         [性質] 副作用あり（DB 書込：ActionLog レコードを作成。自身は変更しない）
         [入力] user: User（マージ実行者、ActionLog.user に記録）
-               merge_reason: str（DuplicateMergeReason の値、§14.3.3 / 別表 C.8。
-                 'same_card' / 'transfer' / 'promotion' / 'job_change' /
-                 'additional_role' / 'name_change' / 'other_merged' のいずれか）
-               updated_fields: list[str] | None（マージ画面で更新されたフィールド名リスト。
-                 None / 空リストならフィールド更新なし）
         [出力] None
 
         単一責任：ActionLog に書き込むだけ。自身の状態（status / executed_by / executed_at
         等）は変更しない（指示書 §3.2 / 仕様書 §10.8.4 の状態遷移と ActionLog 記録の分離）。
         状態遷移は別途 `PersonMergeLog.create()` / `mark_as_undone()` の責務。
 
-        data 構造：`{"merge_reason": "...", "updated_fields": [...]}` のみ。
-        `surviving_person_id` / `merged_person_id` / `duplicate_candidate_id` は FK で
-        取れるので冗長コピーしない（指示書 §3.3 / §4.7）。content_object=self で merge_log
-        への参照を持つので、ActionLog から `select_related` で参照可能。
+        data 構造：`{"merge_reason": "..."}` のみ。`surviving_person_id` /
+        `merged_person_id` / `duplicate_candidate_id` は FK で取れるので冗長コピーしない
+        （指示書 §3.3 / §4.7）。content_object=self で merge_log への参照を持つので、
+        ActionLog から `select_related` で参照可能。
+
+        merge_reason の組み立てルール（X-5 指示書 §3.2）：
+          self.duplicate_candidate.review_result（list[str]）から単一文字列に変換する。
+          - `'additional_role' in review_result` なら 'additional_role'（特殊ルール優先、
+            §9.4.3 で additional_role のみ Contact の status 遷移が異なるため、ログ上も
+            この値を保持する）
+          - それ以外は `','.join(review_result)`（複数選択時はカンマ区切り、単独時はその値）
+          - duplicate_candidate=None / review_result=[] の場合は空文字列（防御的処理）
         """
         from actionlogs.models import ActionLog  # 循環 import を避けるため遅延 import
+
+        review_result = (
+            self.duplicate_candidate.review_result
+            if self.duplicate_candidate is not None
+            else []
+        ) or []
+        if DuplicateMergeReason.ADDITIONAL_ROLE in review_result:
+            merge_reason = DuplicateMergeReason.ADDITIONAL_ROLE.value
+        else:
+            merge_reason = ",".join(review_result)
 
         ActionLog.record(
             user=user,
             action="merged",
             content_object=self,
-            data={
-                "merge_reason": merge_reason,
-                "updated_fields": updated_fields if updated_fields else [],
-            },
+            data={"merge_reason": merge_reason},
         )
 
     def record_undo_action(self, user):
