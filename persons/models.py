@@ -3,6 +3,8 @@ import uuid
 from django.db import models, transaction
 from django.utils.translation import gettext_lazy as _
 
+from config.constants import DuplicateMergeReason
+
 
 class Person(models.Model):
     """人物DB（仕様書 v1.4.2 §4.5）。
@@ -110,6 +112,95 @@ class Person(models.Model):
             # Step 4: self.primary_contact = new_contact に更新
             self.primary_contact = new_contact
             self.save(update_fields=["primary_contact", "updated_at"])
+
+    def transfer_contacts_to(self, surviving_person, merge_reason):
+        """自身（merged_person）のコンタクト群を surviving_person に引き渡す（仕様書 §10.4.1 / §9.4）。
+
+        [性質] 副作用あり（DB書込：自身配下の Contact の status / previous_status /
+               previous_person / person FK を更新。Contact の他フィールドは触らない）
+        [入力] surviving_person: Person（マージで残る側）
+               merge_reason: str（DuplicateMergeReason の値、merged 系 7 値のいずれか）
+        [出力] None
+        [前提] 呼び出し元の `transaction.atomic()` 内で実行されること（X-4 指示書 §5.5 / §9.3）。
+               本メソッドでは atomic を切らない（呼び出し元の責務）。
+        [仕様書] §10.4.1 / §9.4 / 別添 PDF「マージ前後のコンタクトのステータス等まとめ.pdf」
+                 の Excute_Merge_Only 列に従って状態遷移。
+
+        処理内容（merged 側 Contact 群を PDF 表通りに変換）：
+          - 元 primary（最大 1 件）：
+              status → INACTIVE（ただし merge_reason='additional_role' のときは ACTIVE、§9.4.3）
+              previous_status='primary' / previous_person=self / person=surviving_person
+          - 元 active 群：status は 'active' のまま（変更なし）
+              previous_status='active' / previous_person=self / person=surviving_person
+          - 元 inactive 群：status は 'inactive' のまま（変更なし）
+              previous_status='inactive' / previous_person=self / person=surviving_person
+
+        責務範囲外（本メソッドで触らないもの）：
+          - サバイブ側 Contact のフィールド（§9.4.1 previous_* 不変原則）
+          - ContactFieldConfidence（§10.5.1 / §10.6 の責務範囲）
+          - self.primary_contact / self.status（mark_as_merged() の責務、§10.4.1）
+          - ActionLog 記録（呼び出し元 Execute_Merge_* の責務）
+
+        実装メモ（partial unique constraint 配慮、X-4 指示書 §6.3）：
+          Contact の `UniqueConstraint(person, where status='primary')` 違反を避けるため、
+          元 primary は status と person を **1 回の save() で同時更新** する。
+          person FK を先に付け替えると surviving_person 側に瞬間的に primary が 2 つ存在
+          する状態が発生し、IntegrityError になる。
+        """
+        from contacts.models import Contact  # 循環 import を避けるため遅延 import
+
+        # 元 primary の遷移先 status を merge_reason から決定（PDF 表 / §9.4.3）。
+        # additional_role のみ ACTIVE、それ以外の merged 系 6 値は INACTIVE。
+        if merge_reason == DuplicateMergeReason.ADDITIONAL_ROLE:
+            new_primary_status = Contact.Status.ACTIVE
+        else:
+            new_primary_status = Contact.Status.INACTIVE
+
+        # 元 primary（partial unique constraint により最大 1 件）の付け替え。
+        # status と person を 1 回の save() で同時更新（partial unique 違反回避）。
+        primary = self.contact_set.filter(status=Contact.Status.PRIMARY).first()
+        if primary is not None:
+            primary.previous_person = self
+            primary.previous_status = Contact.Status.PRIMARY
+            primary.status = new_primary_status
+            primary.person = surviving_person
+            primary.save(
+                update_fields=[
+                    "status",
+                    "previous_status",
+                    "previous_person",
+                    "person",
+                    "updated_at",
+                ]
+            )
+
+        # 元 active 群の付け替え（status は 'active' のまま）。
+        for contact in self.contact_set.filter(status=Contact.Status.ACTIVE):
+            contact.previous_person = self
+            contact.previous_status = Contact.Status.ACTIVE
+            contact.person = surviving_person
+            contact.save(
+                update_fields=[
+                    "previous_status",
+                    "previous_person",
+                    "person",
+                    "updated_at",
+                ]
+            )
+
+        # 元 inactive 群の付け替え（status は 'inactive' のまま）。
+        for contact in self.contact_set.filter(status=Contact.Status.INACTIVE):
+            contact.previous_person = self
+            contact.previous_status = Contact.Status.INACTIVE
+            contact.person = surviving_person
+            contact.save(
+                update_fields=[
+                    "previous_status",
+                    "previous_person",
+                    "person",
+                    "updated_at",
+                ]
+            )
 
     def get_active_contacts(self):
         """status='active' の Contact 一覧（QuerySet）を返す（仕様書 §10.4.1）。
