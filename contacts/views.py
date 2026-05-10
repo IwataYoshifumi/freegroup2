@@ -1,14 +1,16 @@
 """contacts アプリの View 層。
 
-D-3c で追加した AJAX 2 エンドポイントを実装する。仕様書 §10.6.4 ケース 4
-（AJAX 個別フィールド修正・確認）を担う。
+D-3c で追加した AJAX 2 エンドポイント、および D-3b で追加した Contact 詳細画面を
+実装する。仕様書 §10.6.4 ケース 4（AJAX 個別フィールド修正・確認）と
+§11.3 11 番（Contact 詳細画面）を担う。
 
-認証方針（仕様書 §18.1 / D-3c 論点 1）：
-  v1.4.2 では認証が仮実装のため、AJAX エンドポイントだけ先行して 403 ガードを入れる。
-  LoginRequiredMixin は使わず、未認証時は JSON で 403 を返す（302 リダイレクトだと
-  AJAX で扱いにくいため）。
+認証方針：
+  v1.4.2 では認証が仮実装（仕様書 §18.1）。
+  - AJAX エンドポイントは未認証で 403 JSON（D-3c 論点 1）
+  - 詳細画面（GET）は既存 cards View 流儀の get_current_user 仮認証
+    （D-3b 論点 1、未認証でもスーパーユーザー扱いで 200）
 
-ガード方針（指示書 §3.6 / 補足）：
+ガード方針（AJAX のみ、指示書 §3.6 / 補足）：
   - 認証必須：未認証は 403
   - Contact.status は 'primary' / 'active' のみ受け付ける（'inactive' は 403）
   - Person.status は 'active' のみ受け付ける（archived / merged 等は 403）
@@ -17,12 +19,121 @@ D-3c で追加した AJAX 2 エンドポイントを実装する。仕様書 §1
 
 import json
 
+from django.contrib.auth import get_user_model
 from django.http import JsonResponse
 from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.decorators.http import require_POST
+from django.views.generic import DetailView
+
+from back_navigator.back_navigator import BackNavigator
+from duplicates.models import DuplicateCandidate, PersonMergeLog
 
 from .models import Contact, ContactFieldConfidence
+
+
+User = get_user_model()
+
+
+def get_current_user(request):
+    """認証未実装のための仮処理（既存 cards/views.py と同じ実装）。
+
+    request.user が認証済みならそれを返し、未認証なら最初のスーパーユーザーを返す。
+    v1.4.2 は認証仮実装期（仕様書 §18.1）、本格的な認証は v1.5.0 以降で実装。
+    """
+    if request.user.is_authenticated:
+        return request.user
+    return User.objects.filter(is_superuser=True).first()
+
+
+class ContactDetailView(DetailView):
+    """Contact 詳細画面（仕様書 §11.3 11 番、D-3b）。
+
+    GET 専用、業務メイン画面（active な Person を見る画面）。Contact.status と
+    Person.status によって表示・操作モードが切り替わる：
+      - 編集可能モード：Contact.status in ('primary', 'active') AND
+                       Contact.person.status == 'active'
+      - 表示のみモード：それ以外（inactive Contact / archived・merged Person 配下等）
+
+    認証は既存 cards View と同じ仮認証スタイル（LoginRequiredMixin 未使用、
+    D-3b 論点 1）。所有者フィルタなし（仕様書 §18.2、Contact は user フィールド
+    を持たないため、全 Contact 対象）。
+
+    関連 URL（修正 12/13、別肩書追加 9、Person 詳細 8、マージ 17、マージログ 20、
+    重複候補 16）はすべて未実装のため、テンプレートではプレースホルダ「準備中」表示
+    （D-3b 論点 3）。
+    """
+
+    model = Contact
+    template_name = "contacts/contact_detail.html"
+    context_object_name = "contact"
+    pk_url_kwarg = "pk"
+
+    def get_queryset(self):
+        return Contact.objects.select_related(
+            "person", "business_card", "previous_person"
+        )
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        contact = self.object
+
+        # モード判定（D-3b §3.2）
+        is_primary = contact.status == Contact.Status.PRIMARY
+        is_active = contact.status == Contact.Status.ACTIVE
+        is_inactive = contact.status == Contact.Status.INACTIVE
+        is_editable = (
+            contact.status in (Contact.Status.PRIMARY, Contact.Status.ACTIVE)
+            and contact.person.status == "active"
+        )
+
+        # 他のアクティブコンタクト（D-3b 論点 4）
+        if is_primary:
+            other_active_contacts = contact.person.contact_set.filter(
+                status=Contact.Status.ACTIVE
+            )
+        elif is_active:
+            other_active_contacts = (
+                contact.person.contact_set.filter(
+                    status__in=[
+                        Contact.Status.PRIMARY,
+                        Contact.Status.ACTIVE,
+                    ]
+                )
+                .exclude(pk=contact.pk)
+            )
+        else:
+            other_active_contacts = Contact.objects.none()
+
+        # 重複候補・マージログ・previous_person
+        pending_duplicates = DuplicateCandidate.get_pending(contact)
+        merge_logs = PersonMergeLog.get_for_person(contact.person)
+        previous_person = contact.previous_person
+
+        # BackNavigator（詳細画面なので push_current は呼ばない、既存 cards 慣例に揃える。
+        # BackNavigator.push_current は keys=[] を DEBUG 時に ValueError として弾くため、
+        # 詳細画面ではスタック生成だけ行い、一覧画面側で push_current 済みのスタックを参照する）
+        back = BackNavigator(self.request)
+
+        context.update(
+            {
+                "contact": contact,
+                "field_confidences": contact.get_field_confidences(),
+                "is_editable": is_editable,
+                "is_primary": is_primary,
+                "is_active": is_active,
+                "is_inactive": is_inactive,
+                "business_card": contact.business_card,
+                "other_active_contacts": other_active_contacts,
+                "pending_duplicates": pending_duplicates,
+                "merge_logs": merge_logs,
+                "previous_person": previous_person,
+                "back": back,
+                "active_app": "cards",
+                "active_menu": "cards:card_list",
+            }
+        )
+        return context
 
 
 def _error(message, status):

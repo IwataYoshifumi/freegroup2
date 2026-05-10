@@ -5,8 +5,10 @@ import json
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.template import Context, Template
 from django.test import Client, TestCase
 from django.urls import reverse
+from django.utils import timezone
 
 from contacts.models import Contact, ContactFieldConfidence
 from duplicates.models import DuplicateCandidate
@@ -712,3 +714,362 @@ class ContactAjaxConfirmFieldsViewTests(_ContactAjaxTestBase):
             self._url(), {"field_names": ["company"]}
         )
         self.assertEqual(resp.json()["unconfirmed_count"], 2)
+
+
+class ContactDetailViewTests(TestCase):
+    """ContactDetailView の単体テスト（D-3b §8.1）。"""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="d3b_test_user", password="dummy"
+        )
+        # primary Contact のセットアップ
+        self.person_a = Person.objects.create()
+        self.contact_a = Contact.objects.create(
+            person=self.person_a,
+            status=Contact.Status.PRIMARY,
+            full_name="A-name",
+            company="A-company",
+        )
+        self.person_a.primary_contact = self.contact_a
+        self.person_a.save(update_fields=["primary_contact", "updated_at"])
+
+        # CFC（mid/low）
+        self.cfc_company = ContactFieldConfidence.objects.create(
+            contact=self.contact_a,
+            field_name="company",
+            confidence=ContactFieldConfidence.Confidence.MEDIUM,
+        )
+
+        self.client = Client()
+        self.client.force_login(self.user)
+
+    def _url(self, contact=None):
+        return reverse(
+            "contacts:contact_detail",
+            kwargs={"pk": (contact or self.contact_a).pk},
+        )
+
+    # ---- 正常系 ----
+
+    def test_n1_primary_contact(self):
+        """N1: primary Contact → 200、編集可能モード。"""
+        resp = self.client.get(self._url())
+        self.assertEqual(resp.status_code, 200)
+        ctx = resp.context
+        self.assertTrue(ctx["is_editable"])
+        self.assertTrue(ctx["is_primary"])
+        self.assertFalse(ctx["is_active"])
+        self.assertFalse(ctx["is_inactive"])
+        self.assertEqual(ctx["contact"].pk, self.contact_a.pk)
+
+    def test_n2_active_contact(self):
+        """N2: active Contact → 200、編集可能モード、別肩書追加ボタン非表示。"""
+        active = Contact.objects.create(
+            person=self.person_a,
+            status=Contact.Status.ACTIVE,
+            full_name="A-active",
+        )
+        resp = self.client.get(self._url(active))
+        self.assertEqual(resp.status_code, 200)
+        ctx = resp.context
+        self.assertTrue(ctx["is_editable"])
+        self.assertFalse(ctx["is_primary"])
+        self.assertTrue(ctx["is_active"])
+        # 別肩書追加ボタンは primary のみ。テンプレート側で is_primary=False なので
+        # 別肩書ボタン HTML は描画されない
+        self.assertNotIn("別肩書追加", resp.content.decode())
+
+    def test_n3_inactive_contact(self):
+        """N3: inactive Contact → 200、表示のみモード。"""
+        # primary を別 Contact にして inactive を作る（partial unique constraint 回避）
+        inactive_person = Person.objects.create()
+        inactive_primary = Contact.objects.create(
+            person=inactive_person,
+            status=Contact.Status.PRIMARY,
+            full_name="dummy-primary",
+        )
+        inactive_person.primary_contact = inactive_primary
+        inactive_person.save(update_fields=["primary_contact", "updated_at"])
+
+        inactive = Contact.objects.create(
+            person=inactive_person,
+            status=Contact.Status.INACTIVE,
+            full_name="A-inactive",
+        )
+
+        resp = self.client.get(self._url(inactive))
+        self.assertEqual(resp.status_code, 200)
+        ctx = resp.context
+        self.assertFalse(ctx["is_editable"])
+        self.assertTrue(ctx["is_inactive"])
+        self.assertIn("表示のみモード", resp.content.decode())
+
+    def test_n4_archived_person_contact(self):
+        """N4: archived Person 配下の Contact → 200、表示のみモード。"""
+        self.person_a.status = Person.Status.ARCHIVED
+        self.person_a.save(update_fields=["status", "updated_at"])
+
+        resp = self.client.get(self._url())
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(resp.context["is_editable"])
+
+    def test_n5_merged_person_contact(self):
+        """N5: merged Person 配下の Contact → 200、表示のみモード。"""
+        self.person_a.status = Person.Status.MERGED
+        self.person_a.save(update_fields=["status", "updated_at"])
+
+        resp = self.client.get(self._url())
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(resp.context["is_editable"])
+
+    def test_n6_no_business_card(self):
+        """N6: business_card なし → 名刺画像セクション非表示。"""
+        resp = self.client.get(self._url())
+        self.assertIsNone(resp.context["business_card"])
+        # モーダル要素も描画されない
+        self.assertNotIn("contactCardImageModal", resp.content.decode())
+
+    def test_n7_other_active_contacts(self):
+        """N7: 他の active Contact がある → other_active_contacts に含まれる。"""
+        other_active = Contact.objects.create(
+            person=self.person_a,
+            status=Contact.Status.ACTIVE,
+            full_name="A-other-active",
+        )
+        resp = self.client.get(self._url())
+        ctx_others = list(resp.context["other_active_contacts"])
+        self.assertIn(other_active, ctx_others)
+
+    def test_n7b_active_view_includes_primary(self):
+        """N7': 自分が active なら他のアクティブコンタクトに primary が含まれる。"""
+        active = Contact.objects.create(
+            person=self.person_a,
+            status=Contact.Status.ACTIVE,
+            full_name="A-active",
+        )
+        resp = self.client.get(self._url(active))
+        ctx_others = list(resp.context["other_active_contacts"])
+        self.assertIn(self.contact_a, ctx_others)  # primary が含まれる
+        self.assertNotIn(active, ctx_others)  # 自分は含まれない
+
+    def test_n8_pending_duplicates(self):
+        """N8: 重複候補がある → pending_duplicates に含まれる。"""
+        person_b = Person.objects.create()
+        Contact.objects.create(
+            person=person_b,
+            status=Contact.Status.PRIMARY,
+            full_name="B-name",
+        )
+        if self.person_a.id < person_b.id:
+            pa, pb = self.person_a, person_b
+        else:
+            pa, pb = person_b, self.person_a
+        DuplicateCandidate.objects.create(
+            person_a=pa,
+            person_b=pb,
+            score=120,
+            rank=DuplicateCandidate.Rank.POSSIBLE_MID,
+            review_status=DuplicateCandidate.ReviewStatus.PENDING,
+            review_result=[],
+        )
+        resp = self.client.get(self._url())
+        self.assertEqual(len(resp.context["pending_duplicates"]), 1)
+        # マージ画面ボタンプレースホルダが描画される
+        self.assertIn("マージ画面へ", resp.content.decode())
+
+    def test_n9_previous_person(self):
+        """N9: previous_person がある → context に含まれる。"""
+        prev_person = Person.objects.create()
+        self.contact_a.previous_person = prev_person
+        self.contact_a.save(
+            update_fields=["previous_person", "updated_at"]
+        )
+        resp = self.client.get(self._url())
+        self.assertEqual(resp.context["previous_person"], prev_person)
+        self.assertIn("マージ前の人物", resp.content.decode())
+
+    def test_n10_no_cfc_records(self):
+        """N10: CFC レコードなし（全 high）→ contact_confidence が「確認すべきフィールドなし」表示。"""
+        # CFC を全削除
+        ContactFieldConfidence.objects.filter(contact=self.contact_a).delete()
+        resp = self.client.get(self._url())
+        self.assertIn("確認すべきフィールドはありません", resp.content.decode())
+
+    # ---- 異常系 ----
+
+    def test_e1_contact_not_found(self):
+        """E1: 存在しない Contact → 404。"""
+        import uuid as _uuid
+
+        url = reverse(
+            "contacts:contact_detail", kwargs={"pk": _uuid.uuid4()}
+        )
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 404)
+
+    def test_e2_unauthenticated_returns_200(self):
+        """E2: 未ログイン → 200（仮認証スタイル、論点 1）。"""
+        c = Client()  # 未ログイン
+        # スーパーユーザーが存在しないと get_current_user が None を返すが
+        # このテストは仮認証「スタイル」（LoginRequiredMixin 未使用）の確認
+        User.objects.create_superuser(username="su", password="dummy")
+        resp = c.get(self._url())
+        self.assertEqual(resp.status_code, 200)
+
+    # ---- レスポンス検証 ----
+
+    def test_r1_context_keys(self):
+        """R1: context に必要なキーがすべて含まれる。"""
+        resp = self.client.get(self._url())
+        for key in (
+            "contact",
+            "field_confidences",
+            "is_editable",
+            "is_primary",
+            "is_active",
+            "is_inactive",
+            "business_card",
+            "other_active_contacts",
+            "pending_duplicates",
+            "merge_logs",
+            "previous_person",
+            "back",
+        ):
+            self.assertIn(key, resp.context, f"missing context key: {key}")
+
+    def test_r2_template_rendered(self):
+        """R2: テンプレートが正しくレンダリング、Contact 名が含まれる。"""
+        resp = self.client.get(self._url())
+        body = resp.content.decode()
+        self.assertIn("A-name", body)
+        self.assertIn("コンタクト詳細", body)
+
+
+class ConfidenceTagTests(TestCase):
+    """{% confidence %} カスタムタグの単体テスト（D-3b §8.2 C1〜C4）。"""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="tag_test_user", password="dummy"
+        )
+        self.person = Person.objects.create()
+        self.contact = Contact.objects.create(
+            person=self.person,
+            status=Contact.Status.PRIMARY,
+            full_name="T",
+        )
+
+    def _render(self, contact, field_name, fmt="badge"):
+        tpl = Template(
+            "{% load ui_tags %}"
+            "{% confidence confidences field_name fmt %}"
+        )
+        confidences = contact.get_field_confidences()
+        return tpl.render(
+            Context(
+                {
+                    "confidences": confidences,
+                    "field_name": field_name,
+                    "fmt": fmt,
+                }
+            )
+        )
+
+    def test_c1_high_field_shows_nothing(self):
+        """C1: 疑似 high（CFC レコードなし）→ 何も表示されない。"""
+        rendered = self._render(self.contact, "full_name")
+        self.assertEqual(rendered.strip(), "")
+
+    def test_c2_medium_unconfirmed_shows_badge(self):
+        """C2: medium AND confirmed_at IS NULL → 中バッジ表示。"""
+        ContactFieldConfidence.objects.create(
+            contact=self.contact,
+            field_name="company",
+            confidence=ContactFieldConfidence.Confidence.MEDIUM,
+        )
+        rendered = self._render(self.contact, "company")
+        self.assertIn("app-status-badge--warning", rendered)
+        self.assertIn("中", rendered)
+
+    def test_c3_low_unconfirmed_shows_badge(self):
+        """C3: low AND confirmed_at IS NULL → 低バッジ表示。"""
+        ContactFieldConfidence.objects.create(
+            contact=self.contact,
+            field_name="phone",
+            confidence=ContactFieldConfidence.Confidence.LOW,
+        )
+        rendered = self._render(self.contact, "phone")
+        self.assertIn("app-status-badge--error", rendered)
+        self.assertIn("低", rendered)
+
+    def test_c4_confirmed_shows_confirmed_badge(self):
+        """C4: confirmed_at IS NOT NULL → 確認済みバッジ表示。"""
+        ContactFieldConfidence.objects.create(
+            contact=self.contact,
+            field_name="email",
+            confidence=ContactFieldConfidence.Confidence.LOW,
+            confirmed_at=timezone.now(),
+            confirmed_by=self.user,
+        )
+        rendered = self._render(self.contact, "email")
+        self.assertIn("app-status-badge--success", rendered)
+        self.assertIn("確認済み", rendered)
+
+
+class ContactConfidenceTagTests(TestCase):
+    """{% contact_confidence %} カスタムタグの単体テスト（D-3b §8.2 CC1〜CC2）。"""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="cctag_test_user", password="dummy"
+        )
+        self.person = Person.objects.create()
+        self.contact = Contact.objects.create(
+            person=self.person,
+            status=Contact.Status.PRIMARY,
+            full_name="T",
+        )
+
+    def _render(self, contact, fmt="summary"):
+        tpl = Template(
+            "{% load ui_tags %}"
+            "{% contact_confidence contact fmt %}"
+        )
+        return tpl.render(Context({"contact": contact, "fmt": fmt}))
+
+    def test_cc1_summary_with_unconfirmed(self):
+        """CC1: 未確認あり → 「未確認 N 件 / 全 M 件中」表示。"""
+        ContactFieldConfidence.objects.create(
+            contact=self.contact,
+            field_name="company",
+            confidence=ContactFieldConfidence.Confidence.MEDIUM,
+        )
+        ContactFieldConfidence.objects.create(
+            contact=self.contact,
+            field_name="phone",
+            confidence=ContactFieldConfidence.Confidence.LOW,
+            confirmed_at=timezone.now(),
+            confirmed_by=self.user,
+        )
+        rendered = self._render(self.contact)
+        self.assertIn("未確認", rendered)
+        self.assertIn("1", rendered)  # 未確認 1 件
+        self.assertIn("2", rendered)  # 全 2 件中
+
+    def test_cc2_summary_all_confirmed(self):
+        """CC2: 全確認済み → 「全 M 件確認済み」表示。"""
+        ContactFieldConfidence.objects.create(
+            contact=self.contact,
+            field_name="company",
+            confidence=ContactFieldConfidence.Confidence.MEDIUM,
+            confirmed_at=timezone.now(),
+            confirmed_by=self.user,
+        )
+        rendered = self._render(self.contact)
+        self.assertIn("全 1 件確認済み", rendered)
+
+    def test_cc3_summary_no_cfc_records(self):
+        """CC3: CFC レコードなし → 「確認すべきフィールドはありません」。"""
+        rendered = self._render(self.contact)
+        self.assertIn("確認すべきフィールドはありません", rendered)

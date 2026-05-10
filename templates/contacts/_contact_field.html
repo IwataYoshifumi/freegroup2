@@ -1,0 +1,40 @@
+{% load ui_tags %}
+{% comment %}
+Contact 詳細画面のフィールド 1 行を表示するパーツ（D-3b）。
+
+引数：
+  field_name: str（Contact のフィールド名、UPDATABLE_FIELDS のいずれか）
+  label: str（表示ラベル）
+  value: 任意（フィールド値）
+
+外側の context から field_confidences（Contact.get_field_confidences() の戻り値、
+dict[field_name -> ContactFieldConfidence]）と is_editable（編集可能モード判定）を
+参照する。
+
+編集可能モード時：
+  - confidence バッジ表示
+  - JS フック用 data-* 属性を付与（D-3d で AJAX 化）
+
+表示のみモード時：
+  - 値とバッジのみ表示、JS フックなし
+{% endcomment %}
+
+{% if is_editable %}
+  <div class="app-detail-item js-contact-field-row"
+       data-field-name="{{ field_name }}"
+       data-contact-id="{{ contact.id }}">
+    <div class="app-detail-label">{{ label }}</div>
+    <div class="app-detail-value">
+      <span class="js-contact-field-value">{{ value }}</span>
+      {% confidence field_confidences field_name 'badge' %}
+    </div>
+  </div>
+{% else %}
+  <div class="app-detail-item">
+    <div class="app-detail-label">{{ label }}</div>
+    <div class="app-detail-value">
+      {{ value }}
+      {% confidence field_confidences field_name 'badge' %}
+    </div>
+  </div>
+{% endif %}
