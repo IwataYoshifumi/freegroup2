@@ -24,7 +24,12 @@
 
 from __future__ import annotations
 
-from duplicates.models import DuplicateCandidate
+from django.core.exceptions import ValidationError
+from django.db import transaction
+from django.utils import timezone
+
+from config.constants import DUPLICATE_CHECK_FIELDS, DuplicateMergeReason
+from duplicates.models import DuplicateCandidate, PersonMergeLog
 from persons.models import Person
 
 
@@ -191,3 +196,134 @@ def recover_duplicate_candidates(merged_person, surviving_person):
         # 再計算しない、§12.8.4）。直接 objects.create() を呼ばず、必ず
         # create_recovered_from を経由する（§3.7 / §10.7.1）。
         DuplicateCandidate.create_recovered_from(old_dc, surviving_person)
+
+
+def Mark_as_Different_Person(candidate, form, user):
+    """別人判定の本体（仕様書 §13.4.5 / §11.4.6 / §10.7.2）。
+
+    [性質] 副作用あり（DB 書込：DuplicateCandidate の review_status 遷移 +
+           ActionLog 1 件作成）
+    [入力] candidate: DuplicateCandidate（判定対象の重複候補）
+           form: MergeForm（cleaned_data['review_result'] / cleaned_data['note'] を参照）
+           user: User（判定者、reviewed_by および ActionLog.user に記録）
+    [出力] None
+
+    処理範囲：当該 1 candidate のみ。他の pending 候補・duplicate_checked_at・
+    Person のステータスには触れない（C-1+2 指示書「処理範囲」）。
+
+    処理内容（§9.3.1 マージ系の 10 ステップとは別フロー）：
+      1. transaction.atomic() で関数全体をラップ
+      2. candidate.mark_as_different_person(user, review_result, note) で状態遷移
+         （review_status='different_person' / review_result / reviewed_by /
+         reviewed_at / note を 1 save で更新）
+      3. candidate.record_different_person_action(user) で ActionLog 記録
+         （data={"different_reason": ...} は X-5 のルールで self.review_result から
+         組み立てられる）
+
+    `form.cleaned_data["note"]` は任意（既定 ""）。`mark_as_different_person` は
+    None を空文字に正規化するが、サービス側で .get(default="") して明示的に str を
+    渡す。
+    """
+    review_result = form.cleaned_data["review_result"]
+    note = form.cleaned_data.get("note", "")
+
+    with transaction.atomic():
+        candidate.mark_as_different_person(user, review_result, note)
+        candidate.record_different_person_action(user)
+
+
+def Execute_Merge_Only(candidate, surviving_person, merged_person, form, user):
+    """マージのみ実行（フィールド修正なし、仕様書 §9.3.1 / §13.4.5 / §11.4.6）。
+
+    [性質] 副作用あり（DB 書込：複数モデルを同一トランザクションで更新）
+    [入力] candidate: DuplicateCandidate（マージ起点の重複候補）
+           surviving_person: Person（マージで残る側）
+           merged_person: Person（マージで統合される側）
+           form: MergeForm（cleaned_data['merge_reason'] / ['review_result'] / ['note']
+                 を参照）
+           user: User（マージ実行者、PersonMergeLog.executed_by および ActionLog.user
+                 に記録）
+    [出力] None
+    [例外] ValidationError（surviving 側、または additional_role 時の merged 側 primary に
+           非 high フィールドが残る場合。トランザクション開始前に送出するので DB は不変）
+
+    フィールド修正がないため、§9.3.1 の手順 3（フィールド反映）と手順 4
+    （ContactFieldConfidence 記録）はスキップする。Execute_Merge_with_Updates との
+    切り分け基準は「フィールド修正の有無」（§9.4.4）。
+
+    処理順序：
+      A. トランザクション開始前のバリデーション（§9.3.1 手順 2）
+         1. surviving_person.primary_contact が DUPLICATE_CHECK_FIELDS 全 high
+         2. merge_reason='additional_role' のときは merged_person.primary_contact も同条件
+      B. transaction.atomic() 内で §9.3.1 手順 5〜10 を実行
+         5. PersonMergeLog.create() でログ作成
+         5'. duplicate_candidate / note を merge_log にセットして 2 回目 save
+         6. merged_person.transfer_contacts_to(surviving_person, merge_reason)
+         7. merged_person.mark_as_merged(surviving_person)
+         8. PersonMergeLog.lock_past_logs(merged_person)
+         10前. candidate.mark_as_merged(user, review_result, note)
+              （recover 内部の防御コードでフォールバック merged 化されると reviewer 情報
+              が欠落するため、明示的に先に呼ぶ。レビュー回答 §B 参照）
+         9. recover_duplicate_candidates(merged_person, surviving_person)
+         9末. surviving_person.primary_contact.duplicate_checked_at = now()
+         10. merge_log.record_merge_action(user) で ActionLog 記録
+
+    マジックストリング 'additional_role' を直接比較せず、`DuplicateMergeReason.ADDITIONAL_ROLE`
+    で判定する。`DUPLICATE_CHECK_FIELDS` も config/constants.py から参照する
+    （C-1+2 指示書「定数・enum の使用」）。
+    """
+    merge_reason = form.cleaned_data["merge_reason"]
+    review_result = form.cleaned_data["review_result"]
+    note = form.cleaned_data.get("note", "")
+
+    # ---- A. バリデーション（トランザクション開始前、§9.3.1 手順 2） ----
+    if not surviving_person.primary_contact.is_all_field_confidence_high(
+        DUPLICATE_CHECK_FIELDS
+    ):
+        raise ValidationError(
+            "surviving_person の primary_contact に全 high でないフィールドが残っています。"
+        )
+    if merge_reason == DuplicateMergeReason.ADDITIONAL_ROLE:
+        if not merged_person.primary_contact.is_all_field_confidence_high(
+            DUPLICATE_CHECK_FIELDS
+        ):
+            raise ValidationError(
+                "additional_role でのマージでは merged_person の primary_contact も "
+                "全 high が必要です。"
+            )
+
+    # ---- B. トランザクション内（§9.3.1 手順 5〜10） ----
+    with transaction.atomic():
+        # 手順 5: PersonMergeLog 作成 + 2 回目 save で duplicate_candidate / note セット
+        merge_log = PersonMergeLog.create(surviving_person, merged_person, user)
+        merge_log.duplicate_candidate = candidate
+        merge_log.note = note
+        merge_log.save(
+            update_fields=["duplicate_candidate", "note", "updated_at"]
+        )
+
+        # 手順 6: merged_person 配下 Contact を surviving_person に付け替え
+        merged_person.transfer_contacts_to(surviving_person, merge_reason)
+
+        # 手順 7: merged_person のステータス遷移（status='merged' / merged_into セット）
+        merged_person.mark_as_merged(surviving_person)
+
+        # 手順 8: 過去のマージログを locked 化
+        PersonMergeLog.lock_past_logs(merged_person)
+
+        # 手順 10 前段: 当該 candidate を merged 化（recover の前に明示、レビュー回答 §B）
+        candidate.mark_as_merged(user, review_result, note)
+
+        # 手順 9: recover 処理（第三者 Person との pending DC を invalidated → 再復帰）
+        recover_duplicate_candidates(merged_person, surviving_person)
+
+        # 手順 9 末: surviving 側 primary の duplicate_checked_at を now() に更新
+        surviving_primary = surviving_person.primary_contact
+        surviving_primary.duplicate_checked_at = timezone.now()
+        surviving_primary.save(
+            update_fields=["duplicate_checked_at", "updated_at"]
+        )
+
+        # 手順 10: ActionLog 記録（data={"merge_reason": ...} は X-5 のルールで
+        # merge_log.duplicate_candidate.review_result から組み立てられる）
+        merge_log.record_merge_action(user)
