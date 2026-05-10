@@ -71,6 +71,39 @@ class Person(models.Model):
                 update_fields=["status", "merged_into", "primary_contact", "updated_at"]
             )
 
+    def mark_as_active(self):
+        """自身の状態遷移：active 化（merged または archived からの復帰）。
+
+        [性質] 副作用あり（自身のフィールド更新のみ）
+        [入力] なし
+        [出力] None
+        [例外] ValueError（self.status が 'merged' でも 'archived' でもない場合）
+
+        呼ばれる業務シナリオ：
+          - Execute_Merge_Undo（C-3）から merged Person を active に戻す
+          - 将来追加される archived 復元機能から archived Person を active に戻す
+
+        primary_contact は触らない（mark_as_merged との非対称、X-6 指示書 §3.5）。
+        primary_contact の再設定は呼び出し側が set_primary_contact() で別途実行する責務
+        （仕様書 §10.4.3）。
+
+        person.mark_as_merged() の対称メソッド。ActionLog 記録は本メソッドの責務外で、
+        呼び出し元（Execute_Merge_Undo 等）が merge_log.record_undo_action(user) を別途
+        呼ぶ（X-6 指示書 §3.6 / 仕様書 §10.6 / §10.8.4）。
+
+        ガード方針（X-6 指示書 §3.7）：active な Person に対して呼ばれた場合は ValueError。
+        archived → active の復帰時にサイレントに status を変えてしまうのを防ぎ、業務フロー
+        のバグを早期検出する。
+        """
+        if self.status not in (self.Status.MERGED, self.Status.ARCHIVED):
+            raise ValueError(
+                f"mark_as_active() can only be called on merged or archived "
+                f"Person, but Person {self.id} has status='{self.status}'"
+            )
+        self.status = self.Status.ACTIVE
+        self.merged_into = None
+        self.save(update_fields=["status", "merged_into", "updated_at"])
+
     def set_primary_contact(self, new_contact, old_primary_new_status="active"):
         """primary_contact 切り替え（派生情報の同期、仕様書 §10.4.3）。
 
