@@ -1,6 +1,6 @@
 {% load ui_tags %}
 {% comment %}
-Contact 詳細画面のフィールド 1 行を表示するパーツ（D-3b）。
+Contact 詳細画面のフィールド 1 行を表示するパーツ（D-3b / D-3d 準備）。
 
 引数：
   field_name: str（Contact のフィールド名、UPDATABLE_FIELDS のいずれか）
@@ -12,21 +12,62 @@ dict[field_name -> ContactFieldConfidence]）と is_editable（編集可能モ�
 参照する。
 
 編集可能モード時：
+  - data-* 属性（field-name / contact-id / confidence-state）を付与
   - confidence バッジ表示
-  - JS フック用 data-* 属性を付与（D-3d で AJAX 化）
+  - 修正 UI（ラジオ + 確定ボタン + 修正フォーム）を hidden で出力（D-3d JS が制御）
 
 表示のみモード時：
-  - 値とバッジのみ表示、JS フックなし
+  - 値とバッジのみ表示、JS フックなし、修正 UI なし
 {% endcomment %}
 
 {% if is_editable %}
+  {% confidence_state field_confidences field_name as cfc_state %}
   <div class="app-detail-item js-contact-field-row"
        data-field-name="{{ field_name }}"
-       data-contact-id="{{ contact.id }}">
+       data-contact-id="{{ contact.id }}"
+       data-confidence-state="{{ cfc_state }}">
     <div class="app-detail-label">{{ label }}</div>
     <div class="app-detail-value">
       <span class="js-contact-field-value">{{ value }}</span>
       {% confidence field_confidences field_name 'badge' %}
+    </div>
+
+    {# 修正 UI（D-3d JS で制御。初期は確定ボタン / 修正フォーム両方 hidden） #}
+    <div class="app-contact-field-actions">
+      <label>
+        <input type="radio"
+               name="contact-field-action-{{ field_name }}"
+               class="js-contact-field-action"
+               value="confirm">
+        確認 OK
+      </label>
+      <label>
+        <input type="radio"
+               name="contact-field-action-{{ field_name }}"
+               class="js-contact-field-action"
+               value="edit">
+        要修正
+      </label>
+
+      <button type="button"
+              class="app-btn app-btn--sm js-contact-field-confirm-btn"
+              hidden>
+        確定
+      </button>
+
+      <div class="js-contact-field-edit-form" hidden>
+        <input type="text"
+               class="app-input js-contact-field-edit-input"
+               value="{{ value }}">
+        <button type="button"
+                class="app-btn app-btn--sm js-contact-field-update-btn">
+          修正
+        </button>
+        <button type="button"
+                class="app-btn app-btn--sm app-btn--secondary js-contact-field-cancel-btn">
+          キャンセル
+        </button>
+      </div>
     </div>
   </div>
 {% else %}

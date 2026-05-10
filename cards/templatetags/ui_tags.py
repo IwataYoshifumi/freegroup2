@@ -10,6 +10,11 @@ D-3b で追加：
   - {% contact_confidence contact format %}
       Contact 全体の集計サマリー表示。
       format='summary' のみサポート。
+
+D-3d 準備で追加：
+  - {% confidence_state confidences field_name %}
+      data-confidence-state 属性用の状態文字列を返す。
+      'high' / 'mid' / 'low' / 'confirmed' のいずれか。
 """
 
 from django.template import Library
@@ -124,7 +129,48 @@ def contact_confidence(contact, format="summary"):
         )
 
     return format_html(
-        "未確認 <strong>{}</strong> 件 / 全 {} 件中",
+        '未確認 <strong class="js-unconfirmed-count">{}</strong> 件 / 全 {} 件中',
         unconfirmed,
         total,
     )
+
+
+# ----------------------------------------------------------------------
+# {% confidence_state %} : data-confidence-state 属性用の状態文字列
+# ----------------------------------------------------------------------
+
+
+@register.simple_tag
+def confidence_state(confidences, field_name):
+    """data-confidence-state 属性に出力する状態文字列を返す（D-3d 準備）。
+
+    [性質] 純関数（DB 操作なし・副作用なし）
+    [入力] confidences: dict[field_name -> ContactFieldConfidence]
+                        （Contact.get_field_confidences() の戻り値）
+           field_name: str（対象フィールド名）
+       [出力] str（'high' / 'mid' / 'low' / 'confirmed' のいずれか）
+
+    判定ロジック：
+      - 疑似 high インスタンス（CFC レコードなし）→ 'high'
+      - confirmed_at IS NOT NULL → 'confirmed'
+      - confidence='medium' AND 未確認 → 'mid'（短縮形、JS フック用）
+      - confidence='low' AND 未確認 → 'low'
+
+    JS 側はこの値で「修正 UI を出すかどうか」「未確認バッジを出すかどうか」を判定する。
+    """
+    if not confidences or field_name not in confidences:
+        return "high"
+
+    cfc = confidences[field_name]
+    if cfc is None or cfc.confidence == "high":
+        return "high"
+
+    if cfc.confirmed_at is not None:
+        return "confirmed"
+
+    if cfc.confidence == "medium":
+        return "mid"
+    if cfc.confidence == "low":
+        return "low"
+
+    return "high"

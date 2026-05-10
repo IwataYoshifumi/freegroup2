@@ -945,6 +945,33 @@ class ContactDetailViewTests(TestCase):
         self.assertIn("A-name", body)
         self.assertIn("コンタクト詳細", body)
 
+    def test_r3_edit_ui_in_editable_mode(self):
+        """R3: 編集可能モードで修正 UI（ラジオ / 確定 / 修正フォーム）と data-confidence-state が出力。"""
+        resp = self.client.get(self._url())
+        body = resp.content.decode()
+        # 修正 UI のフック
+        self.assertIn("js-contact-field-action", body)
+        self.assertIn("js-contact-field-confirm-btn", body)
+        self.assertIn("js-contact-field-edit-form", body)
+        self.assertIn("js-contact-field-edit-input", body)
+        self.assertIn("js-contact-field-update-btn", body)
+        self.assertIn("js-contact-field-cancel-btn", body)
+        # data-confidence-state（company は medium CFC → "mid"）
+        self.assertIn('data-confidence-state="mid"', body)
+        # 共通 toast 要素（base.html）
+        self.assertIn('class="app-toast"', body)
+
+    def test_r4_no_edit_ui_in_view_only_mode(self):
+        """R4: 表示のみモード（archived Person 配下）では修正 UI が出力されない。"""
+        self.person_a.status = Person.Status.ARCHIVED
+        self.person_a.save(update_fields=["status", "updated_at"])
+        resp = self.client.get(self._url())
+        body = resp.content.decode()
+        self.assertNotIn("js-contact-field-action", body)
+        self.assertNotIn("js-contact-field-edit-form", body)
+        # data-confidence-state も付かない
+        self.assertNotIn("data-confidence-state", body)
+
 
 class ConfidenceTagTests(TestCase):
     """{% confidence %} カスタムタグの単体テスト（D-3b §8.2 C1〜C4）。"""
