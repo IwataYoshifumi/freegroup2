@@ -327,3 +327,100 @@ def Execute_Merge_Only(candidate, surviving_person, merged_person, form, user):
         # 手順 10: ActionLog 記録（data={"merge_reason": ...} は X-5 のルールで
         # merge_log.duplicate_candidate.review_result から組み立てられる）
         merge_log.record_merge_action(user)
+
+
+def Execute_Merge_Undo(merge_log, form, user):
+    """マージ復元の本体（仕様書 §9.5 / §13.4.5 / §11.4.6）。
+
+    [性質] 副作用あり（DB 書込：複数モデルを同一トランザクションで更新）
+    [入力] merge_log: PersonMergeLog（復元対象、status='undoable' 必須）
+           form: MergeUndoForm（D ブロックで実装。C-3 段階では未使用、シグネチャは
+                 仕様書 §13.4.1 通り保持）
+           user: User（復元実行者、PersonMergeLog.undone_by および ActionLog.user
+                 に記録）
+    [出力] None
+    [例外] ValidationError（merge_log が undoable でない場合。トランザクション開始前
+           に送出するので DB は不変）
+
+    処理順序：
+      A. トランザクション開始前のバリデーション
+         - merge_log.is_undoable() == False なら ValidationError
+      B. transaction.atomic() 内で §9.5.2 手順 1〜7 を実行
+         手順 1〜4: merged_person 由来の Contact 群を previous_* から復元
+                   （person=surviving_person AND previous_person=merged_person で
+                    絞り込み、status / person を previous 値に戻し、previous_* を
+                    NULL にクリア）
+         手順 5: merged_person.mark_as_active()
+         手順 6: merged_person 側のみ primary_contact 同期（§9.3.2、レビュー回答 §A）
+                  surviving_person 側はマージ前後で primary が変わらないため同期不要
+         手順 7: merge_log.mark_as_undone(user)
+         DC 後処理: merged_person.primary_contact.duplicate_checked_at = None
+                   （次回 cron で merged_person 起点の DC が再生成される。
+                   §12.8.4 補助レコードに完璧な整合性を求めず UX 優先）
+         ActionLog: merge_log.record_undo_action(user)
+
+    DuplicateCandidate / ContactFieldConfidence は一切触らない（§12.8.4 / §9.5.3）。
+
+    補足（restored_primary の二重 save）：
+      手順 2 で元 primary Contact に status='primary' を save し、手順 6 の
+      set_primary_contact() 内 Step 2 でも status='primary' を再 save する形になる。
+      同一トランザクション内なので実用上問題なく、コードの読みやすさを優先する判断
+      （レビュー回答「補足」）。
+    """
+    from contacts.models import Contact  # 循環 import を避けるため遅延 import
+
+    # ---- A. バリデーション（atomic 外） ----
+    if not merge_log.is_undoable():
+        raise ValidationError(
+            f"merge_log {merge_log.id} は復元できません（status='{merge_log.status}'）。"
+        )
+
+    surviving_person = merge_log.surviving_person
+    merged_person = merge_log.merged_person
+
+    # ---- B. トランザクション内（§9.5.2 手順 1〜7） ----
+    with transaction.atomic():
+        # 手順 1〜4: Contact のロールバック（merged_person 由来の Contact 群）
+        rollback_targets = Contact.objects.filter(
+            person=surviving_person,
+            previous_person=merged_person,
+        )
+        for contact in rollback_targets:
+            contact.person = contact.previous_person
+            contact.status = contact.previous_status
+            contact.previous_person = None
+            contact.previous_status = None
+            contact.save(
+                update_fields=[
+                    "person",
+                    "status",
+                    "previous_person",
+                    "previous_status",
+                    "updated_at",
+                ]
+            )
+
+        # 手順 5: merged_person を active 化
+        merged_person.mark_as_active()
+
+        # 手順 6: primary_contact 同期（merged_person 側のみ、レビュー回答 §A）
+        #         surviving_person.primary_contact はマージ前後で変化しないため同期不要
+        merged_primary_after = merged_person.contact_set.filter(
+            status=Contact.Status.PRIMARY
+        ).first()
+        if merged_primary_after is not None:
+            merged_person.set_primary_contact(merged_primary_after)
+
+        # 手順 7: PersonMergeLog の状態遷移
+        merge_log.mark_as_undone(user)
+
+        # DC 後処理: merged_person.primary_contact.duplicate_checked_at = None
+        # （次回 cron で再生成される。§12.8.4）
+        if merged_primary_after is not None:
+            merged_primary_after.duplicate_checked_at = None
+            merged_primary_after.save(
+                update_fields=["duplicate_checked_at", "updated_at"]
+            )
+
+        # ActionLog 記録（data={} は X-5 確定方針）
+        merge_log.record_undo_action(user)
