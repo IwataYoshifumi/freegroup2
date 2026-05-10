@@ -1,10 +1,12 @@
-"""Contact モデルの単体テスト。"""
+"""Contact モデル + 関連 View の単体テスト。"""
 
 import inspect
+import json
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import Client, TestCase
+from django.urls import reverse
 
 from contacts.models import Contact, ContactFieldConfidence
 from duplicates.models import DuplicateCandidate
@@ -285,3 +287,428 @@ class ContactUpdateFieldTests(TestCase):
             list(sig.parameters.keys()),
             ["self", "field_name", "new_value", "user"],
         )
+
+
+class _ContactAjaxTestBase(TestCase):
+    """AJAX テスト共通の setUp（D-3c）。"""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="d3c_test_user", password="dummy"
+        )
+        self.person_a = Person.objects.create()
+        self.contact_a = Contact.objects.create(
+            person=self.person_a,
+            status=Contact.Status.PRIMARY,
+            full_name="A-name",
+            company="A-company",
+            notes="A-notes",
+        )
+        self.person_a.primary_contact = self.contact_a
+        self.person_a.save(update_fields=["primary_contact", "updated_at"])
+
+        # CFC: company medium、notes low、phone low（unconfirmed_count 検証用）
+        self.cfc_company = ContactFieldConfidence.objects.create(
+            contact=self.contact_a,
+            field_name="company",
+            confidence=ContactFieldConfidence.Confidence.MEDIUM,
+        )
+        self.cfc_notes = ContactFieldConfidence.objects.create(
+            contact=self.contact_a,
+            field_name="notes",
+            confidence=ContactFieldConfidence.Confidence.LOW,
+        )
+        self.cfc_phone = ContactFieldConfidence.objects.create(
+            contact=self.contact_a,
+            field_name="phone",
+            confidence=ContactFieldConfidence.Confidence.LOW,
+        )
+
+        # invalidate 検証用：(A,B) pending DC
+        self.person_b = Person.objects.create()
+        self.contact_b = Contact.objects.create(
+            person=self.person_b,
+            status=Contact.Status.PRIMARY,
+            full_name="B-name",
+        )
+        if self.person_a.id < self.person_b.id:
+            pa, pb = self.person_a, self.person_b
+        else:
+            pa, pb = self.person_b, self.person_a
+        self.candidate = DuplicateCandidate.objects.create(
+            person_a=pa,
+            person_b=pb,
+            score=120,
+            rank=DuplicateCandidate.Rank.POSSIBLE_MID,
+            review_status=DuplicateCandidate.ReviewStatus.PENDING,
+            review_result=[],
+        )
+
+        self.client = Client()
+        self.client.force_login(self.user)
+
+    def _post_json(self, url, payload, client=None):
+        """JSON ボディで POST するヘルパー。"""
+        c = client or self.client
+        return c.post(
+            url,
+            data=json.dumps(payload),
+            content_type="application/json",
+        )
+
+
+class ContactAjaxUpdateFieldViewTests(_ContactAjaxTestBase):
+    """ContactAjaxUpdateFieldView の単体テスト（D-3c §5.1）。"""
+
+    def _url(self, contact=None):
+        return reverse(
+            "contacts:ajax_update_field",
+            kwargs={"pk": (contact or self.contact_a).pk},
+        )
+
+    # ---- 正常系 ----
+
+    def test_n1_updates_duplicate_check_field(self):
+        """N1: DUPLICATE_CHECK_FIELDS（company）修正 → 200 / 値更新 / CFC confirmed / DC invalidated。"""
+        resp = self._post_json(
+            self._url(),
+            {"field_name": "company", "new_value": "A-company-new"},
+        )
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertTrue(body["success"])
+        self.assertEqual(body["field_name"], "company")
+        self.assertEqual(body["updated_value"], "A-company-new")
+        self.assertEqual(body["confidence_state"], "confirmed")
+
+        self.contact_a.refresh_from_db()
+        self.assertEqual(self.contact_a.company, "A-company-new")
+
+        self.cfc_company.refresh_from_db()
+        self.assertIsNotNone(self.cfc_company.confirmed_at)
+
+        self.candidate.refresh_from_db()
+        self.assertEqual(
+            self.candidate.review_status,
+            DuplicateCandidate.ReviewStatus.INVALIDATED,
+        )
+
+    def test_n2_updates_non_duplicate_check_field(self):
+        """N2: DUPLICATE_CHECK_FIELDS 外（notes）修正 → 200 / 値更新 / DC 不変。"""
+        resp = self._post_json(
+            self._url(),
+            {"field_name": "notes", "new_value": "A-notes-new"},
+        )
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertTrue(body["success"])
+        self.assertEqual(body["updated_value"], "A-notes-new")
+
+        self.contact_a.refresh_from_db()
+        self.assertEqual(self.contact_a.notes, "A-notes-new")
+
+        self.candidate.refresh_from_db()
+        self.assertEqual(
+            self.candidate.review_status,
+            DuplicateCandidate.ReviewStatus.PENDING,
+        )
+
+    def test_n3_no_value_diff(self):
+        """N3: 差分なし → 200 / save 不発生。"""
+        original_updated_at = self.contact_a.updated_at
+        resp = self._post_json(
+            self._url(),
+            {"field_name": "notes", "new_value": "A-notes"},
+        )
+        self.assertEqual(resp.status_code, 200)
+
+        self.contact_a.refresh_from_db()
+        self.assertEqual(self.contact_a.updated_at, original_updated_at)
+        self.cfc_notes.refresh_from_db()
+        self.assertIsNotNone(self.cfc_notes.confirmed_at)
+
+    # ---- 異常系 ----
+
+    def test_e1_contact_not_found(self):
+        """E1: 存在しない Contact → 404。"""
+        import uuid as _uuid
+
+        url = reverse(
+            "contacts:ajax_update_field", kwargs={"pk": _uuid.uuid4()}
+        )
+        resp = self._post_json(
+            url, {"field_name": "company", "new_value": "x"}
+        )
+        self.assertEqual(resp.status_code, 404)
+        self.assertFalse(resp.json()["success"])
+
+    def test_e2_inactive_contact_forbidden(self):
+        """E2: inactive Contact → 403。"""
+        self.contact_a.status = Contact.Status.INACTIVE
+        self.contact_a.save(update_fields=["status", "updated_at"])
+        resp = self._post_json(
+            self._url(),
+            {"field_name": "company", "new_value": "x"},
+        )
+        self.assertEqual(resp.status_code, 403)
+
+    def test_e3_archived_person_forbidden(self):
+        """E3: archived Person 配下 → 403。"""
+        self.person_a.status = Person.Status.ARCHIVED
+        self.person_a.save(update_fields=["status", "updated_at"])
+        resp = self._post_json(
+            self._url(),
+            {"field_name": "company", "new_value": "x"},
+        )
+        self.assertEqual(resp.status_code, 403)
+
+    def test_e3b_merged_person_forbidden(self):
+        """E3': merged Person 配下 → 403（防御的、論点 4）。"""
+        # mark_as_merged は Person 単独で動かないので status を直接書き換え
+        self.person_a.status = Person.Status.MERGED
+        self.person_a.save(update_fields=["status", "updated_at"])
+        resp = self._post_json(
+            self._url(),
+            {"field_name": "company", "new_value": "x"},
+        )
+        self.assertEqual(resp.status_code, 403)
+
+    def test_e4_unauthenticated_forbidden(self):
+        """E4: 未ログイン → 403（論点 1、案 A）。"""
+        c = Client()  # 未ログインクライアント
+        resp = self._post_json(
+            self._url(),
+            {"field_name": "company", "new_value": "x"},
+            client=c,
+        )
+        self.assertEqual(resp.status_code, 403)
+        self.assertIn("Authentication required", resp.json()["error"])
+
+    def test_e5_invalid_field_name(self):
+        """E5: UPDATABLE_FIELDS 外のフィールド → 400。"""
+        resp = self._post_json(
+            self._url(),
+            {"field_name": "status", "new_value": "x"},
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("Invalid field name", resp.json()["error"])
+
+    def test_e6_invalid_json(self):
+        """E6: JSON パースエラー → 400。"""
+        resp = self.client.post(
+            self._url(),
+            data="not-a-json",
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("Invalid JSON", resp.json()["error"])
+
+    def test_e7_missing_csrf_token(self):
+        """E7: CSRF トークンなし → 403（@csrf_exempt 未使用）。"""
+        c = Client(enforce_csrf_checks=True)
+        c.force_login(self.user)
+        resp = c.post(
+            self._url(),
+            data=json.dumps({"field_name": "company", "new_value": "x"}),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 403)
+
+    # ---- レスポンス検証 ----
+
+    def test_r1_updated_value_in_response(self):
+        """R1: レスポンスの updated_value が DB の保存後の値と一致する。"""
+        resp = self._post_json(
+            self._url(),
+            {"field_name": "full_name", "new_value": "A-name-renamed"},
+        )
+        self.contact_a.refresh_from_db()
+        self.assertEqual(
+            resp.json()["updated_value"], self.contact_a.full_name
+        )
+
+    def test_r2_unconfirmed_count_in_response(self):
+        """R2: unconfirmed_count が正しく計算される。"""
+        # 初期：company / notes / phone の 3 件 unconfirmed
+        resp = self._post_json(
+            self._url(),
+            {"field_name": "company", "new_value": "A-company-new"},
+        )
+        # company が confirmed 化されたので残り 2 件
+        self.assertEqual(resp.json()["unconfirmed_count"], 2)
+
+
+class ContactAjaxConfirmFieldsViewTests(_ContactAjaxTestBase):
+    """ContactAjaxConfirmFieldsView の単体テスト（D-3c §5.2）。"""
+
+    def _url(self, contact=None):
+        return reverse(
+            "contacts:ajax_confirm_fields",
+            kwargs={"pk": (contact or self.contact_a).pk},
+        )
+
+    # ---- 正常系 ----
+
+    def test_n1_single_field(self):
+        """N1: 単数フィールドの確認 → 200 / CFC confirmed。"""
+        resp = self._post_json(
+            self._url(), {"field_names": ["company"]}
+        )
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertTrue(body["success"])
+        self.assertEqual(body["confirmed_field_names"], ["company"])
+        self.assertEqual(body["unconfirmed_count"], 2)  # notes / phone 残り
+
+        self.cfc_company.refresh_from_db()
+        self.assertIsNotNone(self.cfc_company.confirmed_at)
+
+    def test_n2_multiple_fields_bulk(self):
+        """N2: 複数フィールドの確認（一括確定）→ 200 / 全 CFC confirmed。"""
+        resp = self._post_json(
+            self._url(),
+            {"field_names": ["company", "notes", "phone"]},
+        )
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertEqual(
+            sorted(body["confirmed_field_names"]),
+            ["company", "notes", "phone"],
+        )
+        self.assertEqual(body["unconfirmed_count"], 0)
+
+        for cfc in (self.cfc_company, self.cfc_notes, self.cfc_phone):
+            cfc.refresh_from_db()
+            self.assertIsNotNone(cfc.confirmed_at)
+
+    def test_n3_already_confirmed_idempotent(self):
+        """N3: 既に confirmed 済みのフィールド再指定 → 冪等動作。"""
+        # 1 回目
+        self._post_json(self._url(), {"field_names": ["company"]})
+        self.cfc_company.refresh_from_db()
+        first_confirmed_at = self.cfc_company.confirmed_at
+        self.assertIsNotNone(first_confirmed_at)
+
+        # 2 回目（同じフィールド）
+        resp = self._post_json(self._url(), {"field_names": ["company"]})
+        self.assertEqual(resp.status_code, 200)
+        self.cfc_company.refresh_from_db()
+        # confirmed_at は更新される（mark_fields_as_confirmed の挙動）
+        self.assertIsNotNone(self.cfc_company.confirmed_at)
+
+    def test_n4_high_field_no_cfc_record(self):
+        """N4: 疑似 high フィールド（CFC レコードなし）→ 200 / no-op、エラーなし。"""
+        # full_name は CFC レコード未作成（疑似 high）
+        cfc_count_before = ContactFieldConfidence.objects.filter(
+            contact=self.contact_a
+        ).count()
+        resp = self._post_json(
+            self._url(), {"field_names": ["full_name"]}
+        )
+        self.assertEqual(resp.status_code, 200)
+        cfc_count_after = ContactFieldConfidence.objects.filter(
+            contact=self.contact_a
+        ).count()
+        self.assertEqual(cfc_count_after, cfc_count_before)
+
+    # ---- 異常系 ----
+
+    def test_e1_contact_not_found(self):
+        """E1: 存在しない Contact → 404。"""
+        import uuid as _uuid
+
+        url = reverse(
+            "contacts:ajax_confirm_fields", kwargs={"pk": _uuid.uuid4()}
+        )
+        resp = self._post_json(url, {"field_names": ["company"]})
+        self.assertEqual(resp.status_code, 404)
+
+    def test_e2_inactive_contact_forbidden(self):
+        """E2: inactive Contact → 403。"""
+        self.contact_a.status = Contact.Status.INACTIVE
+        self.contact_a.save(update_fields=["status", "updated_at"])
+        resp = self._post_json(
+            self._url(), {"field_names": ["company"]}
+        )
+        self.assertEqual(resp.status_code, 403)
+
+    def test_e3_archived_person_forbidden(self):
+        """E3: archived Person 配下 → 403。"""
+        self.person_a.status = Person.Status.ARCHIVED
+        self.person_a.save(update_fields=["status", "updated_at"])
+        resp = self._post_json(
+            self._url(), {"field_names": ["company"]}
+        )
+        self.assertEqual(resp.status_code, 403)
+
+    def test_e4_invalid_field_name(self):
+        """E4: UPDATABLE_FIELDS 外のフィールド名 → 400。"""
+        resp = self._post_json(
+            self._url(), {"field_names": ["status"]}
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("Invalid field name", resp.json()["error"])
+
+    def test_e5_empty_field_names_no_op(self):
+        """E5: field_names が空配列 → 200 で no-op（論点 5）。"""
+        resp = self._post_json(self._url(), {"field_names": []})
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertTrue(body["success"])
+        self.assertEqual(body["confirmed_field_names"], [])
+        # 初期 unconfirmed_count 3 件のまま
+        self.assertEqual(body["unconfirmed_count"], 3)
+
+        # CFC は触られない
+        for cfc in (self.cfc_company, self.cfc_notes, self.cfc_phone):
+            cfc.refresh_from_db()
+            self.assertIsNone(cfc.confirmed_at)
+
+    def test_e6_invalid_json(self):
+        """E6: JSON パースエラー → 400。"""
+        resp = self.client.post(
+            self._url(),
+            data="not-a-json",
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 400)
+
+    def test_e7_missing_csrf_token(self):
+        """E7: CSRF トークンなし → 403。"""
+        c = Client(enforce_csrf_checks=True)
+        c.force_login(self.user)
+        resp = c.post(
+            self._url(),
+            data=json.dumps({"field_names": ["company"]}),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 403)
+
+    def test_e_unauthenticated_forbidden(self):
+        """E: 未ログイン → 403（論点 1）。"""
+        c = Client()
+        resp = self._post_json(
+            self._url(), {"field_names": ["company"]}, client=c
+        )
+        self.assertEqual(resp.status_code, 403)
+
+    # ---- レスポンス検証 ----
+
+    def test_r1_confirmed_field_names_in_response(self):
+        """R1: confirmed_field_names がリクエストの field_names を反映。"""
+        resp = self._post_json(
+            self._url(), {"field_names": ["company", "phone"]}
+        )
+        self.assertEqual(
+            sorted(resp.json()["confirmed_field_names"]),
+            ["company", "phone"],
+        )
+
+    def test_r2_unconfirmed_count_in_response(self):
+        """R2: unconfirmed_count が処理後の値で正しく返る。"""
+        # company / notes / phone の 3 件 unconfirmed が初期状態
+        # company を確認 → 残り 2 件
+        resp = self._post_json(
+            self._url(), {"field_names": ["company"]}
+        )
+        self.assertEqual(resp.json()["unconfirmed_count"], 2)
