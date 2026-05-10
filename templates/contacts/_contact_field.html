@@ -12,9 +12,13 @@ dict[field_name -> ContactFieldConfidence]）と is_editable（編集可能モ�
 参照する。
 
 編集可能モード時：
-  - data-* 属性（field-name / contact-id / confidence-state）を付与
-  - confidence バッジ表示
-  - 修正 UI（ラジオ + 確定ボタン + 修正フォーム）を hidden で出力（D-3d JS が制御）
+  - data-* 属性（field-name / contact-id / confidence-state）を全フィールドに付与
+  - confidence バッジ表示（slot ラップ）
+  - 修正 UI（ラジオ + 確定ボタン + 修正フォーム）は mid / low の未確認フィールドのみ
+    （high / confirmed フィールドは既に確定状態のため、修正 UI を出さない）
+
+「すでに確認済みフィールドの再修正」「high フィールドの修正」動線は本タスクスコープ外。
+後続タスク（PersonDetailView 改修・名刺詳細画面パーツ置き換え時に ContactBaseForm 経由）で対応予定。
 
 表示のみモード時：
   - 値とバッジのみ表示、JS フックなし、修正 UI なし
@@ -32,43 +36,44 @@ dict[field_name -> ContactFieldConfidence]）と is_editable（編集可能モ�
       <span class="js-contact-field-badge-slot">{% confidence field_confidences field_name 'badge' %}</span>
     </div>
 
-    {# 修正 UI（D-3d JS で制御。初期は確定ボタン / 修正フォーム両方 hidden） #}
-    <div class="app-contact-field-actions">
-      <label>
-        <input type="radio"
-               name="contact-field-action-{{ field_name }}"
-               class="js-contact-field-action"
-               value="confirm">
-        確認 OK
-      </label>
-      <label>
-        <input type="radio"
-               name="contact-field-action-{{ field_name }}"
-               class="js-contact-field-action"
-               value="edit">
-        要修正
-      </label>
+    {% if cfc_state == 'mid' or cfc_state == 'low' %}
+      <div class="app-contact-field-actions">
+        <label>
+          <input type="radio"
+                 name="contact-field-action-{{ field_name }}"
+                 class="js-contact-field-action"
+                 value="confirm">
+          確認 OK
+        </label>
+        <label>
+          <input type="radio"
+                 name="contact-field-action-{{ field_name }}"
+                 class="js-contact-field-action"
+                 value="edit">
+          要修正
+        </label>
 
-      <button type="button"
-              class="app-btn app-btn--sm js-contact-field-confirm-btn"
-              hidden>
-        確定
-      </button>
+        <button type="button"
+                class="app-btn app-btn--sm js-contact-field-confirm-btn"
+                hidden>
+          確定
+        </button>
 
-      <div class="js-contact-field-edit-form" hidden>
-        <input type="text"
-               class="app-input js-contact-field-edit-input"
-               value="{{ value }}">
-        <button type="button"
-                class="app-btn app-btn--sm js-contact-field-update-btn">
-          修正
-        </button>
-        <button type="button"
-                class="app-btn app-btn--sm app-btn--secondary js-contact-field-cancel-btn">
-          キャンセル
-        </button>
+        <div class="js-contact-field-edit-form" hidden>
+          <input type="text"
+                 class="app-input js-contact-field-edit-input"
+                 value="{{ value }}">
+          <button type="button"
+                  class="app-btn app-btn--sm js-contact-field-update-btn">
+            修正
+          </button>
+          <button type="button"
+                  class="app-btn app-btn--sm app-btn--secondary js-contact-field-cancel-btn">
+            キャンセル
+          </button>
+        </div>
       </div>
-    </div>
+    {% endif %}
   </div>
 {% else %}
   <div class="app-detail-item">

@@ -974,6 +974,84 @@ class ContactDetailViewTests(TestCase):
         # data-confidence-state も付かない
         self.assertNotIn("data-confidence-state", body)
 
+    def _render_field(self, field_name, value, label="ラベル"):
+        """_contact_field.html を直接レンダリングするヘルパー。"""
+        tpl = Template('{% include "contacts/_contact_field.html" %}')
+        ctx = Context(
+            {
+                "is_editable": True,
+                "field_name": field_name,
+                "label": label,
+                "value": value,
+                "contact": self.contact_a,
+                "field_confidences": self.contact_a.get_field_confidences(),
+            }
+        )
+        return tpl.render(ctx)
+
+    def test_r5_high_field_no_edit_ui(self):
+        """R5: 編集可能モードでも high フィールドには修正 UI が出力されない。
+
+        ただし js-contact-field-row / data-confidence-state="high" /
+        js-contact-field-badge-slot は引き続き出力される（JS フック維持）。
+        """
+        # full_name は CFC 未作成 → 疑似 high
+        rendered = self._render_field("full_name", "Tester")
+        # 行レベルのフックは維持
+        self.assertIn("js-contact-field-row", rendered)
+        self.assertIn('data-confidence-state="high"', rendered)
+        self.assertIn("js-contact-field-badge-slot", rendered)
+        # 修正 UI フックは出力されない
+        self.assertNotIn("js-contact-field-action", rendered)
+        self.assertNotIn("js-contact-field-confirm-btn", rendered)
+        self.assertNotIn("js-contact-field-edit-form", rendered)
+        self.assertNotIn("app-contact-field-actions", rendered)
+
+    def test_r6_confirmed_field_no_edit_ui(self):
+        """R6: 編集可能モードでも confirmed フィールドには修正 UI が出力されない。
+
+        バッジは「確認済み」が描画され、行フックは維持される。
+        """
+        # email に confirmed_at セット済みの CFC を作成
+        ContactFieldConfidence.objects.create(
+            contact=self.contact_a,
+            field_name="email",
+            confidence=ContactFieldConfidence.Confidence.LOW,
+            confirmed_at=timezone.now(),
+            confirmed_by=self.user,
+        )
+        rendered = self._render_field("email", "a@example.com")
+        # 行レベルのフック + 確認済みバッジ
+        self.assertIn("js-contact-field-row", rendered)
+        self.assertIn('data-confidence-state="confirmed"', rendered)
+        self.assertIn("app-status-badge--success", rendered)
+        self.assertIn("確認済み", rendered)
+        # 修正 UI フックは出力されない
+        self.assertNotIn("js-contact-field-action", rendered)
+        self.assertNotIn("js-contact-field-confirm-btn", rendered)
+        self.assertNotIn("js-contact-field-edit-form", rendered)
+
+    def test_r7_mid_low_field_has_edit_ui(self):
+        """R7: mid / low フィールドには修正 UI が出力される（既存 R3 の補強）。"""
+        # company は medium CFC（setUp で作成済み）
+        rendered_mid = self._render_field("company", "A-company")
+        self.assertIn('data-confidence-state="mid"', rendered_mid)
+        self.assertIn("js-contact-field-action", rendered_mid)
+        self.assertIn("js-contact-field-confirm-btn", rendered_mid)
+        self.assertIn("js-contact-field-edit-form", rendered_mid)
+
+        # phone に low CFC を作成
+        ContactFieldConfidence.objects.create(
+            contact=self.contact_a,
+            field_name="phone",
+            confidence=ContactFieldConfidence.Confidence.LOW,
+        )
+        # field_confidences は再取得
+        self.contact_a.refresh_from_db()
+        rendered_low = self._render_field("phone", "03-1234")
+        self.assertIn('data-confidence-state="low"', rendered_low)
+        self.assertIn("js-contact-field-action", rendered_low)
+
 
 class ConfidenceTagTests(TestCase):
     """{% confidence %} カスタムタグの単体テスト（D-3b §8.2 C1〜C4）。"""

@@ -362,8 +362,13 @@
   }
 
   function applyConfirmedState(row, unconfirmedCount) {
-    /* AJAX 成功時の DOM 更新（指示書 §3-2） */
-    resetRow(row);
+    /* AJAX 成功時の DOM 更新。
+       修正 UI 全体（.app-contact-field-actions）を DOM から削除し、サーバ側で
+       リロード時の状態（confirmed フィールドにはテンプレートが
+       app-contact-field-actions を出力しない）と一致させる。 */
+    const actionsDiv = row.querySelector('.app-contact-field-actions');
+    if (actionsDiv) actionsDiv.remove();
+
     row.dataset.confidenceState = 'confirmed';
     const slot = row.querySelector('.js-contact-field-badge-slot');
     if (slot) slot.innerHTML = CONFIRMED_BADGE_HTML;
