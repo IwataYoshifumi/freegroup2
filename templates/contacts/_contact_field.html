@@ -29,7 +29,7 @@ dict[field_name -> ContactFieldConfidence]）と is_editable（編集可能モ�
     <div class="app-detail-label">{{ label }}</div>
     <div class="app-detail-value">
       <span class="js-contact-field-value">{{ value }}</span>
-      {% confidence field_confidences field_name 'badge' %}
+      <span class="js-contact-field-badge-slot">{% confidence field_confidences field_name 'badge' %}</span>
     </div>
 
     {# 修正 UI（D-3d JS で制御。初期は確定ボタン / 修正フォーム両方 hidden） #}

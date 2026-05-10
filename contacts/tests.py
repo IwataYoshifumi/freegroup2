@@ -956,6 +956,8 @@ class ContactDetailViewTests(TestCase):
         self.assertIn("js-contact-field-edit-input", body)
         self.assertIn("js-contact-field-update-btn", body)
         self.assertIn("js-contact-field-cancel-btn", body)
+        # confidence バッジ slot（D-3d-1 で追加、JS が innerHTML を差し替えるフック）
+        self.assertIn("js-contact-field-badge-slot", body)
         # data-confidence-state（company は medium CFC → "mid"）
         self.assertIn('data-confidence-state="mid"', body)
         # 共通 toast 要素（base.html）

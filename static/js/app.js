@@ -241,3 +241,197 @@
     locale
   });
 })();
+
+/* ============================================================
+ * D-3d-1 + D-3d-6: 共通 AJAX ヘルパー（CSRF + fetch ラッパー + toast 通知）
+ *
+ * window.appAjax 名前空間で公開：
+ *   - window.appAjax.postJson(url, payload) → Promise<{ok, status, data}>
+ *   - window.appAjax.showToastMessage(message) → void
+ *
+ * 既存 showToast() は引数なしで textContent を書き換えない仕様のため、
+ * メッセージ付き表示の独自関数を本ブロック内で実装する（既存ブロックは触らない）。
+ * ============================================================ */
+(function () {
+  function getCookie(name) {
+    if (!document.cookie) return null;
+    const cookies = document.cookie.split(';');
+    for (let i = 0; i < cookies.length; i++) {
+      const cookie = cookies[i].trim();
+      if (cookie.substring(0, name.length + 1) === name + '=') {
+        return decodeURIComponent(cookie.substring(name.length + 1));
+      }
+    }
+    return null;
+  }
+
+  let toastTimer = null;
+  function showToastMessage(message) {
+    const toast = document.querySelector('.app-toast');
+    if (!toast) return;
+    toast.textContent = message || '';
+    toast.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () {
+      toast.hidden = true;
+    }, 2400);
+  }
+
+  function errorMessageForStatus(status) {
+    if (status === 400) return '入力内容に問題があります';
+    if (status === 403) return 'この項目は編集できません';
+    if (status === 404) return 'データが見つかりません';
+    if (status >= 500 && status < 600) return 'サーバーエラーが発生しました';
+    if (status === 0) return '通信エラーが発生しました';
+    return 'エラーが発生しました';
+  }
+
+  function postJson(url, payload) {
+    return fetch(url, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': getCookie('csrftoken') || ''
+      },
+      body: JSON.stringify(payload)
+    }).then(function (response) {
+      const status = response.status;
+      return response.json().then(
+        function (data) {
+          const success = response.ok && data && data.success === true;
+          if (!success) {
+            showToastMessage(errorMessageForStatus(status));
+            return { ok: false, status: status, data: data };
+          }
+          return { ok: true, status: status, data: data };
+        },
+        function () {
+          /* JSON パース失敗 */
+          showToastMessage(errorMessageForStatus(0));
+          return { ok: false, status: 0, data: null };
+        }
+      );
+    }, function () {
+      /* ネットワークエラー */
+      showToastMessage(errorMessageForStatus(0));
+      return { ok: false, status: 0, data: null };
+    });
+  }
+
+  window.appAjax = {
+    postJson: postJson,
+    showToastMessage: showToastMessage
+  };
+})();
+
+/* ============================================================
+ * D-3d-2: Contact 詳細画面の個別フィールド「確認 OK」機能
+ *
+ * 対象 DOM（D-3b / D-3d-準備で _contact_field.html に仕込み済み）：
+ *   - .js-contact-field-row[data-field-name][data-contact-id][data-confidence-state]
+ *   - .js-contact-field-action（ラジオ confirm / edit）
+ *   - .js-contact-field-confirm-btn（確定ボタン、初期 hidden）
+ *   - .js-contact-field-edit-form（修正フォーム、初期 hidden）
+ *   - .js-contact-field-cancel-btn（キャンセル）
+ *   - .js-contact-field-badge-slot（confidence バッジ slot）
+ *   - .js-unconfirmed-count（未確認件数の <strong>、画面に 1 個）
+ *
+ * 値修正（修正ボタンの AJAX）は D-3d-3 で実装、本ブロックでは UI 開閉まで。
+ * ============================================================ */
+(function () {
+  const CONFIRMED_BADGE_HTML =
+    '<span class="app-status-badge app-status-badge--success">確認済み</span>';
+
+  function findRow(target) {
+    return target.closest('.js-contact-field-row');
+  }
+
+  function setHidden(el, hidden) {
+    if (!el) return;
+    el.hidden = !!hidden;
+  }
+
+  function resetRow(row) {
+    /* ラジオの選択を解除 + 確定ボタン / 修正フォームを hidden に戻す */
+    row.querySelectorAll('.js-contact-field-action').forEach(function (input) {
+      input.checked = false;
+    });
+    setHidden(row.querySelector('.js-contact-field-confirm-btn'), true);
+    setHidden(row.querySelector('.js-contact-field-edit-form'), true);
+  }
+
+  function applyConfirmedState(row, unconfirmedCount) {
+    /* AJAX 成功時の DOM 更新（指示書 §3-2） */
+    resetRow(row);
+    row.dataset.confidenceState = 'confirmed';
+    const slot = row.querySelector('.js-contact-field-badge-slot');
+    if (slot) slot.innerHTML = CONFIRMED_BADGE_HTML;
+
+    if (typeof unconfirmedCount === 'number') {
+      const counter = document.querySelector('.js-unconfirmed-count');
+      if (counter) counter.textContent = String(unconfirmedCount);
+    }
+  }
+
+  function onActionChange(input, row) {
+    const value = input.value;
+    const confirmBtn = row.querySelector('.js-contact-field-confirm-btn');
+    const editForm = row.querySelector('.js-contact-field-edit-form');
+    if (value === 'confirm') {
+      setHidden(confirmBtn, false);
+      setHidden(editForm, true);
+    } else if (value === 'edit') {
+      setHidden(confirmBtn, true);
+      setHidden(editForm, false);
+    }
+  }
+
+  function onConfirmClick(btn, row) {
+    const contactId = row.dataset.contactId;
+    const fieldName = row.dataset.fieldName;
+    if (!contactId || !fieldName) return;
+
+    btn.disabled = true;
+    const url = '/contacts/' + contactId + '/ajax-confirm-fields/';
+    window.appAjax
+      .postJson(url, { field_names: [fieldName] })
+      .then(function (result) {
+        if (result.ok) {
+          const count = result.data && result.data.unconfirmed_count;
+          applyConfirmedState(row, count);
+        }
+        /* 失敗時はヘルパー側で toast 表示済み、UI はそのまま操作可能 */
+      })
+      .finally(function () {
+        btn.disabled = false;
+      });
+  }
+
+  function onCancelClick(row) {
+    resetRow(row);
+  }
+
+  document.addEventListener('change', function (event) {
+    const input = event.target.closest('.js-contact-field-action');
+    if (!input) return;
+    const row = findRow(input);
+    if (!row) return;
+    onActionChange(input, row);
+  });
+
+  document.addEventListener('click', function (event) {
+    const confirmBtn = event.target.closest('.js-contact-field-confirm-btn');
+    if (confirmBtn) {
+      const row = findRow(confirmBtn);
+      if (row) onConfirmClick(confirmBtn, row);
+      return;
+    }
+
+    const cancelBtn = event.target.closest('.js-contact-field-cancel-btn');
+    if (cancelBtn) {
+      const row = findRow(cancelBtn);
+      if (row) onCancelClick(row);
+    }
+  });
+})();
