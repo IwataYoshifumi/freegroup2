@@ -19,6 +19,7 @@ from back_navigator.back_navigator import BackNavigator
 from .forms import UploadForm
 from .models import BusinessCard, OriginalImage
 from .services.image_processor import convert_to_jpeg
+from config.constants import DUPLICATE_CHECK_FIELDS
 from contacts.models import ContactFieldConfidence
 
 User = get_user_model()
@@ -149,20 +150,33 @@ class CardListView(ListView):
 
     def get_queryset(self):
         user = get_current_user(self.request)
+        # confidence ドットは DUPLICATE_CHECK_FIELDS のみ対象、confirmed_at で
+        # 「未確認」を区別する（DEBUG=True 時のみ表示）。
         qs = (
             BusinessCard.objects.filter(original_image__user=user)
             .select_related("original_image", "contact")
             .annotate(
-                has_low=Exists(
+                has_unconfirmed_low=Exists(
                     ContactFieldConfidence.objects.filter(
                         contact__business_card=OuterRef("pk"),
+                        field_name__in=DUPLICATE_CHECK_FIELDS,
                         confidence=ContactFieldConfidence.Confidence.LOW,
+                        confirmed_at__isnull=True,
                     )
                 ),
-                has_medium=Exists(
+                has_unconfirmed_medium=Exists(
                     ContactFieldConfidence.objects.filter(
                         contact__business_card=OuterRef("pk"),
+                        field_name__in=DUPLICATE_CHECK_FIELDS,
                         confidence=ContactFieldConfidence.Confidence.MEDIUM,
+                        confirmed_at__isnull=True,
+                    )
+                ),
+                has_confirmed=Exists(
+                    ContactFieldConfidence.objects.filter(
+                        contact__business_card=OuterRef("pk"),
+                        field_name__in=DUPLICATE_CHECK_FIELDS,
+                        confirmed_at__isnull=False,
                     )
                 ),
             )
@@ -236,10 +250,20 @@ class CardDetailView(DetailView):
         context["back"] = BackNavigator(self.request)
 
         contact = getattr(self.object, "contact", None)
+        # confidence_map は field_name -> 'low' / 'mid' / 'confirmed' の文字列。
+        # confirmed_at セット済み → 'confirmed'、それ以外は confidence 値（'medium'
+        # は 'mid' に短縮、Contact 詳細画面の {% confidence_state %} と整合）。
+        # 疑似 high のフィールドは map に含めない（テンプレート側で「キーなし = 何も
+        # 表示しない」を維持）。
         confidence_map = {}
         if contact is not None:
             for entry in contact.confidences.all():
-                confidence_map[entry.field_name] = entry.confidence
+                if entry.confirmed_at is not None:
+                    confidence_map[entry.field_name] = "confirmed"
+                elif entry.confidence == ContactFieldConfidence.Confidence.LOW:
+                    confidence_map[entry.field_name] = "low"
+                elif entry.confidence == ContactFieldConfidence.Confidence.MEDIUM:
+                    confidence_map[entry.field_name] = "mid"
         context["contact"] = contact
         context["confidence_map"] = confidence_map
 

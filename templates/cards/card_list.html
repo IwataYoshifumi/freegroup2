@@ -75,7 +75,15 @@
                 <a href="{% append_back_url detail_url back %}" class="app-btn app-btn--secondary app-btn--sm">詳細</a>
               </td>
               <td style="text-align:center; vertical-align:middle;">
-                {% if card.has_low %}🔴{% elif card.has_medium %}🟡{% endif %}
+                {% if debug %}
+                  {% if card.has_unconfirmed_low %}
+                    <span class="app-status-dot app-status-dot--error" title="未確認 low あり" aria-label="未確認 low あり"></span>
+                  {% elif card.has_unconfirmed_medium %}
+                    <span class="app-status-dot app-status-dot--warning" title="未確認 mid あり" aria-label="未確認 mid あり"></span>
+                  {% elif card.has_confirmed %}
+                    <span class="app-status-dot app-status-dot--success" title="確認済みあり（未確認なし）" aria-label="確認済みあり"></span>
+                  {% endif %}
+                {% endif %}
               </td>
               <td>
                 <div style="display:flex;align-items:flex-start;gap:6px;">
@@ -124,7 +132,18 @@
         {% url 'cards:card_detail' pk=card.id as detail_url %}
         <a href="{% append_back_url detail_url back %}" class="app-list-card" style="display: block; text-decoration: none; color: inherit;">
           <div class="app-list-card__main">
-            <strong>{% if card.has_low %}🔴{% elif card.has_medium %}🟡{% endif %}{{ card.contact.full_name|default:"(氏名なし)" }}</strong>
+            <strong>
+              {% if debug %}
+                {% if card.has_unconfirmed_low %}
+                  <span class="app-status-dot app-status-dot--error" title="未確認 low あり" aria-label="未確認 low あり"></span>
+                {% elif card.has_unconfirmed_medium %}
+                  <span class="app-status-dot app-status-dot--warning" title="未確認 mid あり" aria-label="未確認 mid あり"></span>
+                {% elif card.has_confirmed %}
+                  <span class="app-status-dot app-status-dot--success" title="確認済みあり（未確認なし）" aria-label="確認済みあり"></span>
+                {% endif %}
+              {% endif %}
+              {{ card.contact.full_name|default:"(氏名なし)" }}
+            </strong>
             {% if card.contact.company %}<div>{{ card.contact.company }}</div>{% endif %}
             {% if card.contact.title %}<div class="app-muted">{{ card.contact.title }}</div>{% endif %}
           </div>
