@@ -326,18 +326,10 @@
 })();
 
 /* ============================================================
- * D-3d-2: Contact 詳細画面の個別フィールド「確認 OK」機能
+ * D-3d-2 + D-3d-3: Contact 詳細画面 個別フィールドの「確認 OK」+ 値修正 AJAX
  *
- * 対象 DOM（D-3b / D-3d-準備で _contact_field.html に仕込み済み）：
- *   - .js-contact-field-row[data-field-name][data-contact-id][data-confidence-state]
- *   - .js-contact-field-action（ラジオ confirm / edit）
- *   - .js-contact-field-confirm-btn（確定ボタン、初期 hidden）
- *   - .js-contact-field-edit-form（修正フォーム、初期 hidden）
- *   - .js-contact-field-cancel-btn（キャンセル）
- *   - .js-contact-field-badge-slot（confidence バッジ slot）
- *   - .js-unconfirmed-count（未確認件数の <strong>、画面に 1 個）
- *
- * 値修正（修正ボタンの AJAX）は D-3d-3 で実装、本ブロックでは UI 開閉まで。
+ * テンプレート：templates/contacts/_contact_field.html。
+ * edit ラジオは画面内 1 行のみ展開（排他制御）— confirm 選択は他行に影響しない。
  * ============================================================ */
 (function () {
   const CONFIRMED_BADGE_HTML =
@@ -361,17 +353,21 @@
     setHidden(row.querySelector('.js-contact-field-edit-form'), true);
   }
 
-  function applyConfirmedState(row, unconfirmedCount) {
-    /* AJAX 成功時の DOM 更新。
-       修正 UI 全体（.app-contact-field-actions）を DOM から削除し、サーバ側で
-       リロード時の状態（confirmed フィールドにはテンプレートが
-       app-contact-field-actions を出力しない）と一致させる。 */
+  function applyConfirmedState(row, unconfirmedCount, updatedValue) {
+    /* .app-contact-field-actions を丸ごと削除して、リロード時の confirmed 状態
+       （テンプレートが actions を出力しない）と一致させる。
+       updatedValue は string のみ反映（空文字含む、省略時は値表示を触らない）。 */
     const actionsDiv = row.querySelector('.app-contact-field-actions');
     if (actionsDiv) actionsDiv.remove();
 
     row.dataset.confidenceState = 'confirmed';
     const slot = row.querySelector('.js-contact-field-badge-slot');
     if (slot) slot.innerHTML = CONFIRMED_BADGE_HTML;
+
+    if (typeof updatedValue === 'string') {
+      const valueEl = row.querySelector('.js-contact-field-value');
+      if (valueEl) valueEl.textContent = updatedValue;
+    }
 
     if (typeof unconfirmedCount === 'number') {
       const counter = document.querySelector('.js-unconfirmed-count');
@@ -387,6 +383,18 @@
       setHidden(confirmBtn, false);
       setHidden(editForm, true);
     } else if (value === 'edit') {
+      /* 他行の edit を閉じてから自行を展開（同時 1 行のみ）。 */
+      document
+        .querySelectorAll('.js-contact-field-row')
+        .forEach(function (otherRow) {
+          if (otherRow === row) return;
+          const otherEditRadio = otherRow.querySelector(
+            '.js-contact-field-action[value="edit"]'
+          );
+          if (otherEditRadio && otherEditRadio.checked) {
+            resetRow(otherRow);
+          }
+        });
       setHidden(confirmBtn, true);
       setHidden(editForm, false);
     }
@@ -413,6 +421,33 @@
       });
   }
 
+  function onUpdateClick(btn, row) {
+    /* バリデーションはサーバー側に委ねる（空文字も POST）。
+       失敗時は共通ヘルパーが toast を出すだけで、修正フォームは開いたまま維持。 */
+    const contactId = row.dataset.contactId;
+    const fieldName = row.dataset.fieldName;
+    if (!contactId || !fieldName) return;
+
+    const input = row.querySelector('.js-contact-field-edit-input');
+    if (!input) return;
+    const newValue = input.value;
+
+    btn.disabled = true;
+    const url = '/contacts/' + contactId + '/ajax-update-field/';
+    window.appAjax
+      .postJson(url, { field_name: fieldName, new_value: newValue })
+      .then(function (result) {
+        if (result.ok) {
+          const count = result.data && result.data.unconfirmed_count;
+          const updated = result.data && result.data.updated_value;
+          applyConfirmedState(row, count, updated);
+        }
+      })
+      .finally(function () {
+        btn.disabled = false;
+      });
+  }
+
   function onCancelClick(row) {
     resetRow(row);
   }
@@ -430,6 +465,13 @@
     if (confirmBtn) {
       const row = findRow(confirmBtn);
       if (row) onConfirmClick(confirmBtn, row);
+      return;
+    }
+
+    const updateBtn = event.target.closest('.js-contact-field-update-btn');
+    if (updateBtn) {
+      const row = findRow(updateBtn);
+      if (row) onUpdateClick(updateBtn, row);
       return;
     }
 
