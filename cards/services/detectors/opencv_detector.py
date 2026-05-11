@@ -60,127 +60,103 @@ def detect_cards(image_path: str) -> list[dict]:
       検出失敗時は空リストを返す（例外を外に漏らさない）。
     """
     try:
-        return _detect_with_debug(image_path)["results"]
+        debug_result = _detect_with_debug(image_path)
+        attempts = debug_result.get("attempts") or []
+        if not attempts:
+            return []
+        return attempts[-1].get("results", [])
     except Exception as e:
         logger.warning("detect_cards failed for %s: %s", image_path, e)
         return []
 
 
 def detect_cards_with_debug(image_path: str) -> dict:
-    """画像から名刺を検出し、最終結果と中間データを「全部入り」で返す（デバッグ用）。
+    """画像から名刺を検出し、各試行（通常／反転リトライ）の中間データを「全部入り」で返す。
 
-    検出ロジックは detect_cards() と同一。各段階の中間データを収集して返す。
+    検出ロジックは detect_cards() と同一。試行回数（attempt_no）軸で対称構造に並べる。
+    反転リトライが走らなかった場合は attempts 配列が 1 要素のみ。
+    走った場合は 2 要素（attempt_no=1 が通常、attempt_no=2 が反転後）。
 
     [性質] 純関数（ファイル読み取りのみ・DB 操作なし・副作用なし）
     [入力] image_path: 元画像のファイルパス
     [出力] dict:
       {
-        "results": list[dict],
-            # detect_cards() と同じ最終結果リスト。各要素：
-            # {"polygon": <polygon dict>, "warped_image": PIL.Image.Image}
-
         "image_size": {"width": int, "height": int, "area": int},
 
+        # 共通マスク（反転処理の影響を受けない 3 枚）
         "masks": {
-            "mask_diff":   PIL.Image.Image,  # 輝度差マスク
-            "mask_edge":   PIL.Image.Image,  # Canny エッジマスク
-            "mask_sat":    PIL.Image.Image,  # HSV 彩度マスク
-            "mask_or":     PIL.Image.Image,  # 上記3種を OR 合成
-            "mask_closed": PIL.Image.Image,  # クローズ処理後の最終マスク
+            "diff": PIL.Image.Image,  # 輝度差マスク
+            "edge": PIL.Image.Image,  # Canny エッジマスク
+            "sat":  PIL.Image.Image,  # HSV 彩度マスク
         },
-
-        "contours_count": int,  # findContours で取得した全輪郭数
-
-        "candidates_filter": [
-            # 全輪郭に対するフィルタ判定結果（通過/除外問わず全件）
-            {
-                "area": float,                 # 輪郭面積
-                "area_ratio": float,           # area / image_area
-                "rect_center": [float, float], # minAreaRect の中心 (cx, cy)
-                "rect_size":   [float, float], # minAreaRect の (rw, rh)
-                "rect_angle":  float,          # minAreaRect の回転角
-                "aspect_ratio": float | None,  # max/min（min=0 のとき None）
-                "passed": bool,
-                "reject_reason": str,
-                    # 通過時は ""
-                    # 除外時は "area_too_small" / "area_too_large"
-                    #         / "zero_size" / "aspect_invalid"
-            },
-            ...
-        ],
-
-        "candidates_dedup": [
-            # フィルタ通過候補に対する重複除去判定（面積大きい順に処理）
-            {
-                "bbox": [int, int, int, int],  # boundingRect (bx, by, bw, bh)
-                "area": float,
-                "kept": bool,
-                "overlap_with": int | None,
-                    # 除外時は重複した kept のインデックス
-                    # 保持時は None
-            },
-            ...
-        ],
-
-        "warp_failures": [
-            # 透視変換でサイズ基準未満になった候補
-            {
-                "polygon": dict,             # _pts_to_polygon と同形式
-                "computed_width":  int,
-                "computed_height": int,
-                "min_required": [100, 50],   # [_MIN_WARP_WIDTH, _MIN_WARP_HEIGHT]
-            },
-            ...
-        ],
-
-        "error_message": str,  # 失敗時のみ例外メッセージ。成功時は空文字列
-
         "mask_white_ratios": {
-            # 5 マスクそれぞれの白画素率（mask > 0 の比率, 0.0〜1.0）。
-            # mask 番号 → キーの対応は opencv_debug_cache._MASK_FILE_ORDER と一致。
-            "mask_1": float,  # mask_diff
-            "mask_2": float,  # mask_edge
-            "mask_3": float,  # mask_sat
-            "mask_4": float,  # mask_or
-            "mask_5": float,  # mask_closed
+            "diff": float, "edge": float, "sat": float,  # mask>0 の比率
         },
+
+        # 各試行ごとの中間データ
+        "attempts": [
+            {
+                "attempt_no": 1,            # 1=通常, 2=反転リトライ
+                "type": "normal",           # "normal" | "inverted"
+                "masks": {
+                    "or":     PIL.Image.Image,  # OR 合成マスク
+                    "closed": PIL.Image.Image,  # クローズ処理後の最終マスク
+                },
+                "mask_white_ratios": {"or": float, "closed": float},
+                "contours_count":    int,
+                "candidates_filter": list[dict],  # 全輪郭フィルタ判定結果（後述）
+                "candidates_dedup":  list[dict],  # 重複除去判定結果（後述）
+                "warp_failures":     list[dict],  # 透視変換サイズ未満候補（後述）
+                "results": [
+                    {"polygon": dict, "warped_image": PIL.Image.Image},
+                    ...
+                ],
+            },
+            # attempt_no=2 は反転リトライが走った場合のみ
+        ],
+
+        # candidates_filter の各要素：
+        #   {area, area_ratio, rect_center, rect_size, rect_angle,
+        #    aspect_ratio, passed, reject_reason}
+        #   reject_reason: "" | "area_too_small" | "area_too_large"
+        #                | "zero_size" | "aspect_invalid"
+        # candidates_dedup の各要素：
+        #   {bbox: [x,y,w,h], area, kept, overlap_with}
+        # warp_failures の各要素：
+        #   {polygon, computed_width, computed_height, min_required: [100, 50]}
 
         "sat_fallback": {
             # mask_sat 暴走時のフォールバック判定結果（背景高彩度対策）。
-            # triggered=True のときは mask_sat を OR 合成から除外して mask_or を構築している。
-            "triggered":       bool,   # フォールバック発動有無
-            "sat_white_ratio": float,  # mask_sat の実測白画素率（0.0〜1.0）
-            "threshold":       float,  # 発動閾値（_SAT_WHITE_RATIO_MAX の値）
+            "triggered":       bool,
+            "sat_white_ratio": float,
+            "threshold":       float,
         },
 
         "or_inversion": {
-            # 通常マスクで passed=0 のときに mask_or を反転して再試行した結果。
-            # attempted=True の場合、masks["mask_or"] / masks["mask_closed"] および
-            # contours_count / candidates_filter / candidates_dedup / warp_failures /
-            # results はいずれも反転後の値で上書きされている。
-            "attempted":     bool,   # 反転リトライを実施したか
-            "passed_before": int,    # 反転前の passed 数（attempted=True なら 0）
-            "passed_after":  int,    # 反転後の passed 数（attempted=False なら passed_before と同値）
-            "improved":      bool,   # passed_after > 0 か
-            "polygon_expand": {
-                # 反転リトライ経路で polygon を中心から外側に拡張した量の記録。
-                # 反転後マスクは「白地の連続領域」を拾うため polygon が名刺端の
-                # 数 px 内側で確定しがち。通常検出と同等の余白を持たせるため拡張する。
-                # attempted=False のときは {"ratio": 0.0, "min_px": 0} で埋まる。
-                "ratio":  float,   # 適用した拡張比率（対角線長に対する比率）
-                "min_px": int,     # 拡張量の下限ピクセル
-            },
+            # 反転リトライ判定結果。
+            "attempted":     bool,
+            "passed_before": int,
+            "passed_after":  int,
+            "improved":      bool,
+            "polygon_expand": {"ratio": float, "min_px": int},
         },
+
+        "error_message": str,  # 失敗時のみ例外メッセージ。成功時は空文字列
       }
 
       検出処理で例外が発生した場合は次を返す（例外を外に漏らさない）：
-        {"results": [], "error_message": str(例外)}
+        {"attempts": [], "error_message": str(例外)}
     """
     try:
         return _detect_with_debug(image_path)
     except Exception as e:
         logger.warning("detect_cards_with_debug failed for %s: %s", image_path, e)
-        return {"results": [], "error_message": str(e)}
+        return {"attempts": [], "error_message": str(e)}
+
+
+def _white_ratio(arr: np.ndarray) -> float:
+    """[性質] 純関数 / 2値マスクの白画素率（>0 の比率）を返す。"""
+    return float((arr > 0).sum() / arr.size) if arr.size else 0.0
 
 
 def _detect_with_debug(image_path: str) -> dict:
@@ -197,11 +173,29 @@ def _detect_with_debug(image_path: str) -> dict:
     # ② マスク生成（中間マスクも収集）
     masks_np = _build_mask(bgr, gray)
 
-    # ③〜⑦ 通常マスクで候補抽出・重複除去・透視変換
-    pipeline = _extract_from_closed_mask(masks_np["mask_closed"], np_rgb, image_area)
+    # ③〜⑦ 通常マスクで候補抽出・重複除去・透視変換（attempt_no=1）
+    pipeline_1 = _extract_from_closed_mask(masks_np["mask_closed"], np_rgb, image_area)
+    attempt_1 = {
+        "attempt_no": 1,
+        "type": "normal",
+        "masks": {
+            "or":     Image.fromarray(masks_np["mask_or"]),
+            "closed": Image.fromarray(masks_np["mask_closed"]),
+        },
+        "mask_white_ratios": {
+            "or":     _white_ratio(masks_np["mask_or"]),
+            "closed": _white_ratio(masks_np["mask_closed"]),
+        },
+        "contours_count":    pipeline_1["contours_count"],
+        "candidates_filter": pipeline_1["candidates_filter"],
+        "candidates_dedup":  pipeline_1["candidates_dedup"],
+        "warp_failures":     pipeline_1["warp_failures"],
+        "results":           pipeline_1["results"],
+    }
+    attempts = [attempt_1]
 
     # ⑧ 反転リトライ判定：通常マスクで passed=0 のとき mask_or を反転して再試行
-    passed_before = sum(1 for c in pipeline["candidates_filter"] if c["passed"])
+    passed_before = sum(1 for c in pipeline_1["candidates_filter"] if c["passed"])
     or_inversion = {
         "attempted": False,
         "passed_before": passed_before,
@@ -216,12 +210,12 @@ def _detect_with_debug(image_path: str) -> dict:
         mask_closed_inv = cv2.morphologyEx(
             mask_or_inv, cv2.MORPH_CLOSE, k_close, iterations=2
         )
-        pipeline_inv = _extract_from_closed_mask(
+        pipeline_2 = _extract_from_closed_mask(
             mask_closed_inv, np_rgb, image_area,
             expand_ratio=_INVERTED_POLYGON_EXPAND_RATIO,
             expand_min_px=_INVERTED_POLYGON_EXPAND_MIN_PX,
         )
-        passed_after = sum(1 for c in pipeline_inv["candidates_filter"] if c["passed"])
+        passed_after = sum(1 for c in pipeline_2["candidates_filter"] if c["passed"])
 
         or_inversion = {
             "attempted": True,
@@ -234,42 +228,40 @@ def _detect_with_debug(image_path: str) -> dict:
             },
         }
 
-        # 反転後の結果を最終結果として採用（DebugMask も反転後の mask_or/closed で上書き）
-        masks_np["mask_or"] = mask_or_inv
-        masks_np["mask_closed"] = mask_closed_inv
-        pipeline = pipeline_inv
-
-    # マスク白画素率（mask > 0 の比率）。numpy 配列のうちに計算する。
-    # キーの順序・対応は opencv_debug_cache._MASK_FILE_ORDER と一致させる。
-    def _white_ratio(arr):
-        return float((arr > 0).sum() / arr.size) if arr.size else 0.0
-
-    mask_white_ratios = {
-        "mask_1": _white_ratio(masks_np["mask_diff"]),
-        "mask_2": _white_ratio(masks_np["mask_edge"]),
-        "mask_3": _white_ratio(masks_np["mask_sat"]),
-        "mask_4": _white_ratio(masks_np["mask_or"]),
-        "mask_5": _white_ratio(masks_np["mask_closed"]),
-    }
+        attempts.append({
+            "attempt_no": 2,
+            "type": "inverted",
+            "masks": {
+                "or":     Image.fromarray(mask_or_inv),
+                "closed": Image.fromarray(mask_closed_inv),
+            },
+            "mask_white_ratios": {
+                "or":     _white_ratio(mask_or_inv),
+                "closed": _white_ratio(mask_closed_inv),
+            },
+            "contours_count":    pipeline_2["contours_count"],
+            "candidates_filter": pipeline_2["candidates_filter"],
+            "candidates_dedup":  pipeline_2["candidates_dedup"],
+            "warp_failures":     pipeline_2["warp_failures"],
+            "results":           pipeline_2["results"],
+        })
 
     return {
-        "results": pipeline["results"],
         "image_size": {"width": int(w), "height": int(h), "area": int(image_area)},
         "masks": {
-            "mask_diff":   Image.fromarray(masks_np["mask_diff"]),
-            "mask_edge":   Image.fromarray(masks_np["mask_edge"]),
-            "mask_sat":    Image.fromarray(masks_np["mask_sat"]),
-            "mask_or":     Image.fromarray(masks_np["mask_or"]),
-            "mask_closed": Image.fromarray(masks_np["mask_closed"]),
+            "diff": Image.fromarray(masks_np["mask_diff"]),
+            "edge": Image.fromarray(masks_np["mask_edge"]),
+            "sat":  Image.fromarray(masks_np["mask_sat"]),
         },
-        "contours_count": pipeline["contours_count"],
-        "candidates_filter": pipeline["candidates_filter"],
-        "candidates_dedup": pipeline["candidates_dedup"],
-        "warp_failures": pipeline["warp_failures"],
-        "error_message": "",
-        "mask_white_ratios": mask_white_ratios,
+        "mask_white_ratios": {
+            "diff": _white_ratio(masks_np["mask_diff"]),
+            "edge": _white_ratio(masks_np["mask_edge"]),
+            "sat":  _white_ratio(masks_np["mask_sat"]),
+        },
+        "attempts": attempts,
         "sat_fallback": masks_np["sat_fallback"],
         "or_inversion": or_inversion,
+        "error_message": "",
     }
 
 
