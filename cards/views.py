@@ -156,18 +156,21 @@ class OriginalDetailView(DetailView):
 
         debug_json = self.object.debug_json
         debug_masks = list(self.object.debug_masks.all())
-        mask_white_ratios = {
-            m.mask_type: m.metadata.get("white_ratio")
-            for m in debug_masks
-            if isinstance(m.metadata, dict) and m.metadata.get("white_ratio") is not None
-        }
+        mask_white_ratios = _build_mask_white_ratios(debug_masks)
+        block1_mask_urls, block2_mask_urls = _build_mask_url_blocks(debug_masks)
+
+        last_attempt = _get_last_attempt(debug_json) or {}
+
         context["debug_json"] = debug_json
         context["debug_summary"] = _build_debug_summary(
             debug_json, raw_json=raw_json, bc_count=business_cards.count()
         )
-        context["mask_urls"] = _build_mask_urls(debug_masks)
+        context["block1_mask_urls"] = block1_mask_urls
+        context["block2_mask_urls"] = block2_mask_urls
         context["candidates_passed"] = _candidates_passed(debug_json)
         context["candidates_all"] = _candidates_all(debug_json)
+        context["candidates_dedup"] = last_attempt.get("candidates_dedup") or []
+        context["warp_failures"] = last_attempt.get("warp_failures") or []
         context["overlay_polygons"] = _build_overlay_polygons(debug_json)
         context["warning_stripe"] = _build_warning_stripe(debug_json, mask_white_ratios)
 
@@ -177,11 +180,22 @@ class OriginalDetailView(DetailView):
 _REJECT_REASONS_ORDER = ("area_too_small", "area_too_large", "zero_size", "aspect_invalid")
 
 
+def _get_last_attempt(debug_json):
+    """[性質] 純関数 / debug_json の最終 attempt dict を返す。なければ None。"""
+    if not debug_json:
+        return None
+    attempts = debug_json.get("attempts") or []
+    return attempts[-1] if attempts else None
+
+
 def _build_debug_summary(debug_json, raw_json=None, bc_count=0):
     if not debug_json:
         return None
-    cf = debug_json.get("candidates_filter") or []
-    cd = debug_json.get("candidates_dedup") or []
+    last = _get_last_attempt(debug_json) or {}
+    cf = last.get("candidates_filter") or []
+    cd = last.get("candidates_dedup") or []
+    results = last.get("results") or []
+    wf = last.get("warp_failures") or []
 
     rejected = [x for x in cf if not x.get("passed")]
     reason_counter = Counter(x.get("reject_reason") or "" for x in rejected)
@@ -189,7 +203,7 @@ def _build_debug_summary(debug_json, raw_json=None, bc_count=0):
         f"{r}: {reason_counter.get(r, 0)}" for r in _REJECT_REASONS_ORDER
     )
 
-    results_count = len(debug_json.get("results") or [])
+    results_count = len(results)
     has_min_ng = _has_minimum_info_ng_count(raw_json)
     if has_min_ng is None:
         has_min_ng_str = "未実行（OCR 未走行）"
@@ -203,12 +217,12 @@ def _build_debug_summary(debug_json, raw_json=None, bc_count=0):
 
     return {
         "image_size": debug_json.get("image_size") or {},
-        "contours_count": debug_json.get("contours_count", 0),
+        "contours_count": last.get("contours_count", 0) or 0,
         "passed_count": sum(1 for x in cf if x.get("passed")),
         "candidates_total": len(cf),
         "kept_count": sum(1 for x in cd if x.get("kept")),
         "dedup_total": len(cd),
-        "warp_failures_count": len(debug_json.get("warp_failures") or []),
+        "warp_failures_count": len(wf),
         "results_count": results_count,
         "error_message": debug_json.get("error_message") or "",
         "computed_at": debug_json.get("computed_at") or "",
@@ -246,48 +260,108 @@ def _build_warning_stripe(debug_json, mask_white_ratios=None):
     """検出失敗の警告ストライプに表示する条件メッセージリスト（立った条件のみ列挙）。
 
     [入力]
-      debug_json         : OriginalImage.debug_json
-      mask_white_ratios  : {mask_type: white_ratio} 形式の dict（DebugMask.metadata 由来）
+      debug_json         : OriginalImage.debug_json（新構造）
+      mask_white_ratios  : {attempt_no: {mask_type: white_ratio}} 形式の dict
     [出力] list[str]: 立った条件のメッセージ。1 つも該当しなければ空リスト。
+
+    判定対象は最終 attempt（反転リトライがあれば 2 回目、なければ 1 回目）。
+    反転リトライが走っていた場合は、その事実自体もストライプに追加する。
     """
     if not debug_json:
         return []
     msgs = []
+    last = _get_last_attempt(debug_json) or {}
+    last_attempt_no = last.get("attempt_no")
 
-    # 条件1: closed マスク白画素率 ≥ 80%
+    # 条件1: 最終 attempt の closed マスク白画素率 ≥ 80%
     mwr = mask_white_ratios or {}
-    closed_ratio = mwr.get(DebugMask.MaskType.CLOSED)
+    closed_ratio = (mwr.get(last_attempt_no) or {}).get(DebugMask.MaskType.CLOSED)
     if closed_ratio is not None and closed_ratio >= 0.80:
         msgs.append(f"マスク白画素率が異常 ({closed_ratio * 100:.1f}%)")
 
-    # 条件2: passed = 0
-    cf = debug_json.get("candidates_filter") or []
-    passed_count = sum(1 for x in cf if x.get("passed"))
-    if passed_count == 0:
-        msgs.append("passed が 0 件")
+    # 条件2: 最終 attempt の results が 0 件
+    results = last.get("results") or []
+    if len(results) == 0:
+        msgs.append("最終検出 0 件")
 
-    # 条件3: area_too_large ≥ 1
+    # 条件3: 最終 attempt の area_too_large ≥ 1
+    cf = last.get("candidates_filter") or []
     too_large = sum(1 for x in cf if x.get("reject_reason") == "area_too_large")
     if too_large >= 1:
         msgs.append(f"巨大候補が {too_large} 件")
 
+    # 条件4: 反転リトライが実施されたか
+    or_inv = debug_json.get("or_inversion") or {}
+    if or_inv.get("attempted"):
+        before = or_inv.get("passed_before", 0)
+        after = or_inv.get("passed_after", 0)
+        improved = "／改善あり" if or_inv.get("improved") else "／改善なし"
+        msgs.append(f"反転リトライ実行（{before} 件 → {after} 件{improved}）")
+
     return msgs
 
 
-def _build_mask_urls(debug_masks):
-    """5枚のマスク画像 (label, url) のリスト。DebugMask レコード経由で取得。
+_BLOCK1_MASK_TYPES = (
+    DebugMask.MaskType.DIFF,
+    DebugMask.MaskType.EDGE,
+    DebugMask.MaskType.SAT,
+    DebugMask.MaskType.OR,
+    DebugMask.MaskType.CLOSED,
+)
+_BLOCK2_MASK_TYPES = (
+    DebugMask.MaskType.OR,
+    DebugMask.MaskType.CLOSED,
+)
 
+
+def _build_mask_url_blocks(debug_masks):
+    """マスク画像 (label, url) のリストを attempt ごとの 2 ブロックで返す。
+
+    [性質] 準関数（DebugMask の mask_image.url 参照のみ・DB 書込なし）
     [入力] debug_masks: DebugMask の iterable（同一 OriginalImage 配下）
-    [出力] list[(label, url|None)]、長さ常に5、TextChoices の定義順（diff→edge→sat→or→closed）
+    [出力] (block1, block2)
+      block1: 1 回目（attempt_no=1）の (label, url|None) リスト。長さ常に 5。
+              順序は diff → edge → sat → or → closed。
+      block2: 2 回目（attempt_no=2）の (label, url|None) リスト。
+              attempt_no=2 のレコードが 1 件も無ければ [] を返す。
+              ある場合は or → closed の 2 件固定。
+    label の "mask_N" の番号は MaskType.choices の定義順（1〜5）に合わせる。
     """
-    by_type = {m.mask_type: m for m in debug_masks}
-    items = []
-    for idx, (mask_type, verbose) in enumerate(DebugMask.MaskType.choices, start=1):
-        label = f"mask_{idx}: {verbose}"
-        rec = by_type.get(mask_type)
+    by_key = {(m.mask_type, m.attempt_no): m for m in debug_masks}
+    type_to_idx = {
+        mt: idx for idx, (mt, _) in enumerate(DebugMask.MaskType.choices, start=1)
+    }
+    verbose_of = dict(DebugMask.MaskType.choices)
+
+    def _entry(mask_type, attempt_no):
+        idx = type_to_idx[mask_type]
+        label = f"mask_{idx}: {verbose_of[mask_type]}"
+        rec = by_key.get((mask_type, attempt_no))
         url = rec.mask_image.url if rec else None
-        items.append((label, url))
-    return items
+        return (label, url)
+
+    block1 = [_entry(mt, 1) for mt in _BLOCK1_MASK_TYPES]
+
+    has_attempt2 = any(m.attempt_no == 2 for m in debug_masks)
+    block2 = [_entry(mt, 2) for mt in _BLOCK2_MASK_TYPES] if has_attempt2 else []
+
+    return block1, block2
+
+
+def _build_mask_white_ratios(debug_masks):
+    """[性質] 純関数 / DebugMask.metadata の white_ratio を attempt_no 別に集約。
+
+    [出力] {attempt_no: {mask_type: ratio}} 形式の dict。
+    """
+    ratios = {}
+    for m in debug_masks:
+        if not isinstance(m.metadata, dict):
+            continue
+        wr = m.metadata.get("white_ratio")
+        if wr is None:
+            continue
+        ratios.setdefault(m.attempt_no, {})[m.mask_type] = wr
+    return ratios
 
 
 def _format_candidate(c):
@@ -315,9 +389,8 @@ def _format_candidate(c):
 
 
 def _candidates_passed(debug_json):
-    if not debug_json:
-        return []
-    cf = debug_json.get("candidates_filter") or []
+    last = _get_last_attempt(debug_json) or {}
+    cf = last.get("candidates_filter") or []
     return [
         _format_candidate(c)
         for c in sorted(
@@ -329,9 +402,8 @@ def _candidates_passed(debug_json):
 
 def _candidates_all(debug_json):
     """passed 優先 → area 降順。"""
-    if not debug_json:
-        return []
-    cf = debug_json.get("candidates_filter") or []
+    last = _get_last_attempt(debug_json) or {}
+    cf = last.get("candidates_filter") or []
     return [
         _format_candidate(c)
         for c in sorted(
@@ -349,16 +421,19 @@ def _build_overlay_polygons(debug_json):
 
     is_giant: results 内の area_ratio 中央値の 1.5 倍以上のものに True。
               ただし results が 1 件以下の場合は判定スキップ（全て False）。
+
+    対象は最終 attempt の results（反転リトライがあれば 2 回目、なければ 1 回目）。
     """
     if not debug_json:
         return []
+    last = _get_last_attempt(debug_json) or {}
     keys = ("top_left", "top_right", "bottom_right", "bottom_left")
     image_size = debug_json.get("image_size") or {}
     image_area = image_size.get("area") or 0
 
     # 各 polygon の座標と shoelace area を一旦計算
     raw = []
-    for r in debug_json.get("results") or []:
+    for r in last.get("results") or []:
         polygon = r.get("polygon") or {}
         coords = []
         for k in keys:
