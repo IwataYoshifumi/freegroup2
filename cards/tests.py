@@ -134,15 +134,17 @@ class CardListViewConfidenceAnnotateTests(TestCase):
         self.assertTrue(card.has_confirmed)
 
 
-class CardDetailViewConfidenceMapTests(TestCase):
-    """CardDetailView の confidence_map 拡張テスト（仕様変更後）。
+class CardDetailViewFieldConfidencesTests(TestCase):
+    """CardDetailView の field_confidences context テスト（D-3b/D-3d パーツ再利用）。
 
-    'low' / 'mid' / 'confirmed' の文字列を含むこと、'medium' は使われないこと。
+    CFC レコード（low/mid/confirmed）が context に CFC インスタンス dict として
+    反映されること、疑似 high（CFC レコードなし）は dict に含まれないことを検証。
+    旧 confidence_map は廃止。
     """
 
     def setUp(self):
         self.user = User.objects.create_superuser(
-            username="card_detail_test_user", password="dummy"
+            username="card_detail_fc_test_user", password="dummy"
         )
         self.original = OriginalImage.objects.create(
             user=self.user, status=OriginalImage.STATUS_EXTRACTED
@@ -163,8 +165,8 @@ class CardDetailViewConfidenceMapTests(TestCase):
         self.client.force_login(self.user)
         self.url = reverse("cards:card_detail", kwargs={"pk": self.bc.pk})
 
-    def test_confidence_map_uses_mid_low_confirmed_strings(self):
-        """confidence_map の値が 'low' / 'mid' / 'confirmed' に正規化される。"""
+    def test_field_confidences_includes_low_mid_confirmed_records(self):
+        """CFC レコード（mid/low/confirmed）が field_confidences に CFC インスタンスで載る。"""
         ContactFieldConfidence.objects.create(
             contact=self.contact,
             field_name="company",
@@ -185,20 +187,147 @@ class CardDetailViewConfidenceMapTests(TestCase):
 
         resp = self.client.get(self.url)
         self.assertEqual(resp.status_code, 200)
-        cmap = resp.context["confidence_map"]
+        fc = resp.context["field_confidences"]
 
-        self.assertEqual(cmap.get("company"), "mid")
-        self.assertEqual(cmap.get("phone"), "low")
-        self.assertEqual(cmap.get("email"), "confirmed")
+        self.assertEqual(
+            fc["company"].confidence, ContactFieldConfidence.Confidence.MEDIUM
+        )
+        self.assertIsNone(fc["company"].confirmed_at)
+        self.assertEqual(
+            fc["phone"].confidence, ContactFieldConfidence.Confidence.LOW
+        )
+        self.assertIsNone(fc["phone"].confirmed_at)
+        self.assertEqual(
+            fc["email"].confidence, ContactFieldConfidence.Confidence.LOW
+        )
+        self.assertIsNotNone(fc["email"].confirmed_at)
 
-        # 'medium' という値は使われない（'mid' に短縮されている）
-        self.assertNotIn("medium", cmap.values())
-
-    def test_confidence_map_excludes_pseudo_high(self):
-        """疑似 high のフィールド（CFC レコードなし）は confidence_map に含まれない。"""
-        # CFC レコードなしのまま
+    def test_field_confidences_includes_pseudo_high_for_missing_cfc(self):
+        """CFC レコードなしフィールドは confidence='high' の疑似インスタンスで含まれる
+        （Contact.get_field_confidences の仕様、§10.5.3）。"""
         resp = self.client.get(self.url)
-        cmap = resp.context["confidence_map"]
-        self.assertNotIn("full_name", cmap)
-        self.assertNotIn("company", cmap)
-        self.assertEqual(cmap, {})
+        fc = resp.context["field_confidences"]
+        self.assertIn("full_name", fc)
+        self.assertEqual(fc["full_name"].confidence, "high")
+        self.assertIsNone(fc["full_name"].confirmed_at)
+        self.assertIsNone(fc["full_name"].pk)
+
+    def test_confidence_map_removed_from_context(self):
+        """旧 confidence_map は context から削除されている（regression 防止）。"""
+        resp = self.client.get(self.url)
+        self.assertNotIn("confidence_map", resp.context)
+
+
+class CardDetailViewEditableModeTests(TestCase):
+    """CardDetailView の is_editable 判定 + 編集 UI 表示有無テスト。
+
+    Contact.status と Person.status の組み合わせで編集可能モードと表示のみモードを
+    切り替え、_contact_field.html の編集 UI（ラジオ等）が条件通りに出ること、
+    Contact 紐付きなしのとき編集セクション自体が出ないことを検証。
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_superuser(
+            username="card_detail_editable_test_user", password="dummy"
+        )
+        self.original = OriginalImage.objects.create(
+            user=self.user, status=OriginalImage.STATUS_EXTRACTED
+        )
+        self.bc = BusinessCard.objects.create(
+            original_image=self.original, card_index=0
+        )
+        self.person = Person.objects.create()
+        self.contact = Contact.objects.create(
+            person=self.person,
+            status=Contact.Status.PRIMARY,
+            business_card=self.bc,
+            full_name="T",
+            company="C",
+        )
+        self.person.primary_contact = self.contact
+        self.person.save(update_fields=["primary_contact", "updated_at"])
+
+        # low/mid CFC が無いと _contact_field.html がラジオを描画しないため
+        # 編集 UI の表示有無を検証するために 1 件作る
+        ContactFieldConfidence.objects.create(
+            contact=self.contact,
+            field_name="company",
+            confidence=ContactFieldConfidence.Confidence.MEDIUM,
+        )
+
+        self.client.force_login(self.user)
+        self.url = reverse("cards:card_detail", kwargs={"pk": self.bc.pk})
+
+    def _promote_other_to_primary(self):
+        """self.contact を別ステータスにしたあと、別 Contact を primary に据える。"""
+        other = Contact.objects.create(
+            person=self.person,
+            status=Contact.Status.PRIMARY,
+            full_name="P",
+        )
+        self.person.primary_contact = other
+        self.person.save(update_fields=["primary_contact", "updated_at"])
+        return other
+
+    def test_primary_contact_is_editable(self):
+        """primary Contact + active Person → is_editable=True、編集 UI が描画される。"""
+        resp = self.client.get(self.url)
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.context["is_editable"])
+        content = resp.content.decode()
+        self.assertIn("js-contact-field-row", content)
+        self.assertIn("js-contact-field-action", content)
+        self.assertNotIn("表示のみモード", content)
+
+    def test_active_contact_is_editable(self):
+        """active Contact + active Person → is_editable=True。"""
+        self.contact.status = Contact.Status.ACTIVE
+        self.contact.save(update_fields=["status", "updated_at"])
+        self._promote_other_to_primary()
+
+        resp = self.client.get(self.url)
+        self.assertTrue(resp.context["is_editable"])
+
+    def test_inactive_contact_is_not_editable(self):
+        """inactive Contact → is_editable=False、表示のみモード、編集ラジオ非表示。"""
+        self.contact.status = Contact.Status.INACTIVE
+        self.contact.save(update_fields=["status", "updated_at"])
+        self._promote_other_to_primary()
+
+        resp = self.client.get(self.url)
+        self.assertFalse(resp.context["is_editable"])
+        content = resp.content.decode()
+        self.assertIn("表示のみモード", content)
+        self.assertNotIn("js-contact-field-action", content)
+
+    def test_archived_person_is_not_editable(self):
+        """archived Person 配下の Contact → is_editable=False。"""
+        self.person.status = Person.Status.ARCHIVED
+        self.person.save(update_fields=["status", "updated_at"])
+
+        resp = self.client.get(self.url)
+        self.assertFalse(resp.context["is_editable"])
+
+    def test_merged_person_is_not_editable(self):
+        """merged Person 配下の Contact → is_editable=False。"""
+        self.person.status = Person.Status.MERGED
+        self.person.save(update_fields=["status", "updated_at"])
+
+        resp = self.client.get(self.url)
+        self.assertFalse(resp.context["is_editable"])
+
+    def test_no_contact_hides_editing_section(self):
+        """Contact 紐付きなし → 編集セクション自体が出ず、デバッグセクションは維持。"""
+        bc2 = BusinessCard.objects.create(
+            original_image=self.original, card_index=1
+        )
+        url2 = reverse("cards:card_detail", kwargs={"pk": bc2.pk})
+
+        resp = self.client.get(url2)
+        self.assertEqual(resp.status_code, 200)
+        self.assertIsNone(resp.context["contact"])
+        self.assertFalse(resp.context["is_editable"])
+        self.assertEqual(resp.context["field_confidences"], {})
+        content = resp.content.decode()
+        self.assertNotIn("js-contact-field-row", content)
+        self.assertIn("Contact が紐付いていません", content)

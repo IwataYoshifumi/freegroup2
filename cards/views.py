@@ -20,7 +20,7 @@ from .forms import UploadForm
 from .models import BusinessCard, OriginalImage
 from .services.image_processor import convert_to_jpeg
 from config.constants import DUPLICATE_CHECK_FIELDS
-from contacts.models import ContactFieldConfidence
+from contacts.models import Contact, ContactFieldConfidence
 
 User = get_user_model()
 
@@ -223,11 +223,12 @@ class CardListView(ListView):
 
 
 class CardDetailView(DetailView):
-    """名刺詳細画面（仕様書 v1.2.2 / Phase 4）。
+    """名刺詳細画面（仕様書 v1.4.2 / Phase 4）。
 
-    BusinessCard の Contact 情報をグルーピング表示し、
-    ContactFieldConfidence の low/medium マーカーを各フィールドに添える。
-    同じ元画像内の他名刺は下部にサムネイルリストで表示する。
+    OpenCV デバッグ情報の閲覧と Contact フィールド編集（ContactDetailView と同じ
+    AJAX 編集 UI）を併せ持つ業務画面。Contact 編集パーツは _contact_field.html
+    を再利用するため、ContactDetailView と同じ context（field_confidences /
+    is_editable）を提供する。
     """
 
     model = BusinessCard
@@ -250,22 +251,19 @@ class CardDetailView(DetailView):
         context["back"] = BackNavigator(self.request)
 
         contact = getattr(self.object, "contact", None)
-        # confidence_map は field_name -> 'low' / 'mid' / 'confirmed' の文字列。
-        # confirmed_at セット済み → 'confirmed'、それ以外は confidence 値（'medium'
-        # は 'mid' に短縮、Contact 詳細画面の {% confidence_state %} と整合）。
-        # 疑似 high のフィールドは map に含めない（テンプレート側で「キーなし = 何も
-        # 表示しない」を維持）。
-        confidence_map = {}
-        if contact is not None:
-            for entry in contact.confidences.all():
-                if entry.confirmed_at is not None:
-                    confidence_map[entry.field_name] = "confirmed"
-                elif entry.confidence == ContactFieldConfidence.Confidence.LOW:
-                    confidence_map[entry.field_name] = "low"
-                elif entry.confidence == ContactFieldConfidence.Confidence.MEDIUM:
-                    confidence_map[entry.field_name] = "mid"
         context["contact"] = contact
-        context["confidence_map"] = confidence_map
+
+        # Contact 編集 UI 用 context（ContactDetailView と同等、_contact_field.html 再利用）。
+        # contact が None なら編集セクションを丸ごと出さないため、空辞書 + False で安全に。
+        if contact is not None:
+            context["field_confidences"] = contact.get_field_confidences()
+            context["is_editable"] = (
+                contact.status in (Contact.Status.PRIMARY, Contact.Status.ACTIVE)
+                and contact.person.status == "active"
+            )
+        else:
+            context["field_confidences"] = {}
+            context["is_editable"] = False
 
         sibling_cards = (
             BusinessCard.objects.filter(original_image=self.object.original_image)

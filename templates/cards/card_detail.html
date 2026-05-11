@@ -7,7 +7,6 @@
   <div class="app-page-header" style="max-width:1100px;">
     <div>
       <div class="app-breadcrumb">名刺管理 / 名刺一覧 / 詳細</div>
-      {# 2-1: h1 とアップロードボタンを横並び #}
       <div style="display:flex; align-items:center; gap:12px;">
         <h1>名刺詳細</h1>
         <a href="{% url 'cards:card_upload' %}"
@@ -27,11 +26,9 @@
 
   <section class="app-card" style="max-width:1100px;">
     <div class="app-detail-grid" style="grid-template-columns: minmax(320px, 420px) 1fr;">
-      {# 左カラム：画像と元画像情報 #}
       <div>
         <div class="app-section__header"><h2>名刺画像</h2></div>
 
-        {# 2-2: サムネイル（最大幅300px、クリックでモーダル） #}
         {% if card.card_image %}
           <img src="{{ card.card_image.url }}"
                alt="名刺画像"
@@ -57,8 +54,6 @@
             </div>
           </div>
 
-          {# Contact 詳細画面へのデバッグ用リンク（D-3b 動線、暫定）。
-             debug=True かつ Contact 紐付きありの時のみ表示。後続タスクで正式動線に置換予定。 #}
           {% if debug and card.contact %}
             {% url 'contacts:contact_detail' pk=card.contact.id as contact_detail_url %}
             <div style="margin-top: var(--app-space-sm);">
@@ -68,97 +63,111 @@
               </a>
             </div>
           {% endif %}
-
-          </div>
+        </div>
       </div>
 
-      {# 右カラム：Contact 情報 #}
       <div>
         {% if contact %}
-          {# 氏名グループ #}
-          {% if contact.full_name or contact.salutation_name %}
+          {% if not is_editable %}
+            <div style="margin-bottom:var(--app-space-sm);">
+              <span class="app-muted">表示のみモード（編集不可）</span>
+            </div>
+          {% endif %}
+
+          {% if contact.full_name or contact.salutation_name or contact.last_name or contact.first_name %}
             <div class="app-section__header"><h2>氏名</h2></div>
             {% if contact.full_name %}
-              {% include "cards/_field.html" with label="氏名" value=contact.full_name confidence=confidence_map.full_name %}
+              {% include "contacts/_contact_field.html" with field_name="full_name" label="氏名" value=contact.full_name %}
+            {% endif %}
+            {% if contact.last_name %}
+              {% include "contacts/_contact_field.html" with field_name="last_name" label="姓" value=contact.last_name %}
+            {% endif %}
+            {% if contact.first_name %}
+              {% include "contacts/_contact_field.html" with field_name="first_name" label="名" value=contact.first_name %}
             {% endif %}
             {% if contact.salutation_name %}
-              {% include "cards/_field.html" with label="敬称付き氏名" value=contact.salutation_name confidence=confidence_map.salutation_name %}
+              {% include "contacts/_contact_field.html" with field_name="salutation_name" label="敬称付き氏名" value=contact.salutation_name %}
             {% endif %}
           {% endif %}
 
-          {# 所属グループ #}
           {% if contact.company or contact.branch or contact.department or contact.title or contact.qualification or contact.catchphrase %}
             <div class="app-section__header" style="margin-top: var(--app-space-md);"><h2>所属</h2></div>
             {% if contact.company %}
-              {% include "cards/_field.html" with label="会社" value=contact.company confidence=confidence_map.company %}
+              {% include "contacts/_contact_field.html" with field_name="company" label="会社" value=contact.company %}
             {% endif %}
             {% if contact.branch %}
-              {% include "cards/_field.html" with label="支店・店舗" value=contact.branch confidence=confidence_map.branch %}
+              {% include "contacts/_contact_field.html" with field_name="branch" label="支店・店舗" value=contact.branch %}
             {% endif %}
             {% if contact.department %}
-              {% include "cards/_field.html" with label="部署" value=contact.department confidence=confidence_map.department %}
+              {% include "contacts/_contact_field.html" with field_name="department" label="部署" value=contact.department %}
             {% endif %}
             {% if contact.title %}
-              {% include "cards/_field.html" with label="役職" value=contact.title confidence=confidence_map.title %}
+              {% include "contacts/_contact_field.html" with field_name="title" label="役職" value=contact.title %}
             {% endif %}
             {% if contact.qualification %}
-              {% include "cards/_field.html" with label="資格" value=contact.qualification confidence=confidence_map.qualification %}
+              {% include "contacts/_contact_field.html" with field_name="qualification" label="資格" value=contact.qualification %}
             {% endif %}
             {% if contact.catchphrase %}
-              {% include "cards/_field.html" with label="キャッチコピー" value=contact.catchphrase confidence=confidence_map.catchphrase %}
+              {% include "contacts/_contact_field.html" with field_name="catchphrase" label="キャッチコピー" value=contact.catchphrase %}
             {% endif %}
           {% endif %}
 
-          {# 連絡先グループ #}
-          {% if contact.email or contact.phone or contact.mobile or contact.fax or contact.website %}
+          {% if contact.email or contact.mobile or contact.phone or contact.fax or contact.website %}
             <div class="app-section__header" style="margin-top: var(--app-space-md);"><h2>連絡先</h2></div>
             {% if contact.email %}
-              {% include "cards/_field.html" with label="メール" value=contact.email confidence=confidence_map.email %}
+              {% include "contacts/_contact_field.html" with field_name="email" label="メール" value=contact.email %}
             {% endif %}
             {% if contact.mobile %}
-              {% include "cards/_field.html" with label="携帯" value=contact.mobile confidence=confidence_map.mobile %}
+              {% include "contacts/_contact_field.html" with field_name="mobile" label="携帯" value=contact.mobile %}
             {% endif %}
             {% if contact.phone %}
-              {% include "cards/_field.html" with label="電話" value=contact.phone confidence=confidence_map.phone %}
+              {% include "contacts/_contact_field.html" with field_name="phone" label="電話" value=contact.phone %}
             {% endif %}
             {% if contact.fax %}
-              {% include "cards/_field.html" with label="FAX" value=contact.fax confidence=confidence_map.fax %}
+              {% include "contacts/_contact_field.html" with field_name="fax" label="FAX" value=contact.fax %}
             {% endif %}
             {% if contact.website %}
-              {% include "cards/_field.html" with label="ウェブサイト" value=contact.website confidence=confidence_map.website %}
+              {% include "contacts/_contact_field.html" with field_name="website" label="ウェブサイト" value=contact.website %}
             {% endif %}
           {% endif %}
 
-          {# SNS グループ #}
           {% if contact.twitter or contact.linkedin or contact.facebook or contact.github or contact.instagram %}
             <div class="app-section__header" style="margin-top: var(--app-space-md);"><h2>SNS</h2></div>
             {% if contact.twitter %}
-              {% include "cards/_field.html" with label="Twitter" value=contact.twitter confidence=confidence_map.twitter %}
+              {% include "contacts/_contact_field.html" with field_name="twitter" label="Twitter" value=contact.twitter %}
             {% endif %}
             {% if contact.linkedin %}
-              {% include "cards/_field.html" with label="LinkedIn" value=contact.linkedin confidence=confidence_map.linkedin %}
+              {% include "contacts/_contact_field.html" with field_name="linkedin" label="LinkedIn" value=contact.linkedin %}
             {% endif %}
             {% if contact.facebook %}
-              {% include "cards/_field.html" with label="Facebook" value=contact.facebook confidence=confidence_map.facebook %}
+              {% include "contacts/_contact_field.html" with field_name="facebook" label="Facebook" value=contact.facebook %}
             {% endif %}
             {% if contact.github %}
-              {% include "cards/_field.html" with label="GitHub" value=contact.github confidence=confidence_map.github %}
+              {% include "contacts/_contact_field.html" with field_name="github" label="GitHub" value=contact.github %}
             {% endif %}
             {% if contact.instagram %}
-              {% include "cards/_field.html" with label="Instagram" value=contact.instagram confidence=confidence_map.instagram %}
+              {% include "contacts/_contact_field.html" with field_name="instagram" label="Instagram" value=contact.instagram %}
             {% endif %}
           {% endif %}
 
-          {# 住所グループ #}
-          {% if contact.address %}
+          {% if contact.postal_code or contact.address %}
             <div class="app-section__header" style="margin-top: var(--app-space-md);"><h2>住所</h2></div>
-            {% include "cards/_field.html" with label="住所" value=contact.address confidence=confidence_map.address %}
+            {% if contact.postal_code %}
+              {% include "contacts/_contact_field.html" with field_name="postal_code" label="郵便番号" value=contact.postal_code %}
+            {% endif %}
+            {% if contact.address %}
+              {% include "contacts/_contact_field.html" with field_name="address" label="住所" value=contact.address %}
+            {% endif %}
           {% endif %}
 
-          {# その他 #}
-          {% if contact.notes %}
+          {% if contact.notes or contact.lang %}
             <div class="app-section__header" style="margin-top: var(--app-space-md);"><h2>その他</h2></div>
-            {% include "cards/_field.html" with label="メモ" value=contact.notes confidence=confidence_map.notes %}
+            {% if contact.notes %}
+              {% include "contacts/_contact_field.html" with field_name="notes" label="メモ" value=contact.notes %}
+            {% endif %}
+            {% if contact.lang %}
+              {% include "contacts/_contact_field.html" with field_name="lang" label="言語" value=contact.lang %}
+            {% endif %}
           {% endif %}
         {% else %}
           <p class="app-muted">Contact が紐付いていません。</p>
@@ -168,7 +177,7 @@
   </section>
 
   {% if debug %}
-    <details class="app-card" style="max-width:1100px;">
+    <details class="app-card" style="max-width:1100px; margin-top:var(--app-space-md);">
       <summary style="cursor:pointer; font-weight:bold; padding:var(--app-space-sm) 0;">開発用情報</summary>
       <div style="margin-top:var(--app-space-md);">
         <div class="app-section__header"><h2>元画像</h2></div>
@@ -211,14 +220,12 @@
     </details>
   {% endif %}
 
-  {# 2-4: 右下戻るボタン #}
   <div class="app-action-area" style="margin-top:24px; max-width:1100px;">
     {% if back.back_exist %}
       <a href="{% back_url back %}" class="app-btn app-btn--secondary">＜ 戻る</a>
     {% endif %}
   </div>
 
-  {# 2-2: モーダル（card_image がある場合のみ） #}
   {% if card.card_image %}
     <div class="app-modal-backdrop" hidden></div>
     <div class="app-modal" id="cardImageModal" hidden>
