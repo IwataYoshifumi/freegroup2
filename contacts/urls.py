@@ -1,6 +1,7 @@
 """contacts アプリの URL ルーティング（仕様書 v1.4.2 §11.3）。
 
 定義する URL：
+  - contact_list（v1.4.2 仕様変更追加）: Contact 一覧画面（GET）
   - contact_detail（11 番、D-3b）: Contact 詳細画面（GET）
   - ajax_update_field（D-3c）: 1 フィールド値修正 + 自動 confirmed 化（POST）
   - ajax_confirm_fields（D-3c）: confidence 確認のみ（POST、個別 / 一括両用）
@@ -15,6 +16,7 @@ app_name = "contacts"
 
 
 urlpatterns = [
+    path("", views.ContactListView.as_view(), name="contact_list"),
     path(
         "<uuid:pk>/",
         views.ContactDetailView.as_view(),

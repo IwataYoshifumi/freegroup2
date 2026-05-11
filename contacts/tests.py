@@ -1180,3 +1180,244 @@ class ContactConfidenceTagTests(TestCase):
         """CC3: CFC レコードなし → 「確認すべきフィールドはありません」。"""
         rendered = self._render(self.contact)
         self.assertIn("確認すべきフィールドはありません", rendered)
+
+
+class ContactListViewTests(TestCase):
+    """ContactListView の単体テスト（v1.4.2 仕様変更追加）。
+
+    7 フィールド検索（tel は phone/mobile/fax の OR）、include_inactive、
+    person.status="active" 絞り込み、updated_at 降順、ページネーション、
+    未認証 200 を検証する。
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="contact_list_test_user", password="dummy"
+        )
+        self.person_a = Person.objects.create()
+        self.contact_a = Contact.objects.create(
+            person=self.person_a,
+            status=Contact.Status.PRIMARY,
+            full_name="Alice Smith",
+            company="Acme Corp",
+            department="Sales",
+            title="Manager",
+            email="alice@acme.example",
+            phone="03-1234-5678",
+            address="Tokyo",
+        )
+        self.person_a.primary_contact = self.contact_a
+        self.person_a.save(update_fields=["primary_contact", "updated_at"])
+
+        self.client = Client()
+        self.client.force_login(self.user)
+        self.url = reverse("contacts:contact_list")
+
+    def _make_primary(self, **kwargs):
+        """別 Person 配下に primary Contact を作るヘルパー。"""
+        person = Person.objects.create()
+        contact = Contact.objects.create(
+            person=person, status=Contact.Status.PRIMARY, **kwargs
+        )
+        person.primary_contact = contact
+        person.save(update_fields=["primary_contact", "updated_at"])
+        return contact
+
+    def test_default_shows_primary_only(self):
+        """初回アクセス（searched なし）→ primary のみ、active / inactive は非表示。"""
+        active = Contact.objects.create(
+            person=self.person_a,
+            status=Contact.Status.ACTIVE,
+            full_name="A-active",
+        )
+        inactive = Contact.objects.create(
+            person=self.person_a,
+            status=Contact.Status.INACTIVE,
+            full_name="A-inactive",
+        )
+        resp = self.client.get(self.url)
+        self.assertEqual(resp.status_code, 200)
+        ids = [c.id for c in resp.context["contacts"]]
+        self.assertIn(self.contact_a.id, ids)
+        self.assertNotIn(active.id, ids)
+        self.assertNotIn(inactive.id, ids)
+        self.assertEqual(resp.context["selected_statuses"], ["primary"])
+        self.assertFalse(resp.context["searched"])
+
+    def test_status_filter_primary_active(self):
+        """searched=1 + status=[primary, active] → primary + active 表示、inactive 非表示。"""
+        active = Contact.objects.create(
+            person=self.person_a,
+            status=Contact.Status.ACTIVE,
+            full_name="A-active",
+        )
+        inactive = Contact.objects.create(
+            person=self.person_a,
+            status=Contact.Status.INACTIVE,
+            full_name="A-inactive",
+        )
+        resp = self.client.get(
+            self.url, {"searched": "1", "status": ["primary", "active"]}
+        )
+        ids = [c.id for c in resp.context["contacts"]]
+        self.assertIn(self.contact_a.id, ids)
+        self.assertIn(active.id, ids)
+        self.assertNotIn(inactive.id, ids)
+        self.assertTrue(resp.context["searched"])
+        self.assertEqual(
+            sorted(resp.context["selected_statuses"]), ["active", "primary"]
+        )
+
+    def test_status_filter_inactive_only(self):
+        """searched=1 + status=inactive → inactive のみ表示、primary/active 非表示。"""
+        active = Contact.objects.create(
+            person=self.person_a,
+            status=Contact.Status.ACTIVE,
+            full_name="A-active",
+        )
+        inactive = Contact.objects.create(
+            person=self.person_a,
+            status=Contact.Status.INACTIVE,
+            full_name="A-inactive",
+        )
+        resp = self.client.get(
+            self.url, {"searched": "1", "status": "inactive"}
+        )
+        ids = [c.id for c in resp.context["contacts"]]
+        self.assertIn(inactive.id, ids)
+        self.assertNotIn(self.contact_a.id, ids)
+        self.assertNotIn(active.id, ids)
+
+    def test_status_filter_all_unchecked(self):
+        """searched=1 + status なし → 0 件（全チェック外しの自然な結果）。"""
+        Contact.objects.create(
+            person=self.person_a,
+            status=Contact.Status.ACTIVE,
+            full_name="A-active",
+        )
+        Contact.objects.create(
+            person=self.person_a,
+            status=Contact.Status.INACTIVE,
+            full_name="A-inactive",
+        )
+        resp = self.client.get(self.url, {"searched": "1"})
+        self.assertEqual(list(resp.context["contacts"]), [])
+        self.assertEqual(resp.context["selected_statuses"], [])
+
+    def test_merged_person_excluded_regardless_of_status(self):
+        """merged Person 配下の Contact は status を何選んでも非表示（regression）。"""
+        merged_person = Person.objects.create(status=Person.Status.MERGED)
+        merged_primary = Contact.objects.create(
+            person=merged_person,
+            status=Contact.Status.PRIMARY,
+            full_name="merged-primary",
+        )
+        merged_inactive = Contact.objects.create(
+            person=merged_person,
+            status=Contact.Status.INACTIVE,
+            full_name="merged-inactive",
+        )
+
+        # 初回（primary フィルタ）→ merged primary も非表示
+        resp = self.client.get(self.url)
+        self.assertNotIn(
+            merged_primary.id, [c.id for c in resp.context["contacts"]]
+        )
+
+        # 3 status 全選択 → merged 配下はいずれも非表示
+        resp = self.client.get(
+            self.url,
+            {
+                "searched": "1",
+                "status": ["primary", "active", "inactive"],
+            },
+        )
+        ids = [c.id for c in resp.context["contacts"]]
+        self.assertNotIn(merged_primary.id, ids)
+        self.assertNotIn(merged_inactive.id, ids)
+
+    def test_search_and_name_company(self):
+        """name と company を同時指定で AND 検索（初回 primary フィルタ下）。"""
+        c1 = self._make_primary(
+            full_name="Alice Tanaka", company="Wonder Corp"
+        )
+        c2 = self._make_primary(
+            full_name="Bob Smith", company="Acme Industries"
+        )
+        c3 = self._make_primary(
+            full_name="Alice Brown", company="Acme Group"
+        )
+
+        resp = self.client.get(self.url, {"name": "Alice", "company": "Acme"})
+        ids = [c.id for c in resp.context["contacts"]]
+        self.assertIn(self.contact_a.id, ids)
+        self.assertIn(c3.id, ids)
+        self.assertNotIn(c1.id, ids)
+        self.assertNotIn(c2.id, ids)
+
+    def test_search_tel_or_phone_mobile_fax(self):
+        """tel は phone / mobile / fax の OR 一致。"""
+        c_mobile = self._make_primary(
+            full_name="MobOnly", mobile="090-1111-2222"
+        )
+        c_fax = self._make_primary(full_name="FaxOnly", fax="06-9999-8888")
+        # setUp の contact_a は phone="03-1234-5678"
+
+        resp = self.client.get(self.url, {"tel": "1234"})
+        ids = [c.id for c in resp.context["contacts"]]
+        self.assertIn(self.contact_a.id, ids)
+        self.assertNotIn(c_mobile.id, ids)
+        self.assertNotIn(c_fax.id, ids)
+
+        resp = self.client.get(self.url, {"tel": "090-1111"})
+        ids = [c.id for c in resp.context["contacts"]]
+        self.assertIn(c_mobile.id, ids)
+        self.assertNotIn(self.contact_a.id, ids)
+        self.assertNotIn(c_fax.id, ids)
+
+        resp = self.client.get(self.url, {"tel": "06-9999"})
+        ids = [c.id for c in resp.context["contacts"]]
+        self.assertIn(c_fax.id, ids)
+        self.assertNotIn(self.contact_a.id, ids)
+        self.assertNotIn(c_mobile.id, ids)
+
+    def test_order_by_updated_at_desc(self):
+        """並び順は updated_at 降順。timing fragility を避けるため update() で明示設定。"""
+        from datetime import timedelta
+
+        c_old = self._make_primary(full_name="Old")
+        c_new = self._make_primary(full_name="New")
+
+        now = timezone.now()
+        Contact.objects.filter(pk=self.contact_a.pk).update(
+            updated_at=now - timedelta(hours=2)
+        )
+        Contact.objects.filter(pk=c_old.pk).update(
+            updated_at=now - timedelta(hours=1)
+        )
+        Contact.objects.filter(pk=c_new.pk).update(updated_at=now)
+
+        resp = self.client.get(self.url)
+        ids = [c.id for c in resp.context["contacts"]]
+        self.assertEqual(ids.index(c_new.id), 0)
+        self.assertEqual(ids.index(c_old.id), 1)
+        self.assertEqual(ids.index(self.contact_a.id), 2)
+
+    def test_pagination_21_records_split_to_2_pages(self):
+        """21 件以上で 2 ページ目に分かれる（paginate_by=20）。"""
+        for i in range(20):
+            self._make_primary(full_name=f"page-test-{i:02d}")
+
+        resp = self.client.get(self.url)
+        self.assertTrue(resp.context["is_paginated"])
+        self.assertEqual(len(list(resp.context["contacts"])), 20)
+
+        resp2 = self.client.get(self.url, {"page": "2"})
+        self.assertEqual(len(list(resp2.context["contacts"])), 1)
+
+    def test_unauthenticated_returns_200(self):
+        """未ログイン → 200（仮認証スタイル、ContactDetailView と同じ）。"""
+        # スーパーユーザーがいなくても ContactListView は user フィルタしないので 200
+        c = Client()
+        resp = c.get(self.url)
+        self.assertEqual(resp.status_code, 200)

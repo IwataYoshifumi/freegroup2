@@ -20,11 +20,12 @@ D-3c で追加した AJAX 2 エンドポイント、および D-3b で追加し�
 import json
 
 from django.contrib.auth import get_user_model
+from django.db.models import Q
 from django.http import JsonResponse
 from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.decorators.http import require_POST
-from django.views.generic import DetailView
+from django.views.generic import DetailView, ListView
 
 from back_navigator.back_navigator import BackNavigator
 from duplicates.models import DuplicateCandidate, PersonMergeLog
@@ -44,6 +45,104 @@ def get_current_user(request):
     if request.user.is_authenticated:
         return request.user
     return User.objects.filter(is_superuser=True).first()
+
+
+class ContactListView(ListView):
+    """Contact 一覧画面（v1.4.2 仕様変更で追加、仕様書改訂は別途）。
+
+    GET 専用。デフォルトは active Person 配下の primary / active のみ表示。
+    検索フォームの「inactive を含める」チェックで inactive も表示できる
+    （merged / archived Person 配下は常に除外）。検索仕様は CardListView と
+    同形（7 フィールド AND、tel は phone / mobile / fax の OR）。
+    """
+
+    model = Contact
+    template_name = "contacts/contact_list.html"
+    context_object_name = "contacts"
+    paginate_by = 20
+
+    _SEARCH_PARAMS = (
+        "name",
+        "company",
+        "department",
+        "title",
+        "email",
+        "tel",
+        "address",
+    )
+    _VALID_STATUSES = ("primary", "active", "inactive")
+
+    def _get_selected_statuses(self):
+        """status チェック状態の解決。初回（searched なし）は primary のみ、
+        検索後はチェックされた値そのまま（不正値は捨てる、空も許容で 0 件）。"""
+        if self.request.GET.get("searched") != "1":
+            return ["primary"]
+        return [
+            s
+            for s in self.request.GET.getlist("status")
+            if s in self._VALID_STATUSES
+        ]
+
+    def get_queryset(self):
+        selected = self._get_selected_statuses()
+        if not selected:
+            return Contact.objects.none()
+
+        qs = Contact.objects.filter(
+            status__in=selected, person__status="active"
+        ).select_related("person", "business_card")
+
+        p = self.request.GET
+        if p.get("name", "").strip():
+            qs = qs.filter(full_name__icontains=p["name"].strip())
+        if p.get("company", "").strip():
+            qs = qs.filter(company__icontains=p["company"].strip())
+        if p.get("department", "").strip():
+            qs = qs.filter(department__icontains=p["department"].strip())
+        if p.get("title", "").strip():
+            qs = qs.filter(title__icontains=p["title"].strip())
+        if p.get("email", "").strip():
+            qs = qs.filter(email__icontains=p["email"].strip())
+        if p.get("tel", "").strip():
+            tel = p["tel"].strip()
+            qs = qs.filter(
+                Q(phone__icontains=tel)
+                | Q(mobile__icontains=tel)
+                | Q(fax__icontains=tel)
+            )
+        if p.get("address", "").strip():
+            qs = qs.filter(address__icontains=p["address"].strip())
+
+        return qs.order_by("-updated_at", "-created_at")
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+
+        back = BackNavigator(self.request)
+        back.push_current(
+            "コンタクト一覧",
+            [
+                "name",
+                "company",
+                "department",
+                "title",
+                "email",
+                "tel",
+                "address",
+                "status",
+                "searched",
+                "page",
+            ],
+        )
+        context["back"] = back
+
+        context["active_app"] = "contacts"
+        context["active_menu"] = "contacts:contact_list"
+        for key in self._SEARCH_PARAMS:
+            context[key] = self.request.GET.get(key, "")
+        context["selected_statuses"] = self._get_selected_statuses()
+        context["searched"] = self.request.GET.get("searched") == "1"
+        return context
 
 
 class ContactDetailView(DetailView):
