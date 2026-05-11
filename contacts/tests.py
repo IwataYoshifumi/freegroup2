@@ -1052,6 +1052,81 @@ class ContactDetailViewTests(TestCase):
         self.assertIn('data-confidence-state="low"', rendered_low)
         self.assertIn("js-contact-field-action", rendered_low)
 
+    # ---- inactive Contact 履歴セクション（引継ぎ資料 v5 §4.2）----
+
+    def test_inactive_contacts_displayed(self):
+        """同一 Person 配下の inactive Contact が context に含まれ、画面に表示される。"""
+        inactive = Contact.objects.create(
+            person=self.person_a,
+            status=Contact.Status.INACTIVE,
+            full_name="A-inactive-old",
+        )
+        resp = self.client.get(self._url())
+        ids = [c.id for c in resp.context["inactive_contacts"]]
+        self.assertIn(inactive.id, ids)
+        body = resp.content.decode()
+        self.assertIn("過去のコンタクト（inactive 履歴）", body)
+        self.assertIn("A-inactive-old", body)
+
+    def test_inactive_contacts_excludes_self(self):
+        """自分自身が inactive Contact の時、自身は inactive_contacts から除外される。"""
+        # primary は contact_a。別途同 Person 配下に inactive を 2 件作り、
+        # その 1 件を ContactDetailView で開いて自分自身が除外されることを確認。
+        inactive_self = Contact.objects.create(
+            person=self.person_a,
+            status=Contact.Status.INACTIVE,
+            full_name="self-inactive",
+        )
+        inactive_other = Contact.objects.create(
+            person=self.person_a,
+            status=Contact.Status.INACTIVE,
+            full_name="other-inactive",
+        )
+        resp = self.client.get(self._url(inactive_self))
+        ids = [c.id for c in resp.context["inactive_contacts"]]
+        self.assertNotIn(inactive_self.id, ids)
+        self.assertIn(inactive_other.id, ids)
+
+    def test_inactive_contacts_empty(self):
+        """同一 Person 配下に inactive がない → 空 QuerySet、画面に「なし」表示。"""
+        resp = self.client.get(self._url())
+        self.assertEqual(list(resp.context["inactive_contacts"]), [])
+        body = resp.content.decode()
+        self.assertIn("過去のコンタクト（inactive 履歴）", body)
+        self.assertIn("inactive Contact なし", body)
+
+    def test_inactive_contacts_shown_in_archived_person(self):
+        """archived Person 配下の Contact からも inactive 履歴が見える（表示のみモード）。"""
+        inactive = Contact.objects.create(
+            person=self.person_a,
+            status=Contact.Status.INACTIVE,
+            full_name="archived-pp-inactive",
+        )
+        self.person_a.status = Person.Status.ARCHIVED
+        self.person_a.save(update_fields=["status", "updated_at"])
+
+        resp = self.client.get(self._url())
+        self.assertFalse(resp.context["is_editable"])
+        ids = [c.id for c in resp.context["inactive_contacts"]]
+        self.assertIn(inactive.id, ids)
+        self.assertIn("archived-pp-inactive", resp.content.decode())
+
+    def test_inactive_contacts_shown_in_merged_person(self):
+        """merged Person 配下の Contact からも inactive 履歴が見える（表示のみモード）。"""
+        inactive = Contact.objects.create(
+            person=self.person_a,
+            status=Contact.Status.INACTIVE,
+            full_name="merged-pp-inactive",
+        )
+        self.person_a.status = Person.Status.MERGED
+        self.person_a.save(update_fields=["status", "updated_at"])
+
+        resp = self.client.get(self._url())
+        self.assertFalse(resp.context["is_editable"])
+        ids = [c.id for c in resp.context["inactive_contacts"]]
+        self.assertIn(inactive.id, ids)
+        self.assertIn("merged-pp-inactive", resp.content.decode())
+
 
 class ConfidenceTagTests(TestCase):
     """{% confidence %} カスタムタグの単体テスト（D-3b §8.2 C1〜C4）。"""

@@ -209,6 +209,12 @@ class ContactDetailView(DetailView):
         merge_logs = PersonMergeLog.get_for_person(contact.person)
         previous_person = contact.previous_person
 
+        # 同一 Person 配下の inactive Contact 履歴（自分自身は除外）。
+        # active / primary のときは exclude は no-op、自分が inactive なら自身を弾く。
+        inactive_contacts = (
+            contact.person.get_inactive_contacts().exclude(pk=contact.pk)
+        )
+
         # BackNavigator（詳細画面なので push_current は呼ばない、既存 cards 慣例に揃える。
         # BackNavigator.push_current は keys=[] を DEBUG 時に ValueError として弾くため、
         # 詳細画面ではスタック生成だけ行い、一覧画面側で push_current 済みのスタックを参照する）
@@ -227,6 +233,7 @@ class ContactDetailView(DetailView):
                 "pending_duplicates": pending_duplicates,
                 "merge_logs": merge_logs,
                 "previous_person": previous_person,
+                "inactive_contacts": inactive_contacts,
                 "back": back,
                 "active_app": "cards",
                 "active_menu": "cards:card_list",

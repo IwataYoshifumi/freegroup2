@@ -313,6 +313,10 @@
           <a href="{% append_back_url prev_person_url back %}" class="app-btn app-btn--secondary app-btn--sm">人物詳細</a>
         </p>
       {% endif %}
+
+      {# inactive Contact 履歴（同一 Person 配下、自分自身を除く） #}
+      <div class="app-section__header" style="margin-top:var(--app-space-md);"><h3>過去のコンタクト（inactive 履歴）</h3></div>
+      {% include "contacts/_inactive_contacts.html" %}
     </div>
   </details>
 
