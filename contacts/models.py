@@ -102,6 +102,43 @@ class Contact(models.Model):
             ),
         ]
 
+    # AJAX 経由（Contact 詳細画面、§10.6.4 ケース 4）で update_field() から
+    # 修正可能なフィールドの集合。システム管理フィールド（status / previous_* /
+    # created_* / updated_* / person / business_card / duplicate_checked_at）は
+    # 含めない。将来 ContactBaseForm.Meta.fields に切り替える予定（申し送りメモ
+    # §4.2、Contact.fix() の DUPLICATE_CHECK_FIELDS 暫定参照と同じ運用）。
+    UPDATABLE_FIELDS = (
+        # 名前系
+        "full_name",
+        "last_name",
+        "first_name",
+        "salutation_name",
+        # 会社系
+        "company",
+        "department",
+        "title",
+        "qualification",
+        "catchphrase",
+        "branch",
+        # 連絡先系
+        "postal_code",
+        "address",
+        "email",
+        "phone",
+        "mobile",
+        "fax",
+        "website",
+        # SNS
+        "twitter",
+        "linkedin",
+        "facebook",
+        "github",
+        "instagram",
+        # メモ・言語
+        "notes",
+        "lang",
+    )
+
     def __str__(self):
         return self.full_name or f"Contact {self.id}"
 
@@ -151,6 +188,74 @@ class Contact(models.Model):
                 ContactFieldConfidence.mark_fields_as_confirmed(
                     self, low_mid_field_names, user
                 )
+
+    def update_field(self, field_name, new_value, user):
+        """1 フィールドを修正し、当該フィールドの ContactFieldConfidence を確認済み化する
+        （§10.6.4 ケース 4、D-3a）。
+
+        [性質] 副作用あり（DB 書込：自身のフィールド + ContactFieldConfidence の確認済み化
+               + DUPLICATE_CHECK_FIELDS のときは pending DC の invalidated 化）
+        [入力] field_name: str（UPDATABLE_FIELDS のいずれか）
+               new_value: 任意（field_name の値型）
+               user: 確認者（updated_by および ContactFieldConfidence.confirmed_by に記録）
+        [出力] None
+        [例外] ValueError（self.pk が None、または field_name が UPDATABLE_FIELDS に
+               含まれない場合）
+
+        AJAX 経由の個別フィールド修正・確認用。Contact 詳細画面から呼ばれる想定
+        （仕様書 §10.6.4 ケース 4）。
+
+        処理内容（1 トランザクション）：
+          1. 値に差分があれば self に反映して限定 save
+             （updated_by = user / updated_at は auto_now で更新）
+          2. 当該 1 フィールドの ContactFieldConfidence を confirmed 化
+             （low/mid CFC レコードがあれば。high 扱い（CFC レコードなし）なら no-op、
+             §10.6.1 既存挙動）
+          3. field_name が DUPLICATE_CHECK_FIELDS に含まれる場合のみ
+             invalidate_pending_candidates(self) を呼ぶ（§12.7）
+
+        contact.fix() との責務の違い：
+          - fix(): 全 low/mid フィールドを confirmed 化（フォーム送信時、ケース 2）
+          - update_field(): 当該 1 フィールドのみ confirmed 化（AJAX、ケース 4）
+
+        ガード（指示書 §3.8）：保存済み Contact のみ受け付ける。Contact.id は
+        UUIDField(default=uuid.uuid4) のため pk チェックでは判定できないので、
+        `_state.adding` で「これから INSERT する未保存インスタンス」を検出する。
+        """
+        if self._state.adding or self.pk is None:
+            raise ValueError(
+                "contact.update_field() requires a saved Contact "
+                "(must already exist in DB)."
+            )
+        if field_name not in self.UPDATABLE_FIELDS:
+            raise ValueError(
+                f"'{field_name}' is not an updatable field"
+            )
+
+        # 循環 import を避けるため遅延 import
+        from duplicates.services.merge_executor import (
+            invalidate_pending_candidates,
+        )
+
+        with transaction.atomic():
+            # 1. 値の差分があれば save
+            old_value = getattr(self, field_name)
+            if old_value != new_value:
+                setattr(self, field_name, new_value)
+                self.updated_by = user
+                self.save(
+                    update_fields=[field_name, "updated_by", "updated_at"]
+                )
+
+            # 2. 当該フィールドの ContactFieldConfidence を confirmed 化
+            #    （DB 上に CFC レコードがないフィールドは no-op、§10.6.1）
+            ContactFieldConfidence.mark_fields_as_confirmed(
+                self, [field_name], user
+            )
+
+            # 3. DUPLICATE_CHECK_FIELDS のときのみ §12.7 を発火
+            if field_name in DUPLICATE_CHECK_FIELDS:
+                invalidate_pending_candidates(self)
 
     def get_field_confidences(self):
         """全フィールド分の ContactFieldConfidence インスタンス dict を返す（§10.5.3）。

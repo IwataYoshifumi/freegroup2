@@ -57,6 +57,18 @@
             </div>
           </div>
 
+          {# Contact 詳細画面へのデバッグ用リンク（D-3b 動線、暫定）。
+             debug=True かつ Contact 紐付きありの時のみ表示。後続タスクで正式動線に置換予定。 #}
+          {% if debug and card.contact %}
+            {% url 'contacts:contact_detail' pk=card.contact.id as contact_detail_url %}
+            <div style="margin-top: var(--app-space-sm);">
+              <a href="{% append_back_url contact_detail_url back %}"
+                 class="app-btn app-btn--secondary app-btn--sm">
+                Contact 詳細を見る（デバッグ用）
+              </a>
+            </div>
+          {% endif %}
+
           </div>
       </div>
 
