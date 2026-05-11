@@ -4,5 +4,6 @@
   <a href="{% url 'cards:card_upload' %}" {% if active_menu == 'cards:card_upload' %}class="is-active"{% endif %}>名刺アップロード</a>
   <a href="{% url 'cards:card_list' %}" {% if active_menu == 'cards:card_list' %}class="is-active"{% endif %}>名刺一覧</a>
   <a href="{% url 'originals:original_list' %}" {% if active_menu == 'originals:original_list' %}class="is-active"{% endif %}>元画像一覧</a>
+  <a href="{% url 'persons:person_list' %}" {% if active_menu == 'persons:person_list' %}class="is-active"{% endif %}>人物一覧</a>
   <a href="{% url 'contacts:contact_list' %}" {% if active_menu == 'contacts:contact_list' %}class="is-active"{% endif %}>コンタクト一覧</a>
 </nav>

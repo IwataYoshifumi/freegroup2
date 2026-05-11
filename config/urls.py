@@ -13,6 +13,7 @@ urlpatterns = [
     path("cards/", include("cards.urls", namespace="cards")),
     path("originals/", include("cards.originals_urls", namespace="originals")),
     path("contacts/", include("contacts.urls", namespace="contacts")),
+    path("persons/", include("persons.urls", namespace="persons")),
 ]
 
 if settings.DEBUG:

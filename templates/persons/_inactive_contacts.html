@@ -1,0 +1,32 @@
+{% load back_tags %}
+{% if inactive_contacts %}
+  <div class="app-table-wrapper">
+    <table class="app-table app-table--nowrap">
+      <thead>
+        <tr>
+          <th>操作</th>
+          <th>氏名</th>
+          <th>会社</th>
+          <th>役職</th>
+          <th>更新日時</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in inactive_contacts %}
+          {% url 'contacts:contact_detail' pk=c.id as detail_url %}
+          <tr>
+            <td>
+              <a href="{% append_back_url detail_url back %}" class="app-btn app-btn--secondary app-btn--sm">詳細</a>
+            </td>
+            <td>{{ c.full_name|default:"-" }}</td>
+            <td>{{ c.company|default:"-" }}</td>
+            <td>{{ c.title|default:"-" }}</td>
+            <td>{{ c.updated_at|date:"Y/m/d H:i" }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% else %}
+  <p class="app-muted">inactive Contact なし</p>
+{% endif %}

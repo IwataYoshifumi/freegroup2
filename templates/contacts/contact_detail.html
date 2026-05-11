@@ -307,11 +307,10 @@
       {# previous_person #}
       {% if previous_person %}
         <div class="app-section__header" style="margin-top:var(--app-space-md);"><h3>マージ前の人物</h3></div>
+        {% url 'persons:person_detail' pk=previous_person.id as prev_person_url %}
         <p>
           {{ previous_person }}
-          <a href="#" class="is-disabled" aria-disabled="true" title="準備中">
-            （Person 詳細：準備中）
-          </a>
+          <a href="{% append_back_url prev_person_url back %}" class="app-btn app-btn--secondary app-btn--sm">人物詳細</a>
         </p>
       {% endif %}
     </div>
