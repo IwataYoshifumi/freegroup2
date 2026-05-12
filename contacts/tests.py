@@ -10,6 +10,11 @@ from django.test import Client, TestCase
 from django.urls import reverse
 from django.utils import timezone
 
+from contacts.forms import (
+    ContactBaseForm,
+    ContactUpdateActiveForm,
+    ContactUpdateForm,
+)
 from contacts.models import Contact, ContactFieldConfidence
 from duplicates.models import DuplicateCandidate
 from persons.models import Person
@@ -1496,3 +1501,326 @@ class ContactListViewTests(TestCase):
         c = Client()
         resp = c.get(self.url)
         self.assertEqual(resp.status_code, 200)
+
+
+# ======================================================================
+# D-Form ステップ1：ContactBaseForm / ContactUpdateForm /
+# ContactUpdateActiveForm / UpdateActiveContactView のテスト
+# ======================================================================
+
+
+class ContactBaseFormTests(TestCase):
+    """ContactBaseForm（仕様書 §11.6.2 / §11.6.4）の単体テスト。"""
+
+    def test_meta_fields_match_updatable_fields(self):
+        """Meta.fields が Contact.UPDATABLE_FIELDS と一致する。"""
+        self.assertEqual(
+            ContactBaseForm.Meta.fields, list(Contact.UPDATABLE_FIELDS)
+        )
+
+
+class _ContactUpdateFormTestBase(TestCase):
+    """ContactUpdateForm / ContactUpdateActiveForm 共通の setUp。"""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="form_test_user", password="dummy"
+        )
+        self.person = Person.objects.create()
+        self.contact = Contact.objects.create(
+            person=self.person,
+            status=Contact.Status.PRIMARY,
+            full_name="A-name",
+            company="A-company",
+            email="a@example.com",
+        )
+        # company: medium / email: low / phone: low + confirmed 済み
+        self.cfc_company = ContactFieldConfidence.objects.create(
+            contact=self.contact,
+            field_name="company",
+            confidence=ContactFieldConfidence.Confidence.MEDIUM,
+        )
+        self.cfc_email = ContactFieldConfidence.objects.create(
+            contact=self.contact,
+            field_name="email",
+            confidence=ContactFieldConfidence.Confidence.LOW,
+        )
+        ContactFieldConfidence.objects.create(
+            contact=self.contact,
+            field_name="phone",
+            confidence=ContactFieldConfidence.Confidence.LOW,
+            confirmed_at=timezone.now(),
+            confirmed_by=self.user,
+        )
+
+    def _base_data(self, *, include_change_reason=True):
+        """POST 用ベース data（UPDATABLE_FIELDS を現在値で埋める）。"""
+        data = {f: getattr(self.contact, f) or "" for f in Contact.UPDATABLE_FIELDS}
+        data["note"] = ""
+        if include_change_reason:
+            data["change_reason"] = "fix"
+        return data
+
+
+class ContactUpdateFormTests(_ContactUpdateFormTestBase):
+    """ContactUpdateForm（仕様書 §11.6.2 / §11.7.1）の単体テスト。"""
+
+    def test_requires_target_contact(self):
+        """target_contact 未指定 → TypeError。"""
+        with self.assertRaises(TypeError):
+            ContactUpdateForm(data={})
+
+    def test_adds_confirmed_checkbox_for_low_mid_unconfirmed(self):
+        """low/mid かつ未確認のフィールドに対応する確認チェックボックスが追加される。"""
+        form = ContactUpdateForm(target_contact=self.contact)
+        self.assertIn("confirmed_company", form.fields)  # medium
+        self.assertIn("confirmed_email", form.fields)    # low
+        # phone は confirmed 済み → 追加されない
+        self.assertNotIn("confirmed_phone", form.fields)
+        # full_name は CFC なし（高信頼度）→ 追加されない
+        self.assertNotIn("confirmed_full_name", form.fields)
+
+    def test_no_checkboxes_when_all_high(self):
+        """全 high（CFC レコードなし）の Contact では確認チェックボックス追加なし。"""
+        ContactFieldConfidence.objects.filter(contact=self.contact).delete()
+        form = ContactUpdateForm(target_contact=self.contact)
+        for field_name in Contact.UPDATABLE_FIELDS:
+            self.assertNotIn(f"confirmed_{field_name}", form.fields)
+
+    def test_clean_passes_with_all_checkboxes_on(self):
+        """確認チェックがすべて ON → is_valid() True。"""
+        data = self._base_data()
+        data["confirmed_company"] = "on"
+        data["confirmed_email"] = "on"
+        form = ContactUpdateForm(data=data, target_contact=self.contact)
+        self.assertTrue(form.is_valid(), msg=form.errors)
+
+    def test_clean_fails_when_checkbox_off(self):
+        """確認チェックが 1 つでも OFF → is_valid() False、当該フィールドにエラー。"""
+        data = self._base_data()
+        # confirmed_company は OFF（キー自体を入れない）
+        data["confirmed_email"] = "on"
+        form = ContactUpdateForm(data=data, target_contact=self.contact)
+        self.assertFalse(form.is_valid())
+        self.assertIn("confirmed_company", form.errors)
+        self.assertNotIn("confirmed_email", form.errors)
+
+    def test_change_reason_is_required(self):
+        """change_reason 必須 → 未指定で is_valid() False。"""
+        data = self._base_data(include_change_reason=False)
+        data["confirmed_company"] = "on"
+        data["confirmed_email"] = "on"
+        form = ContactUpdateForm(data=data, target_contact=self.contact)
+        self.assertFalse(form.is_valid())
+        self.assertIn("change_reason", form.errors)
+
+    def test_get_update_contact_returns_pkless_new_contact(self):
+        """get_update_contact() は未保存の新規 Contact を返す（status / person 未設定）。
+
+        Contact.id は UUIDField(default=uuid.uuid4) のため、Contact() の時点で UUID は
+        割り当てられる。「未保存」は _state.adding == True で判定する（仕様書 §11.6.5）。
+        """
+        data = self._base_data()
+        data["full_name"] = "新しい名前"
+        data["confirmed_company"] = "on"
+        data["confirmed_email"] = "on"
+        form = ContactUpdateForm(data=data, target_contact=self.contact)
+        self.assertTrue(form.is_valid(), msg=form.errors)
+        new_contact = form.get_update_contact()
+        # 未保存（DB に存在しない）
+        self.assertTrue(new_contact._state.adding)
+        # 値は反映されている
+        self.assertEqual(new_contact.full_name, "新しい名前")
+        # status / person は未設定（fix() の責務外）
+        self.assertEqual(new_contact.status, "")
+        self.assertIsNone(new_contact.person_id)
+
+    def test_confirmed_field_names_with_checkboxes_on(self):
+        """confirmed_field_names() に確認チェック ON のフィールドが含まれる。"""
+        data = self._base_data()
+        data["confirmed_company"] = "on"
+        data["confirmed_email"] = "on"
+        form = ContactUpdateForm(data=data, target_contact=self.contact)
+        self.assertTrue(form.is_valid(), msg=form.errors)
+        names = form.confirmed_field_names()
+        self.assertIn("company", names)
+        self.assertIn("email", names)
+
+    def test_confirmed_field_names_with_edited_field(self):
+        """編集された high フィールドも confirmed_field_names() に含まれる。"""
+        data = self._base_data()
+        # full_name を編集（CFC なし＝high なので、編集だけで confirmed 扱い）
+        data["full_name"] = "違う名前"
+        data["confirmed_company"] = "on"
+        data["confirmed_email"] = "on"
+        form = ContactUpdateForm(data=data, target_contact=self.contact)
+        self.assertTrue(form.is_valid(), msg=form.errors)
+        names = form.confirmed_field_names()
+        self.assertIn("full_name", names)
+
+
+class ContactUpdateActiveFormTests(_ContactUpdateFormTestBase):
+    """ContactUpdateActiveForm（仕様書 §11.6.2）の単体テスト。"""
+
+    def test_no_change_reason_field(self):
+        """change_reason フィールドが存在しない。"""
+        form = ContactUpdateActiveForm(target_contact=self.contact)
+        self.assertNotIn("change_reason", form.fields)
+
+    def test_confirmed_checkboxes_added_like_parent(self):
+        """親と同様、low/mid 未確認フィールドにチェックボックスが追加される。"""
+        form = ContactUpdateActiveForm(target_contact=self.contact)
+        self.assertIn("confirmed_company", form.fields)
+        self.assertIn("confirmed_email", form.fields)
+
+    def test_clean_passes_without_change_reason(self):
+        """change_reason 不要、確認チェック ON で is_valid() True。"""
+        data = self._base_data(include_change_reason=False)
+        data["confirmed_company"] = "on"
+        data["confirmed_email"] = "on"
+        form = ContactUpdateActiveForm(data=data, target_contact=self.contact)
+        self.assertTrue(form.is_valid(), msg=form.errors)
+
+    def test_clean_fails_when_checkbox_off(self):
+        """親同様、確認チェック OFF でエラー。"""
+        data = self._base_data(include_change_reason=False)
+        data["confirmed_email"] = "on"
+        form = ContactUpdateActiveForm(data=data, target_contact=self.contact)
+        self.assertFalse(form.is_valid())
+        self.assertIn("confirmed_company", form.errors)
+
+
+class UpdateActiveContactViewTests(TestCase):
+    """UpdateActiveContactView（13 番、仕様書 §11.6 / §11.7）の単体テスト。"""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="update_active_user", password="dummy"
+        )
+        self.person = Person.objects.create()
+        self.primary = Contact.objects.create(
+            person=self.person,
+            status=Contact.Status.PRIMARY,
+            full_name="A-primary",
+        )
+        self.person.primary_contact = self.primary
+        self.person.save(update_fields=["primary_contact", "updated_at"])
+        self.active = Contact.objects.create(
+            person=self.person,
+            status=Contact.Status.ACTIVE,
+            full_name="A-active",
+            company="A-active-co",
+            email="active@example.com",
+        )
+        self.cfc_company = ContactFieldConfidence.objects.create(
+            contact=self.active,
+            field_name="company",
+            confidence=ContactFieldConfidence.Confidence.MEDIUM,
+        )
+
+        self.client = Client()
+        self.client.force_login(self.user)
+
+    def _url(self, contact=None):
+        return reverse(
+            "contacts:contact_update_active",
+            kwargs={"pk": (contact or self.active).pk},
+        )
+
+    def _base_post_data(self, contact):
+        data = {f: getattr(contact, f) or "" for f in Contact.UPDATABLE_FIELDS}
+        data["note"] = ""
+        return data
+
+    # ---- GET ----
+
+    def test_get_active_returns_200(self):
+        """active Contact → 200、change_reason フィールド非搭載・confirmed_company 搭載。"""
+        resp = self.client.get(self._url())
+        self.assertEqual(resp.status_code, 200)
+        form = resp.context["form"]
+        self.assertNotIn("change_reason", form.fields)
+        self.assertIn("confirmed_company", form.fields)
+
+    def test_get_primary_returns_404(self):
+        """primary Contact → 404（このViewはactive専用）。"""
+        resp = self.client.get(self._url(self.primary))
+        self.assertEqual(resp.status_code, 404)
+
+    def test_get_inactive_returns_404(self):
+        """inactive Contact → 404。"""
+        inactive_person = Person.objects.create()
+        inactive_primary = Contact.objects.create(
+            person=inactive_person,
+            status=Contact.Status.PRIMARY,
+            full_name="dummy-primary",
+        )
+        inactive_person.primary_contact = inactive_primary
+        inactive_person.save(
+            update_fields=["primary_contact", "updated_at"]
+        )
+        inactive = Contact.objects.create(
+            person=inactive_person,
+            status=Contact.Status.INACTIVE,
+            full_name="A-inactive",
+        )
+        resp = self.client.get(self._url(inactive))
+        self.assertEqual(resp.status_code, 404)
+
+    def test_get_nonexistent_returns_404(self):
+        """存在しない Contact → 404。"""
+        import uuid as _uuid
+
+        url = reverse(
+            "contacts:contact_update_active", kwargs={"pk": _uuid.uuid4()}
+        )
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 404)
+
+    def test_unauthenticated_redirects(self):
+        """未ログイン → 302（LoginRequiredMixin、login URL へリダイレクト）。"""
+        c = Client()
+        resp = c.get(self._url())
+        self.assertEqual(resp.status_code, 302)
+
+    # ---- POST ----
+
+    def test_post_valid_calls_fix_and_redirects(self):
+        """有効な POST → Contact.fix() が呼ばれ、Contact 詳細画面へリダイレクト。"""
+        data = self._base_post_data(self.active)
+        data["company"] = "A-active-co-new"
+        data["confirmed_company"] = "on"
+
+        resp = self.client.post(self._url(), data=data)
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(
+            resp.url,
+            reverse(
+                "contacts:contact_detail", kwargs={"pk": self.active.pk}
+            ),
+        )
+
+        self.active.refresh_from_db()
+        self.assertEqual(self.active.company, "A-active-co-new")
+
+        self.cfc_company.refresh_from_db()
+        self.assertIsNotNone(self.cfc_company.confirmed_at)
+        self.assertEqual(self.cfc_company.confirmed_by_id, self.user.id)
+
+    def test_post_with_checkbox_off_shows_form_error(self):
+        """確認チェック OFF → フォーム再表示、エラー含む、fix() は呼ばれない。"""
+        data = self._base_post_data(self.active)
+        data["company"] = "A-active-co-changed"
+        # confirmed_company は OFF
+
+        resp = self.client.post(self._url(), data=data)
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("confirmed_company", resp.context["form"].errors)
+
+        # fix() は呼ばれていない → 値もCFCも変更なし
+        self.active.refresh_from_db()
+        self.assertEqual(self.active.company, "A-active-co")
+        self.cfc_company.refresh_from_db()
+        self.assertIsNone(self.cfc_company.confirmed_at)

@@ -20,16 +20,19 @@ D-3c で追加した AJAX 2 エンドポイント、および D-3b で追加し�
 import json
 
 from django.contrib.auth import get_user_model
+from django.contrib.auth.mixins import LoginRequiredMixin
 from django.db.models import Q
-from django.http import JsonResponse
+from django.http import Http404, HttpResponseRedirect, JsonResponse
+from django.urls import reverse
 from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.decorators.http import require_POST
-from django.views.generic import DetailView, ListView
+from django.views.generic import DetailView, ListView, UpdateView
 
 from back_navigator.back_navigator import BackNavigator
 from duplicates.models import DuplicateCandidate, PersonMergeLog
 
+from .forms import ContactUpdateActiveForm
 from .models import Contact, ContactFieldConfidence
 
 
@@ -392,4 +395,60 @@ class ContactAjaxConfirmFieldsView(_ContactAjaxBase):
                 "confirmed_field_names": list(field_names),
                 "unconfirmed_count": _unconfirmed_count(contact),
             }
+        )
+
+
+class UpdateActiveContactView(LoginRequiredMixin, UpdateView):
+    """active Contact 修正画面（13 番、仕様書 §11.6 / §11.7）。
+
+    GET：フォーム表示。POST：フォーム値で Contact.fix() を呼び、Contact 詳細画面へ
+    リダイレクト（修正完了 → 結果確認、という業務フロー）。
+
+    対象は status='active' の Contact のみ。primary / inactive は Http404。
+    primary 修正は別途 UpdatePrimaryContactView（12 番、未実装）が担当する。
+
+    POST 成功時の DB 書込責務は Contact.fix() が持つ（仕様書 §10.5.2）。本 View は
+    form_valid() で fix() を呼ぶだけで、form.save() は呼ばない。
+
+    BackNavigator：push_current は呼ばず（サポート担当補足 §3）、テンプレート側で
+    {% back_url back %} を使ってキャンセル時の戻り先（呼び出し元）を解決する。
+    """
+
+    model = Contact
+    form_class = ContactUpdateActiveForm
+    template_name = "contacts/contact_update_active.html"
+    pk_url_kwarg = "pk"
+
+    def get_object(self, queryset=None):
+        obj = super().get_object(queryset=queryset)
+        if obj.status != Contact.Status.ACTIVE:
+            raise Http404("This view is only for active contacts.")
+        return obj
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs["target_contact"] = self.object
+        return kwargs
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        back = BackNavigator(self.request)
+        context.update(
+            {
+                "back": back,
+                "contact": self.object,
+                "field_confidences": self.object.get_field_confidences(),
+                "active_app": "contacts",
+                "active_menu": "contacts:contact_list",
+            }
+        )
+        return context
+
+    def form_valid(self, form):
+        self.object.fix(form, self.request.user)
+        return HttpResponseRedirect(self.get_success_url())
+
+    def get_success_url(self):
+        return reverse(
+            "contacts:contact_detail", kwargs={"pk": self.object.pk}
         )

@@ -102,11 +102,13 @@ class Contact(models.Model):
             ),
         ]
 
-    # AJAX 経由（Contact 詳細画面、§10.6.4 ケース 4）で update_field() から
-    # 修正可能なフィールドの集合。システム管理フィールド（status / previous_* /
-    # created_* / updated_* / person / business_card / duplicate_checked_at）は
-    # 含めない。将来 ContactBaseForm.Meta.fields に切り替える予定（申し送りメモ
-    # §4.2、Contact.fix() の DUPLICATE_CHECK_FIELDS 暫定参照と同じ運用）。
+    # Contact のユーザー入力対象フィールドのマスター定義（仕様書 §11.6.2）。
+    # ContactBaseForm.Meta.fields はこの集合を参照する。Contact 側がマスター、
+    # Form 側が参照という方向で確定（D ブロック Form 実装時に決定）。
+    # AJAX 経由（Contact 詳細画面、§10.6.4 ケース 4）の update_field() / Form 経由の
+    # fix() の双方で、修正可能フィールドの集合として共通利用する。システム管理
+    # フィールド（status / previous_* / created_* / updated_* / person / business_card
+    # / duplicate_checked_at）は含めない。
     UPDATABLE_FIELDS = (
         # 名前系
         "full_name",
@@ -155,8 +157,9 @@ class Contact(models.Model):
         [出力] None
         [例外] ValueError（self.pk が None の場合）
 
-        対象フィールドは DUPLICATE_CHECK_FIELDS（9 フィールド、§6.3 / §9.1）。
-        D ブロック（Form 実装）で ContactBaseForm.Meta.fields に切り替える予定。
+        対象フィールドは ``self.UPDATABLE_FIELDS`` (24 フィールド、仕様書 §11.6.2 の
+        Meta.fields と整合）。fix は Contact のユーザー入力対象フィールドすべてを上書き
+        対象とする（仕様書 §10.5.2）。
         """
         if self.pk is None:
             raise ValueError(
@@ -168,7 +171,7 @@ class Contact(models.Model):
         with transaction.atomic():
             # 差分のあるフィールドのみ更新、限定 save
             changed_fields = []
-            for field_name in DUPLICATE_CHECK_FIELDS:
+            for field_name in self.UPDATABLE_FIELDS:
                 old_value = getattr(self, field_name)
                 new_value = getattr(new_contact, field_name)
                 if old_value != new_value:
