@@ -1,7 +1,9 @@
-"""duplicates アプリの View 層テスト（仕様書 §11.3 / §11.5、D-4e）。
+"""duplicates アプリのテスト（View 層 / Form 層）。
 
-DuplicateCandidateGroupListViewTests：15 番（一覧、絞り込み）。
-DuplicateCandidateGroupDetailViewTests：16 番（詳細、表示切替）。
+DuplicateCandidateGroupListViewTests：15 番（一覧、絞り込み、D-4e）。
+DuplicateCandidateGroupDetailViewTests：16 番（詳細、表示切替、D-4e）。
+MergeFormInitTests / MergeFormCleanTests / MergeFormHelpersTests：
+    17 番マージ画面用 Form（仕様書 §11.6.2 / §11.7.3、D-4a）。
 """
 
 import uuid
@@ -9,8 +11,10 @@ import uuid
 from django.contrib.auth import get_user_model
 from django.test import Client, TestCase
 from django.urls import reverse
+from django.utils import timezone
 
-from contacts.models import Contact
+from contacts.models import Contact, ContactFieldConfidence
+from duplicates.forms import MergeForm
 from duplicates.models import DuplicateCandidate
 from persons.models import Person
 
@@ -345,3 +349,285 @@ class DuplicateCandidateGroupDetailViewTests(_DuplicatesTestBase):
         self.assertEqual(resp.context["different_person_count"], 0)
         self.assertEqual(resp.context["pending_count"], 0)
         self.assertFalse(resp.context["has_pending"])
+
+
+class _MergeFormTestBase(_DuplicatesTestBase):
+    """MergeForm 系テスト共通：surviving / merged の Person + Contact + DC を 1 セット用意。"""
+
+    def setUp(self):
+        super().setUp()
+        self.surviving_person, self.surviving_primary = (
+            self._make_person_with_primary("生存太郎", created_by=self.user)
+        )
+        self.merged_person, self.merged_primary = (
+            self._make_person_with_primary("統合次郎", created_by=self.user)
+        )
+        self.candidate = self._make_candidate(
+            self.surviving_person,
+            self.merged_person,
+        )
+
+    def _set_cfc(
+        self, contact, field_name, *, confidence="low", confirmed=False
+    ):
+        cfc = ContactFieldConfidence.objects.create(
+            contact=contact,
+            field_name=field_name,
+            confidence=confidence,
+        )
+        if confirmed:
+            cfc.confirmed_at = timezone.now()
+            cfc.confirmed_by = self.user
+            cfc.save()
+        return cfc
+
+    def _valid_data(self, **overrides):
+        """正常系の最小フォームデータ（UPDATABLE_FIELDS の surviving 現在値 + 必須項目）。"""
+        data = {
+            f: getattr(self.surviving_primary, f)
+            for f in Contact.UPDATABLE_FIELDS
+        }
+        data["review_result"] = ["same_card"]
+        data["merge_reason"] = "same_card"
+        data["surviving_person_choice"] = "person_a"
+        data["note"] = ""
+        data.update(overrides)
+        return data
+
+    def _make_form(self, data=None, **kwargs):
+        return MergeForm(
+            data=data,
+            candidate=kwargs.get("candidate", self.candidate),
+            surviving_person=kwargs.get(
+                "surviving_person", self.surviving_person
+            ),
+            merged_person=kwargs.get(
+                "merged_person", self.merged_person
+            ),
+        )
+
+
+class MergeFormInitTests(_MergeFormTestBase):
+    """MergeForm.__init__ のテスト（D-4a）。"""
+
+    def test_missing_candidate_raises_type_error(self):
+        with self.assertRaises(TypeError):
+            MergeForm(
+                surviving_person=self.surviving_person,
+                merged_person=self.merged_person,
+            )
+
+    def test_missing_surviving_person_raises_type_error(self):
+        with self.assertRaises(TypeError):
+            MergeForm(
+                candidate=self.candidate,
+                merged_person=self.merged_person,
+            )
+
+    def test_missing_merged_person_raises_type_error(self):
+        with self.assertRaises(TypeError):
+            MergeForm(
+                candidate=self.candidate,
+                surviving_person=self.surviving_person,
+            )
+
+    def test_initial_filled_with_surviving_values(self):
+        """initial が surviving 側 primary_contact の UPDATABLE_FIELDS 値で埋まる。"""
+        self.surviving_primary.company = "サバイブ社"
+        self.surviving_primary.email = "alive@example.com"
+        self.surviving_primary.save()
+
+        form = self._make_form()
+        self.assertEqual(form.initial["full_name"], "生存太郎")
+        self.assertEqual(form.initial["company"], "サバイブ社")
+        self.assertEqual(form.initial["email"], "alive@example.com")
+
+    def test_dynamic_confirm_checkboxes_added_for_low_mid_unconfirmed(self):
+        """surviving 側 low/mid 未確認の DUPLICATE_CHECK_FIELDS に CB が動的追加される。"""
+        self._set_cfc(self.surviving_primary, "full_name", confidence="low")
+        self._set_cfc(self.surviving_primary, "email", confidence="medium")
+        # confirmed 済みは追加対象外
+        self._set_cfc(
+            self.surviving_primary,
+            "phone",
+            confidence="low",
+            confirmed=True,
+        )
+
+        form = self._make_form()
+        self.assertIn("confirmed_full_name", form.fields)
+        self.assertIn("confirmed_email", form.fields)
+        self.assertNotIn("confirmed_phone", form.fields)
+        # CFC レコードなし（疑似 high）にも追加されない
+        self.assertNotIn("confirmed_company", form.fields)
+
+    def test_value_diff_and_match_classification(self):
+        """DUPLICATE_CHECK_FIELDS で値違い / 値一致が正しく分類される。"""
+        self.surviving_primary.company = "A社"
+        self.surviving_primary.email = "a@example.com"
+        self.surviving_primary.save()
+
+        self.merged_primary.company = "A社"  # 一致
+        self.merged_primary.email = "b@example.com"  # 不一致
+        self.merged_primary.save()
+
+        form = self._make_form()
+        # setUp で full_name は surviving/merged で異なる
+        self.assertIn("full_name", form.value_diff_fields())
+        self.assertIn("email", form.value_diff_fields())
+        self.assertIn("company", form.value_match_fields())
+        # 値違いと値一致は排他
+        self.assertNotIn("email", form.value_match_fields())
+        self.assertNotIn("company", form.value_diff_fields())
+
+
+class MergeFormCleanTests(_MergeFormTestBase):
+    """MergeForm.clean() の 6 項目バリデーションテスト（D-4a）。"""
+
+    def test_review_result_empty_invalid(self):
+        data = self._valid_data(review_result=[])
+        form = self._make_form(data)
+        self.assertFalse(form.is_valid())
+        self.assertIn("review_result", form.errors)
+
+    def test_review_result_mixed_merged_and_different_invalid(self):
+        data = self._valid_data(review_result=["same_card", "same_name"])
+        form = self._make_form(data)
+        self.assertFalse(form.is_valid())
+        self.assertIn("review_result", form.errors)
+
+    def test_other_merged_without_note_invalid(self):
+        data = self._valid_data(
+            review_result=["other_merged"],
+            merge_reason="other_merged",
+            note="",
+        )
+        form = self._make_form(data)
+        self.assertFalse(form.is_valid())
+        self.assertIn("note", form.errors)
+
+    def test_other_merged_with_note_valid(self):
+        data = self._valid_data(
+            review_result=["other_merged"],
+            merge_reason="other_merged",
+            note="その他のメモ",
+        )
+        form = self._make_form(data)
+        self.assertTrue(form.is_valid(), form.errors)
+
+    def test_other_different_without_note_invalid(self):
+        data = self._valid_data(
+            review_result=["other_different"],
+            merge_reason="",  # different 系なので不要
+            note="",
+        )
+        form = self._make_form(data)
+        self.assertFalse(form.is_valid())
+        self.assertIn("note", form.errors)
+
+    def test_merge_reason_required_when_merged_series(self):
+        """merged 系のみ選択時に merge_reason 未指定 → invalid。"""
+        data = self._valid_data(
+            review_result=["same_card"],
+            merge_reason="",
+        )
+        form = self._make_form(data)
+        self.assertFalse(form.is_valid())
+        self.assertIn("merge_reason", form.errors)
+
+    def test_merge_reason_not_required_when_different_series(self):
+        """different 系のみ選択時は merge_reason 不要。"""
+        data = self._valid_data(
+            review_result=["same_name"],
+            merge_reason="",
+        )
+        form = self._make_form(data)
+        self.assertTrue(form.is_valid(), form.errors)
+
+    def test_low_mid_field_requires_confirmation(self):
+        """surviving 側 low/mid 未確認 → 確認 CB OFF だと invalid。"""
+        self._set_cfc(self.surviving_primary, "full_name", confidence="low")
+        data = self._valid_data()  # confirmed_full_name なし
+        form = self._make_form(data)
+        self.assertFalse(form.is_valid())
+        self.assertIn("confirmed_full_name", form.errors)
+
+    def test_low_mid_field_passes_when_confirmed(self):
+        """surviving 側 low/mid + 確認 CB ON だと valid。"""
+        self._set_cfc(self.surviving_primary, "full_name", confidence="low")
+        data = self._valid_data(confirmed_full_name=True)
+        form = self._make_form(data)
+        self.assertTrue(form.is_valid(), form.errors)
+
+    def test_valid_form_passes(self):
+        """全項目正常 → valid。"""
+        data = self._valid_data()
+        form = self._make_form(data)
+        self.assertTrue(form.is_valid(), form.errors)
+
+
+class MergeFormHelpersTests(_MergeFormTestBase):
+    """MergeForm のヘルパーメソッドテスト（D-4a）。"""
+
+    def test_get_update_contact_returns_unsaved_contact(self):
+        """get_update_contact() は pk なし（_state.adding=True）の Contact を返す。"""
+        data = self._valid_data(full_name="新しい名前")
+        form = self._make_form(data)
+        self.assertTrue(form.is_valid(), form.errors)
+
+        contact = form.get_update_contact()
+        self.assertTrue(contact._state.adding)
+        self.assertEqual(contact.full_name, "新しい名前")
+
+    def test_confirmed_field_names_includes_edited(self):
+        """編集されたフィールドは confirmed_field_names に含まれる。"""
+        data = self._valid_data(full_name="編集後の名前")
+        form = self._make_form(data)
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertIn("full_name", form.confirmed_field_names())
+
+    def test_confirmed_field_names_includes_checked(self):
+        """編集なしでも CB ON のフィールドは confirmed_field_names に含まれる。"""
+        self._set_cfc(self.surviving_primary, "company", confidence="low")
+        data = self._valid_data(confirmed_company=True)
+        form = self._make_form(data)
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertIn("company", form.confirmed_field_names())
+
+    def test_confirmed_field_names_empty_when_no_changes(self):
+        """編集なし・CB なしのとき confirmed_field_names は空リスト。"""
+        data = self._valid_data()
+        form = self._make_form(data)
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.confirmed_field_names(), [])
+
+    def test_has_field_updates_true_when_edited(self):
+        data = self._valid_data(full_name="編集後の名前")
+        form = self._make_form(data)
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertTrue(form.has_field_updates())
+
+    def test_has_field_updates_false_when_no_edit(self):
+        data = self._valid_data()
+        form = self._make_form(data)
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertFalse(form.has_field_updates())
+
+    def test_value_diff_fields_returns_diff_only(self):
+        """value_diff_fields() は DUPLICATE_CHECK_FIELDS の値違いのみ返す。"""
+        # setUp 時点で full_name のみ surviving/merged で異なる
+        form = self._make_form()
+        diff = form.value_diff_fields()
+        self.assertIn("full_name", diff)
+        # company は空文字同士で一致
+        self.assertNotIn("company", diff)
+
+    def test_value_match_fields_returns_match_only(self):
+        """value_match_fields() は DUPLICATE_CHECK_FIELDS の値一致のみ返す。"""
+        form = self._make_form()
+        match = form.value_match_fields()
+        # company / email / phone 等は空文字同士で一致
+        self.assertIn("company", match)
+        self.assertIn("email", match)
+        # full_name は不一致
+        self.assertNotIn("full_name", match)
