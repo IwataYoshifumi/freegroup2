@@ -14,6 +14,7 @@ urlpatterns = [
     path("originals/", include("cards.originals_urls", namespace="originals")),
     path("contacts/", include("contacts.urls", namespace="contacts")),
     path("persons/", include("persons.urls", namespace="persons")),
+    path("duplicates/", include("duplicates.urls", namespace="duplicates")),
 ]
 
 if settings.DEBUG:

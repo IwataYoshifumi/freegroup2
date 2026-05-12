@@ -1,0 +1,182 @@
+{% extends "cards/app_base.html" %}
+{% load back_tags %}
+
+{% block title %}重複候補グループ一覧 — FreeGroup2{% endblock %}
+
+{% block content %}
+  <div class="app-page-header">
+    <div>
+      <div class="app-breadcrumb">重複候補管理 / 重複候補グループ一覧</div>
+      <h1>重複候補グループ一覧</h1>
+    </div>
+    <div class="app-action-area">
+      {% if back.back_exist %}
+        <a href="{% back_url back %}" class="app-btn app-btn--secondary">戻る</a>
+      {% endif %}
+      {% if back.back_all_exist %}
+        <a href="{% back_all_url back %}" class="app-btn app-btn--secondary">最初に戻る</a>
+      {% endif %}
+    </div>
+  </div>
+
+  <section class="app-card">
+    <form method="get" class="app-form-grid-edit">
+      <input type="hidden" name="searched" value="1">
+      <div class="app-form__group" style="grid-column: span 4;">
+        <label class="app-form__label">rank</label>
+        <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:center;">
+          {% for rank in valid_ranks %}
+            <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+              <input type="checkbox" name="rank" value="{{ rank }}"
+                     {% if rank in selected_ranks %}checked{% endif %}>
+              {{ rank }}
+            </label>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="app-form__group" style="grid-column: span 4;">
+        <label class="app-form__label">進捗</label>
+        <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:center;">
+          <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+            <input type="checkbox" name="progress" value="pending"
+                   {% if "pending" in selected_progress %}checked{% endif %}>
+            未レビュー
+          </label>
+          <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+            <input type="checkbox" name="progress" value="completed"
+                   {% if "completed" in selected_progress %}checked{% endif %}>
+            完了
+          </label>
+        </div>
+      </div>
+
+      <div class="app-form__group" style="grid-column: span 4;">
+        <label class="app-form__label">ユーザー</label>
+        <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:center;">
+          <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+            <input type="checkbox" name="user" value="me"
+                   {% if user_filter_on %}checked{% endif %}>
+            自分が読み取ったコンタクトを含むものに絞る
+          </label>
+        </div>
+      </div>
+
+      <div class="app-action-area app-action-area--search">
+        <button type="submit" class="app-btn app-btn--primary">検索</button>
+        <a href="{% url 'duplicates:duplicate_group_list' %}" class="app-btn app-btn--secondary">リセット</a>
+      </div>
+    </form>
+  </section>
+
+  <section class="app-card">
+    <div class="app-table-wrapper">
+      <table class="app-table app-table--nowrap">
+        <thead>
+          <tr>
+            <th class="app-table__col--action">操作</th>
+            <th>rank</th>
+            <th>代表 Person ペア</th>
+            <th>ペア件数</th>
+            <th>進捗</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for group in enriched_groups %}
+            {% url 'duplicates:duplicate_group_detail' group_id=group.group_id as detail_url %}
+            <tr>
+              <td class="app-table__col--action">
+                <a href="#" class="app-btn app-btn--secondary app-btn--sm is-disabled"
+                   aria-disabled="true" title="準備中">レビュー開始（準備中）</a>
+                <a href="{% append_back_url detail_url back %}"
+                   class="app-btn app-btn--secondary app-btn--sm">詳細</a>
+              </td>
+              <td>
+                {% if group.rank == "exact_match" %}
+                  <span class="app-status-badge app-status-badge--error">完全一致</span>
+                {% elif group.rank == "possible_high" %}
+                  <span class="app-status-badge app-status-badge--warning">高確信度</span>
+                {% elif group.rank == "possible_mid" %}
+                  <span class="app-status-badge app-status-badge--info">中確信度</span>
+                {% elif group.rank == "possible_low" %}
+                  <span class="app-status-badge app-status-badge--muted">低確信度</span>
+                {% else %}
+                  {{ group.rank }}
+                {% endif %}
+              </td>
+              <td>
+                {% if group.rep_candidate %}
+                  {{ group.rep_candidate.person_a.primary_contact.full_name|default:"(氏名なし)" }}
+                  ↔
+                  {{ group.rep_candidate.person_b.primary_contact.full_name|default:"(氏名なし)" }}
+                {% else %}
+                  -
+                {% endif %}
+              </td>
+              <td>{{ group.pair_count }}</td>
+              <td>
+                {% if group.pending_count > 0 %}
+                  <span class="app-status-badge app-status-badge--warning">未レビュー {{ group.pending_count }} 件</span>
+                {% else %}
+                  <span class="app-status-badge app-status-badge--success">完了</span>
+                {% endif %}
+              </td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="5" class="app-muted">該当するグループがありません。</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="app-card-list">
+      {% for group in enriched_groups %}
+        {% url 'duplicates:duplicate_group_detail' group_id=group.group_id as detail_url %}
+        <a href="{% append_back_url detail_url back %}" class="app-list-card" style="display:block; text-decoration:none; color:inherit;">
+          <div class="app-list-card__main">
+            <strong>
+              {% if group.rep_candidate %}
+                {{ group.rep_candidate.person_a.primary_contact.full_name|default:"(氏名なし)" }}
+                ↔
+                {{ group.rep_candidate.person_b.primary_contact.full_name|default:"(氏名なし)" }}
+              {% else %}
+                (group {{ group.group_id }})
+              {% endif %}
+            </strong>
+            {% if group.rank == "exact_match" %}
+              <span class="app-status-badge app-status-badge--error">完全一致</span>
+            {% elif group.rank == "possible_high" %}
+              <span class="app-status-badge app-status-badge--warning">高確信度</span>
+            {% elif group.rank == "possible_mid" %}
+              <span class="app-status-badge app-status-badge--info">中確信度</span>
+            {% elif group.rank == "possible_low" %}
+              <span class="app-status-badge app-status-badge--muted">低確信度</span>
+            {% endif %}
+          </div>
+          <div class="app-list-card__sub">
+            <span>ペア件数 {{ group.pair_count }}</span>
+            <span>
+              {% if group.pending_count > 0 %}未レビュー {{ group.pending_count }} 件{% else %}完了{% endif %}
+            </span>
+          </div>
+        </a>
+      {% empty %}
+        <p class="app-muted">該当するグループがありません。</p>
+      {% endfor %}
+    </div>
+
+    {% if is_paginated %}
+      <div class="app-pagination" style="margin-top:var(--app-space-md);">
+        {% if page_obj.has_previous %}
+          <a href="?{% for k, v in request.GET.items %}{% if k != 'page' %}{{ k }}={{ v }}&{% endif %}{% endfor %}page={{ page_obj.previous_page_number }}"
+             class="app-btn app-btn--secondary app-btn--sm">前へ</a>
+        {% endif %}
+        <span class="app-muted">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }} ページ</span>
+        {% if page_obj.has_next %}
+          <a href="?{% for k, v in request.GET.items %}{% if k != 'page' %}{{ k }}={{ v }}&{% endif %}{% endfor %}page={{ page_obj.next_page_number }}"
+             class="app-btn app-btn--secondary app-btn--sm">次へ</a>
+        {% endif %}
+      </div>
+    {% endif %}
+  </section>
+{% endblock %}

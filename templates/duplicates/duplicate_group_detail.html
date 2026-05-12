@@ -1,0 +1,190 @@
+{% extends "cards/app_base.html" %}
+{% load back_tags %}
+
+{% block title %}重複候補グループ詳細 — FreeGroup2{% endblock %}
+
+{% block content %}
+  <div class="app-page-header" style="max-width:1100px;">
+    <div>
+      <div class="app-breadcrumb">重複候補管理 / 重複候補グループ一覧 / 詳細</div>
+      <h1>重複候補グループ詳細</h1>
+    </div>
+    <div class="app-action-area">
+      <a href="#" class="app-btn app-btn--primary is-disabled"
+         aria-disabled="true" title="準備中">レビューを開始（準備中）</a>
+      {% if back.back_exist %}
+        <a href="{% back_url back %}" class="app-btn app-btn--secondary">戻る</a>
+      {% endif %}
+      {% if back.back_all_exist %}
+        <a href="{% back_all_url back %}" class="app-btn app-btn--secondary">最初に戻る</a>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if messages %}
+    <section class="app-card" style="max-width:1100px;">
+      {% for message in messages %}
+        <div class="app-alert app-alert--info">{{ message }}</div>
+      {% endfor %}
+    </section>
+  {% endif %}
+
+  <section class="app-card" style="max-width:1100px;">
+    <div class="app-section__header"><h2>集計</h2></div>
+    <div class="app-detail-item">
+      <div class="app-detail-label">group_id</div>
+      <div class="app-detail-value"><code>{{ group_id }}</code></div>
+    </div>
+    <div class="app-detail-item">
+      <div class="app-detail-label">未レビュー</div>
+      <div class="app-detail-value">{{ pending_count }} 件</div>
+    </div>
+    <div class="app-detail-item">
+      <div class="app-detail-label">マージ済み</div>
+      <div class="app-detail-value">{{ merged_count }} 件</div>
+    </div>
+    <div class="app-detail-item">
+      <div class="app-detail-label">別人確定</div>
+      <div class="app-detail-value">{{ different_person_count }} 件</div>
+    </div>
+  </section>
+
+  {% if has_pending %}
+    <section class="app-card" style="max-width:1100px; margin-top:var(--app-space-md);">
+      <div class="app-section__header"><h2>未レビュー候補</h2></div>
+      <div class="app-table-wrapper">
+        <table class="app-table app-table--nowrap">
+          <thead>
+            <tr>
+              <th>Person A</th>
+              <th>Person B</th>
+              <th>rank</th>
+              <th>score</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for candidate in pending_candidates %}
+              <tr>
+                <td>
+                  {% url 'persons:person_detail' pk=candidate.person_a_id as person_a_url %}
+                  <a href="{% append_back_url person_a_url back %}">
+                    {{ candidate.person_a.primary_contact.full_name|default:"(氏名なし)" }}
+                  </a>
+                </td>
+                <td>
+                  {% url 'persons:person_detail' pk=candidate.person_b_id as person_b_url %}
+                  <a href="{% append_back_url person_b_url back %}">
+                    {{ candidate.person_b.primary_contact.full_name|default:"(氏名なし)" }}
+                  </a>
+                </td>
+                <td>
+                  {% if candidate.rank == "exact_match" %}
+                    <span class="app-status-badge app-status-badge--error">完全一致</span>
+                  {% elif candidate.rank == "possible_high" %}
+                    <span class="app-status-badge app-status-badge--warning">高確信度</span>
+                  {% elif candidate.rank == "possible_mid" %}
+                    <span class="app-status-badge app-status-badge--info">中確信度</span>
+                  {% elif candidate.rank == "possible_low" %}
+                    <span class="app-status-badge app-status-badge--muted">低確信度</span>
+                  {% else %}
+                    {{ candidate.rank }}
+                  {% endif %}
+                </td>
+                <td>{{ candidate.score }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  {% else %}
+    <section class="app-card" style="max-width:1100px; margin-top:var(--app-space-md);">
+      <div class="app-section__header"><h2>マージ済みの候補</h2></div>
+      {% if merged_candidates %}
+        <div class="app-table-wrapper">
+          <table class="app-table app-table--nowrap">
+            <thead>
+              <tr>
+                <th>Person A</th>
+                <th>Person B</th>
+                <th>レビュー結果</th>
+                <th>レビュー日時</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for candidate in merged_candidates %}
+                <tr>
+                  <td>
+                    {% url 'persons:person_detail' pk=candidate.person_a_id as person_a_url %}
+                    <a href="{% append_back_url person_a_url back %}">
+                      {{ candidate.person_a.primary_contact.full_name|default:"(氏名なし)" }}
+                    </a>
+                  </td>
+                  <td>
+                    {% url 'persons:person_detail' pk=candidate.person_b_id as person_b_url %}
+                    <a href="{% append_back_url person_b_url back %}">
+                      {{ candidate.person_b.primary_contact.full_name|default:"(氏名なし)" }}
+                    </a>
+                  </td>
+                  <td>{{ candidate.review_result|join:", " }}</td>
+                  <td>{{ candidate.reviewed_at|date:"Y/m/d H:i" }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="app-muted">なし</p>
+      {% endif %}
+    </section>
+
+    <section class="app-card" style="max-width:1100px; margin-top:var(--app-space-md);">
+      <div class="app-section__header"><h2>別人確定の候補</h2></div>
+      {% if different_person_candidates %}
+        <div class="app-table-wrapper">
+          <table class="app-table app-table--nowrap">
+            <thead>
+              <tr>
+                <th>Person A</th>
+                <th>Person B</th>
+                <th>レビュー結果</th>
+                <th>レビュー日時</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for candidate in different_person_candidates %}
+                <tr>
+                  <td>
+                    {% url 'persons:person_detail' pk=candidate.person_a_id as person_a_url %}
+                    <a href="{% append_back_url person_a_url back %}">
+                      {{ candidate.person_a.primary_contact.full_name|default:"(氏名なし)" }}
+                    </a>
+                  </td>
+                  <td>
+                    {% url 'persons:person_detail' pk=candidate.person_b_id as person_b_url %}
+                    <a href="{% append_back_url person_b_url back %}">
+                      {{ candidate.person_b.primary_contact.full_name|default:"(氏名なし)" }}
+                    </a>
+                  </td>
+                  <td>{{ candidate.review_result|join:", " }}</td>
+                  <td>{{ candidate.reviewed_at|date:"Y/m/d H:i" }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="app-muted">なし</p>
+      {% endif %}
+    </section>
+  {% endif %}
+
+  <div class="app-action-area" style="margin-top:24px; max-width:1100px;">
+    {% if back.back_exist %}
+      <a href="{% back_url back %}" class="app-btn app-btn--secondary">戻る</a>
+    {% endif %}
+    {% if back.back_all_exist %}
+      <a href="{% back_all_url back %}" class="app-btn app-btn--secondary">最初に戻る</a>
+    {% endif %}
+  </div>
+{% endblock %}
