@@ -4,6 +4,8 @@ DuplicateCandidateGroupListViewTests：15 番（一覧、絞り込み、D-4e）�
 DuplicateCandidateGroupDetailViewTests：16 番（詳細、表示切替、D-4e）。
 MergeFormInitTests / MergeFormCleanTests / MergeFormHelpersTests：
     17 番マージ画面用 Form（仕様書 §11.6.2 / §11.7.3、D-4a）。
+DuplicateCandidateGroupUpdateViewGetTests / SessionTests / RedirectTests /
+MergeFormInitTests：17 番レビュー画面 GET（仕様書 §11.5.2、D-4b）。
 """
 
 import uuid
@@ -631,3 +633,204 @@ class MergeFormHelpersTests(_MergeFormTestBase):
         self.assertIn("email", match)
         # full_name は不一致
         self.assertNotIn("full_name", match)
+
+
+class _DuplicateGroupUpdateViewTestBase(_DuplicatesTestBase):
+    """17 番 View テスト共通：Person 3 体 + group_id を 1 つ用意。"""
+
+    def setUp(self):
+        super().setUp()
+        self.group_id = uuid.uuid4()
+        self.person_x, _ = self._make_person_with_primary(
+            "X 太郎", created_by=self.user
+        )
+        self.person_y, _ = self._make_person_with_primary(
+            "Y 次郎", created_by=self.user
+        )
+        self.person_z, _ = self._make_person_with_primary(
+            "Z 三郎", created_by=self.user
+        )
+
+    def _url(self, group_id=None):
+        return reverse(
+            "duplicates:duplicate_group_review",
+            kwargs={"group_id": group_id or self.group_id},
+        )
+
+
+class DuplicateCandidateGroupUpdateViewGetTests(
+    _DuplicateGroupUpdateViewTestBase
+):
+    """17 番 View GET 単体テスト（D-4b E-1）。"""
+
+    def test_unauthenticated_redirects(self):
+        """LoginRequiredMixin → 未ログインは 302。"""
+        c = Client()
+        resp = c.get(self._url())
+        self.assertEqual(resp.status_code, 302)
+
+    def test_nonexistent_group_redirects_to_list(self):
+        """候補なし + reviewed_pair_ids 空 → 15 番リダイレクト（ステップ5）。"""
+        resp = self.client.get(self._url(group_id=uuid.uuid4()))
+        self.assertRedirects(
+            resp,
+            reverse("duplicates:duplicate_group_list"),
+        )
+
+    def test_pending_candidate_returns_200_with_context(self):
+        """pending 候補あり → 200、context に candidate / form / surviving / merged。"""
+        candidate = self._make_candidate(
+            self.person_x, self.person_y, group_id=self.group_id
+        )
+        resp = self.client.get(self._url())
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.context["candidate"].pk, candidate.pk)
+        self.assertEqual(resp.context["group_id"], self.group_id)
+        self.assertEqual(
+            resp.context["surviving_person"].pk,
+            candidate.person_a.pk,
+        )
+        self.assertEqual(
+            resp.context["merged_person"].pk,
+            candidate.person_b.pk,
+        )
+
+    def test_pair_ordering_score_desc_then_created_at_asc(self):
+        """score 降順 → 同 score なら created_at 昇順で先頭 1 件取得（論点2 案C）。"""
+        self._make_candidate(
+            self.person_x, self.person_y,
+            group_id=self.group_id,
+            score=100,
+        )
+        c_high = self._make_candidate(
+            self.person_x, self.person_z,
+            group_id=self.group_id,
+            score=200,
+        )
+        self._make_candidate(
+            self.person_y, self.person_z,
+            group_id=self.group_id,
+            score=100,
+        )
+
+        resp = self.client.get(self._url())
+        self.assertEqual(resp.context["candidate"].pk, c_high.pk)
+
+
+class DuplicateCandidateGroupUpdateViewSessionTests(
+    _DuplicateGroupUpdateViewTestBase
+):
+    """17 番 View セッション管理テスト（D-4b E-2）。"""
+
+    def test_first_get_adds_pair_to_session(self):
+        """初回 GET → reviewed_pair_ids:<group_id> に当該ペア ID が追加される。"""
+        candidate = self._make_candidate(
+            self.person_x, self.person_y, group_id=self.group_id
+        )
+        self.client.get(self._url())
+        session_key = f"reviewed_pair_ids:{self.group_id}"
+        self.assertIn(str(candidate.pk), self.client.session[session_key])
+
+    def test_second_get_returns_next_pair(self):
+        """2 回目 GET → reviewed 済みペアは除外され、次のペアが返る。"""
+        c1 = self._make_candidate(
+            self.person_x, self.person_y,
+            group_id=self.group_id,
+            score=200,
+        )
+        c2 = self._make_candidate(
+            self.person_x, self.person_z,
+            group_id=self.group_id,
+            score=100,
+        )
+        resp1 = self.client.get(self._url())
+        self.assertEqual(resp1.context["candidate"].pk, c1.pk)
+        resp2 = self.client.get(self._url())
+        self.assertEqual(resp2.context["candidate"].pk, c2.pk)
+
+    def test_all_reviewed_redirects_to_detail_and_clears_session(self):
+        """全レビュー後の GET → 16 番リダイレクト + reviewed_pair_ids クリア。"""
+        self._make_candidate(
+            self.person_x, self.person_y, group_id=self.group_id
+        )
+        self.client.get(self._url())  # 1 ペアを reviewed に追加
+        resp = self.client.get(self._url())
+        self.assertRedirects(
+            resp,
+            reverse(
+                "duplicates:duplicate_group_detail",
+                kwargs={"group_id": self.group_id},
+            ),
+        )
+        session_key = f"reviewed_pair_ids:{self.group_id}"
+        self.assertNotIn(session_key, self.client.session)
+
+    def test_independent_session_keys_per_group(self):
+        """別 group_id のセッションキーは独立（並行レビュー、論点1 案A）。"""
+        group_b = uuid.uuid4()
+        self._make_candidate(
+            self.person_x, self.person_y, group_id=self.group_id
+        )
+        c_b = self._make_candidate(
+            self.person_x, self.person_z, group_id=group_b
+        )
+
+        self.client.get(self._url())
+        resp_b = self.client.get(self._url(group_id=group_b))
+        self.assertEqual(resp_b.context["candidate"].pk, c_b.pk)
+
+        session = self.client.session
+        self.assertIn(f"reviewed_pair_ids:{self.group_id}", session)
+        self.assertIn(f"reviewed_pair_ids:{group_b}", session)
+
+
+class DuplicateCandidateGroupUpdateViewRedirectTests(
+    _DuplicateGroupUpdateViewTestBase
+):
+    """17 番 View PRG リダイレクトテスト（D-4b E-3）。"""
+
+    def test_no_pair_and_empty_session_redirects_to_list(self):
+        """ペアなし + reviewed_pair_ids 空 → 15 番リダイレクト（ステップ5）。"""
+        resp = self.client.get(self._url())
+        self.assertRedirects(
+            resp,
+            reverse("duplicates:duplicate_group_list"),
+        )
+
+    def test_no_pair_with_session_shows_completion_message(self):
+        """ペアなし + reviewed_pair_ids あり → 16 番リダイレクト + 完了メッセージ。"""
+        self._make_candidate(
+            self.person_x, self.person_y, group_id=self.group_id
+        )
+        self.client.get(self._url())
+        resp = self.client.get(self._url(), follow=True)
+        msgs = [str(m) for m in resp.context["messages"]]
+        self.assertIn(
+            "すべてのペアのレビューが完了しました",
+            msgs,
+        )
+
+
+class DuplicateCandidateGroupUpdateViewMergeFormInitTests(
+    _DuplicateGroupUpdateViewTestBase
+):
+    """17 番 View の MergeForm 初期化テスト（D-4b E-4）。"""
+
+    def test_context_form_is_merge_form_instance(self):
+        """context["form"] が MergeForm のインスタンス。"""
+        self._make_candidate(
+            self.person_x, self.person_y, group_id=self.group_id
+        )
+        resp = self.client.get(self._url())
+        self.assertIsInstance(resp.context["form"], MergeForm)
+
+    def test_form_initialized_with_person_a_as_surviving(self):
+        """form.surviving_person=candidate.person_a, merged=person_b（論点3 案A）。"""
+        candidate = self._make_candidate(
+            self.person_x, self.person_y, group_id=self.group_id
+        )
+        resp = self.client.get(self._url())
+        form = resp.context["form"]
+        self.assertEqual(form.candidate.pk, candidate.pk)
+        self.assertEqual(form.surviving_person.pk, candidate.person_a.pk)
+        self.assertEqual(form.merged_person.pk, candidate.person_b.pk)

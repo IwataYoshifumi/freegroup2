@@ -4,11 +4,11 @@ DuplicateCandidateGroupListView：重複候補グループ一覧（URL 15 番）
   group_id 単位で集約表示、rank / progress / user で絞り込み。
 DuplicateCandidateGroupDetailView：重複候補グループ詳細（URL 16 番）。
   pending / merged / different_person の集計と表示切替（§11.5.1）。
-
-レビュー画面（17 番、URL 名 candidate_group_review）は D-4b/c で別途実装。
-本 View で「レビュー開始」ボタンは準備中プレースホルダーとしてテンプレート側に配置。
+DuplicateCandidateGroupUpdateView：重複候補レビュー画面（URL 17 番、GET のみ、D-4b）。
+  仕様書 §11.5.2 の 5 ステップで次ペアを表示、POST は D-4c で別途実装。
 """
 
+from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.db.models import (
     Case,
@@ -20,11 +20,12 @@ from django.db.models import (
     When,
 )
 from django.http import Http404
-from django.shortcuts import render
+from django.shortcuts import redirect, render
 from django.views.generic import ListView, View
 
 from back_navigator.back_navigator import BackNavigator
 
+from .forms import MergeForm
 from .models import DuplicateCandidate
 
 
@@ -235,3 +236,82 @@ class DuplicateCandidateGroupDetailView(LoginRequiredMixin, View):
             "active_menu": "duplicates:duplicate_group_list",
         }
         return render(request, self.template_name, context)
+
+
+class DuplicateCandidateGroupUpdateView(LoginRequiredMixin, View):
+    """重複候補レビュー画面（17 番、仕様書 §11.3 / §11.5.2 / §11.5.5、D-4b）。
+
+    GET：仕様書 §11.5.2 の 5 ステップで次のペアを表示する。
+    POST：MergeForm 検証 → 3 サービス分岐（Mark_as_Different_Person /
+    Execute_Merge_Only / Execute_Merge_with_Updates）。POST は D-4c で別途実装、
+    本タスクでは GET のみ。
+
+    セッションキー：reviewed_pair_ids:<group_id>（D-4b 論点1 案A、group_id ごと独立）。
+    仕様書 §11.5.2 / §11.5.3 の shown_pair_ids は本実装で reviewed_pair_ids に
+    リネーム（v9 セッション、たんたん判断、ストック #39 候補）。
+
+    ペア表示順序：score 降順 → 同 score なら created_at 昇順（D-4b 論点2 案C）。
+    MergeForm 初期化：candidate.person_a を surviving、candidate.person_b を merged
+    でデフォルト初期化（D-4b 論点3 案A、仕様書 §11.5.5「デフォルト：左側」と整合）。
+    """
+
+    template_name = "duplicates/duplicate_group_review.html"
+    _SESSION_KEY_PREFIX = "reviewed_pair_ids:"
+
+    def _session_key(self, group_id):
+        """[性質] 純関数（文字列組み立てのみ）"""
+        return f"{self._SESSION_KEY_PREFIX}{group_id}"
+
+    def get(self, request, group_id):
+        session_key = self._session_key(group_id)
+        reviewed_pair_ids = request.session.get(session_key, [])
+
+        candidate = (
+            DuplicateCandidate.objects.filter(
+                group_id=group_id,
+                review_status=DuplicateCandidate.ReviewStatus.PENDING,
+            )
+            .exclude(pk__in=reviewed_pair_ids)
+            .order_by("-score", "created_at")
+            .select_related(
+                "person_a__primary_contact",
+                "person_b__primary_contact",
+            )
+            .first()
+        )
+
+        if candidate is not None:
+            reviewed_pair_ids.append(str(candidate.pk))
+            request.session[session_key] = reviewed_pair_ids
+            request.session.modified = True
+
+            form = MergeForm(
+                candidate=candidate,
+                surviving_person=candidate.person_a,
+                merged_person=candidate.person_b,
+            )
+
+            back = BackNavigator(request)
+            context = {
+                "candidate": candidate,
+                "group_id": group_id,
+                "form": form,
+                "surviving_person": candidate.person_a,
+                "merged_person": candidate.person_b,
+                "back": back,
+                "active_app": "duplicates",
+                "active_menu": "duplicates:duplicate_group_list",
+            }
+            return render(request, self.template_name, context)
+
+        if reviewed_pair_ids:
+            del request.session[session_key]
+            request.session.modified = True
+            messages.success(
+                request, "すべてのペアのレビューが完了しました"
+            )
+            return redirect(
+                "duplicates:duplicate_group_detail", group_id=group_id
+            )
+
+        return redirect("duplicates:duplicate_group_list")

@@ -1,0 +1,107 @@
+{% extends "cards/app_base.html" %}
+{% load back_tags %}
+
+{% block title %}重複候補レビュー — FreeGroup2{% endblock %}
+
+{% block content %}
+  <div class="app-page-header" style="max-width:1100px;">
+    <div>
+      <div class="app-breadcrumb">重複候補管理 / 重複候補グループ一覧 / レビュー</div>
+      <h1>重複候補レビュー</h1>
+    </div>
+    <div class="app-action-area">
+      {% if back.back_exist %}
+        <a href="{% back_url back %}" class="app-btn app-btn--secondary">戻る</a>
+      {% endif %}
+      {% if back.back_all_exist %}
+        <a href="{% back_all_url back %}" class="app-btn app-btn--secondary">最初に戻る</a>
+      {% endif %}
+    </div>
+  </div>
+
+  <form method="post" class="app-card" style="max-width:1100px;" novalidate>
+    {% csrf_token %}
+    {% hidden_back_field back %}
+
+    {% if form.non_field_errors %}
+      <div class="app-alert app-alert--danger">{{ form.non_field_errors }}</div>
+    {% endif %}
+
+    <div class="app-section__header"><h2>レビュー対象ペア</h2></div>
+    <div class="app-form-grid">
+      <div class="app-form__group">
+        <h3>左側（Person A）</h3>
+        <dl>
+          <dt>氏名</dt>
+          <dd>{{ surviving_person.primary_contact.full_name|default:"(氏名なし)" }}</dd>
+          <dt>会社</dt>
+          <dd>{{ surviving_person.primary_contact.company|default:"-" }}</dd>
+          <dt>メール</dt>
+          <dd>{{ surviving_person.primary_contact.email|default:"-" }}</dd>
+          <dt>携帯</dt>
+          <dd>{{ surviving_person.primary_contact.mobile|default:"-" }}</dd>
+        </dl>
+      </div>
+      <div class="app-form__group">
+        <h3>右側（Person B）</h3>
+        <dl>
+          <dt>氏名</dt>
+          <dd>{{ merged_person.primary_contact.full_name|default:"(氏名なし)" }}</dd>
+          <dt>会社</dt>
+          <dd>{{ merged_person.primary_contact.company|default:"-" }}</dd>
+          <dt>メール</dt>
+          <dd>{{ merged_person.primary_contact.email|default:"-" }}</dd>
+          <dt>携帯</dt>
+          <dd>{{ merged_person.primary_contact.mobile|default:"-" }}</dd>
+        </dl>
+      </div>
+    </div>
+
+    <div class="app-section__header" style="margin-top:var(--app-space-md);"><h2>サバイブ側選択</h2></div>
+    <div class="app-form__group">
+      {{ form.surviving_person_choice }}
+      {{ form.surviving_person_choice.errors }}
+    </div>
+
+    <div class="app-section__header" style="margin-top:var(--app-space-md);"><h2>判定理由</h2></div>
+    <div class="app-form__group">
+      {{ form.review_result }}
+      {{ form.review_result.errors }}
+    </div>
+
+    <div class="app-section__header" style="margin-top:var(--app-space-md);"><h2>マージ理由</h2></div>
+    <div class="app-form__group">
+      {{ form.merge_reason }}
+      {{ form.merge_reason.errors }}
+    </div>
+
+    <div class="app-section__header" style="margin-top:var(--app-space-md);"><h2>確認チェック</h2></div>
+    <div class="app-form__group">
+      {% for field in form %}
+        {% if field.name|slice:":10" == "confirmed_" %}
+          <div class="app-form__group">
+            <label>{{ field }} {{ field.label }}</label>
+            {{ field.errors }}
+          </div>
+        {% endif %}
+      {% endfor %}
+    </div>
+
+    <div class="app-section__header" style="margin-top:var(--app-space-md);"><h2>備考</h2></div>
+    <div class="app-form__group">
+      <label for="{{ form.note.id_for_label }}">備考</label>
+      {{ form.note }}
+      {{ form.note.errors }}
+    </div>
+
+    <div class="app-action-area" style="margin-top:24px;">
+      <button type="submit" class="app-btn app-btn--primary">決定</button>
+      {% if back.back_exist %}
+        <a href="{% back_url back %}" class="app-btn app-btn--secondary">戻る</a>
+      {% endif %}
+      {% if back.back_all_exist %}
+        <a href="{% back_all_url back %}" class="app-btn app-btn--secondary">最初に戻る</a>
+      {% endif %}
+    </div>
+  </form>
+{% endblock %}

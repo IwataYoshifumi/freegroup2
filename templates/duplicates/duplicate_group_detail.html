@@ -10,8 +10,8 @@
       <h1>重複候補グループ詳細</h1>
     </div>
     <div class="app-action-area">
-      <a href="#" class="app-btn app-btn--primary is-disabled"
-         aria-disabled="true" title="準備中">レビューを開始（準備中）</a>
+      {% url 'duplicates:duplicate_group_review' group_id=group_id as review_url %}
+      <a href="{% append_back_url review_url back %}" class="app-btn app-btn--primary">レビューを開始</a>
       {% if back.back_exist %}
         <a href="{% back_url back %}" class="app-btn app-btn--secondary">戻る</a>
       {% endif %}
