@@ -5,6 +5,7 @@
   - contact_create（10 番、D-Form ステップ3a）: 手動 Contact 新規作成画面（GET/POST）
   - contact_detail（11 番、D-3b）: Contact 詳細画面（GET）
   - contact_preview（14 番、D-Form ステップ3a）: Contact プレビュー HTML フラグメント（GET）
+  - contact_update_primary（12 番、D-Form ステップ4）: primary Contact 修正画面（GET/POST）
   - contact_update_active（13 番、D-Form ステップ1）: active Contact 修正画面（GET/POST）
   - ajax_update_field（D-3c）: 1 フィールド値修正 + 自動 confirmed 化（POST）
   - ajax_confirm_fields（D-3c）: confidence 確認のみ（POST、個別 / 一括両用）
@@ -31,6 +32,11 @@ urlpatterns = [
         "<uuid:pk>/preview/",
         views.PreviewContactView.as_view(),
         name="contact_preview",
+    ),
+    path(
+        "<uuid:pk>/update-primary/",
+        views.UpdatePrimaryContactView.as_view(),
+        name="contact_update_primary",
     ),
     path(
         "<uuid:pk>/update-active/",

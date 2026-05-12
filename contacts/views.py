@@ -32,11 +32,12 @@ from django.views.decorators.http import require_POST
 from django.views.generic import DetailView, ListView, UpdateView
 
 from back_navigator.back_navigator import BackNavigator
+from config.constants import PersonChangeReason
 from duplicates.models import DuplicateCandidate, PersonMergeLog
 from duplicates.services.duplicate_detection import find_duplicate_contacts
 from persons.models import Person
 
-from .forms import ContactCreateForm, ContactUpdateActiveForm
+from .forms import ContactCreateForm, ContactUpdateActiveForm, ContactUpdateForm
 from .models import Contact, ContactFieldConfidence
 
 
@@ -402,6 +403,71 @@ class ContactAjaxConfirmFieldsView(_ContactAjaxBase):
         )
 
 
+class UpdatePrimaryContactView(LoginRequiredMixin, UpdateView):
+    """primary Contact 修正画面（12 番、仕様書 §11.3 / §11.4.1 / §11.4.2）。
+
+    GET：フォーム表示。POST：change_reason の値で処理を分岐：
+      - fix：contact.fix(form, user) で既存 Contact を上書き（仕様書 §10.5.2）
+      - transfer / promotion / job_change / name_change：新規 Contact 作成 + 旧 primary を
+        inactive 化 + Person.primary_contact 切り替え（_promote_new_contact_as_primary 経由）
+
+    対象は status='primary' の Contact のみ。active / inactive は Http404。
+    active 修正は別途 UpdateActiveContactView（13 番）が担当する。
+
+    POST 成功時はリダイレクト先 = Person 詳細画面（persons:person_detail、self.object.person.pk）。
+    fix / transfer 系どちらも Person 起点で結果を確認する動線（v9 セッション、たんたん判断）。
+
+    BackNavigator：push_current は呼ばず、リダイレクト時に back.append_url() で back
+    スタックを引き継ぐ（A-2-追加 で確立、b9f8776）。
+    """
+
+    model = Contact
+    form_class = ContactUpdateForm
+    template_name = "contacts/contact_update_primary.html"
+    pk_url_kwarg = "pk"
+
+    def get_object(self, queryset=None):
+        obj = super().get_object(queryset=queryset)
+        if obj.status != Contact.Status.PRIMARY:
+            raise Http404("This view is only for primary contacts.")
+        return obj
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs["target_contact"] = self.object
+        return kwargs
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        back = BackNavigator(self.request)
+        context.update(
+            {
+                "back": back,
+                "contact": self.object,
+                "field_confidences": self.object.get_field_confidences(),
+                "active_app": "contacts",
+                "active_menu": "contacts:contact_list",
+            }
+        )
+        return context
+
+    def form_valid(self, form):
+        change_reason = form.cleaned_data["change_reason"]
+        if change_reason == PersonChangeReason.FIX:
+            self.object.fix(form, self.request.user)
+        else:
+            _promote_new_contact_as_primary(
+                form, self.object, self.request.user
+            )
+
+        back = BackNavigator(self.request)
+        target_url = reverse(
+            "persons:person_detail",
+            kwargs={"pk": self.object.person.pk},
+        )
+        return HttpResponseRedirect(back.append_url(target_url))
+
+
 class UpdateActiveContactView(LoginRequiredMixin, UpdateView):
     """active Contact 修正画面（13 番、仕様書 §11.6 / §11.7）。
 
@@ -500,6 +566,33 @@ def _create_person_and_contact(form, user):
     contact.save()
     person.set_primary_contact(contact)
     return contact
+
+
+@transaction.atomic
+def _promote_new_contact_as_primary(form, target_contact, user):
+    """新規 Contact を primary に昇格し、旧 primary を inactive 化する（仕様書 §11.4.1 / §11.4.2 / §10.4.3）。
+
+    [性質] 副作用あり（DB 書込：Contact 1 件新規 + Contact 1 件更新 + Person.primary_contact 更新）
+    [入力] form: ContactUpdateForm（バリデーション済み、get_update_contact() を呼べる）
+           target_contact: Contact（旧 primary、保存済み）
+           user: 操作実行者（新規 Contact の created_by / updated_by に記録）
+    [出力] Contact（新規作成された primary Contact、保存済み）
+
+    set_primary_contact() の内部 transaction.atomic は外側の atomic とネスト可能
+    （Django 標準動作、savepoint 経由）。新規 Contact には ContactFieldConfidence を
+    作らない（仕様書 §10.6.4 ケース1 / §11.4.2、全 high 扱い）。
+    """
+    new_contact = form.get_update_contact()
+    new_contact.person = target_contact.person
+    # set_primary_contact() が後で primary に昇格させるため、保存時は仮で active を入れる。
+    new_contact.status = Contact.Status.ACTIVE
+    new_contact.created_by = user
+    new_contact.updated_by = user
+    new_contact.save()
+    target_contact.person.set_primary_contact(
+        new_contact, old_primary_new_status="inactive"
+    )
+    return new_contact
 
 
 class ContactCreateView(LoginRequiredMixin, View):

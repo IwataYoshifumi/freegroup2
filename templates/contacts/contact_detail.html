@@ -26,10 +26,10 @@
   <section class="app-card" style="max-width:1100px;">
     <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
       {% if is_editable %}
-        {# 修正画面ボタン（12/13 番、URL 未実装のためプレースホルダ） #}
         {% if is_primary %}
-          <a href="#" class="app-btn app-btn--primary is-disabled" aria-disabled="true"
-             title="準備中">コンタクト修正（準備中）</a>
+          {% url 'contacts:contact_update_primary' contact.id as update_primary_url %}
+          <a href="{% append_back_url update_primary_url back %}"
+             class="app-btn app-btn--primary">プライマリーコンタクト修正</a>
         {% elif is_active %}
           {% url 'contacts:contact_update_active' contact.id as update_active_url %}
           <a href="{% append_back_url update_active_url back %}"

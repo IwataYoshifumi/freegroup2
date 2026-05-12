@@ -1828,6 +1828,244 @@ class UpdateActiveContactViewTests(TestCase):
 
 
 # ======================================================================
+# D-Form ステップ4：UpdatePrimaryContactView（12 番）のテスト
+# ======================================================================
+
+
+class UpdatePrimaryContactViewTests(TestCase):
+    """UpdatePrimaryContactView（12 番、§11.3 / §11.4.1 / §11.4.2 / §10.5.2）の単体テスト。"""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="update_primary_user", password="dummy"
+        )
+        self.person = Person.objects.create()
+        self.primary = Contact.objects.create(
+            person=self.person,
+            status=Contact.Status.PRIMARY,
+            full_name="P-name",
+            company="P-co",
+            email="p@example.com",
+        )
+        self.person.primary_contact = self.primary
+        self.person.save(update_fields=["primary_contact", "updated_at"])
+
+        # company に medium CFC（fix で confirmed 化される検証用、
+        # 同時に確認 CB バリデーションの対象）
+        self.cfc_company = ContactFieldConfidence.objects.create(
+            contact=self.primary,
+            field_name="company",
+            confidence=ContactFieldConfidence.Confidence.MEDIUM,
+        )
+
+        self.client = Client()
+        self.client.force_login(self.user)
+
+    def _url(self, contact=None):
+        return reverse(
+            "contacts:contact_update_primary",
+            kwargs={"pk": (contact or self.primary).pk},
+        )
+
+    def _base_post_data(self, contact, change_reason="fix"):
+        data = {f: getattr(contact, f) or "" for f in Contact.UPDATABLE_FIELDS}
+        data["change_reason"] = change_reason
+        data["note"] = ""
+        return data
+
+    # ---- GET ----
+
+    def test_get_primary_returns_200(self):
+        """primary Contact → 200、ContactUpdateForm（change_reason あり）が context に。"""
+        resp = self.client.get(self._url())
+        self.assertEqual(resp.status_code, 200)
+        form = resp.context["form"]
+        self.assertIn("change_reason", form.fields)
+        self.assertIn("note", form.fields)
+        # low/mid CFC（company）の確認 CB が動的追加されている
+        self.assertIn("confirmed_company", form.fields)
+
+    def test_get_active_returns_404(self):
+        """active Contact → 404（このViewはprimary専用）。"""
+        active_person = Person.objects.create()
+        active_primary = Contact.objects.create(
+            person=active_person,
+            status=Contact.Status.PRIMARY,
+            full_name="A-primary",
+        )
+        active_person.primary_contact = active_primary
+        active_person.save(
+            update_fields=["primary_contact", "updated_at"]
+        )
+        active_contact = Contact.objects.create(
+            person=active_person,
+            status=Contact.Status.ACTIVE,
+            full_name="A-active",
+        )
+        resp = self.client.get(self._url(active_contact))
+        self.assertEqual(resp.status_code, 404)
+
+    def test_get_inactive_returns_404(self):
+        """inactive Contact → 404。"""
+        inactive_person = Person.objects.create()
+        inactive_primary = Contact.objects.create(
+            person=inactive_person,
+            status=Contact.Status.PRIMARY,
+            full_name="I-primary",
+        )
+        inactive_person.primary_contact = inactive_primary
+        inactive_person.save(
+            update_fields=["primary_contact", "updated_at"]
+        )
+        inactive_contact = Contact.objects.create(
+            person=inactive_person,
+            status=Contact.Status.INACTIVE,
+            full_name="I-inactive",
+        )
+        resp = self.client.get(self._url(inactive_contact))
+        self.assertEqual(resp.status_code, 404)
+
+    def test_get_nonexistent_returns_404(self):
+        """存在しない pk → 404。"""
+        import uuid as _uuid
+
+        url = reverse(
+            "contacts:contact_update_primary",
+            kwargs={"pk": _uuid.uuid4()},
+        )
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 404)
+
+    def test_unauthenticated_redirects(self):
+        """LoginRequiredMixin → 未ログインは login にリダイレクト（302）。"""
+        c = Client()
+        resp = c.get(self._url())
+        self.assertEqual(resp.status_code, 302)
+
+    # ---- POST fix ----
+
+    def test_post_fix_updates_contact_fields(self):
+        """fix で Contact フィールドが上書き、Person.primary_contact 変わらず、
+        CFC が confirmed 化、Person 詳細画面へリダイレクト（仕様書 §10.5.2）。"""
+        data = self._base_post_data(self.primary, change_reason="fix")
+        data["company"] = "P-co-new"
+        data["confirmed_company"] = "on"
+
+        resp = self.client.post(self._url(), data=data)
+
+        self.assertEqual(resp.status_code, 302)
+        expected_url = reverse(
+            "persons:person_detail", kwargs={"pk": self.person.pk}
+        )
+        self.assertEqual(resp.url, expected_url)
+
+        # Contact フィールドが更新されている
+        self.primary.refresh_from_db()
+        self.assertEqual(self.primary.company, "P-co-new")
+
+        # Person.primary_contact は同じ Contact のまま
+        self.person.refresh_from_db()
+        self.assertEqual(self.person.primary_contact_id, self.primary.pk)
+
+        # CFC が confirmed 化されている
+        self.cfc_company.refresh_from_db()
+        self.assertIsNotNone(self.cfc_company.confirmed_at)
+        self.assertEqual(self.cfc_company.confirmed_by_id, self.user.id)
+
+    # ---- POST transfer 系（4 値）----
+
+    def test_post_transfer_series_creates_new_primary_and_inactivates_old(self):
+        """transfer / promotion / job_change / name_change の 4 値で、
+        新規 Contact が primary に昇格、旧 primary が inactive 化、CFC は新規未作成・旧側保持
+        （仕様書 §11.4.1 / §11.4.2 / §10.6.4 ケース1）。"""
+        for reason in ["transfer", "promotion", "job_change", "name_change"]:
+            with self.subTest(reason=reason):
+                # 各反復ごとに独立 Person で primary 1 件をセットアップ
+                person = Person.objects.create()
+                old_primary = Contact.objects.create(
+                    person=person,
+                    status=Contact.Status.PRIMARY,
+                    full_name=f"old-{reason}",
+                    company=f"old-co-{reason}",
+                )
+                person.primary_contact = old_primary
+                person.save(
+                    update_fields=["primary_contact", "updated_at"]
+                )
+                # 旧 primary に medium CFC（後で保持されているかを検証）
+                old_cfc = ContactFieldConfidence.objects.create(
+                    contact=old_primary,
+                    field_name="company",
+                    confidence=ContactFieldConfidence.Confidence.MEDIUM,
+                )
+
+                url = reverse(
+                    "contacts:contact_update_primary",
+                    kwargs={"pk": old_primary.pk},
+                )
+                data = self._base_post_data(old_primary, change_reason=reason)
+                data["full_name"] = f"new-{reason}"
+                data["company"] = f"new-co-{reason}"
+                # ContactUpdateForm の clean は low/mid CFC の確認 CB を要求するので ON
+                data["confirmed_company"] = "on"
+
+                resp = self.client.post(url, data=data)
+
+                # 成功 → Person 詳細画面へリダイレクト
+                self.assertEqual(resp.status_code, 302)
+                expected_url = reverse(
+                    "persons:person_detail", kwargs={"pk": person.pk}
+                )
+                self.assertEqual(resp.url, expected_url)
+
+                # 新規 Contact が primary になっている（partial unique 制約により Person 配下に 1 件）
+                person.refresh_from_db()
+                new_primary = person.primary_contact
+                self.assertIsNotNone(new_primary)
+                self.assertNotEqual(new_primary.pk, old_primary.pk)
+                self.assertEqual(new_primary.status, Contact.Status.PRIMARY)
+                self.assertEqual(new_primary.full_name, f"new-{reason}")
+                self.assertEqual(new_primary.company, f"new-co-{reason}")
+
+                # 旧 primary が inactive 化されている
+                old_primary.refresh_from_db()
+                self.assertEqual(old_primary.status, Contact.Status.INACTIVE)
+
+                # 新規 Contact には CFC レコードが作成されていない（§10.6.4 ケース1）
+                self.assertEqual(
+                    ContactFieldConfidence.objects.filter(
+                        contact=new_primary
+                    ).count(),
+                    0,
+                )
+
+                # 旧 primary の既存 CFC レコードは保持されている
+                self.assertTrue(
+                    ContactFieldConfidence.objects.filter(
+                        pk=old_cfc.pk
+                    ).exists()
+                )
+
+    # ---- 確認 CB バリデーション ----
+
+    def test_post_with_unconfirmed_low_mid_field_returns_error(self):
+        """low/mid CFC のフィールドの確認 CB 未 ON → フォーム検証エラー、Contact 不変。"""
+        data = self._base_post_data(self.primary, change_reason="fix")
+        data["company"] = "P-co-attempted-change"
+        # confirmed_company を意図的に含めない（OFF）
+
+        resp = self.client.post(self._url(), data=data)
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("confirmed_company", resp.context["form"].errors)
+
+        # Contact フィールド・CFC ともに変わっていない
+        self.primary.refresh_from_db()
+        self.assertEqual(self.primary.company, "P-co")
+        self.cfc_company.refresh_from_db()
+        self.assertIsNone(self.cfc_company.confirmed_at)
+
+
+# ======================================================================
 # D-Form ステップ2：ContactAddAdditionalRoleForm のテスト
 # ======================================================================
 
