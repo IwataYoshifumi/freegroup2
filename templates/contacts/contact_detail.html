@@ -35,10 +35,11 @@
              class="app-btn app-btn--primary">アクティブ修正</a>
         {% endif %}
 
-        {# 別肩書追加ボタン（9 番、primary のみ表示、URL 未実装） #}
+        {# 別肩書追加ボタン（9 番、primary のみ表示） #}
         {% if is_primary %}
-          <a href="#" class="app-btn app-btn--secondary is-disabled" aria-disabled="true"
-             title="準備中">別肩書追加（準備中）</a>
+          {% url 'persons:person_add_additional_role' contact.person_id as add_role_url %}
+          <a href="{% append_back_url add_role_url back %}"
+             class="app-btn app-btn--secondary">別肩書追加</a>
         {% endif %}
       {% endif %}
 

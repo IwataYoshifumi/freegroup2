@@ -11,6 +11,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from contacts.forms import (
+    ContactAddAdditionalRoleForm,
     ContactBaseForm,
     ContactUpdateActiveForm,
     ContactUpdateForm,
@@ -1824,3 +1825,65 @@ class UpdateActiveContactViewTests(TestCase):
         self.assertEqual(self.active.company, "A-active-co")
         self.cfc_company.refresh_from_db()
         self.assertIsNone(self.cfc_company.confirmed_at)
+
+
+# ======================================================================
+# D-Form ステップ2：ContactAddAdditionalRoleForm のテスト
+# ======================================================================
+
+
+class ContactAddAdditionalRoleFormTests(TestCase):
+    """ContactAddAdditionalRoleForm（仕様書 §11.6.2、9 番）の単体テスト。"""
+
+    def setUp(self):
+        self.person = Person.objects.create()
+        self.primary = Contact.objects.create(
+            person=self.person,
+            status=Contact.Status.PRIMARY,
+            full_name="P-name",
+        )
+        self.person.primary_contact = self.primary
+        self.person.save(update_fields=["primary_contact", "updated_at"])
+
+    def _base_data(self):
+        """POST 用ベース data（UPDATABLE_FIELDS を空文字で埋める。lang は required）。"""
+        data = {f: "" for f in Contact.UPDATABLE_FIELDS}
+        data["lang"] = "ja"  # lang は default="ja" だが ModelForm では required=True
+        return data
+
+    def test_requires_person(self):
+        """person 未指定 → TypeError。"""
+        with self.assertRaises(TypeError):
+            ContactAddAdditionalRoleForm(data={})
+
+    def test_meta_fields_inherited_from_base(self):
+        """Meta.fields は ContactBaseForm から継承される（UPDATABLE_FIELDS と一致）。"""
+        self.assertEqual(
+            ContactAddAdditionalRoleForm.Meta.fields,
+            list(Contact.UPDATABLE_FIELDS),
+        )
+
+    def test_no_change_reason_or_note_fields(self):
+        """change_reason / note / confirmed_<field> フィールドは存在しない。"""
+        form = ContactAddAdditionalRoleForm(person=self.person)
+        self.assertNotIn("change_reason", form.fields)
+        self.assertNotIn("note", form.fields)
+        for f in Contact.UPDATABLE_FIELDS:
+            self.assertNotIn(f"confirmed_{f}", form.fields)
+
+    def test_get_update_contact_returns_unsaved_new_contact(self):
+        """get_update_contact() は status / person 未設定の未保存 Contact を返す。"""
+        data = self._base_data()
+        data["full_name"] = "別肩書 太郎"
+        data["company"] = "別会社"
+        form = ContactAddAdditionalRoleForm(data=data, person=self.person)
+        self.assertTrue(form.is_valid(), msg=form.errors)
+        new_contact = form.get_update_contact()
+        # 未保存（DB に存在しない）
+        self.assertTrue(new_contact._state.adding)
+        # 値は反映
+        self.assertEqual(new_contact.full_name, "別肩書 太郎")
+        self.assertEqual(new_contact.company, "別会社")
+        # status / person は未設定（View 側責務、§10.12）
+        self.assertEqual(new_contact.status, "")
+        self.assertIsNone(new_contact.person_id)

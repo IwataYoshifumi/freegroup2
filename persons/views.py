@@ -6,18 +6,26 @@ PersonDetailView：人物詳細画面（URL 8 番）。Person.status で 4 分�
   - active + primary_contact NULL → orphan 専用画面（Django Admin 誘導）
   - merged → merged 専用画面（merged_into / マージ履歴 / 残存 Contact）
   - archived → archived 専用画面（マージ履歴 / inactive 履歴）
+PersonAddAdditionalRoleView：別肩書追加画面（URL 9 番、D-Form ステップ2）。
+  active Person 配下に新規 active Contact を作成。CFC は作らない（§10.12）。
 
 認証は ContactListView / ContactDetailView と同じく LoginRequiredMixin 未使用の
 仮認証スタイル（仕様書 §18.1 / §18.2）。Person も user FK を持たないため全 Person 対象。
+ただし PersonAddAdditionalRoleView は書込系のため LoginRequiredMixin を使う
+（UpdateActiveContactView と同じ慣例）。
 """
 
+from django.contrib.auth.mixins import LoginRequiredMixin
 from django.db.models import Count, Q
-from django.http import HttpResponseRedirect
-from django.shortcuts import render
+from django.http import Http404, HttpResponseRedirect
+from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
 from django.views.generic import DetailView, ListView
+from django.views.generic.edit import FormView
 
 from back_navigator.back_navigator import BackNavigator
+from contacts.forms import ContactAddAdditionalRoleForm
+from contacts.models import Contact
 from duplicates.models import PersonMergeLog
 
 from .models import Person
@@ -193,3 +201,64 @@ class PersonDetailView(DetailView):
         context["active_app"] = "persons"
         context["active_menu"] = "persons:person_list"
         return context
+
+
+class PersonAddAdditionalRoleView(LoginRequiredMixin, FormView):
+    """別肩書追加画面（9 番、仕様書 §3.6 / §10.12 / §11.4.5）。
+
+    既存 active Person 配下に新規 active Contact を追加する。OCR を経由しない
+    ユーザー直接入力のため、ContactFieldConfidence は作らない（全フィールド high
+    扱い、§10.12 / §10.6.4）。
+
+    Person.status='active' のみ受け付け、archived / merged / 未存在は Http404
+    （論点3 案A）。orphan（active かつ primary_contact NULL）も受け付ける。
+
+    POST 成功時は作成した別肩書 Contact の詳細画面（11 番）へリダイレクト。
+
+    実装は FormView ベース（論点2 案B）。Contact 作成処理は form_valid に View
+    直書き（§10.12 通り）、save 系の services 関数は作らない。
+    """
+
+    form_class = ContactAddAdditionalRoleForm
+    template_name = "persons/person_add_additional_role.html"
+
+    def dispatch(self, request, *args, **kwargs):
+        person = get_object_or_404(Person, pk=kwargs["pk"])
+        if person.status != Person.Status.ACTIVE:
+            raise Http404(
+                "PersonAddAdditionalRoleView is only for active Persons."
+            )
+        self.person = person
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs["person"] = self.person
+        return kwargs
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        back = BackNavigator(self.request)
+        context.update(
+            {
+                "back": back,
+                "person": self.person,
+                "active_app": "persons",
+                "active_menu": "persons:person_list",
+            }
+        )
+        return context
+
+    def form_valid(self, form):
+        new_contact = form.get_update_contact()
+        new_contact.person = self.person
+        new_contact.status = Contact.Status.ACTIVE
+        new_contact.save()
+        self.created_contact = new_contact
+        return HttpResponseRedirect(self.get_success_url())
+
+    def get_success_url(self):
+        return reverse(
+            "contacts:contact_detail",
+            kwargs={"pk": self.created_contact.pk},
+        )

@@ -38,6 +38,26 @@ class ContactBaseForm(forms.ModelForm):
         model = Contact
         fields = list(Contact.UPDATABLE_FIELDS)
 
+    def get_update_contact(self):
+        """フォーム値を反映した未保存の Contact インスタンスを返す（仕様書 §11.6.5）。
+
+        [性質] 純関数（DB 操作なし・副作用なし）
+        [入力] なし（self.cleaned_data から読み取り）
+        [出力] Contact（_state.adding=True / status・person 未設定 / 値はメモリ上のみ）
+
+        Contact.UPDATABLE_FIELDS のキーのみ拾い `Contact(**data)` で新規インスタンスを返す。
+        全派生 Form（ContactUpdateForm / ContactAddAdditionalRoleForm / ContactCreateForm /
+        MergeForm）から共通利用される。呼び出し側（Contact.fix / View 直書き）の責務分離：
+          - 値の反映 ＝ 本メソッドが返す Contact から読む
+          - status / person / save ＝ 呼び出し側
+        """
+        data = {
+            f: self.cleaned_data[f]
+            for f in Contact.UPDATABLE_FIELDS
+            if f in self.cleaned_data
+        }
+        return Contact(**data)
+
     def _apply_widget_classes(self):
         """app.css の app-input クラスを各 widget に付与（CLAUDE.md §7、UI 共通化）。
 
@@ -124,23 +144,6 @@ class ContactUpdateForm(ContactBaseForm):
                     )
         return cleaned
 
-    def get_update_contact(self):
-        """フォーム値を反映した新規 Contact インスタンスを返す（仕様書 §11.6.5）。
-
-        [性質] 純関数（DB 操作なし・副作用なし）
-        [入力] なし（self.cleaned_data から読み取り）
-        [出力] Contact（pk / status / person 未設定、メモリ上のみ）
-
-        Contact.UPDATABLE_FIELDS のキーのみ拾う。Contact.fix() はこの戻り値から
-        フィールド値を読み取って自身を上書きする責務分離（§10.5.2）。
-        """
-        data = {
-            f: self.cleaned_data[f]
-            for f in Contact.UPDATABLE_FIELDS
-            if f in self.cleaned_data
-        }
-        return Contact(**data)
-
     def confirmed_field_names(self):
         """ユーザーが確認・編集したフィールド名リスト（仕様書 §11.6.2 / §9.4）。
 
@@ -179,3 +182,32 @@ class ContactUpdateActiveForm(ContactUpdateForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         del self.fields["change_reason"]
+
+
+class ContactAddAdditionalRoleForm(ContactBaseForm):
+    """別肩書追加用 Form（仕様書 §11.6.2、9 番 PersonAddAdditionalRoleView）。
+
+    既存 active Person 配下に新規 active Contact を追加するための入力フォーム。
+    Contact フィールド（UPDATABLE_FIELDS）のみを束ね、付帯フィールド
+    （change_reason / note / confirmed_<field>）は持たない（§11.6.2）。
+
+    新規 Contact は OCR を経由しないユーザー直接入力のため、全フィールドが
+    high 信頼度として扱われる（ContactFieldConfidence は生成しない、§10.12 / §10.6.4）。
+    status / person FK の設定と save() は View 側（PersonAddAdditionalRoleView.form_valid）
+    の責務。本フォームは値の検証と get_update_contact() による未保存 Contact 生成までを担う。
+
+    [性質] presentation 層クラス（DB 操作なし・副作用なし、§11.6.3 設計原則）
+    [入力] person: Person（必須、kwarg。所属先の active Person、参照情報として保持）
+    """
+
+    def __init__(self, *args, person=None, **kwargs):
+        if person is None:
+            raise TypeError(
+                "ContactAddAdditionalRoleForm requires 'person' keyword argument."
+            )
+        self.person = person
+        # 新規 Contact 生成用なので instance は持たせない（View 側で
+        # get_update_contact() の戻り値を加工して save する責務分離、§10.12）。
+        kwargs.pop("instance", None)
+        super().__init__(*args, **kwargs)
+        self._apply_widget_classes()

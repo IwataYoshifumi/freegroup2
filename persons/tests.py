@@ -257,3 +257,156 @@ class PersonDetailViewTests(TestCase):
         body = resp.content.decode()
         self.assertIn("inactive Contact 履歴", body)
         self.assertIn("inactive-name", body)
+
+
+# ======================================================================
+# D-Form ステップ2：PersonAddAdditionalRoleView (9 番) のテスト
+# ======================================================================
+
+
+class PersonAddAdditionalRoleViewTests(TestCase):
+    """PersonAddAdditionalRoleView（9 番、仕様書 §3.6 / §10.12 / §11.4.5）の単体テスト。"""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="add_role_test_user", password="dummy"
+        )
+        self.person = Person.objects.create()
+        self.primary = Contact.objects.create(
+            person=self.person,
+            status=Contact.Status.PRIMARY,
+            full_name="P-name",
+            company="P-co",
+        )
+        self.person.primary_contact = self.primary
+        self.person.save(update_fields=["primary_contact", "updated_at"])
+
+        self.client = Client()
+        self.client.force_login(self.user)
+
+    def _url(self, person=None):
+        return reverse(
+            "persons:person_add_additional_role",
+            kwargs={"pk": (person or self.person).pk},
+        )
+
+    def _base_post_data(self):
+        from contacts.models import Contact as _Contact
+
+        data = {f: "" for f in _Contact.UPDATABLE_FIELDS}
+        data["lang"] = "ja"  # lang は default="ja" だが ModelForm では required=True
+        return data
+
+    # ---- GET ----
+
+    def test_get_active_returns_200(self):
+        """active Person → 200、context に form / person / back を含む。"""
+        resp = self.client.get(self._url())
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("form", resp.context)
+        self.assertEqual(resp.context["person"], self.person)
+        self.assertIn("back", resp.context)
+
+    def test_get_active_orphan_returns_200(self):
+        """active かつ primary_contact NULL（orphan）→ 200。"""
+        orphan = Person.objects.create()  # status=ACTIVE (default), primary_contact=None
+        self.assertIsNone(orphan.primary_contact_id)
+        resp = self.client.get(self._url(orphan))
+        self.assertEqual(resp.status_code, 200)
+
+    def test_get_archived_returns_404(self):
+        self.person.status = Person.Status.ARCHIVED
+        self.person.save(update_fields=["status", "updated_at"])
+        resp = self.client.get(self._url())
+        self.assertEqual(resp.status_code, 404)
+
+    def test_get_merged_returns_404(self):
+        self.person.status = Person.Status.MERGED
+        self.person.save(update_fields=["status", "updated_at"])
+        resp = self.client.get(self._url())
+        self.assertEqual(resp.status_code, 404)
+
+    def test_get_nonexistent_returns_404(self):
+        import uuid as _uuid
+
+        url = reverse(
+            "persons:person_add_additional_role",
+            kwargs={"pk": _uuid.uuid4()},
+        )
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 404)
+
+    def test_unauthenticated_redirects(self):
+        """LoginRequiredMixin → 未ログインは login にリダイレクト（302）。"""
+        c = Client()
+        resp = c.get(self._url())
+        self.assertEqual(resp.status_code, 302)
+
+    # ---- POST ----
+
+    def test_post_valid_creates_active_contact_and_redirects(self):
+        """有効データ → 新規 active Contact 作成、Contact 詳細画面にリダイレクト。"""
+        data = self._base_post_data()
+        data["full_name"] = "別肩書 太郎"
+        data["company"] = "別会社"
+
+        resp = self.client.post(self._url(), data=data)
+
+        self.assertEqual(resp.status_code, 302)
+        new_contact = Contact.objects.filter(
+            person=self.person, full_name="別肩書 太郎"
+        ).first()
+        self.assertIsNotNone(new_contact)
+        self.assertEqual(new_contact.status, Contact.Status.ACTIVE)
+        self.assertEqual(new_contact.company, "別会社")
+        self.assertEqual(
+            resp.url,
+            reverse(
+                "contacts:contact_detail", kwargs={"pk": new_contact.pk}
+            ),
+        )
+
+    def test_post_does_not_create_field_confidence_records(self):
+        """別肩書追加では ContactFieldConfidence は作成されない（仕様書 §10.12）。"""
+        from contacts.models import ContactFieldConfidence
+
+        cfc_before = ContactFieldConfidence.objects.count()
+        data = self._base_post_data()
+        data["full_name"] = "新規 CFC 不要"
+        resp = self.client.post(self._url(), data=data)
+        self.assertEqual(resp.status_code, 302)
+        cfc_after = ContactFieldConfidence.objects.count()
+        self.assertEqual(cfc_after, cfc_before)
+
+    def test_post_primary_contact_of_person_unchanged(self):
+        """別肩書追加で元の primary_contact は影響を受けない。"""
+        data = self._base_post_data()
+        data["full_name"] = "別肩書"
+        self.client.post(self._url(), data=data)
+
+        self.person.refresh_from_db()
+        self.assertEqual(self.person.primary_contact_id, self.primary.pk)
+        self.primary.refresh_from_db()
+        self.assertEqual(self.primary.status, Contact.Status.PRIMARY)
+
+    def test_post_invalid_redisplays_form(self):
+        """max_length 違反データ → 200 でフォーム再表示、Contact 未作成。"""
+        data = self._base_post_data()
+        data["full_name"] = "x" * 300  # max_length=255 違反
+        resp = self.client.post(self._url(), data=data)
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("full_name", resp.context["form"].errors)
+        self.assertFalse(
+            Contact.objects.filter(full_name="x" * 300).exists()
+        )
+
+    def test_post_to_archived_returns_404(self):
+        """archived Person への POST も 404（dispatch ガードが POST にも効く）。"""
+        self.person.status = Person.Status.ARCHIVED
+        self.person.save(update_fields=["status", "updated_at"])
+        data = self._base_post_data()
+        data["full_name"] = "X"
+        before = Contact.objects.count()
+        resp = self.client.post(self._url(), data=data)
+        self.assertEqual(resp.status_code, 404)
+        self.assertEqual(Contact.objects.count(), before)
