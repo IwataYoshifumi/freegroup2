@@ -1885,3 +1885,211 @@ class ContactAddAdditionalRoleFormTests(TestCase):
         # status / person は未設定（View 側責務、§10.12）
         self.assertEqual(new_contact.status, "")
         self.assertIsNone(new_contact.person_id)
+
+
+# ======================================================================
+# D-Form ステップ3a：10 番 ContactCreateView + 14 番 PreviewContactView
+# ======================================================================
+
+
+class ContactCreateViewTests(TestCase):
+    """ContactCreateView（10 番、仕様書 §11.4.4 / §11.6.5）の単体テスト。"""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="contact_create_user", password="dummy"
+        )
+        self.client = Client()
+        self.client.force_login(self.user)
+        self.url = reverse("contacts:contact_create")
+
+    def _base_post_data(self):
+        return {f: "" for f in Contact.UPDATABLE_FIELDS}
+
+    # ---- GET ----
+
+    def test_get_returns_200_with_form(self):
+        resp = self.client.get(self.url)
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("form", resp.context)
+        self.assertTemplateUsed(resp, "contacts/contact_create.html")
+
+    def test_get_unauthenticated_redirects(self):
+        """LoginRequiredMixin → 未ログインは login にリダイレクト（302）。"""
+        c = Client()
+        resp = c.get(self.url)
+        self.assertEqual(resp.status_code, 302)
+
+    # ---- POST 検証 NG ----
+
+    def test_post_invalid_redisplays_form(self):
+        """max_length 違反データ → 200 でフォーム再表示、Contact 未作成。"""
+        data = self._base_post_data()
+        data["full_name"] = "x" * 300  # max_length=255 違反
+        person_count_before = Person.objects.count()
+        contact_count_before = Contact.objects.count()
+
+        resp = self.client.post(self.url, data=data)
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertTemplateUsed(resp, "contacts/contact_create.html")
+        self.assertIn("full_name", resp.context["form"].errors)
+        self.assertEqual(Person.objects.count(), person_count_before)
+        self.assertEqual(Contact.objects.count(), contact_count_before)
+
+    # ---- POST 検証 OK + 候補なし ----
+
+    def test_post_valid_no_duplicates_creates_and_redirects(self):
+        """重複候補なし → Person + primary Contact 作成、Contact 詳細画面リダイレクト。"""
+        data = self._base_post_data()
+        data["full_name"] = "新規 太郎"
+        data["company"] = "新会社"
+
+        resp = self.client.post(self.url, data=data)
+
+        self.assertEqual(resp.status_code, 302)
+
+        new_contact = Contact.objects.filter(full_name="新規 太郎").first()
+        self.assertIsNotNone(new_contact)
+        self.assertEqual(new_contact.status, Contact.Status.PRIMARY)
+        self.assertEqual(new_contact.created_by_id, self.user.id)
+        self.assertEqual(new_contact.updated_by_id, self.user.id)
+
+        new_person = new_contact.person
+        self.assertEqual(new_person.status, Person.Status.ACTIVE)
+        self.assertEqual(new_person.primary_contact_id, new_contact.pk)
+
+        self.assertEqual(
+            resp.url,
+            reverse(
+                "contacts:contact_detail", kwargs={"pk": new_contact.pk}
+            ),
+        )
+
+    def test_post_does_not_create_field_confidence_records(self):
+        """新規作成では ContactFieldConfidence は作成されない（仕様書 §10.6.4）。"""
+        cfc_before = ContactFieldConfidence.objects.count()
+        data = self._base_post_data()
+        data["full_name"] = "CFC 不要"
+        resp = self.client.post(self.url, data=data)
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(ContactFieldConfidence.objects.count(), cfc_before)
+
+    # ---- POST 検証 OK + 候補あり ----
+
+    def test_post_with_duplicate_shows_duplicates_screen(self):
+        """possible_high 以上の候補あり → 確認画面表示、Person / Contact 未作成。"""
+        # full_name(40) + email(80) + mobile(80) = 200 → POSSIBLE_HIGH 以上を狙う
+        existing_person = Person.objects.create()
+        existing = Contact.objects.create(
+            person=existing_person,
+            status=Contact.Status.PRIMARY,
+            full_name="既存 太郎",
+            email="taro@example.com",
+            mobile="090-1234-5678",
+        )
+        existing_person.primary_contact = existing
+        existing_person.save(update_fields=["primary_contact", "updated_at"])
+
+        person_count_before = Person.objects.count()
+        contact_count_before = Contact.objects.count()
+
+        data = self._base_post_data()
+        data["full_name"] = "既存 太郎"
+        data["email"] = "taro@example.com"
+        data["mobile"] = "090-1234-5678"
+
+        resp = self.client.post(self.url, data=data)
+
+        # 確認画面（duplicates_template）が表示される
+        self.assertEqual(resp.status_code, 200)
+        self.assertTemplateUsed(
+            resp, "contacts/contact_create_duplicates.html"
+        )
+        self.assertIn("top5", resp.context)
+        self.assertEqual(len(resp.context["top5"]), 1)
+        candidate_ids = [c.pk for c, _, _ in resp.context["top5"]]
+        self.assertIn(existing.pk, candidate_ids)
+
+        # Person / Contact は未作成（候補確認段階）
+        self.assertEqual(Person.objects.count(), person_count_before)
+        self.assertEqual(Contact.objects.count(), contact_count_before)
+
+
+class PreviewContactViewTests(TestCase):
+    """PreviewContactView（14 番、仕様書 §11.3 / §11.4.4）の単体テスト。"""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="preview_test_user", password="dummy"
+        )
+        self.person = Person.objects.create()
+        self.contact = Contact.objects.create(
+            person=self.person,
+            status=Contact.Status.PRIMARY,
+            full_name="P-name",
+            company="P-co",
+        )
+        self.person.primary_contact = self.contact
+        self.person.save(update_fields=["primary_contact", "updated_at"])
+
+        self.client = Client()
+        self.client.force_login(self.user)
+
+    def _url(self, contact=None):
+        return reverse(
+            "contacts:contact_preview",
+            kwargs={"pk": (contact or self.contact).pk},
+        )
+
+    # ---- 正常系 ----
+
+    def test_get_returns_200_with_fragment(self):
+        """認証あり GET → 200、_preview_modal_body.html、contact が context に。"""
+        resp = self.client.get(self._url())
+        self.assertEqual(resp.status_code, 200)
+        self.assertTemplateUsed(resp, "contacts/_preview_modal_body.html")
+        self.assertEqual(resp.context["contact"].pk, self.contact.pk)
+        self.assertIn("field_confidences", resp.context)
+        # body 内に氏名が表示される
+        self.assertIn("P-name", resp.content.decode())
+
+    def test_archived_person_inactive_contact_returns_200(self):
+        """archived Person 配下の inactive Contact → 200（ガードなし、§3.5）。"""
+        archived_person = Person.objects.create(status=Person.Status.ARCHIVED)
+        Contact.objects.create(
+            person=archived_person,
+            status=Contact.Status.PRIMARY,
+            full_name="dummy-primary",
+        )
+        inactive = Contact.objects.create(
+            person=archived_person,
+            status=Contact.Status.INACTIVE,
+            full_name="archived-inactive",
+        )
+        resp = self.client.get(self._url(inactive))
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("archived-inactive", resp.content.decode())
+
+    def test_merged_person_contact_returns_200(self):
+        """merged Person 配下の Contact → 200（ガードなし、§3.5）。"""
+        self.person.status = Person.Status.MERGED
+        self.person.save(update_fields=["status", "updated_at"])
+        resp = self.client.get(self._url())
+        self.assertEqual(resp.status_code, 200)
+
+    # ---- 異常系 ----
+
+    def test_unauthenticated_redirects(self):
+        c = Client()
+        resp = c.get(self._url())
+        self.assertEqual(resp.status_code, 302)
+
+    def test_nonexistent_returns_404(self):
+        import uuid as _uuid
+
+        url = reverse(
+            "contacts:contact_preview", kwargs={"pk": _uuid.uuid4()}
+        )
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 404)

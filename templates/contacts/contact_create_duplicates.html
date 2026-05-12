@@ -1,0 +1,92 @@
+{% extends "cards/app_base.html" %}
+{% load back_tags %}
+
+{% block title %}重複候補が見つかりました — FreeGroup2{% endblock %}
+
+{% block content %}
+  <div class="app-page-header" style="max-width:1000px;">
+    <div>
+      <div class="app-breadcrumb">名刺管理 / コンタクト一覧 / 新規作成 / 重複候補</div>
+      <h1>重複する可能性のあるコンタクトが見つかりました</h1>
+      <p class="app-muted">
+        以下の候補と重複する可能性があります。各候補の「詳細を見る」リンクで内容を別タブで確認できます。
+      </p>
+    </div>
+  </div>
+
+  <section class="app-card" style="max-width:1000px;">
+    <div class="app-section__header">
+      <h2>重複候補（上位 {{ top5|length }} 件）</h2>
+    </div>
+    <div class="app-table-wrapper">
+      <table class="app-table">
+        <thead>
+          <tr>
+            <th>氏名</th>
+            <th>会社</th>
+            <th>部署</th>
+            <th>メール</th>
+            <th>携帯</th>
+            <th>判定</th>
+            <th>スコア</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for candidate, score, rank in top5 %}
+            <tr>
+              <td>{{ candidate.full_name|default:"(氏名なし)" }}</td>
+              <td>{{ candidate.company }}</td>
+              <td>{{ candidate.department }}</td>
+              <td>{{ candidate.email }}</td>
+              <td>{{ candidate.mobile }}</td>
+              <td>
+                {% if rank == "exact_match" %}
+                  <span class="app-status-badge app-status-badge--error">完全一致</span>
+                {% elif rank == "possible_high" %}
+                  <span class="app-status-badge app-status-badge--warning">高確信度</span>
+                {% else %}
+                  <span class="app-status-badge app-status-badge--muted">{{ rank }}</span>
+                {% endif %}
+              </td>
+              <td>{{ score }}</td>
+              <td>
+                {# AJAX モーダル化はステップ3b で実装、本ステップでは別タブで Contact 詳細画面を開く #}
+                {% url 'contacts:contact_detail' pk=candidate.id as detail_url %}
+                <a href="{{ detail_url }}"
+                   class="app-btn app-btn--sm app-btn--secondary"
+                   target="_blank" rel="noopener">詳細を見る</a>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if extra_count %}
+      <p class="app-muted" style="margin-top:var(--app-space-sm);">+他 {{ extra_count }} 件</p>
+    {% endif %}
+  </section>
+
+  <form method="post" action="{% url 'contacts:contact_create' %}"
+        class="app-card"
+        style="max-width:1000px; margin-top:var(--app-space-md);">
+    {% csrf_token %}
+    {% hidden_back_field back %}
+
+    {# 入力された全フィールド値を hidden field で保持（ステップ3b の強制作成再 POST 用） #}
+    {% for field in form.visible_fields %}
+      <input type="hidden" name="{{ field.html_name }}" value="{{ field.value|default_if_none:'' }}">
+    {% endfor %}
+
+    <div class="app-action-area" style="margin-top:0;">
+      {# 強制作成ボタンはステップ3b で実装、本ステップでは disabled プレースホルダー（指示書 §3.1） #}
+      <button type="submit" class="app-btn app-btn--danger" disabled
+              title="強制作成はステップ3b で実装予定">
+        強制作成（ステップ3b で実装予定）
+      </button>
+      <a href="{% url 'contacts:contact_create' %}" class="app-btn app-btn--secondary">
+        フォームに戻る
+      </a>
+    </div>
+  </form>
+{% endblock %}

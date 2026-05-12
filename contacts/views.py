@@ -21,8 +21,10 @@ import json
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.db import transaction
 from django.db.models import Q
 from django.http import Http404, HttpResponseRedirect, JsonResponse
+from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
 from django.utils.decorators import method_decorator
 from django.views import View
@@ -31,8 +33,10 @@ from django.views.generic import DetailView, ListView, UpdateView
 
 from back_navigator.back_navigator import BackNavigator
 from duplicates.models import DuplicateCandidate, PersonMergeLog
+from duplicates.services.duplicate_detection import find_duplicate_contacts
+from persons.models import Person
 
-from .forms import ContactUpdateActiveForm
+from .forms import ContactCreateForm, ContactUpdateActiveForm
 from .models import Contact, ContactFieldConfidence
 
 
@@ -451,4 +455,150 @@ class UpdateActiveContactView(LoginRequiredMixin, UpdateView):
     def get_success_url(self):
         return reverse(
             "contacts:contact_detail", kwargs={"pk": self.object.pk}
+        )
+
+
+# ======================================================================
+# D-Form ステップ3a：10 番 ContactCreateView + 14 番 PreviewContactView
+# ======================================================================
+
+
+# 仕様書 §11.4.4：重複候補のうちユーザーに警告すべき rank のセット。
+# 将来的に settings の DUPLICATE_WARNING_LEVEL で調整可能（本ステップ範囲外、別ストック）。
+_DUPLICATE_WARNING_RANKS = (
+    DuplicateCandidate.Rank.EXACT_MATCH,
+    DuplicateCandidate.Rank.POSSIBLE_HIGH,
+)
+
+# rank 表示優先順位（exact_match を最優先）
+_RANK_PRIORITY = {
+    DuplicateCandidate.Rank.EXACT_MATCH: 0,
+    DuplicateCandidate.Rank.POSSIBLE_HIGH: 1,
+}
+
+
+@transaction.atomic
+def _create_person_and_contact(form, user):
+    """新規 Person + primary Contact を 1 トランザクションで作成（仕様書 §11.4.4）。
+
+    [性質] 副作用あり（DB 書込：Person 1 件 + Contact 1 件 + Person.primary_contact 更新）
+    [入力] form: ContactCreateForm（バリデーション済み、get_update_contact() を持つ）
+           user: 操作実行者（Contact.created_by / updated_by に記録）
+    [出力] Contact（新規作成された primary Contact、保存済み）
+
+    set_primary_contact() の内部 transaction.atomic は外側の atomic とネスト可能
+    （Django 標準動作、savepoint 経由）。Person モデルは created_by / updated_by を
+    持たない（persons/models.py 現状）ので Person.objects.create() には渡さない。
+    """
+    person = Person.objects.create(status=Person.Status.ACTIVE)
+    contact = form.get_update_contact()
+    contact.person = person
+    contact.status = Contact.Status.PRIMARY
+    contact.created_by = user
+    contact.updated_by = user
+    contact.save()
+    person.set_primary_contact(contact)
+    return contact
+
+
+class ContactCreateView(LoginRequiredMixin, View):
+    """手動 Contact 新規作成画面（10 番、仕様書 §11.4.4 / §11.6.5）。
+
+    GET：空フォームを表示。
+    POST：
+      1. フォーム検証 → NG なら同じテンプレートでエラー再表示
+      2. 検証 OK なら find_duplicate_contacts() で重複候補取得
+      3. 候補のうち rank ∈ (exact_match, possible_high) がある → 確認画面表示
+         （上位 5 件 + 「+他 N 件」、強制作成はステップ3b で実装、本ステップでは
+         disabled プレースホルダー）
+      4. 候補なし → 1 トランザクションで Person + primary Contact を作成、
+         Contact 詳細画面（11 番）へリダイレクト
+
+    OCR を経由しないユーザー直接入力のため ContactFieldConfidence は作らない
+    （仕様書 §10.6.4、PersonAddAdditionalRoleView と同じ流儀）。
+    """
+
+    template_name = "contacts/contact_create.html"
+    duplicates_template_name = "contacts/contact_create_duplicates.html"
+
+    def get(self, request):
+        form = ContactCreateForm()
+        return render(request, self.template_name, self._context(request, form))
+
+    def post(self, request):
+        form = ContactCreateForm(request.POST)
+        if not form.is_valid():
+            return render(
+                request, self.template_name, self._context(request, form)
+            )
+
+        # 検証 OK：未保存 Contact を生成して重複検出
+        prospective = form.get_update_contact()
+        candidates = find_duplicate_contacts(prospective)
+        critical = [
+            (c, s, r)
+            for c, s, r in candidates
+            if r in _DUPLICATE_WARNING_RANKS
+        ]
+
+        if critical:
+            critical_sorted = sorted(
+                critical,
+                key=lambda x: (_RANK_PRIORITY.get(x[2], 99), -x[1]),
+            )
+            top5 = critical_sorted[:5]
+            extra_count = max(0, len(critical_sorted) - 5)
+            ctx = self._context(request, form)
+            ctx.update(
+                {
+                    "top5": top5,
+                    "extra_count": extra_count,
+                }
+            )
+            return render(request, self.duplicates_template_name, ctx)
+
+        # 候補なし：保存して Contact 詳細画面へリダイレクト
+        new_contact = _create_person_and_contact(form, request.user)
+        return HttpResponseRedirect(
+            reverse(
+                "contacts:contact_detail", kwargs={"pk": new_contact.pk}
+            )
+        )
+
+    def _context(self, request, form):
+        back = BackNavigator(request)
+        return {
+            "form": form,
+            "back": back,
+            "active_app": "contacts",
+            "active_menu": "contacts:contact_create",
+        }
+
+
+class PreviewContactView(LoginRequiredMixin, View):
+    """Contact プレビュー（14 番、仕様書 §11.3 / §11.4.4 AJAX 連携）。
+
+    GET のみ。HTML フラグメント（_preview_modal_body.html）を返す。
+    読み取り専用なので Contact / Person ステータスガードなし（archived / merged
+    Person 配下の inactive Contact もプレビュー可、論点4 / §3.5）。
+
+    用途：
+      - ContactCreateView の重複候補リストから「詳細を見る」リンクで呼ばれる（§11.4.4）
+      - 将来的に Contact 一覧画面のモーダルプレビューでも使用（§11.3 14 番）
+    """
+
+    template_name = "contacts/_preview_modal_body.html"
+
+    def get(self, request, pk):
+        contact = get_object_or_404(
+            Contact.objects.select_related("person", "business_card"),
+            pk=pk,
+        )
+        return render(
+            request,
+            self.template_name,
+            {
+                "contact": contact,
+                "field_confidences": contact.get_field_confidences(),
+            },
         )

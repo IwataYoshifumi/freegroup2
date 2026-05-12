@@ -3,11 +3,11 @@
 Form クラス階層（仕様書 §11.6.1）：
 
     ContactBaseForm（抽象）
-      └── ContactUpdateForm
-            └── ContactUpdateActiveForm
-            └── ContactAddAdditionalRoleForm（未実装）
-            └── ContactCreateForm（未実装）
-            └── MergeForm（未実装）
+      ├── ContactUpdateForm
+      │     └── ContactUpdateActiveForm
+      ├── ContactAddAdditionalRoleForm
+      ├── ContactCreateForm
+      └── MergeForm（未実装）
 
 ContactBaseForm は Contact.UPDATABLE_FIELDS を Meta.fields として共通参照する
 ModelForm 基底クラス。UI 構造を持たず、子 Form から継承して使う。
@@ -182,6 +182,29 @@ class ContactUpdateActiveForm(ContactUpdateForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         del self.fields["change_reason"]
+
+
+class ContactCreateForm(ContactBaseForm):
+    """手動 Contact 新規作成画面用 Form（仕様書 §11.6.2 / §11.4.4、10 番 ContactCreateView）。
+
+    OCR を経由しないユーザー直接入力のため、ContactFieldConfidence は作らない
+    （全フィールド high 扱い、§10.6.4）。新規 Person 生成 + status / person FK の
+    設定 + save() は View 側（ContactCreateView）の責務。本フォームは値の検証と
+    get_update_contact() による未保存 Contact 生成までを担う（§11.6.5）。
+
+    ContactAddAdditionalRoleForm との違い：
+      - person を取らない（新規 Person を View 側で作るため）
+      - 重複検出（find_duplicate_contacts）は View 側で実施
+
+    [性質] presentation 層クラス（DB 操作なし・副作用なし、§11.6.3 設計原則）
+    """
+
+    def __init__(self, *args, **kwargs):
+        # 新規 Contact 生成用なので instance は持たせない（View 側で
+        # get_update_contact() の戻り値を加工して save する責務分離、§11.4.4）。
+        kwargs.pop("instance", None)
+        super().__init__(*args, **kwargs)
+        self._apply_widget_classes()
 
 
 class ContactAddAdditionalRoleForm(ContactBaseForm):

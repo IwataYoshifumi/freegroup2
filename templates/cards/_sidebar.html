@@ -6,4 +6,5 @@
   <a href="{% url 'originals:original_list' %}" {% if active_menu == 'originals:original_list' %}class="is-active"{% endif %}>元画像一覧</a>
   <a href="{% url 'persons:person_list' %}" {% if active_menu == 'persons:person_list' %}class="is-active"{% endif %}>人物一覧</a>
   <a href="{% url 'contacts:contact_list' %}" {% if active_menu == 'contacts:contact_list' %}class="is-active"{% endif %}>コンタクト一覧</a>
+  <a href="{% url 'contacts:contact_create' %}" {% if active_menu == 'contacts:contact_create' %}class="is-active"{% endif %}>コンタクト新規作成</a>
 </nav>
