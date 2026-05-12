@@ -4,10 +4,14 @@
 {% block title %}コンタクト一覧 — FreeGroup2{% endblock %}
 
 {% block content %}
+  {% url 'contacts:contact_create' as create_url %}
   <div class="app-page-header">
     <div>
       <div class="app-breadcrumb">コンタクト管理 / コンタクト一覧</div>
       <h1>コンタクト一覧</h1>
+    </div>
+    <div class="app-action-area">
+      <a href="{% append_back_url create_url back %}" class="app-btn app-btn--primary">コンタクト新規作成</a>
     </div>
   </div>
 
