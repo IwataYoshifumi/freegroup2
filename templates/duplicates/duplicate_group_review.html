@@ -22,6 +22,7 @@
   <form method="post" class="app-card" style="max-width:1100px;" novalidate>
     {% csrf_token %}
     {% hidden_back_field back %}
+    <input type="hidden" name="pair_id" value="{{ candidate.pk }}">
 
     {% if form.non_field_errors %}
       <div class="app-alert app-alert--danger">{{ form.non_field_errors }}</div>

@@ -720,19 +720,20 @@ class DuplicateCandidateGroupUpdateViewGetTests(
 class DuplicateCandidateGroupUpdateViewSessionTests(
     _DuplicateGroupUpdateViewTestBase
 ):
-    """17 番 View セッション管理テスト（D-4b E-2）。"""
+    """17 番 View GET の reviewed_pair_ids フィルタテスト（D-4b E-2、D-4c で改訂）。
 
-    def test_first_get_adds_pair_to_session(self):
-        """初回 GET → reviewed_pair_ids:<group_id> に当該ペア ID が追加される。"""
-        candidate = self._make_candidate(
-            self.person_x, self.person_y, group_id=self.group_id
-        )
-        self.client.get(self._url())
-        session_key = f"reviewed_pair_ids:{self.group_id}"
-        self.assertIn(str(candidate.pk), self.client.session[session_key])
+    D-4c で reviewed_pair_ids への追加は POST 時のみに変更されたため、本クラスは
+    「事前にセッションに値が入っていれば GET の filter が機能する」ことだけを検証する。
+    POST 時の session 追加挙動は DuplicateCandidateGroupUpdateViewPostTests を参照。
+    """
 
-    def test_second_get_returns_next_pair(self):
-        """2 回目 GET → reviewed 済みペアは除外され、次のペアが返る。"""
+    def _set_session_reviewed(self, group_id, pair_ids):
+        session = self.client.session
+        session[f"reviewed_pair_ids:{group_id}"] = pair_ids
+        session.save()
+
+    def test_get_excludes_reviewed_pair_in_session(self):
+        """事前に session に入った pair_id は filter から除外され、次のペアが返る。"""
         c1 = self._make_candidate(
             self.person_x, self.person_y,
             group_id=self.group_id,
@@ -743,17 +744,17 @@ class DuplicateCandidateGroupUpdateViewSessionTests(
             group_id=self.group_id,
             score=100,
         )
-        resp1 = self.client.get(self._url())
-        self.assertEqual(resp1.context["candidate"].pk, c1.pk)
-        resp2 = self.client.get(self._url())
-        self.assertEqual(resp2.context["candidate"].pk, c2.pk)
+
+        self._set_session_reviewed(self.group_id, [str(c1.pk)])
+        resp = self.client.get(self._url())
+        self.assertEqual(resp.context["candidate"].pk, c2.pk)
 
     def test_all_reviewed_redirects_to_detail_and_clears_session(self):
-        """全レビュー後の GET → 16 番リダイレクト + reviewed_pair_ids クリア。"""
-        self._make_candidate(
+        """全ペアがセッションに含まれる状態の GET → 16 番リダイレクト + session クリア。"""
+        candidate = self._make_candidate(
             self.person_x, self.person_y, group_id=self.group_id
         )
-        self.client.get(self._url())  # 1 ペアを reviewed に追加
+        self._set_session_reviewed(self.group_id, [str(candidate.pk)])
         resp = self.client.get(self._url())
         self.assertRedirects(
             resp,
@@ -768,20 +769,33 @@ class DuplicateCandidateGroupUpdateViewSessionTests(
     def test_independent_session_keys_per_group(self):
         """別 group_id のセッションキーは独立（並行レビュー、論点1 案A）。"""
         group_b = uuid.uuid4()
-        self._make_candidate(
+        c_a = self._make_candidate(
             self.person_x, self.person_y, group_id=self.group_id
         )
         c_b = self._make_candidate(
             self.person_x, self.person_z, group_id=group_b
         )
 
-        self.client.get(self._url())
+        self._set_session_reviewed(self.group_id, [str(c_a.pk)])
+        self._set_session_reviewed(group_b, [])
+
+        # group_a：reviewed 済みなので候補なし → 16 番リダイレクト
+        resp_a = self.client.get(self._url())
+        self.assertEqual(resp_a.status_code, 302)
+
+        # group_b：reviewed 空なので候補（c_b）表示
         resp_b = self.client.get(self._url(group_id=group_b))
+        self.assertEqual(resp_b.status_code, 200)
         self.assertEqual(resp_b.context["candidate"].pk, c_b.pk)
 
-        session = self.client.session
-        self.assertIn(f"reviewed_pair_ids:{self.group_id}", session)
-        self.assertIn(f"reviewed_pair_ids:{group_b}", session)
+    def test_get_does_not_add_to_session(self):
+        """GET は session に reviewed_pair_ids を追加しない（D-4c 仕様変更）。"""
+        self._make_candidate(
+            self.person_x, self.person_y, group_id=self.group_id
+        )
+        self.client.get(self._url())
+        session_key = f"reviewed_pair_ids:{self.group_id}"
+        self.assertNotIn(session_key, self.client.session)
 
 
 class DuplicateCandidateGroupUpdateViewRedirectTests(
@@ -799,10 +813,13 @@ class DuplicateCandidateGroupUpdateViewRedirectTests(
 
     def test_no_pair_with_session_shows_completion_message(self):
         """ペアなし + reviewed_pair_ids あり → 16 番リダイレクト + 完了メッセージ。"""
-        self._make_candidate(
+        candidate = self._make_candidate(
             self.person_x, self.person_y, group_id=self.group_id
         )
-        self.client.get(self._url())
+        session = self.client.session
+        session[f"reviewed_pair_ids:{self.group_id}"] = [str(candidate.pk)]
+        session.save()
+
         resp = self.client.get(self._url(), follow=True)
         msgs = [str(m) for m in resp.context["messages"]]
         self.assertIn(
@@ -834,3 +851,225 @@ class DuplicateCandidateGroupUpdateViewMergeFormInitTests(
         self.assertEqual(form.candidate.pk, candidate.pk)
         self.assertEqual(form.surviving_person.pk, candidate.person_a.pk)
         self.assertEqual(form.merged_person.pk, candidate.person_b.pk)
+
+
+class _DuplicateGroupUpdateViewPostTestBase(_DuplicateGroupUpdateViewTestBase):
+    """17 番 View POST テスト共通：candidate 起点の POST データ生成ヘルパー（D-4c）。"""
+
+    def _post_data(self, candidate, **overrides):
+        """正常系 POST データ（merged_only 既定）。surviving=person_a。"""
+        surviving_primary = candidate.person_a.primary_contact
+        data = {
+            f: getattr(surviving_primary, f)
+            for f in Contact.UPDATABLE_FIELDS
+        }
+        data["pair_id"] = str(candidate.pk)
+        data["review_result"] = ["same_card"]
+        data["merge_reason"] = "same_card"
+        data["surviving_person_choice"] = "person_a"
+        data["note"] = ""
+        data.update(overrides)
+        return data
+
+
+class DuplicateCandidateGroupUpdateViewPostTests(
+    _DuplicateGroupUpdateViewPostTestBase
+):
+    """17 番 View POST 正常系テスト（D-4c C-2 / C-3）。"""
+
+    def test_post_different_person_marks_as_different(self):
+        """review_result=different 系 → Mark_as_Different_Person → status=different_person。"""
+        candidate = self._make_candidate(
+            self.person_x, self.person_y, group_id=self.group_id
+        )
+        data = self._post_data(
+            candidate,
+            review_result=["same_name"],
+            merge_reason="",
+        )
+        resp = self.client.post(self._url(), data)
+        self.assertEqual(resp.status_code, 302)
+        candidate.refresh_from_db()
+        self.assertEqual(
+            candidate.review_status,
+            DuplicateCandidate.ReviewStatus.DIFFERENT_PERSON,
+        )
+
+    def test_post_merged_executes_merge_only(self):
+        """review_result=merged 系 → Execute_Merge_Only → DC=merged + merged_person=merged。"""
+        candidate = self._make_candidate(
+            self.person_x, self.person_y, group_id=self.group_id
+        )
+        data = self._post_data(candidate)
+        resp = self.client.post(self._url(), data)
+        self.assertEqual(resp.status_code, 302)
+        candidate.refresh_from_db()
+        self.assertEqual(
+            candidate.review_status,
+            DuplicateCandidate.ReviewStatus.MERGED,
+        )
+        merged_person = candidate.person_b
+        merged_person.refresh_from_db()
+        self.assertEqual(merged_person.status, Person.Status.MERGED)
+
+    def test_post_surviving_person_b_swaps_surviving_merged(self):
+        """surviving_person_choice=person_b → surviving=person_b、merged=person_a が swap される。"""
+        candidate = self._make_candidate(
+            self.person_x, self.person_y, group_id=self.group_id
+        )
+        data = self._post_data(
+            candidate, surviving_person_choice="person_b"
+        )
+        # surviving=person_b なので入力データを person_b の primary_contact 値に揃える
+        merged_primary = candidate.person_b.primary_contact
+        for f in Contact.UPDATABLE_FIELDS:
+            data[f] = getattr(merged_primary, f)
+
+        resp = self.client.post(self._url(), data)
+        self.assertEqual(resp.status_code, 302)
+        # person_b 側が surviving として active のまま、person_a が merged 化
+        candidate.person_a.refresh_from_db()
+        candidate.person_b.refresh_from_db()
+        self.assertEqual(
+            candidate.person_a.status, Person.Status.MERGED
+        )
+        self.assertEqual(
+            candidate.person_b.status, Person.Status.ACTIVE
+        )
+
+    def test_post_success_redirects_to_review_url(self):
+        """成功 POST → 同 URL の GET にリダイレクト（PRG パターン）。"""
+        candidate = self._make_candidate(
+            self.person_x, self.person_y, group_id=self.group_id
+        )
+        data = self._post_data(candidate)
+        resp = self.client.post(self._url(), data)
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], self._url())
+
+    def test_post_success_adds_pair_to_reviewed_session(self):
+        """成功 POST → reviewed_pair_ids に pair_id 追加。"""
+        candidate = self._make_candidate(
+            self.person_x, self.person_y, group_id=self.group_id
+        )
+        data = self._post_data(candidate)
+        self.client.post(self._url(), data)
+        session_key = f"reviewed_pair_ids:{self.group_id}"
+        self.assertIn(str(candidate.pk), self.client.session[session_key])
+
+    def test_post_invalid_form_renders_review_page(self):
+        """フォームバリデーション失敗 → 200 + form エラー + session 未追加 + DC 不変。"""
+        candidate = self._make_candidate(
+            self.person_x, self.person_y, group_id=self.group_id
+        )
+        data = self._post_data(candidate, review_result=[])
+        resp = self.client.post(self._url(), data)
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("form", resp.context)
+        self.assertTrue(resp.context["form"].errors)
+        session_key = f"reviewed_pair_ids:{self.group_id}"
+        self.assertNotIn(session_key, self.client.session)
+        candidate.refresh_from_db()
+        self.assertEqual(
+            candidate.review_status,
+            DuplicateCandidate.ReviewStatus.PENDING,
+        )
+
+
+class DuplicateCandidateGroupUpdateViewConflictTests(
+    _DuplicateGroupUpdateViewPostTestBase
+):
+    """17 番 View 競合検出テスト（D-4c C-4 / C-5）。"""
+
+    def test_post_already_processed_redirects_with_error(self):
+        """review_status != pending → 競合エラー + GET リダイレクト + session 未追加。"""
+        candidate = self._make_candidate(
+            self.person_x,
+            self.person_y,
+            group_id=self.group_id,
+            review_status=DuplicateCandidate.ReviewStatus.MERGED,
+        )
+        data = self._post_data(candidate)
+        resp = self.client.post(self._url(), data, follow=True)
+        msgs = [str(m) for m in resp.context["messages"]]
+        self.assertTrue(
+            any("既に他の操作で処理されました" in m for m in msgs)
+        )
+        session_key = f"reviewed_pair_ids:{self.group_id}"
+        self.assertNotIn(session_key, self.client.session)
+
+    def test_post_pair_id_not_in_group_redirects_with_error(self):
+        """pair_id が URL group_id に属さない → 競合エラー + GET リダイレクト。"""
+        other_group = uuid.uuid4()
+        candidate = self._make_candidate(
+            self.person_x, self.person_y, group_id=other_group
+        )
+        data = self._post_data(candidate)
+        resp = self.client.post(self._url(), data, follow=True)
+        msgs = [str(m) for m in resp.context["messages"]]
+        self.assertTrue(
+            any("既に他の操作で処理されました" in m for m in msgs)
+        )
+
+    def test_post_invalid_pair_id_redirects_with_error(self):
+        """無効な pair_id（malformed UUID）→ 競合エラー + GET リダイレクト。"""
+        data = {
+            "pair_id": "not-a-uuid",
+            "review_result": ["same_card"],
+            "merge_reason": "same_card",
+            "surviving_person_choice": "person_a",
+        }
+        resp = self.client.post(self._url(), data, follow=True)
+        msgs = [str(m) for m in resp.context["messages"]]
+        self.assertTrue(
+            any("既に他の操作で処理されました" in m for m in msgs)
+        )
+
+    def test_post_missing_pair_id_redirects_with_error(self):
+        """POST に pair_id なし → 競合エラー + GET リダイレクト。"""
+        data = {
+            "review_result": ["same_card"],
+            "merge_reason": "same_card",
+            "surviving_person_choice": "person_a",
+        }
+        resp = self.client.post(self._url(), data, follow=True)
+        msgs = [str(m) for m in resp.context["messages"]]
+        self.assertTrue(
+            any("既に他の操作で処理されました" in m for m in msgs)
+        )
+
+
+class DuplicateCandidateGroupUpdateViewServiceErrorTests(
+    _DuplicateGroupUpdateViewPostTestBase
+):
+    """17 番 View サービス層 ValidationError キャッチテスト（D-4c C-6）。"""
+
+    def test_post_service_validation_error_renders_review_page(self):
+        """surviving primary の非 high 残置 → Execute_Merge_Only が ValidationError →
+        レビュー画面再 render + form non_field_errors + DC 不変 + session 未追加。
+
+        セットアップ：surviving 側 primary_contact に low CFC を 1 件作成。POST 側で
+        confirmed_<field>=True を送るので Form 検証は通るが、DB の CFC.confirmed_at は
+        NULL のまま → Execute_Merge_Only 内の is_all_field_confidence_high が False →
+        ValidationError。
+        """
+        candidate = self._make_candidate(
+            self.person_x, self.person_y, group_id=self.group_id
+        )
+        ContactFieldConfidence.objects.create(
+            contact=candidate.person_a.primary_contact,
+            field_name="full_name",
+            confidence="low",
+        )
+
+        data = self._post_data(candidate, confirmed_full_name=True)
+        resp = self.client.post(self._url(), data)
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.context["form"].non_field_errors())
+        candidate.refresh_from_db()
+        self.assertEqual(
+            candidate.review_status,
+            DuplicateCandidate.ReviewStatus.PENDING,
+        )
+        session_key = f"reviewed_pair_ids:{self.group_id}"
+        self.assertNotIn(session_key, self.client.session)

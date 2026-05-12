@@ -10,6 +10,7 @@ DuplicateCandidateGroupUpdateView：重複候補レビュー画面（URL 17 番�
 
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.core.exceptions import ValidationError
 from django.db.models import (
     Case,
     Count,
@@ -24,9 +25,14 @@ from django.shortcuts import redirect, render
 from django.views.generic import ListView, View
 
 from back_navigator.back_navigator import BackNavigator
+from config.constants import DifferentPersonReason
 
 from .forms import MergeForm
 from .models import DuplicateCandidate
+from .services.merge_executor import (
+    Execute_Merge_Only,
+    Mark_as_Different_Person,
+)
 
 
 class DuplicateCandidateGroupListView(LoginRequiredMixin, ListView):
@@ -239,28 +245,120 @@ class DuplicateCandidateGroupDetailView(LoginRequiredMixin, View):
 
 
 class DuplicateCandidateGroupUpdateView(LoginRequiredMixin, View):
-    """重複候補レビュー画面（17 番、仕様書 §11.3 / §11.5.2 / §11.5.5、D-4b）。
+    """重複候補レビュー画面（17 番、仕様書 §11.3 / §11.5.2 / §11.5.3 / §11.5.5）。
 
-    GET：仕様書 §11.5.2 の 5 ステップで次のペアを表示する。
-    POST：MergeForm 検証 → 3 サービス分岐（Mark_as_Different_Person /
-    Execute_Merge_Only / Execute_Merge_with_Updates）。POST は D-4c で別途実装、
-    本タスクでは GET のみ。
+    GET（D-4b）：仕様書 §11.5.2 の 5 ステップで次のペアを表示する。
+    POST（D-4c）：MergeForm 検証 → 2 サービス分岐（Mark_as_Different_Person /
+    Execute_Merge_Only）→ reviewed_pair_ids 追加 → PRG リダイレクト。
 
     セッションキー：reviewed_pair_ids:<group_id>（D-4b 論点1 案A、group_id ごと独立）。
     仕様書 §11.5.2 / §11.5.3 の shown_pair_ids は本実装で reviewed_pair_ids に
     リネーム（v9 セッション、たんたん判断、ストック #39 候補）。
 
+    reviewed_pair_ids への追加タイミング：仕様書 §11.5.2 では GET 時の追加を記載するが、
+    本実装は POST 時のみ追加（D-4c、ユーザーの意思表明をもって「処理済み」確定。画面を
+    見ただけで後戻り不可となる UX 問題の回避、新ストック候補で仕様書改訂予定）。
+
     ペア表示順序：score 降順 → 同 score なら created_at 昇順（D-4b 論点2 案C）。
-    MergeForm 初期化：candidate.person_a を surviving、candidate.person_b を merged
-    でデフォルト初期化（D-4b 論点3 案A、仕様書 §11.5.5「デフォルト：左側」と整合）。
+    MergeForm 初期化（GET）：candidate.person_a を surviving、candidate.person_b を
+    merged でデフォルト初期化（D-4b 論点3 案A、仕様書 §11.5.5「デフォルト：左側」）。
+
+    サービス分岐（仕様書 §11.4.6、2026-05-10 設計変更で 3→2 分岐）：
+      - DifferentPersonReason のいずれかが review_result に含まれる
+        → Mark_as_Different_Person
+      - DuplicateMergeReason のみ → Execute_Merge_Only
+    Execute_Merge_with_Updates は廃止（マージ画面で値修正すると
+    duplicate_checked_at=NULL になり DC 全 invalidated 化で再マージ不可となる問題のため）。
+    フィールド修正は Contact 詳細画面 AJAX に分離（§10.6.4 ケース 4）。
     """
 
     template_name = "duplicates/duplicate_group_review.html"
     _SESSION_KEY_PREFIX = "reviewed_pair_ids:"
+    _CONFLICT_MESSAGE = (
+        "このペアは既に他の操作で処理されました。次のペアを表示します。"
+    )
 
     def _session_key(self, group_id):
         """[性質] 純関数（文字列組み立てのみ）"""
         return f"{self._SESSION_KEY_PREFIX}{group_id}"
+
+    def _render_review_page(
+        self, request, group_id, candidate, form,
+        surviving_person, merged_person,
+    ):
+        """[性質] 副作用あり（BackNavigator 初期化 + HttpResponse 返却）"""
+        back = BackNavigator(request)
+        context = {
+            "candidate": candidate,
+            "group_id": group_id,
+            "form": form,
+            "surviving_person": surviving_person,
+            "merged_person": merged_person,
+            "back": back,
+            "active_app": "duplicates",
+            "active_menu": "duplicates:duplicate_group_list",
+        }
+        return render(request, self.template_name, context)
+
+    def _get_pending_candidate(self, group_id, pair_id):
+        """指定 group_id・pair_id・pending な DC を取得（POST 検証用）。
+
+        [性質] 準関数（DB 読み取りのみ）
+        [入力] group_id: UUID（URL から）/ pair_id: str | None（POST から、形式不正可）
+        [出力] DuplicateCandidate | None（pair_id 不正 / 不存在 / 競合いずれも None）
+        """
+        if not pair_id:
+            return None
+        try:
+            return (
+                DuplicateCandidate.objects.filter(
+                    pk=pair_id,
+                    group_id=group_id,
+                    review_status=DuplicateCandidate.ReviewStatus.PENDING,
+                )
+                .select_related(
+                    "person_a__primary_contact",
+                    "person_b__primary_contact",
+                )
+                .first()
+            )
+        except (ValueError, ValidationError):
+            return None
+
+    def _resolve_surviving_merged(self, candidate, surviving_person_choice):
+        """surviving_person_choice から surviving / merged の Person タプルを返す。
+
+        [性質] 純関数（DB 操作なし・副作用なし）
+        [入力] candidate: DuplicateCandidate / surviving_person_choice: str
+        [出力] (surviving: Person, merged: Person)
+
+        D-4b 論点3 案A：デフォルト（"person_a" もしくは不正値）では
+        surviving=candidate.person_a、merged=candidate.person_b（左側）。
+        """
+        if surviving_person_choice == "person_b":
+            return candidate.person_b, candidate.person_a
+        return candidate.person_a, candidate.person_b
+
+    def _dispatch_service(
+        self, candidate, surviving_person, merged_person, form, user,
+    ):
+        """review_result の値で 2 サービス関数のいずれかを呼ぶ（仕様書 §11.4.6）。
+
+        [性質] 副作用あり（merge_executor.py の 2 関数のいずれかを呼び DB 更新）
+        [入力] candidate / surviving_person / merged_person / form / user
+        [出力] None
+        [例外] ValidationError（サービス層が raise する場合あり、§11.4.6）
+        """
+        review_result = form.cleaned_data["review_result"]
+        different_values = set(DifferentPersonReason.values)
+        is_different = any(v in different_values for v in review_result)
+
+        if is_different:
+            Mark_as_Different_Person(candidate, form, user)
+        else:
+            Execute_Merge_Only(
+                candidate, surviving_person, merged_person, form, user
+            )
 
     def get(self, request, group_id):
         session_key = self._session_key(group_id)
@@ -281,28 +379,15 @@ class DuplicateCandidateGroupUpdateView(LoginRequiredMixin, View):
         )
 
         if candidate is not None:
-            reviewed_pair_ids.append(str(candidate.pk))
-            request.session[session_key] = reviewed_pair_ids
-            request.session.modified = True
-
             form = MergeForm(
                 candidate=candidate,
                 surviving_person=candidate.person_a,
                 merged_person=candidate.person_b,
             )
-
-            back = BackNavigator(request)
-            context = {
-                "candidate": candidate,
-                "group_id": group_id,
-                "form": form,
-                "surviving_person": candidate.person_a,
-                "merged_person": candidate.person_b,
-                "back": back,
-                "active_app": "duplicates",
-                "active_menu": "duplicates:duplicate_group_list",
-            }
-            return render(request, self.template_name, context)
+            return self._render_review_page(
+                request, group_id, candidate, form,
+                candidate.person_a, candidate.person_b,
+            )
 
         if reviewed_pair_ids:
             del request.session[session_key]
@@ -315,3 +400,54 @@ class DuplicateCandidateGroupUpdateView(LoginRequiredMixin, View):
             )
 
         return redirect("duplicates:duplicate_group_list")
+
+    def post(self, request, group_id):
+        pair_id = request.POST.get("pair_id")
+        candidate = self._get_pending_candidate(group_id, pair_id)
+        if candidate is None:
+            messages.error(request, self._CONFLICT_MESSAGE)
+            return redirect(
+                "duplicates:duplicate_group_review", group_id=group_id
+            )
+
+        surviving_person, merged_person = self._resolve_surviving_merged(
+            candidate,
+            request.POST.get("surviving_person_choice", "person_a"),
+        )
+
+        form = MergeForm(
+            request.POST,
+            candidate=candidate,
+            surviving_person=surviving_person,
+            merged_person=merged_person,
+        )
+
+        if not form.is_valid():
+            return self._render_review_page(
+                request, group_id, candidate, form,
+                surviving_person, merged_person,
+            )
+
+        try:
+            self._dispatch_service(
+                candidate, surviving_person, merged_person,
+                form, request.user,
+            )
+        except ValidationError as e:
+            form.add_error(None, e)
+            return self._render_review_page(
+                request, group_id, candidate, form,
+                surviving_person, merged_person,
+            )
+
+        session_key = self._session_key(group_id)
+        reviewed_pair_ids = request.session.get(session_key, [])
+        pair_id_str = str(candidate.pk)
+        if pair_id_str not in reviewed_pair_ids:
+            reviewed_pair_ids.append(pair_id_str)
+            request.session[session_key] = reviewed_pair_ids
+            request.session.modified = True
+
+        return redirect(
+            "duplicates:duplicate_group_review", group_id=group_id
+        )
