@@ -14,9 +14,10 @@
     </div>
     <div class="app-action-area">
       {% if back.back_exist %}
-        <a href="{% back_url back %}" class="app-btn app-btn--secondary">
-          <span class="app-icon--back"></span> 戻る
-        </a>
+        <a href="{% back_url back %}" class="app-btn app-btn--secondary">戻る</a>
+      {% endif %}
+      {% if back.back_all_exist %}
+        <a href="{% back_all_url back %}" class="app-btn app-btn--secondary">最初に戻る</a>
       {% endif %}
     </div>
   </div>
@@ -83,7 +84,10 @@
 
   <div class="app-action-area" style="margin-top:24px; max-width:1100px;">
     {% if back.back_exist %}
-      <a href="{% back_url back %}" class="app-btn app-btn--secondary">＜ 戻る</a>
+      <a href="{% back_url back %}" class="app-btn app-btn--secondary">戻る</a>
+    {% endif %}
+    {% if back.back_all_exist %}
+      <a href="{% back_all_url back %}" class="app-btn app-btn--secondary">最初に戻る</a>
     {% endif %}
   </div>
 {% endblock %}

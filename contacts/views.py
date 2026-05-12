@@ -450,7 +450,8 @@ class UpdateActiveContactView(LoginRequiredMixin, UpdateView):
 
     def form_valid(self, form):
         self.object.fix(form, self.request.user)
-        return HttpResponseRedirect(self.get_success_url())
+        back = BackNavigator(self.request)
+        return HttpResponseRedirect(back.append_url(self.get_success_url()))
 
     def get_success_url(self):
         return reverse(
@@ -536,12 +537,12 @@ class ContactCreateView(LoginRequiredMixin, View):
         # 強制作成された Contact は後の cron で重複候補として再検出される。
         if "force_create" in request.POST:
             new_contact = _create_person_and_contact(form, request.user)
-            return HttpResponseRedirect(
-                reverse(
-                    "contacts:contact_detail",
-                    kwargs={"pk": new_contact.pk},
-                )
+            back = BackNavigator(request)
+            target_url = reverse(
+                "contacts:contact_detail",
+                kwargs={"pk": new_contact.pk},
             )
+            return HttpResponseRedirect(back.append_url(target_url))
 
         # 検証 OK：未保存 Contact を生成して重複検出
         prospective = form.get_update_contact()
@@ -570,11 +571,12 @@ class ContactCreateView(LoginRequiredMixin, View):
 
         # 候補なし：保存して Contact 詳細画面へリダイレクト
         new_contact = _create_person_and_contact(form, request.user)
-        return HttpResponseRedirect(
-            reverse(
-                "contacts:contact_detail", kwargs={"pk": new_contact.pk}
-            )
+        back = BackNavigator(request)
+        target_url = reverse(
+            "contacts:contact_detail",
+            kwargs={"pk": new_contact.pk},
         )
+        return HttpResponseRedirect(back.append_url(target_url))
 
     def _context(self, request, form):
         back = BackNavigator(request)

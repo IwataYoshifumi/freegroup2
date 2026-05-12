@@ -9,6 +9,14 @@
       <div class="app-breadcrumb">名刺管理 / 名刺一覧 / コンタクト詳細 / アクティブコンタクト修正</div>
       <h1>アクティブコンタクト修正</h1>
     </div>
+    <div class="app-action-area">
+      {% if back.back_exist %}
+        <a href="{% back_url back %}" class="app-btn app-btn--secondary">戻る</a>
+      {% endif %}
+      {% if back.back_all_exist %}
+        <a href="{% back_all_url back %}" class="app-btn app-btn--secondary">最初に戻る</a>
+      {% endif %}
+    </div>
   </div>
 
   <form method="post" class="app-card" style="max-width:900px;" novalidate>
@@ -203,7 +211,10 @@
     <div class="app-action-area" style="margin-top:24px;">
       <button type="submit" class="app-btn app-btn--primary">保存</button>
       {% if back.back_exist %}
-        <a href="{% back_url back %}" class="app-btn app-btn--secondary">キャンセル</a>
+        <a href="{% back_url back %}" class="app-btn app-btn--secondary">戻る</a>
+      {% endif %}
+      {% if back.back_all_exist %}
+        <a href="{% back_all_url back %}" class="app-btn app-btn--secondary">最初に戻る</a>
       {% endif %}
     </div>
   </form>

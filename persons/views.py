@@ -255,7 +255,8 @@ class PersonAddAdditionalRoleView(LoginRequiredMixin, FormView):
         new_contact.status = Contact.Status.ACTIVE
         new_contact.save()
         self.created_contact = new_contact
-        return HttpResponseRedirect(self.get_success_url())
+        back = BackNavigator(self.request)
+        return HttpResponseRedirect(back.append_url(self.get_success_url()))
 
     def get_success_url(self):
         return reverse(

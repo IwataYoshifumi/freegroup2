@@ -9,8 +9,9 @@ import json
 from django.contrib.auth import get_user_model
 from django.core.files.base import ContentFile
 from django.db.models import Exists, OuterRef, Q
-from django.http import HttpResponse
+from django.http import HttpResponse, HttpResponseRedirect
 from django.shortcuts import redirect, render
+from django.urls import reverse
 from django.utils.dateparse import parse_date
 from django.views.generic import DetailView, FormView, ListView
 
@@ -57,7 +58,12 @@ class UploadView(FormView):
         filename = f"{original.id}.jpg"
         original.image_file.save(filename, ContentFile(jpeg_bytes), save=False)
         original.save()
-        return redirect("originals:original_detail", pk=original.id)
+        back = BackNavigator(self.request)
+        target_url = reverse(
+            "originals:original_detail",
+            kwargs={"pk": original.id},
+        )
+        return HttpResponseRedirect(back.append_url(target_url))
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)

@@ -12,6 +12,14 @@
         以下の候補と重複する可能性があります。各候補の「詳細を見る」リンクで内容を別タブで確認できます。
       </p>
     </div>
+    <div class="app-action-area">
+      {% if back.back_exist %}
+        <a href="{% back_url back %}" class="app-btn app-btn--secondary">戻る</a>
+      {% endif %}
+      {% if back.back_all_exist %}
+        <a href="{% back_all_url back %}" class="app-btn app-btn--secondary">最初に戻る</a>
+      {% endif %}
+    </div>
   </div>
 
   <section class="app-card" style="max-width:1000px;">
@@ -85,9 +93,12 @@
               class="app-btn app-btn--danger">
         強制作成
       </button>
-      <a href="{% url 'contacts:contact_create' %}" class="app-btn app-btn--secondary">
-        フォームに戻る
-      </a>
+      {% if back.back_exist %}
+        <a href="{% back_url back %}" class="app-btn app-btn--secondary">戻る</a>
+      {% endif %}
+      {% if back.back_all_exist %}
+        <a href="{% back_all_url back %}" class="app-btn app-btn--secondary">最初に戻る</a>
+      {% endif %}
     </div>
   </form>
 
