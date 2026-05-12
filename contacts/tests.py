@@ -2015,6 +2015,68 @@ class ContactCreateViewTests(TestCase):
         self.assertEqual(Person.objects.count(), person_count_before)
         self.assertEqual(Contact.objects.count(), contact_count_before)
 
+    # ---- ステップ3b：強制作成 ----
+
+    def test_post_force_create_skips_duplicate_check_and_creates(self):
+        """強制作成 POST → 重複候補があっても検出スキップ、Person + Contact 作成、詳細画面リダイレクト。"""
+        # 既存 Contact（重複候補になる、full_name + email + mobile 一致で possible_high 以上）
+        existing_person = Person.objects.create()
+        existing = Contact.objects.create(
+            person=existing_person,
+            status=Contact.Status.PRIMARY,
+            full_name="既存 太郎",
+            email="taro@example.com",
+            mobile="090-1234-5678",
+        )
+        existing_person.primary_contact = existing
+        existing_person.save(update_fields=["primary_contact", "updated_at"])
+
+        person_count_before = Person.objects.count()
+        contact_count_before = Contact.objects.count()
+
+        # 同じ値 + force_create=1 で POST
+        data = self._base_post_data()
+        data["full_name"] = "既存 太郎"
+        data["email"] = "taro@example.com"
+        data["mobile"] = "090-1234-5678"
+        data["force_create"] = "1"
+
+        resp = self.client.post(self.url, data=data)
+
+        # 強制作成により Person + Contact 各 1 件追加、Contact 詳細画面へリダイレクト
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(Person.objects.count(), person_count_before + 1)
+        self.assertEqual(Contact.objects.count(), contact_count_before + 1)
+
+        new_contact = (
+            Contact.objects.filter(full_name="既存 太郎")
+            .exclude(pk=existing.pk)
+            .first()
+        )
+        self.assertIsNotNone(new_contact)
+        self.assertEqual(new_contact.status, Contact.Status.PRIMARY)
+        self.assertNotEqual(new_contact.person_id, existing_person.pk)
+
+        self.assertEqual(
+            resp.url,
+            reverse(
+                "contacts:contact_detail", kwargs={"pk": new_contact.pk}
+            ),
+        )
+
+    def test_post_force_create_with_invalid_form_redisplays(self):
+        """force_create + 検証 NG → 通常通りフォーム再表示、Contact 未作成。"""
+        data = self._base_post_data()
+        data["full_name"] = "x" * 300  # max_length=255 違反
+        data["force_create"] = "1"
+        contact_count_before = Contact.objects.count()
+
+        resp = self.client.post(self.url, data=data)
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertTemplateUsed(resp, "contacts/contact_create.html")
+        self.assertEqual(Contact.objects.count(), contact_count_before)
+
 
 class PreviewContactViewTests(TestCase):
     """PreviewContactView（14 番、仕様書 §11.3 / §11.4.4）の単体テスト。"""

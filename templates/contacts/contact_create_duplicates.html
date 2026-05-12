@@ -51,11 +51,13 @@
               </td>
               <td>{{ score }}</td>
               <td>
-                {# AJAX モーダル化はステップ3b で実装、本ステップでは別タブで Contact 詳細画面を開く #}
-                {% url 'contacts:contact_detail' pk=candidate.id as detail_url %}
-                <a href="{{ detail_url }}"
-                   class="app-btn app-btn--sm app-btn--secondary"
-                   target="_blank" rel="noopener">詳細を見る</a>
+                {# クリックで AJAX で _preview_modal_body.html を取得して #previewModal に流し込む（ステップ3b） #}
+                <button type="button"
+                        class="app-btn app-btn--sm app-btn--secondary"
+                        data-action="open-preview-modal"
+                        data-preview-url="{% url 'contacts:contact_preview' pk=candidate.id %}">
+                  詳細を見る
+                </button>
               </td>
             </tr>
           {% endfor %}
@@ -79,14 +81,27 @@
     {% endfor %}
 
     <div class="app-action-area" style="margin-top:0;">
-      {# 強制作成ボタンはステップ3b で実装、本ステップでは disabled プレースホルダー（指示書 §3.1） #}
-      <button type="submit" class="app-btn app-btn--danger" disabled
-              title="強制作成はステップ3b で実装予定">
-        強制作成（ステップ3b で実装予定）
+      <button type="submit" name="force_create" value="1"
+              class="app-btn app-btn--danger">
+        強制作成
       </button>
       <a href="{% url 'contacts:contact_create' %}" class="app-btn app-btn--secondary">
         フォームに戻る
       </a>
     </div>
   </form>
+
+  <div class="app-modal-backdrop" hidden data-action="close-modal"></div>
+  <div class="app-modal" id="previewModal" hidden>
+    <div class="app-modal__panel">
+      <div class="app-modal__header">
+        <h2>コンタクトプレビュー</h2>
+        <button type="button" class="app-btn app-btn--sm app-btn--secondary"
+                data-action="close-modal">閉じる</button>
+      </div>
+      <div class="app-modal__body">
+        <p>読み込み中…</p>
+      </div>
+    </div>
+  </div>
 {% endblock %}

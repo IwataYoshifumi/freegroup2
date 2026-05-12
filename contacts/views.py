@@ -532,6 +532,17 @@ class ContactCreateView(LoginRequiredMixin, View):
                 request, self.template_name, self._context(request, form)
             )
 
+        # 強制作成フラグ：重複検出をスキップして即保存（仕様書 §11.4.4、ステップ3b 論点1 案 B）。
+        # 強制作成された Contact は後の cron で重複候補として再検出される。
+        if "force_create" in request.POST:
+            new_contact = _create_person_and_contact(form, request.user)
+            return HttpResponseRedirect(
+                reverse(
+                    "contacts:contact_detail",
+                    kwargs={"pk": new_contact.pk},
+                )
+            )
+
         # 検証 OK：未保存 Contact を生成して重複検出
         prospective = form.get_update_contact()
         candidates = find_duplicate_contacts(prospective)

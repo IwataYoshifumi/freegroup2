@@ -66,6 +66,37 @@
     activeModal = null;
   }
 
+  /* ステップ3b：data-preview-url から HTML フラグメントを取得し #previewModal の
+     body に流し込んで開く。閉じる動作は既存 closeModal (Escape / 背景 / 閉じるボタン) と共有。 */
+  function openPreviewModal(event, trigger) {
+    const url = trigger.getAttribute('data-preview-url');
+    if (!url) return;
+    const modal = document.getElementById('previewModal');
+    if (!modal || !modalBackdrop) return;
+    const body = modal.querySelector('.app-modal__body');
+    if (!body) return;
+
+    /* モーダルを先に表示（既存 openModal の挙動を踏襲、AJAX 中はローディングを見せる） */
+    body.innerHTML = '<p>読み込み中…</p>';
+    activeModal = modal;
+    modalBackdrop.hidden = false;
+    modal.hidden = false;
+
+    /* AJAX で HTML フラグメント取得（同一オリジン GET、CSRF トークン不要）。
+       LoginRequiredMixin の認証維持のため credentials を同一オリジンに。 */
+    fetch(url, { credentials: 'same-origin' })
+      .then(function (resp) {
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        return resp.text();
+      })
+      .then(function (html) {
+        body.innerHTML = html;
+      })
+      .catch(function () {
+        body.innerHTML = '<p>読み込みに失敗しました。</p>';
+      });
+  }
+
   function showToast() {
     if (!toast) return;
     toast.hidden = false;
@@ -99,6 +130,7 @@
     'toggle-drawer-section': toggleDrawerSection,
     'open-modal': openModal,
     'close-modal': closeModal,
+    'open-preview-modal': openPreviewModal,
     'show-toast': showToast,
     'toggle-loading': toggleLoading,
     'copy-to-clipboard': copyToClipboard
@@ -109,6 +141,15 @@
     const action = trigger ? trigger.getAttribute('data-action') : null;
     if (action && actions[action]) {
       actions[action](event, trigger);
+    }
+
+    /* .app-modal 自身（panel の外、余白部分）クリックで閉じる。
+       .app-modal-backdrop に data-action="close-modal" を付けても、CSS で
+       .app-modal が backdrop より上の z-index なので背景クリックが backdrop に届かない。
+       event.target が .app-modal 自身（panel やその子要素ではない、modal の余白）
+       のときのみ closeModal を呼ぶ。 */
+    if (event.target.classList && event.target.classList.contains('app-modal')) {
+      closeModal();
     }
 
     if (!event.target.closest('.app-user-menu')) {
