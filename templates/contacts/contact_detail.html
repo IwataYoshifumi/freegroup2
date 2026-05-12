@@ -25,6 +25,12 @@
   {# ============================================================ #}
   <section class="app-card" style="max-width:1100px;">
     <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+      {% if contact.person %}
+        {% url 'persons:person_detail' pk=contact.person.pk as person_detail_url %}
+        <a href="{% append_back_url person_detail_url back %}"
+           class="app-btn app-btn--primary">人物詳細</a>
+      {% endif %}
+
       {% if is_editable %}
         {% if is_primary %}
           {% url 'contacts:contact_update_primary' contact.id as update_primary_url %}
