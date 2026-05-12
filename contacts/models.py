@@ -60,7 +60,7 @@ class Contact(models.Model):
         blank=True,
         related_name="+",
     )
-    lang = models.CharField(max_length=10, default="ja")
+    lang = models.CharField(max_length=10, default="ja", blank=True)
     postal_code = models.CharField(max_length=20, blank=True, default="")
 
     full_name = models.CharField(max_length=255, blank=True, default="")

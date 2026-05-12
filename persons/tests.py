@@ -293,9 +293,7 @@ class PersonAddAdditionalRoleViewTests(TestCase):
     def _base_post_data(self):
         from contacts.models import Contact as _Contact
 
-        data = {f: "" for f in _Contact.UPDATABLE_FIELDS}
-        data["lang"] = "ja"  # lang は default="ja" だが ModelForm では required=True
-        return data
+        return {f: "" for f in _Contact.UPDATABLE_FIELDS}
 
     # ---- GET ----
 

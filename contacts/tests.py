@@ -1846,10 +1846,8 @@ class ContactAddAdditionalRoleFormTests(TestCase):
         self.person.save(update_fields=["primary_contact", "updated_at"])
 
     def _base_data(self):
-        """POST 用ベース data（UPDATABLE_FIELDS を空文字で埋める。lang は required）。"""
-        data = {f: "" for f in Contact.UPDATABLE_FIELDS}
-        data["lang"] = "ja"  # lang は default="ja" だが ModelForm では required=True
-        return data
+        """POST 用ベース data（UPDATABLE_FIELDS を空文字で埋める）。"""
+        return {f: "" for f in Contact.UPDATABLE_FIELDS}
 
     def test_requires_person(self):
         """person 未指定 → TypeError。"""
