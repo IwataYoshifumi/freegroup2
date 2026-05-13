@@ -14,8 +14,10 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.utils import timezone
 
-from cards.models import BusinessCard, Contact, OriginalImage, Person
+from cards.models import BusinessCard, OriginalImage
 from cards.tasks.pipeline_coordinator import PipelineCoordinator
+from contacts.models import Contact
+from persons.models import Person
 
 logger = logging.getLogger(__name__)
 

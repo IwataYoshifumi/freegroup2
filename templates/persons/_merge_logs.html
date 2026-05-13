@@ -1,0 +1,43 @@
+{% load back_tags %}
+{% if merge_logs %}
+  <div class="app-table-wrapper">
+    <table class="app-table app-table--nowrap">
+      <thead>
+        <tr>
+          <th>実行日時</th>
+          <th>方向</th>
+          <th>復元状態</th>
+          <th>実行者</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for log in merge_logs %}
+          <tr>
+            <td>{{ log.executed_at|date:"Y/m/d H:i" }}</td>
+            <td>
+              {% if log.merged_person_id == person.id %}
+                {% url 'persons:person_detail' pk=log.surviving_person_id as surviving_url %}
+                自身 → <a href="{% append_back_url surviving_url back %}">統合先</a>
+              {% else %}
+                {% url 'persons:person_detail' pk=log.merged_person_id as merged_url %}
+                <a href="{% append_back_url merged_url back %}">統合元</a> → 自身
+              {% endif %}
+            </td>
+            <td>
+              {% if log.status == "undoable" %}
+                <span class="app-status-badge app-status-badge--success">復元可能</span>
+              {% elif log.status == "undone" %}
+                <span class="app-status-badge app-status-badge--muted">復元済み</span>
+              {% elif log.status == "locked" %}
+                <span class="app-status-badge app-status-badge--warning">復元不可</span>
+              {% endif %}
+            </td>
+            <td>{{ log.executed_by.username|default:"-" }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% else %}
+  <p class="app-muted">マージ履歴なし</p>
+{% endif %}

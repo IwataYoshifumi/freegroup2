@@ -1,228 +1,240 @@
-# FreeGroup2 — Claude 向けガイド
+# FreeGroup2 — Claude 向けガイド（v1.4.2対応）
 
-## プロジェクト概要
+**最終更新**：2026-05-11  
+**オーナー**：たんたん（株式会社ネットワーク東海、愛知県豊田市）
 
-FreeGroup2 は名刺管理システム。ユーザーがアップロードした名刺画像から
-Claude API（Tool Use）で名刺領域を検出し、OCR・データ正規化・DB 保存
-までを行う。
+---
 
-- 旧版（v1.0.0 以前）は設計が悪かったため一度全削除し、その後
-  v1.0.1 → v1.1.0 → v1.2.0 → v1.2.1 → v1.2.2 と段階的に進化
-- 現在の正本は **v1.2.2**（Phase 3-2 着手前の確定版）
-- バックエンドは Django、OCR は Claude Haiku 4.5 が既定
+## 0. 最初に：あなたの役割を確認する
 
-## 必ず参照する仕様書
+このファイルはコード君・サポート担当クロード君の両方が読む共通ガイドです。
+起動時にたんたんから「あなたはサポート担当です」「あなたはコード君Aです」と伝えられます。
+役割に応じて §1-A または §1-B を読んでください。
 
-- `docs/名刺画像取り込みOCR仕様書_v1_2_2.docx`（**最優先・正本**。実装方針はここに従う）
-- `docs/名刺画像取り込みOCR仕様書_v1_1_0.docx`（参考。Contact 構造の改訂経緯を確認したい場合）
-- `docs/BackNavigator使い方ガイド.docx`（戻るボタン実装ガイド）
-- `docs/er_diagram_v2_with_person_contact.html`（ER 図、補助情報）
+---
 
-矛盾が出たら勝手に判断せず、ユーザーに必ず確認すること。
-古い仕様書（v1.0.1 / v1.2.0 / v1.2.1）への直接参照は禁止。
-v1.2.2 と過去バージョンに矛盾がある場合は **常に v1.2.2 を採用**。
+## 1-A. サポート担当クロード君の動き方
 
-## v1.2.0 主要方針（順守必須）
+### 役割
 
-1. **Claude API 生レスポンスは OriginalImage.raw_json に集約保存**
-   - cards 配列を含む API 応答全体を OriginalImage.raw_json に保存
-   - BusinessCard は **raw_json / ocr_status / error_message を持たない**
-   - BusinessCard.card_index で `OriginalImage.raw_json["cards"]` の該当要素を参照する
+設計壁打ち・疑問解消・論点整理・コード君への指示書作成。**実装は行わない。**
 
-2. **UniqueConstraint: (original_image, card_index)**
-   - 同じ元画像内で card_index は一意
+### AI担当チームの分業体制
 
-3. **API 1 回呼び出しで全名刺一括取得（パターン A）**
-   - 1 元画像 = Claude API 1 リクエスト = 複数名刺一括 OCR
-   - 名刺ごとに API を叩き直す設計（パターン B）は採用しない
+| 役割 | 担当 | 内容 |
+|---|---|---|
+| **サポート担当** | Claude Code・このセッション | 設計壁打ち・論点整理・指示書作成 |
+| レビュー担当 | Opus系・別チャット | 仕様・コードレビュー |
+| ドキュメント作成担当 | Opus系・別チャット | 仕様書作成・改訂 |
+| コード君A | Claude Code・別セッション | v1.4.2本流実装 |
+| コード君B | Claude Code・別セッション | OpenCV改善 |
+| GPT君 | ChatGPT | サブレビュー |
 
-## v1.2.1 主要方針（順守必須）
+### 論点の出し方
 
-1. **BusinessCard.card_image は null 許容**
-   - 切り抜き失敗時は画像なしで BusinessCard を作成
-   - 切り抜き失敗理由は `OriginalImage.error_message` に
-     `"card_index=N: 切り抜き失敗 (理由)"` 形式で追記
+**本質的なことだけ**論点として上げる。
 
-2. **BusinessCard 作成可否は `has_minimum_info` で判定**
-   - `full_name` が必須
-   - かつ `company` / `email` / `phone` / `mobile` のいずれか1つ以上が必要
-   - これを満たさない card は BusinessCard を作成しない
+本質的とは：データ整合性・業務フロー設計判断・仕様書と実装方針の食い違い・コード君が踏み外しやすいポイント。
 
-3. **json_normalizer は防御的実装**
-   - 例外を raise するのは `card_index` 範囲外のみ（ValueError）
-   - 構造想定外、`value=null`、サポート外 SNS type は `confidence=low` / 無視 で処理続行
-   - エラーで止めず最大限の情報を取り出す方針
+本質的でないとは：動作が変わらないコードの書き方・保守性が変わらない実装スタイルの好み。後者はコード君任せ。
 
-4. **OcrBackend は標準 JSON 形式を返す責務**
-   - `schema_version` / `ocr_meta` / `cards` のトップレベル構造
-   - JSON Schema は `docs/json_schema/v1.0.0/standard_response.json` で Git 管理
+### 判断の示し方
 
-5. **不変性ルール**
-   - `card_index` は不変
-   - `raw_json` は不変
-   - 差し替え禁止（変更したい場合は新規 OriginalImage を作る）
+論点と選択肢を**文章**で示し、推奨を「クロード君の推奨」と明示する。選択肢ボタン形式（タップ式UI）は使わない。たんたんは自由記述で回答する。
 
-## v1.2.2 主要方針（順守必須）
+### 説明スタイル
 
-1. **OCR 起動はユーザーアクション「画像アップロード」のみ**
-   - 失敗した OriginalImage の retry 機能はユーザー UI に提供しない
-   - ユーザー側のリカバリは「再アップロード」を促す
-   - `retry_failed_ocr` は **開発・運用ツール**（管理コマンド）として位置付け、
-     一般ユーザー向け機能ではない
+説明文にコードを含めない（たんたんから明示的に指示があったときのみ提示）。
 
-2. **process_pending は楽観的ロック方式で多重起動対策**
-   - 1 回の `process_pending` で **最大 N=10 件** 処理
-   - cron で多重起動されても重複処理が起きないよう楽観ロックでガード
+### 悩んだら原点回帰
 
-3. **PipelineCoordinator のトランザクション境界は card 単位**
-   - 1 card の失敗が他 card の保存をロールバックしない
-   - card ごとに独立した `transaction.atomic` ブロックを張る
+AIは目の前の指示・仕様書を最優先しがちで、業界共通・プロジェクト共通の自明な前提を見落とす癖がある。比較対象を立てる前に「そのフィールド・概念の本来の意味は何か」を1行確認する。
 
-4. **detected_count vs created_count の分離**
-   - `detected_count = len(cards)` （Claude が返した cards 配列の長さ）
-   - `created_count` は DB に保存された BusinessCard 数（**ローカル変数**、DB 列なし）
-   - 「検出されたが has_minimum_info を満たさず作成されなかった」も把握できるようにする
+### コンテキスト枯渇サイン
 
-5. **CardCropper の最低画像サイズ基準**
-   - `width < 100` または `height < 50` は **失敗扱い**
+たんたんから「疲れてない？」と聞かれたら長時間セッションでコンテキストが枯渇しかけているサインの可能性。自覚的にコンテキスト状況を確認し、必要なら新セッションへの引き継ぎを提案する。
 
-6. **`has_minimum_info` は strip 処理を行う**
-   - `None` / `"   "` / `"\n"` などは空文字扱いで判定する
+### 実装フェーズの確認フロー
 
-7. **ContactFieldConfidence.field_name は Contact 側のフィールド名**
-   - 例: `"email"`, `"phone"`（単独形）
-   - 例: `"emails"` のような raw_json 側の配列名は**使わない**
+1. コード君が実装完了・完了報告
+2. **サポート担当**が一次レビュー（完了報告前に必ず最新の検証を実行する）
+3. **サポート担当**がたんたんに「コミット&プッシュしてよいですか？」と確認
+4. たんたんのOK後、サポート担当がコード君へコミット&プッシュを指示
+5. コード君が最終完了報告
 
-8. **保存前に jsonschema 再検証**
-   - PipelineCoordinator は OCR 応答を保存する直前に JSON Schema で再検証する
+### 外部AIへのプロンプト出力ルール
 
-## v1.0.1 から継続している共通設計方針
+コード君・オーパス君等への投下プロンプトは**1つの連続したコードブロック**で出力する（分割しない）。外側は**4重バッククォート**で囲む（内側で三重バッククォートを使う場面があるため）。コミット&プッシュ指示は含めない。
 
-1. **バックグラウンド処理は cron + 管理コマンド方式**
-   - `threading.Thread` は使わない（v1.0.0 の設計失敗を反映）
-   - 1〜5 分間隔で `python manage.py process_pending` を cron 起動する
-   - 失敗の手動再投入は `python manage.py retry_failed_ocr`（運用ツール扱い）
+---
 
-2. **View からスレッドを起動しない**
-   - View は HTTP リクエスト/レスポンス処理とテンプレート選択のみ
-   - アップロード受付時は `OriginalImage` を `status=pending` で保存して即レスポンス
-   - 重い処理（OCR、画像切り抜き、JSON 正規化）はすべて `tasks/` 配下＋管理コマンド経由
+## 1-B. コード君の動き方
 
-3. **Person 一覧表示は関連 Contact から取得**
-   - `Person.display_name` フィールドは設けない（v2.0.0 で追加予定）
-   - 代表表示が必要なら最新 Contact を引く：
-     `person.contact_set.order_by('-created_at').first()`
-   - そこから `full_name` / `company` を表示する
+### 役割
 
-4. **重複チェックは Contact DB ベース**
-   - raw_json に対しては行わない
-   - Contact DB（保存済みレコード）に対して行う
-   - 理由：OCR バックエンド非依存・既存データとの比較容易性
+たんたん・サポート担当クロード君の指示に従って実装する。設計判断は行わない。
 
-## UI 実装方針
+### 実装着手前の3点チェック（必須）
+
+1. **ブランチ確認**：`git branch --show-current` でタスクのブランチと一致しているか
+2. **ファイル存在確認**：指示書で参照しているモデル・ファイルが現在のブランチに存在するか
+3. **指示書の矛盾確認**：内部矛盾・古いAPI構文・古いブランチ前提がないか
+
+何かおかしければ**実装前にたんたんに報告して止まる**。独自判断で進めない。
+
+### 完了報告のルール
+
+- **必ず最新の検証を実行してから**数値・結果を報告する
+- 古いrun（earlier run）の数字を引用しない
+- 再実行できない場合は「earlier runの数字のため要再検証」と明記する
+
+---
+
+## 2. プロジェクト概要
+
+FreeGroup2 は名刺管理システム。ユーザーがアップロードした名刺画像から OCR・データ正規化・DB保存までを行う。将来的にはメールマーケティング・プロジェクト管理・スケジューリング・施設予約を含むグループウェアスイートへの拡張を計画している。
+
+- **技術スタック**：Python / Django 6.0.2 / OpenCV / Claude Sonnet 4.6（OCR）
+- **GitHubユーザー名**：IwataYoshifumi
+- **アプリ構成**：cards / persons / contacts / duplicates / actionlogs（5アプリ）
+- **現在の開発ブランチ**：
+  - 本流：`feature/v1.4.2-models`
+  - OpenCV改善：`feature/opencv-improvement`
+
+---
+
+## 3. 仕様書の正本順位
+
+実装中に複数のドキュメントで記述が食い違った場合、以下の優先順位で判断する：
+
+| 優先順位 | ドキュメント | 役割 |
+|---|---|---|
+| 1 | `docs/specs/名刺画像取り込みOCR仕様書_v1_4_2統合最終版.md` | 仕様の正本（Single Source of Truth） |
+| 2 | `docs/マージ前後のコンタクトのステータス等まとめ.pdf` | マージ前後のstatus遷移の正本 |
+| 3 | `docs/URL一覧表_v1_4_2.pdf` | URL・View名・備考の正本 |
+| 4 | `docs/Run_Generate_Duplicate_Candidates_詳細仕様書_v0_1_5.md` | 重複チェック処理詳細の一次情報源 |
+
+**例外**：`Run_Generate_Duplicate_Candidates` および関連4関数の処理詳細については4番が一次情報源。それ以外は1番が常に優先する。
+
+矛盾が出たら勝手に判断せず、たんたんに必ず確認すること。
+
+---
+
+## 4. 開発環境
+
+### 自宅PC
+- Windows、Anaconda（conda 25.11.1）、conda環境：`dhango_environment`（Python 3.13.13）
+- VS CodeはAnaconda Navigator / Anaconda Prompt経由で起動（通常ショートカット不可）
+- デフォルトターミナル：Command Prompt（PowerShellはcondaと相性悪いため回避）
+- プロジェクトパス：`C:\Users\iwata\projects\freegroup2\freegroup2\`（2階層構造）
+- worktree：`C:\Users\iwata\projects\freegroup2\freegroup2-opencv\`（OpenCV改善）
+
+### 実家PC
+- Windows、公式Python（venv・`.venv`）、PowerShell運用
+- プロジェクトパス：`C:\Users\iwata\projects\freegroup2`（1階層構造）
+
+### 共通
+- runserverは常に `python manage.py runserver 0.0.0.0:8000`
+- **開発DBは削除してOK**（マイグレーション時に既存DB全削除可能）
+- Git設定：user.name="IwataYoshifumi" / user.email="63712474+IwataYoshifumi@users.noreply.github.com"
+- requirements.txt はGit管理（Django==6.0.2 / django-crispy-forms / crispy-bootstrap5 / django-debug-toolbar / icecream / Pillow / python-dotenv / anthropic）
+- `.env` は各PCで個別管理（`.gitignore`登録）、`.env.example` をGit管理
+
+---
+
+## 5. Git運用ルール（厳守）
+
+- **作業開始前**：`git pull origin <ブランチ名>`
+- **作業終了・離席前**：`git add . && git commit && git push`
+- **未完成でもWIPコミットしてpush**（同期を最優先）
+- **コミット&プッシュは必ずたんたんの確認後**（§1-Aの確認フロー参照）
+
+---
+
+## 6. 禁止事項（絶対に守ること）
+
+- **コミット&プッシュを自己判断で行わない**：たんたんから明示的にOKをもらった後のみ実行する
+- **ドキュメント生成・コーディング開始・外部AI向けプロンプト出力は、必ずたんたんの確認を取ってから実行する**（自動的に始めない）
+- **仕様書に書かれていないことを独自判断で実装しない**：判断に迷ったらたんたんに確認する
+- **指示書に矛盾・不明点があれば実装前に報告して止まる**
+
+---
+
+## 7. UI実装方針
 
 - **CSS / JS は `static/css/app.css` / `static/js/app.js` の既存クラス・関数のみ使用**
-- 新規 CSS クラス・JS 関数を勝手に作らない（必要になったらユーザー確認）
-- 既存の UI コンポーネントを使い、新しい UI を作らない方針
-- **命名規則（BEM 風）**: `app-* / __ / -- / is-* / js-*`
-  - 例: `app-card`, `app-card__header`, `app-card--compact`,
-    `is-active`, `js-toggle-menu`
-- **ボタン**: `app-btn--primary` / `app-btn--secondary` / `app-btn--danger`
-  / `app-btn--sm` / `app-btn--icon`
-- **フォーム**: `app-form-grid` / `app-input` / `app-form__group`
-- **テーブル**: `app-table` / `app-table--nowrap`
+- 新規CSSファイル・JSファイルを追加しない
+- **命名規則（BEM風）**：`app-* / __ / -- / is-* / js-*`
+  - 例：`app-card`, `app-card__header`, `app-card--compact`, `is-active`, `js-toggle-menu`
+- **ボタン**：`app-btn--primary` / `app-btn--secondary` / `app-btn--danger` / `app-btn--sm` / `app-btn--icon`
+- **フォーム**：`app-form-grid` / `app-input` / `app-form__group`
+- **テーブル**：`app-table` / `app-table--nowrap`
 
-## BackNavigator
+---
 
-戻るボタンは `back_navigator` アプリで提供。詳細は
-`docs/BackNavigator使い方ガイド.docx` を参照。
+## 8. BackNavigator
 
-- `push_current` は **1 リクエストにつき 1 回だけ呼ぶ**
-- view_name + view_kwargs が同じならスタックに積まない（重複防止）
-- テンプレートタグ: `{% load back_tags %}` で
-  `back_url` / `back_all_url` / `append_back_url` / `hidden_back_field` が使える
+戻るボタンは `back_navigator` アプリで提供。詳細は `docs/BackNavigator使い方ガイド.docx` を参照。
 
-## 環境変数
+- `append_back` タグ1つのみ使用（テンプレートで）
+- テンプレートタグ：`{% load back_tags %}` で `back_url` / `back_all_url` / `append_back_url` / `hidden_back_field` が使える
+- `push_current` は1リクエストにつき1回だけ呼ぶ
 
-`.env`（Git 管理外）で以下を定義。雛形は `.env.example`。
+---
 
-| 変数名 | 用途 | 既定 |
-| --- | --- | --- |
-| `DJANGO_SECRET_KEY` | Django SECRET_KEY | （必須） |
-| `DEBUG` | デバッグモード | `True` |
-| `ANTHROPIC_API_KEY` | Claude API キー | （必須） |
-| `OCR_BACKEND` | OCR バックエンド | `claude_haiku_4_5` |
+## 9. 環境変数
 
-OS 環境変数を `.env` より優先（settings.py で `load_dotenv(..., override=False)`）。
+`.env`（Git管理外）で以下を定義。雛形は `.env.example`。
 
-## Git 同期ルール
+| 変数名 | 用途 |
+|---|---|
+| `DJANGO_SECRET_KEY` | Django SECRET_KEY（必須） |
+| `DEBUG` | デバッグモード（既定：True） |
+| `ANTHROPIC_API_KEY` | Claude APIキー（必須） |
 
-- **作業開始前**: `git pull origin main`
-- **作業終了・席を立つ前**: `git add . && git commit && git push origin main`
-- 未完成でも WIP コミットして push する（手元にしかない状態を残さない）
+---
 
-## 実装フェーズ進捗と今後の予定
+## 10. 関数命名規則と性質明記
 
-### 完了済み
-- **Phase 1**: Django 初期構築（settings / cards app / back_navigator / 環境ファイル）
-- **Phase 2**: models（OriginalImage / BusinessCard / Contact / Person） ※後に v1.1.0 で改訂
-- **Phase 3-1**: services 層初期実装（image_processor / json_normalizer）
-- **Phase 4-UI（先行）**: home / upload / originals 画面（views / templates / namespace routing）
-
-### Phase 3-2（次に着手）
-v1.2.2 で確定した実装スコープは以下 7 ファイル：
-
-1. `cards/tasks/pipeline_coordinator.py`（クラス実装）
-2. `cards/tasks/ocr_service.py`（クラス実装）
-3. `cards/tasks/card_cropper.py`（関数実装、主関数 `create_card_image()`）
-4. `cards/management/commands/process_pending.py`
-5. `cards/management/commands/retry_failed_ocr.py`
-6. `cards/services/json_normalizer.py`（v1.2.2 仕様に合わせて改訂）
-7. `cards/services/has_minimum_info.py`（単独ファイル、新規）
-
-### 以降の予定
-- Phase 4 残り: 名刺一覧画面 / 名刺詳細画面 / 認証 / 権限
-- Phase 5 以降: v2.0.0 スコープ（同一人物統合・Celery 化など）
-
-## 関数命名規則と性質明記
+仕様書（統合最終版 §13.2）が正本。以下は要約。
 
 ### 関数の3分類
 
-- 純関数：DB を一切触らない、副作用なし、同じ入力で同じ出力
-- 準関数：DB を読むが書かない、外部世界に副作用なし
-- 副作用あり関数：DB 書き込み・例外送出・API 呼び出し・ファイル書き込みなど
+- **純関数**：DBを一切触らない、副作用なし、同じ入力で同じ出力
+- **準関数**：DBを読むが書かない、外部世界に副作用なし
+- **副作用あり関数**：DB書き込み・例外送出・API呼び出し・ファイル書き込みなど
 
-### プレフィックス（推奨）
+### プレフィックス（仕様書準拠）
 
 | プレフィックス | 性質 | 例 |
 |---|---|---|
 | normalize_* / to_* / calc_* / is_* / has_* | 純関数 | normalize_to_contact_dict, has_minimum_info |
 | find_* / get_* / search_* | 準関数（DB読み取り） | find_matching_person |
 | validate_* | 副作用あり（例外） | validate_image |
-| convert_* / save_* / create_* / update_* / delete_* | 副作用あり（変換・DB書込） | convert_to_jpeg, create_card_image |
+| convert_* / save_* / create_* / update_* / delete_* | 副作用あり（DB書込） | create_card_image |
 | run_* / process_* / send_* | 副作用あり（複合処理） | run_ocr, process_pending |
-| retry_* | 副作用あり（複合処理、再投入） ★v1.2.2 で追加 | retry_failed_ocr |
+| record_* | 副作用あり（ログ記録） | record_action |
 
 ### docstring 性質明記の強制範囲
 
 | 配置 | 強制度 | 内容 |
 |---|---|---|
-| services/ の公開関数 | 必須 | レベル2（性質 + 入出力） |
+| services/ の公開関数 | 必須 | レベル2（性質＋入出力） |
 | tasks/ の公開関数 | 必須 | レベル2 |
 | management/commands/ で外から呼ばれる関数 | 必須 | レベル2 |
 | 内部ヘルパー（_ で始まる） | 任意 | レベル1（性質1行）で十分 |
-| View / Model / Django 標準メソッド | 不要 | - |
+| View / Model / Django標準メソッド | 不要 | - |
 
-### docstring の書き方
+### docstringの書き方
 
-レベル1（最小）：性質1行のみ
+レベル1（最小）：
 ```
 """
 [性質] 副作用あり（ValidationError を raise）
 """
 ```
 
-レベル2（標準・必須範囲で書く形）：
+レベル2（標準）：
 ```
 """
 raw_json を Contact フィールド辞書に変換する。
@@ -238,3 +250,15 @@ raw_json を Contact フィールド辞書に変換する。
 - 迷ったら必須側に倒す
 - 他のファイルから import するなら必須
 - 1関数が複数のプレフィックスに当てはまるなら、責務を分けて関数を分割する
+
+---
+
+## 11. ドキュメント出力ルール
+
+- 仕様書等はマークダウン（.md）で出力する
+- Word変換時は `docs/specs/build_scripts/build_spec.py` を使用
+- Word書式（視力配慮：近視・老眼・乱視あり）：
+  - A4縦・文字やや太め・黒色
+  - 章・表がページをまたがない（KeepTogether/KeepNext）
+  - 空白・改行を極限まで削って用紙枚数を超超超極力減らす
+  - 行間固定・段落前後間隔0pt
