@@ -15,12 +15,17 @@ D-3d 準備で追加：
   - {% confidence_state confidences field_name %}
       data-confidence-state 属性用の状態文字列を返す。
       'high' / 'mid' / 'low' / 'confirmed' のいずれか。
+
+v1.5.0（OCR パイプライン分離）で追加：
+  - {% ocr_result_badge card %}
+      BusinessCard.ocr_status / ocr_result に応じたバッジ表示。
 """
 
 from django.template import Library
 from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 
+from cards.models import BusinessCard
 from contacts.models import ContactFieldConfidence
 
 
@@ -174,3 +179,59 @@ def confidence_state(confidences, field_name):
         return "low"
 
     return "high"
+
+
+# ----------------------------------------------------------------------
+# {% ocr_result_badge %} : BusinessCard.ocr_status / ocr_result のバッジ
+# ----------------------------------------------------------------------
+
+_OCR_RESULT_BADGE_VARIANT = {
+    BusinessCard.OcrResult.NOT_BUSINESS_CARD: "muted",
+    BusinessCard.OcrResult.INSUFFICIENT_INFO: "warning",
+    BusinessCard.OcrResult.OCR_FAILED: "error",
+    BusinessCard.OcrResult.OTHERS: "muted",
+}
+
+# v1.5.0: ocr_status 由来のバッジ。ocr_status が pending / processing のとき優先表示。
+_OCR_STATUS_BADGE = {
+    BusinessCard.OcrStatus.PENDING:    ("muted", "OCR待ち"),
+    BusinessCard.OcrStatus.PROCESSING: ("info",  "OCR中"),
+}
+
+
+@register.simple_tag
+def ocr_result_badge(card):
+    """BusinessCard の状態に応じたバッジ HTML を返す。
+
+    [性質] 純関数（DB操作なし・副作用なし）
+    [入力] card: BusinessCard インスタンス
+    [出力] SafeString
+        - ocr_status が pending → 「OCR待ち」バッジ（muted）
+        - ocr_status が processing → 「OCR中」バッジ（info）
+        - ocr_status が done / failed の場合は ocr_result 由来：
+          - business_card → 空文字（バッジを描画しない）
+          - not_business_card / insufficient_info / ocr_failed / others → 5 値バッジ
+          - None など想定外 → 空文字
+    """
+    if card is None:
+        return mark_safe("")
+
+    status_badge = _OCR_STATUS_BADGE.get(card.ocr_status)
+    if status_badge is not None:
+        variant, label = status_badge
+        return format_html(
+            '<span class="app-status-badge app-status-badge--{}">{}</span>',
+            variant,
+            label,
+        )
+
+    value = card.ocr_result
+    if value is None or value == BusinessCard.OcrResult.BUSINESS_CARD:
+        return mark_safe("")
+    variant = _OCR_RESULT_BADGE_VARIANT.get(value, "muted")
+    label = card.get_ocr_result_display()
+    return format_html(
+        '<span class="app-status-badge app-status-badge--{}">{}</span>',
+        variant,
+        label,
+    )
