@@ -1,6 +1,7 @@
 """cards アプリの単体テスト。"""
 
 from django.contrib.auth import get_user_model
+from django.http import QueryDict
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -44,10 +45,18 @@ class CardListViewConfidenceAnnotateTests(TestCase):
         from cards.views import CardListView
 
         view = CardListView()
+        # v1.4.2 統合（テーマ 6）以降、CardListView は ocr_result フィルタを持つ。
+        # フィルタ未指定 = "business_card" のみ表示の業務仕様（ストック #15）が
+        # 適用されると、ocr_result=None / ocr_status=PENDING のテスト BC が
+        # queryset から除外されてしまう。annotate ロジックの検証目的を維持するため、
+        # _OCR_FILTER_CHOICES の全 7 値を明示的に渡してフィルタを「全マッチ」にする。
+        query = QueryDict(mutable=True)
+        for value, _label in CardListView._OCR_FILTER_CHOICES:
+            query.appendlist("ocr_result", value)
         view.request = type(
             "Req",
             (),
-            {"user": self.user, "GET": {}},
+            {"user": self.user, "GET": query},
         )()
         return view.get_queryset().get(pk=self.bc.pk)
 

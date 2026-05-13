@@ -38,38 +38,6 @@ def save_card_image(
         return False, None, f"保存失敗: {type(e).__name__}: {e}"
 
 
-def save_card_image_tmp(
-    warped_image: Image.Image,
-    original_image_uuid: str,
-    card_index: int,
-) -> tuple[bool, str | None, str | None, str]:
-    """透視変換済み PIL Image を一時パス（.tmp）に JPEG として保存する。
-
-    DB コミット前の一時保存用。コミット成功時に on_commit コールバックで
-    正式パスにリネームして BusinessCard.card_image を更新する。
-
-    [性質] 副作用あり（ファイル書き込み）
-    [入力] warped_image: 透視変換済みの PIL Image
-           original_image_uuid: 元画像の UUID（文字列）
-           card_index: 名刺のインデックス番号
-    [出力] (success, tmp_abs_path, final_rel_path, error_message)
-           - tmp_abs_path: 書き込んだ一時ファイルの絶対パス（失敗時 None）
-           - final_rel_path: コミット後に保存する MEDIA_ROOT 相対パス（失敗時 None）
-    [方針] 例外は外に漏らさない。失敗時は (False, None, None, 理由) を返す
-    """
-    try:
-        img = warped_image if warped_image.mode == "RGB" else warped_image.convert("RGB")
-        final_rel, final_abs = _build_save_path(original_image_uuid, card_index)
-        tmp_abs = final_abs + ".tmp"
-        os.makedirs(os.path.dirname(tmp_abs), exist_ok=True)
-        img.save(tmp_abs, format="JPEG", quality=JPEG_QUALITY)
-        return True, tmp_abs, final_rel, ""
-    except OSError as e:
-        return False, None, None, f"ファイル I/O エラー: {e}"
-    except Exception as e:
-        return False, None, None, f"保存失敗: {type(e).__name__}: {e}"
-
-
 def _build_save_path(original_image_uuid: str, card_index: int):
     """[性質] 副作用あり（時刻取得）/ 保存パス（相対 / 絶対）のタプルを返す。"""
     now = datetime.now()
