@@ -396,8 +396,6 @@ Contact フィールドごとの信頼度を別テーブルで管理する。hum
 | person_b | FK(Person, CASCADE) | 候補の Person（順序ルールあり） |
 | score | IntegerField | 合計スコア（confidence=high のみ加算） |
 | rank | CharField(TextChoices) | exact_match / possible_high / possible_mid / possible_low |
-| match_reason | CharField | email / mobile / name_strong / name_score 等 |
-| matched_fields | JSONField | 一致したフィールド名の配列 |
 | review_status | CharField(TextChoices) | pending / merged / different_person / invalidated |
 | review_result | JSONField | 判定理由の配列（複数選択可） |
 | note | TextField (default='') | 任意メモ（other_* 選択時は必須） |
@@ -492,8 +490,7 @@ status='merged' の Person は以下の操作ができない。
 | object_id | CharField (null=True, blank=True) | 操作対象の PK（UUID 文字列、システム実行は NULL） |
 | content_object | GenericForeignKey | 上 2 つを合わせた仮想 FK |
 | object_repr | CharField | 操作時点の対象オブジェクトの文字列表現またはコマンド名 |
-| diff | JSONField (null=True) | 変更前後の値（更新時のみ） |
-| extra | JSONField (default=dict) | モデルごとの追加情報を自由に格納 |
+| data | JSONField (default=dict) | モデルごとの追加情報を自由に格納（変更前後の差分が必要な場合もこのフィールドに格納する） |
 | note | TextField (default='') | 補足メモ |
 | created_at | DateTimeField (auto_now_add) | 操作日時 |
 
@@ -501,7 +498,7 @@ status='merged' の Person は以下の操作ができない。
 
 | メソッド | 種別 | 責務 |
 |---|---|---|
-| `ActionLog.record(user, action, content_object=None, object_repr='', diff=None, extra=None, note='')` | クラスメソッド | 任意の業務イベントを直接記録（cron 実行ログなど、モデルインスタンスを持たない場面で使用） |
+| `ActionLog.record(user, action, content_object=None, object_repr='', data=None, note='')` | クラスメソッド | 任意の業務イベントを直接記録（cron 実行ログなど、モデルインスタンスを持たない場面で使用） |
 
 ## 4.11 ActionLog と PersonMergeLog の関係
 
@@ -512,7 +509,7 @@ status='merged' の Person は以下の操作ができない。
 | 状態の更新 | あり（undoable→undone→locked） | なし（不変履歴） |
 | 書き込みタイミング | マージと同トランザクション | マージと同トランザクション |
 | 失敗時の挙動 | マージ全体ロールバック | マージ全体ロールバック |
-| note | 操作履歴 + ユーザー入力（文字列） | extra に構造化データで格納 |
+| note | 操作履歴 + ユーザー入力（文字列） | data に構造化データで格納 |
 
 両者は共存させる。マージ実行時は両方に書き込む。
 
@@ -1273,7 +1270,7 @@ OCR で取り込まれた Contact のみ、Claude の confidence 判定により
 |---|---|---|
 | `candidate.mark_as_merged(user, review_result, note)` | 自身の状態遷移（review_status='merged' / review_result / reviewed_by / reviewed_at / note） | duplicates/models.py |
 | `candidate.mark_as_different_person(user, review_result, note=None)` | 自身の状態遷移（review_status='different_person' / reviewed_by / reviewed_at / note） | duplicates/models.py |
-| `candidate.record_different_person_action(user)` | 自身の別人判定操作を ActionLog に記録（action='different_person'、extra に判定理由を格納） | duplicates/models.py |
+| `candidate.record_different_person_action(user)` | 自身の別人判定操作を ActionLog に記録（action='different_person'、data に判定理由を格納） | duplicates/models.py |
 
 ### 10.7.3 設計趣旨
 
@@ -1308,8 +1305,8 @@ OCR で取り込まれた Contact のみ、Claude の confidence 判定により
 |---|---|---|
 | `merge_log.is_undoable()` | 復元可能かどうかの判定（status='undoable' なら True） | duplicates/models.py |
 | `merge_log.mark_as_undone(user)` | 自身の状態遷移（status='undone' / undone_by / undone_at） | duplicates/models.py |
-| `merge_log.record_merge_action(user)` | マージ実行を ActionLog に記録（action='merged'、extra に surviving/merged Person 情報、duplicate_candidate ID 等） | duplicates/models.py |
-| `merge_log.record_undo_action(user)` | 復元実行を ActionLog に記録（action='undone'、extra に復元理由＋復元内容として surviving 側 Person・復元側 Person のインスタンス情報を JSON で保存） | duplicates/models.py |
+| `merge_log.record_merge_action(user)` | マージ実行を ActionLog に記録（action='merged'、data に surviving/merged Person 情報、duplicate_candidate ID 等） | duplicates/models.py |
+| `merge_log.record_undo_action(user)` | 復元実行を ActionLog に記録（action='undone'、data に復元理由＋復元内容として surviving 側 Person・復元側 Person のインスタンス情報を JSON で保存） | duplicates/models.py |
 | `merge_log.get_undo_preview()` | 復元後の予測状態を返す（確認画面表示用：復元 Person・復元 Person に戻る Contact の集合・surviving 側 Person に残る Contact の集合） | duplicates/models.py |
 
 ### 10.8.3 `merge_log.get_undo_preview()` の戻り値設計
@@ -1357,7 +1354,7 @@ ActionLog 記録メソッドの 2 分離（`record_merge_action` / `record_undo_
 
 | メソッド | 責務 | 配置先 |
 |---|---|---|
-| `ActionLog.record(user, action, content_object=None, object_repr='', diff=None, extra=None, note='')` | 任意の業務イベントを直接記録（cron 実行ログなど、モデルインスタンスを持たない場面で使用） | duplicates/models.py または共通アプリ |
+| `ActionLog.record(user, action, content_object=None, object_repr='', data=None, note='')` | 任意の業務イベントを直接記録（cron 実行ログなど、モデルインスタンスを持たない場面で使用） | actionlogs/models.py |
 
 ### 10.9.2 設計趣旨
 
@@ -1439,14 +1436,15 @@ ActionLog の書き込みは 2 通り：
 
 ## 11.1 アプリケーション構成
 
-v1.4.0 では既存の cards アプリに加えて、新たに 3 つのアプリを追加する。
+v1.4.0 では既存の cards アプリに加えて、新たに 4 つのアプリを追加する。
 
 | アプリ | 用途 |
 |---|---|
 | cards（既存） | BusinessCard、OriginalImage 関連 |
 | persons(新規) | Person 関連 |
 | contacts（新規） | Contact 関連 |
-| duplicates（新規） | DuplicateCandidate、PersonMergeLog、ActionLog 関連 |
+| duplicates（新規） | DuplicateCandidate、PersonMergeLog 関連 |
+| actionlogs（新規） | ActionLog 関連（モデル横断の汎用ログ） |
 
 ## 11.2 ディレクトリ構成
 
@@ -1462,7 +1460,8 @@ v1.4.x で追加・変更するファイルを以下に示す。
 | contacts/forms.py | ContactBaseForm、ContactUpdateForm、ContactUpdateActiveForm、ContactAddAdditionalRoleForm、ContactCreateForm |
 | contacts/services/normalization.py | フィールド正規化（純関数） |
 | contacts/services/json_parser.py | raw_json → Contact 用辞書（v1.3.4 の json_normalizer から移動・拡張） |
-| duplicates/models.py | DuplicateCandidate、PersonMergeLog、ActionLog モデル |
+| duplicates/models.py | DuplicateCandidate、PersonMergeLog モデル |
+| actionlogs/models.py | ActionLog モデル |
 | duplicates/views.py | DuplicateCandidateGroupListView、DuplicateCandidateGroupDetailView、DuplicateCandidateGroupUpdateView、PersonMergeLogListView、PersonMergeLogDetailView、PersonMergeLogConfirmUndoView |
 | duplicates/forms.py | MergeForm、MergeUndoForm |
 | duplicates/services/duplicate_detection.py | find_duplicate_contacts、_calculate_score、_determine_rank、determine_base_person |
@@ -2070,7 +2069,7 @@ review_status='merged' / 'different_person' のレコードはそのまま（過
 2. **当該マージの DuplicateCandidate を 'merged' に変更**
 3. **保持した DuplicateCandidate を再復帰**：
    - **`DuplicateCandidate.create_recovered_from(old_candidate, new_surviving_person)` クラスメソッド**で新規作成
-   - score / rank / matched_fields / group_id は old_candidate からコピー（再スコア計算は不要）
+   - score / rank / group_id は old_candidate からコピー（再スコア計算は不要）
    - merged_person だった側を surviving_person（new_surviving_person）に置き換え
    - review_status='pending' で作成
 4. **surviving_person.duplicate_checked_at の更新**：
@@ -2101,7 +2100,7 @@ review_status='merged' / 'different_person' のレコードはそのまま（過
 - `(B, C)` `(B, D)` を invalidated 化
 - 新たに `(A, C, score=150, rank=possible_mid, group_id=G2, pending)` を作成
 - 新たに `(A, D, score=130, rank=possible_mid, group_id=G2, pending)` を作成
-- score / rank / matched_fields / group_id は元のものをそのままコピー
+- score / rank / group_id は元のものをそのままコピー
 
 **ここで誤解されやすいのが「surviving 側が B から A に変わったのだから、比較対象も変わってスコアも変わるはず」という直感である。**
 
@@ -2160,7 +2159,7 @@ recheck_duplicates --all の処理自体は数秒で完了する（duplicate_che
 | content_type | NULL |
 | object_repr | 'check_duplicates'（管理コマンド名） |
 
-extra に以下を格納：
+data に以下を格納：
 
 - search_target_count（duplicate_checked_at が NULL の Contact 総数）
 - processed_count（実際に処理した件数、--limit で制限後）
@@ -2487,7 +2486,6 @@ DuplicateCandidate.review_result の different_person 系。
 | ContactFieldConfidence.Confidence | low / medium（high は記録対象外） |
 | DuplicateCandidate.Rank | exact_match / possible_high / possible_mid / possible_low / none |
 | DuplicateCandidate.ReviewStatus | pending / merged / different_person / invalidated |
-| DuplicateCandidate.MatchReason | email / mobile / name_strong / name_score |
 | PersonMergeLog.Status | undoable / undone / locked |
 
 ---
@@ -2964,6 +2962,7 @@ v1.4.2 のマイグレーション適用は以下の順序で行う。
 | 人物アプリ | persons |
 | コンタクトアプリ | contacts |
 | 重複検出アプリ | duplicates |
+| アクションログアプリ | actionlogs |
 | 共通設定 | config |
 
 ### A.2 モデル
@@ -3081,8 +3080,6 @@ v1.4.2 のマイグレーション適用は以下の順序で行う。
 | 人物 B | person_b |
 | スコア | score |
 | ランク | rank |
-| 一致理由 | match_reason |
-| 一致フィールド | matched_fields |
 | レビューステータス | review_status |
 | レビュー結果 | review_result |
 | メモ | note |
@@ -3120,8 +3117,7 @@ v1.4.2 のマイグレーション適用は以下の順序で行う。
 | 対象オブジェクト ID | object_id |
 | 対象オブジェクト | content_object |
 | 対象オブジェクト表現 | object_repr |
-| 差分 | diff |
-| 追加情報 | extra |
+| 追加情報 | data |
 | 補足メモ | note |
 | 作成日時 | created_at |
 
