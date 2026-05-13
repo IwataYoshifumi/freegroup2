@@ -75,6 +75,7 @@ class UploadView(FormView):
         context = super().get_context_data(**kwargs)
         context["active_app"] = "cards"
         context["active_menu"] = "cards:card_upload"
+        context["back"] = BackNavigator(self.request)
         return context
 
 
