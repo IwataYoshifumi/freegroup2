@@ -39,6 +39,11 @@ class OriginalImage(models.Model):
     )
     claimed_at = models.DateTimeField(null=True, blank=True, default=None)
     raw_json = models.JSONField(null=True, blank=True)
+    debug_json = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="OpenCV 検出のデバッグ情報（中間データ）。None なら次回 GET 時に再計算される",
+    )
     error_message = models.TextField(blank=True, default="")
     detected_count = models.IntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -138,6 +143,13 @@ class BusinessCard(models.Model):
         (ORIENTATION_MIRROR,  "鏡像"),
     ]
 
+    class OcrResult(models.TextChoices):
+        BUSINESS_CARD = "business_card", "名刺"
+        NOT_BUSINESS_CARD = "not_business_card", "名刺ではない"
+        INSUFFICIENT_INFO = "insufficient_info", "情報不足"
+        OCR_FAILED = "ocr_failed", "OCR失敗"
+        OTHERS = "others", "その他"
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     original_image = models.ForeignKey(
         OriginalImage,
@@ -153,6 +165,11 @@ class BusinessCard(models.Model):
         max_length=20,
         choices=ORIENTATION_CHOICES,
         default=ORIENTATION_NORMAL,
+    )
+    ocr_result = models.CharField(
+        max_length=20,
+        choices=OcrResult.choices,
+        default=OcrResult.BUSINESS_CARD,
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -196,3 +213,54 @@ class BusinessCard(models.Model):
         同じ URL。
         """
         return self.card_image.url if self.card_image else ""
+
+
+def _debug_mask_upload_path(instance, filename):
+    """[性質] 純関数 / DebugMask の ImageField の保存先を組み立てる。
+
+    保存先：MEDIA_ROOT/debug_masks/<original_image_id>/<mask_type>_attempt<attempt_no>.png
+    filename 引数は無視し、mask_type と attempt_no に基づいた固定名を使う。
+    """
+    return (
+        f"debug_masks/{instance.original_image_id}/"
+        f"{instance.mask_type}_attempt{instance.attempt_no}.png"
+    )
+
+
+class DebugMask(models.Model):
+    """OpenCV 検出のデバッグ用マスク画像（5種類）。
+
+    OriginalImage に紐付き、検出時に save_debug_data() から書き込まれる。
+    DBが1次ソース、mask_image の FS 実体は post_delete シグナル経由で削除される。
+    白黒反転リトライが走った場合、attempt_no=2 の or / closed が追加で保存される。
+    """
+
+    class MaskType(models.TextChoices):
+        DIFF = "diff", "輝度差 (diff)"
+        EDGE = "edge", "エッジ (edge)"
+        SAT = "sat", "彩度 (sat)"
+        OR = "or", "OR 合成 (or)"
+        CLOSED = "closed", "クロージング (closed)"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    original_image = models.ForeignKey(
+        OriginalImage,
+        on_delete=models.CASCADE,
+        related_name="debug_masks",
+    )
+    mask_type = models.CharField(max_length=10, choices=MaskType.choices)
+    attempt_no = models.IntegerField(default=1)
+    mask_image = models.ImageField(upload_to=_debug_mask_upload_path)
+    metadata = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["original_image", "mask_type", "attempt_no"],
+                name="unique_original_image_mask_type_attempt",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.original_image_id} {self.mask_type} attempt{self.attempt_no}"
