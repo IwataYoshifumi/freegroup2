@@ -14,12 +14,16 @@ class OriginalImage(models.Model):
     """
 
     STATUS_PENDING = "pending"
+    STATUS_OPENCV_PROCESSING = "opencv_processing"
+    STATUS_CARDS_EXTRACTED = "cards_extracted"
     STATUS_PROCESSING = "processing"
     STATUS_EXTRACTED = "extracted"
     STATUS_GARBAGE = "garbage"
     STATUS_FAILED = "failed"
     STATUS_CHOICES = [
         (STATUS_PENDING, "処理待ち"),
+        (STATUS_OPENCV_PROCESSING, "OpenCV処理中"),
+        (STATUS_CARDS_EXTRACTED, "OpenCV完了・OCR待ち"),
         (STATUS_PROCESSING, "処理中"),
         (STATUS_EXTRACTED, "完了"),
         (STATUS_GARBAGE, "無効画像"),
@@ -150,6 +154,12 @@ class BusinessCard(models.Model):
         OCR_FAILED = "ocr_failed", "OCR失敗"
         OTHERS = "others", "その他"
 
+    class OcrStatus(models.TextChoices):
+        PENDING = "pending", "OCR待ち"
+        PROCESSING = "processing", "OCR処理中"
+        DONE = "done", "OCR完了"
+        FAILED = "failed", "OCR失敗"
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     original_image = models.ForeignKey(
         OriginalImage,
@@ -169,8 +179,19 @@ class BusinessCard(models.Model):
     ocr_result = models.CharField(
         max_length=20,
         choices=OcrResult.choices,
-        default=OcrResult.BUSINESS_CARD,
+        null=True,
+        blank=True,
+        default=None,
     )
+    ocr_status = models.CharField(
+        max_length=20,
+        choices=OcrStatus.choices,
+        default=OcrStatus.PENDING,
+    )
+    raw_json_1 = models.JSONField(null=True, blank=True)
+    raw_json_2 = models.JSONField(null=True, blank=True)
+    claimed_at = models.DateTimeField(null=True, blank=True, default=None)
+    error_message = models.TextField(blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
