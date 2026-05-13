@@ -1,0 +1,128 @@
+{% extends "cards/app_base.html" %}
+{% load back_tags %}
+
+{% block title %}マージ復元の確認 — FreeGroup2{% endblock %}
+
+{% block content %}
+  <div class="app-page-header" style="max-width:1100px;">
+    <div>
+      <div class="app-breadcrumb">重複候補管理 / マージログ一覧 / マージログ詳細 / 復元の確認</div>
+      <h1>マージ復元の確認</h1>
+    </div>
+    <div class="app-action-area">
+      {% if back.back_exist %}
+        <a href="{% back_url back %}" class="app-btn app-btn--secondary">戻る</a>
+      {% endif %}
+      {% if back.back_all_exist %}
+        <a href="{% back_all_url back %}" class="app-btn app-btn--secondary">最初に戻る</a>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="app-alert app-alert--danger" style="max-width:1100px;">
+    <strong>この操作は取り消せません。</strong>
+    {{ merged_person.primary_contact.full_name|default:"(氏名なし)" }} を active 状態に戻し、
+    {{ undo_preview.contacts_to_restore|length }} 件の Contact が
+    {{ merged_person.primary_contact.full_name|default:"(氏名なし)" }} 配下に戻されます。
+  </div>
+
+  <section class="app-card" style="max-width:1100px;">
+    <div class="app-section__header"><h2>対象マージ</h2></div>
+    <dl class="app-detail-list">
+      <div class="app-detail-item">
+        <dt class="app-detail-label">実行日時</dt>
+        <dd class="app-detail-value">{{ merge_log.executed_at|date:"Y/m/d H:i:s" }}</dd>
+      </div>
+      <div class="app-detail-item">
+        <dt class="app-detail-label">実行者</dt>
+        <dd class="app-detail-value">{{ merge_log.executed_by.username|default:"-" }}</dd>
+      </div>
+      <div class="app-detail-item">
+        <dt class="app-detail-label">サバイブ側</dt>
+        <dd class="app-detail-value">{{ surviving_person.primary_contact.full_name|default:"(氏名なし)" }}</dd>
+      </div>
+      <div class="app-detail-item">
+        <dt class="app-detail-label">統合元</dt>
+        <dd class="app-detail-value">{{ merged_person.primary_contact.full_name|default:"(氏名なし)" }}</dd>
+      </div>
+    </dl>
+  </section>
+
+  <section class="app-card" style="max-width:1100px;">
+    <div class="app-section__header"><h2>復元プレビュー</h2></div>
+    <div class="app-form-grid">
+      <div class="app-form__group">
+        <h3>統合元（{{ merged_person.primary_contact.full_name|default:"-" }}）に戻る Contact</h3>
+        {% if undo_preview.contacts_to_restore %}
+          <dl class="app-detail-list">
+            {% for c in undo_preview.contacts_to_restore %}
+              <div class="app-detail-item">
+                <dt class="app-detail-label">{{ c.full_name|default:"(氏名なし)" }}</dt>
+                <dd class="app-detail-value">{{ c.company|default:"-" }}</dd>
+              </div>
+            {% endfor %}
+          </dl>
+        {% else %}
+          <p class="app-muted">対象なし</p>
+        {% endif %}
+      </div>
+      <div class="app-form__group">
+        <h3>サバイブ側に残る Contact</h3>
+        {% if undo_preview.contacts_remaining_in_surviving %}
+          <dl class="app-detail-list">
+            {% for c in undo_preview.contacts_remaining_in_surviving %}
+              <div class="app-detail-item">
+                <dt class="app-detail-label">{{ c.full_name|default:"(氏名なし)" }}</dt>
+                <dd class="app-detail-value">{{ c.company|default:"-" }}</dd>
+              </div>
+            {% endfor %}
+          </dl>
+        {% else %}
+          <p class="app-muted">対象なし</p>
+        {% endif %}
+      </div>
+    </div>
+  </section>
+
+  <form method="post" class="app-card" style="max-width:1100px;" novalidate>
+    {% csrf_token %}
+    {% hidden_back_field back %}
+
+    {% if form.errors %}
+      <div class="app-alert app-alert--danger app-form__error-summary">
+        <div class="app-form__error-summary__title">入力エラーがあります</div>
+        <ul class="app-form__error-summary__list">
+          {% for err in form.non_field_errors %}
+            <li>{{ err }}</li>
+          {% endfor %}
+          {% for field in form %}
+            {% for err in field.errors %}
+              <li>{{ field.label }}: {{ err }}</li>
+            {% endfor %}
+          {% endfor %}
+        </ul>
+      </div>
+    {% endif %}
+
+    <div class="app-section__header"><h2>復元の備考</h2></div>
+    <div class="app-form__group">
+      <label for="{{ form.note.id_for_label }}">{{ form.note.label }}</label>
+      {{ form.note }}
+      {{ form.note.errors }}
+    </div>
+
+    <div class="app-section__header" style="margin-top:var(--app-space-md);"><h2>確認</h2></div>
+    <div class="app-form__group">
+      <label>
+        {{ form.confirmed }} {{ form.confirmed.label }}
+      </label>
+      {{ form.confirmed.errors }}
+    </div>
+
+    <div class="app-action-area" style="margin-top:24px;">
+      <button type="submit" class="app-btn app-btn--danger">復元する</button>
+      {% url 'duplicates:merge_log_detail' pk=merge_log.pk as detail_url %}
+      <a href="{% append_back_url detail_url back %}" class="app-btn app-btn--secondary">キャンセル</a>
+    </div>
+  </form>
+{% endblock %}

@@ -4,8 +4,15 @@ DuplicateCandidateGroupListView：重複候補グループ一覧（URL 15 番）
   group_id 単位で集約表示、rank / progress / user で絞り込み。
 DuplicateCandidateGroupDetailView：重複候補グループ詳細（URL 16 番）。
   pending / merged / different_person の集計と表示切替（§11.5.1）。
-DuplicateCandidateGroupUpdateView：重複候補レビュー画面（URL 17 番、GET のみ、D-4b）。
-  仕様書 §11.5.2 の 5 ステップで次ペアを表示、POST は D-4c で別途実装。
+DuplicateCandidateGroupUpdateView：重複候補レビュー画面（URL 17 番、GET / POST）。
+  仕様書 §11.5.2 の 5 ステップで次ペアを表示、POST で 3 値分岐サービス。
+PersonMergeLogListView：マージログ一覧（URL 19 番、D-4f-1）。
+  status / user で絞り込み、-executed_at 降順、20 件ページネーション。
+PersonMergeLogDetailView：マージログ詳細（URL 20 番、D-4f-1）。
+  実行情報 + status + 復元プレビュー（get_undo_preview）+ 復元ボタン（D-4f-2 で実装）。
+PersonMergeLogConfirmUndoView：マージ復元確認 + 実行（URL 21 番、D-4f-2）。
+  GET で確認画面、POST で MergeUndoForm 検証 → Execute_Merge_Undo 実行。
+  is_undoable 競合検出と messages による UX フィードバック付き。
 """
 
 from django.contrib import messages
@@ -27,10 +34,11 @@ from django.views.generic import ListView, View
 from back_navigator.back_navigator import BackNavigator
 from config.constants import DifferentPersonReason, DuplicateMergeReason
 
-from .forms import MergeForm
-from .models import DuplicateCandidate
+from .forms import MergeForm, MergeUndoForm
+from .models import DuplicateCandidate, PersonMergeLog
 from .services.merge_executor import (
     Execute_Merge_Only,
+    Execute_Merge_Undo,
     Mark_as_Different_Person,
 )
 
@@ -581,3 +589,224 @@ class DuplicateCandidateGroupUpdateView(LoginRequiredMixin, View):
         return redirect(
             "duplicates:duplicate_group_review", group_id=group_id
         )
+
+
+class PersonMergeLogListView(LoginRequiredMixin, ListView):
+    """マージログ一覧画面（19 番、仕様書 §11.3 / D-4f-1）。
+
+    PersonMergeLog を全件対象に -executed_at 降順で表示。絞り込み GET パラメータ：
+      - status：3 値（undoable / undone / locked）の複数選択
+      - user：'me' のとき executed_by=ログインユーザーに絞る
+      - searched=1：絞り込み実行済みフラグ。未指定（初回）は status='undoable' のみ
+        + user 絞り込みなし
+
+    並び順：-executed_at（最新マージが上）。
+    N+1 対策：surviving / merged の primary_contact、executed_by / undone_by を
+    select_related。
+    """
+
+    template_name = "duplicates/merge_log_list.html"
+    context_object_name = "merge_logs"
+    paginate_by = 20
+
+    _VALID_STATUSES = (
+        PersonMergeLog.Status.UNDOABLE,
+        PersonMergeLog.Status.UNDONE,
+        PersonMergeLog.Status.LOCKED,
+    )
+
+    def _is_searched(self):
+        return self.request.GET.get("searched") == "1"
+
+    def _get_selected_statuses(self):
+        """初回は undoable のみ、検索後はチェック値のみ（不正値は捨てる）。"""
+        if not self._is_searched():
+            return [PersonMergeLog.Status.UNDOABLE]
+        return [
+            s
+            for s in self.request.GET.getlist("status")
+            if s in self._VALID_STATUSES
+        ]
+
+    def _is_user_filter_on(self):
+        return self.request.GET.get("user") == "me"
+
+    def get_queryset(self):
+        selected_statuses = self._get_selected_statuses()
+        if not selected_statuses:
+            return PersonMergeLog.objects.none()
+
+        qs = (
+            PersonMergeLog.objects.filter(status__in=selected_statuses)
+            .select_related(
+                "surviving_person__primary_contact",
+                "merged_person__primary_contact",
+                "executed_by",
+                "undone_by",
+            )
+            .order_by("-executed_at")
+        )
+
+        if self._is_user_filter_on():
+            qs = qs.filter(executed_by=self.request.user)
+
+        return qs
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        back = BackNavigator(self.request)
+        back.push_current(
+            "マージログ一覧",
+            ["status", "user", "searched", "page"],
+        )
+        context["back"] = back
+        context["valid_statuses"] = list(self._VALID_STATUSES)
+        context["selected_statuses"] = self._get_selected_statuses()
+        context["user_filter_on"] = self._is_user_filter_on()
+        context["searched"] = self._is_searched()
+        context["active_app"] = "duplicates"
+        context["active_menu"] = "duplicates:merge_log_list"
+        return context
+
+
+class PersonMergeLogDetailView(LoginRequiredMixin, View):
+    """マージログ詳細画面（20 番、仕様書 §11.3 / D-4f-1）。
+
+    URL kwarg `pk`（UUID）で受け取り、PersonMergeLog を 1 件取得。存在しない pk は
+    Http404。
+
+    表示内容：実行情報 / status / surviving / merged / duplicate_candidate /
+    undone 情報 / note / 復元プレビュー（get_undo_preview の dict）。
+
+    復元ボタン：is_undoable=True のときテンプレ側で「準備中」グレーアウト表示
+    （21 番 PersonMergeLogConfirmUndoView は D-4f-2 で別途実装）。
+    """
+
+    template_name = "duplicates/merge_log_detail.html"
+
+    def get(self, request, pk):
+        try:
+            merge_log = (
+                PersonMergeLog.objects.select_related(
+                    "surviving_person__primary_contact",
+                    "merged_person__primary_contact",
+                    "duplicate_candidate",
+                    "executed_by",
+                    "undone_by",
+                )
+                .get(pk=pk)
+            )
+        except PersonMergeLog.DoesNotExist:
+            raise Http404("PersonMergeLog not found.")
+
+        back = BackNavigator(request)
+        context = {
+            "merge_log": merge_log,
+            "surviving_person": merge_log.surviving_person,
+            "merged_person": merge_log.merged_person,
+            "is_undoable": merge_log.is_undoable(),
+            "undo_preview": merge_log.get_undo_preview(),
+            "back": back,
+            "active_app": "duplicates",
+            "active_menu": "duplicates:merge_log_list",
+        }
+        return render(request, self.template_name, context)
+
+
+class PersonMergeLogConfirmUndoView(LoginRequiredMixin, View):
+    """マージ復元の確認 + 実行画面（21 番、仕様書 §11.3 / D-4f-2）。
+
+    GET：merge_log を取得 → is_undoable() False なら messages.error + 20 番リダイレクト
+    （競合検出）。True なら MergeUndoForm を空で初期化して confirm-undo 画面を render。
+
+    POST：merge_log を取得 → is_undoable() を再チェック（POST 中の競合保険）→
+    MergeUndoForm 検証 → invalid なら画面再 render → valid なら Execute_Merge_Undo を
+    呼ぶ。ValidationError キャッチ時は messages.error + 20 番リダイレクト。成功時は
+    復元結果サマリの messages.success + 20 番リダイレクト。
+
+    BackNavigator：push_current は呼ばない。20 番からの遷移時に append_back_url で
+    back スタックが引き継がれる（merge_log_detail.html 側で対応）。
+    """
+
+    template_name = "duplicates/merge_log_confirm_undo.html"
+
+    def _get_merge_log(self, pk):
+        """[性質] 準関数（DB 読み取りのみ）"""
+        try:
+            return (
+                PersonMergeLog.objects.select_related(
+                    "surviving_person__primary_contact",
+                    "merged_person__primary_contact",
+                    "executed_by",
+                )
+                .get(pk=pk)
+            )
+        except PersonMergeLog.DoesNotExist:
+            raise Http404("PersonMergeLog not found.")
+
+    def _redirect_with_conflict(self, request, merge_log):
+        """[性質] 副作用あり（messages + redirect）"""
+        messages.error(
+            request,
+            f"このマージは復元できません（現在の状態：{merge_log.get_status_display()}）。",
+        )
+        return redirect("duplicates:merge_log_detail", pk=merge_log.pk)
+
+    def _render_confirm_page(self, request, merge_log, form):
+        """[性質] 副作用あり（BackNavigator 初期化 + HttpResponse 返却）"""
+        back = BackNavigator(request)
+        context = {
+            "merge_log": merge_log,
+            "surviving_person": merge_log.surviving_person,
+            "merged_person": merge_log.merged_person,
+            "undo_preview": merge_log.get_undo_preview(),
+            "form": form,
+            "back": back,
+            "active_app": "duplicates",
+            "active_menu": "duplicates:merge_log_list",
+        }
+        return render(request, self.template_name, context)
+
+    def get(self, request, pk):
+        merge_log = self._get_merge_log(pk)
+        if not merge_log.is_undoable():
+            return self._redirect_with_conflict(request, merge_log)
+        form = MergeUndoForm()
+        return self._render_confirm_page(request, merge_log, form)
+
+    def post(self, request, pk):
+        merge_log = self._get_merge_log(pk)
+        if not merge_log.is_undoable():
+            return self._redirect_with_conflict(request, merge_log)
+
+        form = MergeUndoForm(request.POST)
+        if not form.is_valid():
+            return self._render_confirm_page(request, merge_log, form)
+
+        # 復元実行前に preview の Contact 件数を取得（成功 message に使用）。
+        # merged.primary_contact はマージ完了直後 None なので、復元すると ACTIVE に
+        # 戻る Contact（contacts_to_restore のうち previous_status='primary' の 1 件）の
+        # full_name を表示用に取得する。
+        preview = merge_log.get_undo_preview()
+        contacts_to_restore_count = preview["contacts_to_restore"].count()
+        restored_primary = preview["contacts_to_restore"].filter(
+            previous_status="primary"
+        ).first()
+        merged_person_name = (
+            restored_primary.full_name if restored_primary else "(氏名なし)"
+        )
+
+        try:
+            Execute_Merge_Undo(merge_log, form, request.user)
+        except ValidationError as e:
+            messages.error(request, str(e))
+            return redirect("duplicates:merge_log_detail", pk=merge_log.pk)
+
+        messages.success(
+            request,
+            (
+                f"マージを復元しました。{merged_person_name} が active 状態に戻り、"
+                f"{contacts_to_restore_count} 件の Contact が戻されました。"
+            ),
+        )
+        return redirect("duplicates:merge_log_detail", pk=merge_log.pk)

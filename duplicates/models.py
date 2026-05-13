@@ -599,19 +599,21 @@ class PersonMergeLog(models.Model):
             data={"merge_reason": merge_reason},
         )
 
-    def record_undo_action(self, user):
-        """復元実行を ActionLog に記録（仕様書 §10.8.2 / §4.11.3）。
+    def record_undo_action(self, user, note=""):
+        """復元実行を ActionLog に記録（仕様書 §10.8.2 / §4.11.3、D-4f-2 で note 拡張）。
 
         [性質] 副作用あり（DB 書込：ActionLog レコードを作成。自身は変更しない）
         [入力] user: User（復元実行者、ActionLog.user に記録）
+               note: str（任意、復元理由のメモ。MergeUndoForm.cleaned_data['note'] から
+                 渡される。空文字でも空文字で記録）
         [出力] None
 
         単一責任：ActionLog に書き込むだけ。自身の状態は変更しない。状態遷移は別途
         `mark_as_undone()` の責務。
 
-        data 構造：`{}`（空 dict）。`surviving_person_id` / `merged_person_id` は merge_log
-        経由で取れるため冗長コピーしない。復元自体には追加の業務情報がないので、空 dict で
-        十分（指示書 §3.3 / §4.7）。
+        data 構造：`{"note": <str>}`。`surviving_person_id` / `merged_person_id` は
+        merge_log 経由で取れるため冗長コピーしない。note は空文字でも空文字で記録する
+        （集計時のキー揃え、D-4f-2 §2-6 サポート担当 A 推奨）。
         """
         from actionlogs.models import ActionLog  # 循環 import を避けるため遅延 import
 
@@ -619,5 +621,5 @@ class PersonMergeLog(models.Model):
             user=user,
             action="undone",
             content_object=self,
-            data={},
+            data={"note": note},
         )

@@ -1,10 +1,14 @@
-"""duplicates アプリの Form 層（仕様書 v1.4.2 §11.6 / §11.7、17 番）。
+"""duplicates アプリの Form 層（仕様書 v1.4.2 §11.6 / §11.7、17 番 / 21 番）。
 
 MergeForm：マージ画面用 Form（DuplicateCandidate のレビュー判定 +
 surviving 側 primary Contact の修正を一体で扱う）。値違い検出 + バリデーション
 までが責務で、実 DB 書込（merge_log 作成 / Contact 更新 / set_primary_contact 等）は
 duplicates/services/merge_executor.py の 3 サービス関数（Mark_as_Different_Person /
 Execute_Merge_Only / Execute_Merge_with_Updates）の責務。
+
+MergeUndoForm：マージ復元確認画面用 Form（21 番 PersonMergeLogConfirmUndoView、D-4f-2）。
+復元 note + 不可逆操作の確認 CB のみ。実 DB 書込（Contact ロールバック / merge_log 状態
+遷移 / ActionLog 記録）は Execute_Merge_Undo の責務。
 
 [性質] presentation 層モジュール（DB 操作なし・副作用なし、§11.6.3 設計原則）
 """
@@ -16,7 +20,7 @@ from config.constants import (
     DifferentPersonReason,
     DuplicateMergeReason,
 )
-from contacts.forms import ContactBaseForm
+from contacts.forms import AppErrorList, ContactBaseForm
 from contacts.models import Contact
 
 
@@ -382,3 +386,34 @@ class MergeForm(ContactBaseForm):
         if sv_first not in sv_full:
             return []
         return ["last_name", "first_name"]
+
+
+class MergeUndoForm(forms.Form):
+    """マージ復元確認画面用 Form（仕様書 §11.6 / §11.7、21 番 D-4f-2）。
+
+    [性質] presentation 層クラス（DB 操作なし・副作用なし、§11.6.3 設計原則）
+
+    フィールド：
+      - note: CharField（任意、復元理由のメモ。ActionLog の data["note"] に記録される）
+      - confirmed: BooleanField（required=True、不可逆操作の明示確認）
+
+    実 DB 書込は Execute_Merge_Undo の責務。本 Form は note の取り出し口と confirmed の
+    必須化のみ。AppErrorList を error_class に設定し、`<ul class="errorlist
+    app-form__error">` で個別フィールドエラーを既存スタイルに接続する。
+    """
+
+    error_class = AppErrorList
+
+    note = forms.CharField(
+        required=False,
+        widget=forms.Textarea,
+        label="復元の備考",
+    )
+    confirmed = forms.BooleanField(
+        required=True,
+        label="この操作は取り消せません。内容を理解しました",
+    )
+
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault("error_class", self.error_class)
+        super().__init__(*args, **kwargs)

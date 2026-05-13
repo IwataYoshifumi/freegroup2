@@ -350,12 +350,11 @@ def Execute_Merge_Only(candidate, surviving_person, merged_person, form, user):
 
 
 def Execute_Merge_Undo(merge_log, form, user):
-    """マージ復元の本体（仕様書 §9.5 / §13.4.5 / §11.4.6）。
+    """マージ復元の本体（仕様書 §9.5 / §13.4.5 / §11.4.6、D-4f-2 で note 連携）。
 
     [性質] 副作用あり（DB 書込：複数モデルを同一トランザクションで更新）
     [入力] merge_log: PersonMergeLog（復元対象、status='undoable' 必須）
-           form: MergeUndoForm（D ブロックで実装。C-3 段階では未使用、シグネチャは
-                 仕様書 §13.4.1 通り保持）
+           form: MergeUndoForm（cleaned_data['note'] を ActionLog に転記）
            user: User（復元実行者、PersonMergeLog.undone_by および ActionLog.user
                  に記録）
     [出力] None
@@ -397,6 +396,7 @@ def Execute_Merge_Undo(merge_log, form, user):
 
     surviving_person = merge_log.surviving_person
     merged_person = merge_log.merged_person
+    note = form.cleaned_data.get("note", "")
 
     # ---- B. トランザクション内（§9.5.2 手順 1〜7） ----
     with transaction.atomic():
@@ -442,5 +442,5 @@ def Execute_Merge_Undo(merge_log, form, user):
                 update_fields=["duplicate_checked_at", "updated_at"]
             )
 
-        # ActionLog 記録（data={} は X-5 確定方針）
-        merge_log.record_undo_action(user)
+        # ActionLog 記録（D-4f-2：form.cleaned_data['note'] を data['note'] に転記）
+        merge_log.record_undo_action(user, note)

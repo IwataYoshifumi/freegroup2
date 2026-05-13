@@ -1,0 +1,150 @@
+{% extends "cards/app_base.html" %}
+{% load back_tags %}
+
+{% block title %}マージログ詳細 — FreeGroup2{% endblock %}
+
+{% block content %}
+  <div class="app-page-header" style="max-width:1100px;">
+    <div>
+      <div class="app-breadcrumb">重複候補管理 / マージログ一覧 / 詳細</div>
+      <h1>マージログ詳細</h1>
+    </div>
+    <div class="app-action-area">
+      {% if back.back_exist %}
+        <a href="{% back_url back %}" class="app-btn app-btn--secondary">戻る</a>
+      {% endif %}
+      {% if back.back_all_exist %}
+        <a href="{% back_all_url back %}" class="app-btn app-btn--secondary">最初に戻る</a>
+      {% endif %}
+    </div>
+  </div>
+
+  <section class="app-card" style="max-width:1100px;">
+    <div class="app-section__header"><h2>基本情報</h2></div>
+    <dl class="app-detail-list">
+      <div class="app-detail-item">
+        <dt class="app-detail-label">実行日時</dt>
+        <dd class="app-detail-value">{{ merge_log.executed_at|date:"Y/m/d H:i:s" }}</dd>
+      </div>
+      <div class="app-detail-item">
+        <dt class="app-detail-label">実行者</dt>
+        <dd class="app-detail-value">{{ merge_log.executed_by.username|default:"-" }}</dd>
+      </div>
+      <div class="app-detail-item">
+        <dt class="app-detail-label">サバイブ側</dt>
+        <dd class="app-detail-value">
+          {% url 'persons:person_detail' pk=surviving_person.pk as surviving_url %}
+          <a href="{% append_back_url surviving_url back %}">{{ surviving_person.primary_contact.full_name|default:"(氏名なし)" }}</a>
+        </dd>
+      </div>
+      <div class="app-detail-item">
+        <dt class="app-detail-label">統合元</dt>
+        <dd class="app-detail-value">
+          {% url 'persons:person_detail' pk=merged_person.pk as merged_url %}
+          <a href="{% append_back_url merged_url back %}">{{ merged_person.primary_contact.full_name|default:"(氏名なし)" }}</a>
+        </dd>
+      </div>
+      <div class="app-detail-item">
+        <dt class="app-detail-label">状態</dt>
+        <dd class="app-detail-value">
+          {% if merge_log.status == "undoable" %}
+            <span class="app-status-badge app-status-badge--success">復元可能</span>
+          {% elif merge_log.status == "undone" %}
+            <span class="app-status-badge app-status-badge--muted">復元済み</span>
+          {% elif merge_log.status == "locked" %}
+            <span class="app-status-badge app-status-badge--warning">復元不可</span>
+          {% endif %}
+        </dd>
+      </div>
+      {% if merge_log.status == "undone" %}
+        <div class="app-detail-item">
+          <dt class="app-detail-label">復元実行者</dt>
+          <dd class="app-detail-value">{{ merge_log.undone_by.username|default:"-" }}</dd>
+        </div>
+        <div class="app-detail-item">
+          <dt class="app-detail-label">復元日時</dt>
+          <dd class="app-detail-value">{{ merge_log.undone_at|date:"Y/m/d H:i:s" }}</dd>
+        </div>
+      {% endif %}
+      {% if merge_log.duplicate_candidate %}
+        <div class="app-detail-item">
+          <dt class="app-detail-label">重複候補</dt>
+          <dd class="app-detail-value">
+            {% if merge_log.duplicate_candidate.group_id %}
+              {% url 'duplicates:duplicate_group_detail' group_id=merge_log.duplicate_candidate.group_id as group_url %}
+              <a href="{% append_back_url group_url back %}">グループ詳細を開く</a>
+            {% else %}
+              {{ merge_log.duplicate_candidate.pk }}
+            {% endif %}
+          </dd>
+        </div>
+      {% endif %}
+    </dl>
+  </section>
+
+  {% if merge_log.note %}
+    <section class="app-card" style="max-width:1100px;">
+      <div class="app-section__header"><h2>備考</h2></div>
+      <div class="app-detail-value" style="white-space:pre-wrap;">{{ merge_log.note }}</div>
+    </section>
+  {% endif %}
+
+  <section class="app-card" style="max-width:1100px;">
+    <div class="app-section__header"><h2>復元プレビュー</h2></div>
+    <p class="app-muted">復元実行時にどの Contact がどう動くかの予測。実際の復元は実行ボタンから（D-4f-2 で実装予定）。</p>
+
+    <div class="app-form-grid">
+      <div class="app-form__group">
+        <h3>統合元（{{ merged_person.primary_contact.full_name|default:"-" }}）に戻る Contact</h3>
+        {% if undo_preview.contacts_to_restore %}
+          <dl class="app-detail-list">
+            {% for c in undo_preview.contacts_to_restore %}
+              {% url 'contacts:contact_detail' pk=c.pk as c_url %}
+              <div class="app-detail-item">
+                <dt class="app-detail-label">{{ c.full_name|default:"(氏名なし)" }}</dt>
+                <dd class="app-detail-value">
+                  <a href="{% append_back_url c_url back %}">
+                    {{ c.company|default:"-" }}
+                  </a>
+                </dd>
+              </div>
+            {% endfor %}
+          </dl>
+        {% else %}
+          <p class="app-muted">対象なし</p>
+        {% endif %}
+      </div>
+      <div class="app-form__group">
+        <h3>サバイブ側に残る Contact</h3>
+        {% if undo_preview.contacts_remaining_in_surviving %}
+          <dl class="app-detail-list">
+            {% for c in undo_preview.contacts_remaining_in_surviving %}
+              {% url 'contacts:contact_detail' pk=c.pk as c_url %}
+              <div class="app-detail-item">
+                <dt class="app-detail-label">{{ c.full_name|default:"(氏名なし)" }}</dt>
+                <dd class="app-detail-value">
+                  <a href="{% append_back_url c_url back %}">
+                    {{ c.company|default:"-" }}
+                  </a>
+                </dd>
+              </div>
+            {% endfor %}
+          </dl>
+        {% else %}
+          <p class="app-muted">対象なし</p>
+        {% endif %}
+      </div>
+    </div>
+  </section>
+
+  {% if is_undoable %}
+    <section class="app-card" style="max-width:1100px;">
+      <div class="app-action-area" style="margin-top:0;">
+        {% url 'duplicates:merge_log_confirm_undo' pk=merge_log.pk as confirm_undo_url %}
+        <a href="{% append_back_url confirm_undo_url back %}"
+           class="app-btn app-btn--danger">このマージを復元する</a>
+        <span class="app-muted">復元すると merged_person が active 状態に戻ります。</span>
+      </div>
+    </section>
+  {% endif %}
+{% endblock %}

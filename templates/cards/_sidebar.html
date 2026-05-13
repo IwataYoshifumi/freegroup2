@@ -8,4 +8,5 @@
   <a href="{% url 'contacts:contact_list' %}" {% if active_menu == 'contacts:contact_list' %}class="is-active"{% endif %}>コンタクト一覧</a>
   <a href="{% url 'contacts:contact_create' %}" {% if active_menu == 'contacts:contact_create' %}class="is-active"{% endif %}>コンタクト新規作成</a>
   <a href="{% url 'duplicates:duplicate_group_list' %}" {% if active_menu == 'duplicates:duplicate_group_list' %}class="is-active"{% endif %}>重複候補一覧</a>
+  <a href="{% url 'duplicates:merge_log_list' %}" {% if active_menu == 'duplicates:merge_log_list' %}class="is-active"{% endif %}>マージログ</a>
 </nav>

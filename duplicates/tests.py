@@ -9,6 +9,7 @@ MergeFormInitTests：17 番レビュー画面 GET（仕様書 §11.5.2、D-4b）
 """
 
 import uuid
+from datetime import timedelta
 
 from django.contrib.auth import get_user_model
 from django.test import Client, TestCase
@@ -16,8 +17,9 @@ from django.urls import reverse
 from django.utils import timezone
 
 from contacts.models import Contact, ContactFieldConfidence
-from duplicates.forms import MergeForm
-from duplicates.models import DuplicateCandidate
+from actionlogs.models import ActionLog
+from duplicates.forms import MergeForm, MergeUndoForm
+from duplicates.models import DuplicateCandidate, PersonMergeLog
 from persons.models import Person
 
 
@@ -1723,3 +1725,353 @@ class DuplicateCandidateGroupUpdateViewContextTests(
                 names.add(field["field_name"])
         self.assertIn("last_name", names)
         self.assertIn("first_name", names)
+
+
+class _PersonMergeLogViewTestBase(_DuplicatesTestBase):
+    """マージログ View 共通：surviving / merged Person + Contact + PersonMergeLog を作る。"""
+
+    def setUp(self):
+        super().setUp()
+        self.surviving, self.surviving_contact = self._make_person_with_primary(
+            "サバイブ太郎", created_by=self.user
+        )
+        self.merged, self.merged_contact = self._make_person_with_primary(
+            "統合元次郎", created_by=self.user
+        )
+        # merged Contact を surviving 配下に付け替え（復元プレビューの
+        # contacts_to_restore に乗るよう previous_person=merged をセット）。
+        self.merged_contact.person = self.surviving
+        self.merged_contact.previous_person = self.merged
+        self.merged_contact.previous_status = Contact.Status.PRIMARY
+        self.merged_contact.status = Contact.Status.INACTIVE
+        self.merged_contact.save()
+
+    def _make_log(self, *, user=None, status=None, executed_at=None):
+        log = PersonMergeLog.create(self.surviving, self.merged, user or self.user)
+        if status is not None and status != PersonMergeLog.Status.UNDOABLE:
+            log.status = status
+            log.save(update_fields=["status", "updated_at"])
+        if executed_at is not None:
+            log.executed_at = executed_at
+            log.save(update_fields=["executed_at", "updated_at"])
+        return log
+
+
+class PersonMergeLogListViewTests(_PersonMergeLogViewTestBase):
+    """19 番 PersonMergeLogListView の単体テスト（D-4f-1）。"""
+
+    def _url(self):
+        return reverse("duplicates:merge_log_list")
+
+    def test_unauthenticated_redirects(self):
+        c = Client()
+        resp = c.get(self._url())
+        self.assertEqual(resp.status_code, 302)
+
+    def test_initial_shows_only_undoable(self):
+        """初回アクセス（searched なし）は undoable のみ表示。"""
+        self._make_log(status=PersonMergeLog.Status.UNDOABLE)
+        self._make_log(status=PersonMergeLog.Status.UNDONE)
+        self._make_log(status=PersonMergeLog.Status.LOCKED)
+
+        resp = self.client.get(self._url())
+        self.assertEqual(resp.status_code, 200)
+        statuses = {log.status for log in resp.context["merge_logs"]}
+        self.assertEqual(statuses, {PersonMergeLog.Status.UNDOABLE})
+
+    def test_searched_with_multiple_statuses(self):
+        """searched=1 + status=undoable&status=undone → 両方表示。"""
+        self._make_log(status=PersonMergeLog.Status.UNDOABLE)
+        self._make_log(status=PersonMergeLog.Status.UNDONE)
+        self._make_log(status=PersonMergeLog.Status.LOCKED)
+
+        resp = self.client.get(
+            self._url() + "?searched=1&status=undoable&status=undone"
+        )
+        statuses = {log.status for log in resp.context["merge_logs"]}
+        self.assertEqual(
+            statuses,
+            {PersonMergeLog.Status.UNDOABLE, PersonMergeLog.Status.UNDONE},
+        )
+
+    def test_user_filter_me(self):
+        """user=me → executed_by=ログインユーザーのみ。"""
+        my_log = self._make_log(user=self.user)
+        self._make_log(user=self.other_user)
+
+        resp = self.client.get(self._url() + "?searched=1&status=undoable&user=me")
+        log_ids = [log.id for log in resp.context["merge_logs"]]
+        self.assertIn(my_log.id, log_ids)
+        self.assertEqual(len(log_ids), 1)
+
+    def test_ordering_by_executed_at_desc(self):
+        """-executed_at 降順（最新マージが上）。"""
+        old = self._make_log(executed_at=timezone.now() - timedelta(days=2))
+        new = self._make_log(executed_at=timezone.now() - timedelta(hours=1))
+
+        resp = self.client.get(self._url())
+        log_ids = [log.id for log in resp.context["merge_logs"]]
+        self.assertEqual(log_ids[0], new.id)
+        self.assertEqual(log_ids[1], old.id)
+
+    def test_html_contains_person_names(self):
+        """HTML に surviving / merged の primary_contact.full_name が含まれる。"""
+        self._make_log()
+        resp = self.client.get(self._url())
+        self.assertContains(resp, "サバイブ太郎")
+        self.assertContains(resp, "統合元次郎")
+
+    def test_pagination(self):
+        """20 件超で次ページに分かれる。"""
+        for _ in range(21):
+            self._make_log()
+        resp = self.client.get(self._url())
+        self.assertTrue(resp.context["is_paginated"])
+        self.assertEqual(len(resp.context["merge_logs"]), 20)
+
+
+class PersonMergeLogDetailViewTests(_PersonMergeLogViewTestBase):
+    """20 番 PersonMergeLogDetailView の単体テスト（D-4f-1）。"""
+
+    def _url(self, pk):
+        return reverse("duplicates:merge_log_detail", kwargs={"pk": pk})
+
+    def test_unauthenticated_redirects(self):
+        log = self._make_log()
+        c = Client()
+        resp = c.get(self._url(log.pk))
+        self.assertEqual(resp.status_code, 302)
+
+    def test_nonexistent_pk_returns_404(self):
+        resp = self.client.get(self._url(uuid.uuid4()))
+        self.assertEqual(resp.status_code, 404)
+
+    def test_context_basic_keys(self):
+        log = self._make_log()
+        resp = self.client.get(self._url(log.pk))
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.context["merge_log"].pk, log.pk)
+        self.assertEqual(resp.context["surviving_person"].pk, self.surviving.pk)
+        self.assertEqual(resp.context["merged_person"].pk, self.merged.pk)
+        self.assertTrue(resp.context["is_undoable"])
+        self.assertIn("undo_preview", resp.context)
+
+    def test_html_shows_names_and_status(self):
+        """HTML に surviving / merged 氏名 + status バッジが含まれる。"""
+        log = self._make_log()
+        resp = self.client.get(self._url(log.pk))
+        self.assertContains(resp, "サバイブ太郎")
+        self.assertContains(resp, "統合元次郎")
+        self.assertContains(resp, "復元可能")
+
+    def test_undo_preview_shows_contacts_to_restore(self):
+        """get_undo_preview の contacts_to_restore が画面に出る。"""
+        log = self._make_log()
+        resp = self.client.get(self._url(log.pk))
+        # setUp で merged_contact を surviving 配下に移動 + previous_person=merged
+        # なので contacts_to_restore に乗る
+        preview = resp.context["undo_preview"]
+        self.assertEqual(
+            list(preview["contacts_to_restore"].values_list("pk", flat=True)),
+            [self.merged_contact.pk],
+        )
+
+    def test_undo_button_shown_when_undoable(self):
+        """is_undoable=True のとき復元ボタン関連 HTML が表示される。"""
+        log = self._make_log(status=PersonMergeLog.Status.UNDOABLE)
+        resp = self.client.get(self._url(log.pk))
+        self.assertContains(resp, "このマージを復元する")
+
+    def test_undo_button_hidden_when_undone(self):
+        """undone（is_undoable=False）のとき復元ボタンは表示されない。"""
+        log = self._make_log(status=PersonMergeLog.Status.UNDONE)
+        resp = self.client.get(self._url(log.pk))
+        self.assertNotContains(resp, "このマージを復元する")
+
+    def test_undo_button_hidden_when_locked(self):
+        """locked（is_undoable=False）のとき復元ボタンは表示されない。"""
+        log = self._make_log(status=PersonMergeLog.Status.LOCKED)
+        resp = self.client.get(self._url(log.pk))
+        self.assertNotContains(resp, "このマージを復元する")
+
+
+class MergeUndoFormTests(TestCase):
+    """MergeUndoForm の単体テスト（D-4f-2 §6-A）。"""
+
+    def test_valid_with_confirmed_only(self):
+        form = MergeUndoForm(data={"confirmed": "on"})
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data["note"], "")
+
+    def test_valid_with_confirmed_and_note(self):
+        form = MergeUndoForm(data={"confirmed": "on", "note": "誤マージ"})
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data["note"], "誤マージ")
+
+    def test_invalid_without_confirmed(self):
+        form = MergeUndoForm(data={"note": "理由"})
+        self.assertFalse(form.is_valid())
+        self.assertIn("confirmed", form.errors)
+
+    def test_invalid_when_all_empty(self):
+        form = MergeUndoForm(data={})
+        self.assertFalse(form.is_valid())
+        self.assertIn("confirmed", form.errors)
+
+    def test_field_errors_use_app_form_error_class(self):
+        """AppErrorList が効いて errorlist app-form__error が付与される。"""
+        form = MergeUndoForm(data={})
+        self.assertFalse(form.is_valid())
+        self.assertIn(
+            'class="errorlist app-form__error"',
+            str(form["confirmed"].errors),
+        )
+
+
+class PersonMergeLogConfirmUndoViewTests(_PersonMergeLogViewTestBase):
+    """21 番 PersonMergeLogConfirmUndoView の単体テスト（D-4f-2 §6-B / §6-C）。"""
+
+    def _url(self, pk):
+        return reverse("duplicates:merge_log_confirm_undo", kwargs={"pk": pk})
+
+    def _detail_url(self, pk):
+        return reverse("duplicates:merge_log_detail", kwargs={"pk": pk})
+
+    def _prepare_merged_state(self):
+        """Execute_Merge_Undo 実行可能なマージ後状態に merged Person を整える
+        （mark_as_active() のガード `status in (MERGED, ARCHIVED)` を通すため）。
+        """
+        self.merged.status = Person.Status.MERGED
+        self.merged.merged_into = self.surviving
+        self.merged.primary_contact = None
+        self.merged.save()
+
+    # ---- GET ----
+    def test_get_unauthenticated_redirects(self):
+        log = self._make_log()
+        c = Client()
+        resp = c.get(self._url(log.pk))
+        self.assertEqual(resp.status_code, 302)
+
+    def test_get_nonexistent_pk_returns_404(self):
+        resp = self.client.get(self._url(uuid.uuid4()))
+        self.assertEqual(resp.status_code, 404)
+
+    def test_get_undoable_shows_confirm_page(self):
+        log = self._make_log(status=PersonMergeLog.Status.UNDOABLE)
+        resp = self.client.get(self._url(log.pk))
+        self.assertEqual(resp.status_code, 200)
+        self.assertIsInstance(resp.context["form"], MergeUndoForm)
+        self.assertIn("undo_preview", resp.context)
+
+    def test_get_undone_redirects_with_error(self):
+        log = self._make_log(status=PersonMergeLog.Status.UNDONE)
+        resp = self.client.get(self._url(log.pk), follow=True)
+        self.assertRedirects(resp, self._detail_url(log.pk))
+        msgs = [str(m) for m in resp.context["messages"]]
+        self.assertTrue(any("復元できません" in m for m in msgs))
+
+    def test_get_locked_redirects_with_error(self):
+        log = self._make_log(status=PersonMergeLog.Status.LOCKED)
+        resp = self.client.get(self._url(log.pk), follow=True)
+        self.assertRedirects(resp, self._detail_url(log.pk))
+
+    # ---- POST ----
+    def test_post_valid_executes_undo(self):
+        """valid POST → Execute_Merge_Undo 実行 → status=undone + 成功 message + 20 番リダイレクト。"""
+        self._prepare_merged_state()
+        log = self._make_log(status=PersonMergeLog.Status.UNDOABLE)
+        resp = self.client.post(
+            self._url(log.pk),
+            {"confirmed": "on", "note": "誤マージのため復元"},
+            follow=True,
+        )
+        self.assertRedirects(resp, self._detail_url(log.pk))
+        log.refresh_from_db()
+        self.assertEqual(log.status, PersonMergeLog.Status.UNDONE)
+        self.assertEqual(log.undone_by, self.user)
+        msgs = [str(m) for m in resp.context["messages"]]
+        self.assertTrue(any("マージを復元しました" in m for m in msgs))
+
+    def test_post_valid_records_action_log_with_note(self):
+        """valid POST → ActionLog に action='undone' + data={"note": ...} 記録。"""
+        self._prepare_merged_state()
+        log = self._make_log(status=PersonMergeLog.Status.UNDOABLE)
+        self.client.post(
+            self._url(log.pk),
+            {"confirmed": "on", "note": "復元理由テスト"},
+        )
+        action = ActionLog.objects.filter(action="undone").last()
+        self.assertIsNotNone(action)
+        self.assertEqual(action.data, {"note": "復元理由テスト"})
+
+    def test_post_valid_does_not_change_merge_log_note(self):
+        """復元 note は merge_log.note に書かれない（マージ時 note と分離）。"""
+        self._prepare_merged_state()
+        log = self._make_log(status=PersonMergeLog.Status.UNDOABLE)
+        log.note = "マージ時のメモ"
+        log.save(update_fields=["note", "updated_at"])
+        self.client.post(
+            self._url(log.pk),
+            {"confirmed": "on", "note": "復元 note"},
+        )
+        log.refresh_from_db()
+        self.assertEqual(log.note, "マージ時のメモ")
+
+    def test_post_invalid_renders_confirm_page(self):
+        """invalid（confirmed なし）→ 200 + form エラー + DB 不変。"""
+        log = self._make_log(status=PersonMergeLog.Status.UNDOABLE)
+        resp = self.client.post(self._url(log.pk), {"note": "理由のみ"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.context["form"].errors)
+        log.refresh_from_db()
+        self.assertEqual(log.status, PersonMergeLog.Status.UNDOABLE)
+
+    def test_post_conflict_when_status_changed(self):
+        """POST 時に既に undone（競合）→ 復元実行されず 20 番リダイレクト + error。"""
+        log = self._make_log(status=PersonMergeLog.Status.UNDONE)
+        resp = self.client.post(
+            self._url(log.pk),
+            {"confirmed": "on"},
+            follow=True,
+        )
+        self.assertRedirects(resp, self._detail_url(log.pk))
+        log.refresh_from_db()
+        self.assertEqual(log.status, PersonMergeLog.Status.UNDONE)
+        msgs = [str(m) for m in resp.context["messages"]]
+        self.assertTrue(any("復元できません" in m for m in msgs))
+
+
+class PersonMergeLogRecordUndoActionTests(_PersonMergeLogViewTestBase):
+    """PersonMergeLog.record_undo_action() の単体テスト（D-4f-2 §6-D）。"""
+
+    def test_record_with_default_empty_note(self):
+        """デフォルト note='' → data={"note": ""}。"""
+        log = self._make_log()
+        log.record_undo_action(self.user)
+        action = ActionLog.objects.filter(action="undone").last()
+        self.assertEqual(action.data, {"note": ""})
+
+    def test_record_with_note(self):
+        """note 指定 → data={"note": <値>}。"""
+        log = self._make_log()
+        log.record_undo_action(self.user, note="復元理由 X")
+        action = ActionLog.objects.filter(action="undone").last()
+        self.assertEqual(action.data, {"note": "復元理由 X"})
+
+
+class PersonMergeLogDetailUndoLinkTests(_PersonMergeLogViewTestBase):
+    """20 番テンプレの復元リンクが 21 番 confirm-undo を指すこと（D-4f-2 §6-E）。"""
+
+    def _url(self, pk):
+        return reverse("duplicates:merge_log_detail", kwargs={"pk": pk})
+
+    def test_undo_link_points_to_confirm_undo(self):
+        log = self._make_log(status=PersonMergeLog.Status.UNDOABLE)
+        resp = self.client.get(self._url(log.pk))
+        confirm_undo_url = reverse(
+            "duplicates:merge_log_confirm_undo", kwargs={"pk": log.pk}
+        )
+        # append_back_url で ?back=... が付くため、URL の先頭部分のみで照合
+        self.assertContains(resp, confirm_undo_url)
+        self.assertContains(resp, "このマージを復元する")
