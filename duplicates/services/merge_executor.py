@@ -29,6 +29,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from config.constants import DUPLICATE_CHECK_FIELDS, DuplicateMergeReason
+from contacts.models import ContactFieldConfidence
 from duplicates.models import DuplicateCandidate, PersonMergeLog
 from persons.models import Person
 
@@ -239,8 +240,8 @@ def Execute_Merge_Only(candidate, surviving_person, merged_person, form, user):
     [入力] candidate: DuplicateCandidate（マージ起点の重複候補）
            surviving_person: Person（マージで残る側）
            merged_person: Person（マージで統合される側）
-           form: MergeForm（cleaned_data['merge_reason'] / ['review_result'] / ['note']
-                 を参照）
+           form: MergeForm（get_merge_reason() / cleaned_data['review_result'] /
+                 cleaned_data['note'] を参照）
            user: User（マージ実行者、PersonMergeLog.executed_by および ActionLog.user
                  に記録）
     [出力] None
@@ -254,7 +255,8 @@ def Execute_Merge_Only(candidate, surviving_person, merged_person, form, user):
     処理順序：
       A. トランザクション開始前のバリデーション（§9.3.1 手順 2）
          1. surviving_person.primary_contact が DUPLICATE_CHECK_FIELDS 全 high
-         2. merge_reason='additional_role' のときは merged_person.primary_contact も同条件
+         2. ADDITIONAL_ROLE が merge_reason（list[str]）に含まれるときは
+            merged_person.primary_contact も同条件
       B. transaction.atomic() 内で §9.3.1 手順 5〜10 を実行
          5. PersonMergeLog.create() でログ作成
          5'. duplicate_candidate / note を merge_log にセットして 2 回目 save
@@ -272,28 +274,46 @@ def Execute_Merge_Only(candidate, surviving_person, merged_person, form, user):
     で判定する。`DUPLICATE_CHECK_FIELDS` も config/constants.py から参照する
     （C-1+2 指示書「定数・enum の使用」）。
     """
-    merge_reason = form.cleaned_data["merge_reason"]
+    merge_reason = form.get_merge_reason()
     review_result = form.cleaned_data["review_result"]
     note = form.cleaned_data.get("note", "")
+    surviving_primary = surviving_person.primary_contact
 
-    # ---- A. バリデーション（トランザクション開始前、§9.3.1 手順 2） ----
-    if not surviving_person.primary_contact.is_all_field_confidence_high(
-        DUPLICATE_CHECK_FIELDS
-    ):
-        raise ValidationError(
-            "surviving_person の primary_contact に全 high でないフィールドが残っています。"
+    # ---- atomic を冒頭から包む構造（D-4d-1 第 3 弾 §2 修正項目 4） ----
+    # マージ画面の確認 CB 全 ON 検証（MergeForm.clean()）は通過済みだが、CFC の DB 状態
+    # は未更新のため、ここで surviving 側 primary の未確認 low/mid CFC を一括 confirmed
+    # 化してから is_all_field_confidence_high を見る。merged 側 CFC は触らない
+    # （additional_role のときの merged 側バリデーションは現状の挙動を維持）。
+    with transaction.atomic():
+        # ---- 0. CFC 確定処理（confirm CB 全 ON 検証を DB に反映） ----
+        unconfirmed_field_names = list(
+            ContactFieldConfidence.objects.filter(
+                contact=surviving_primary,
+                confirmed_at__isnull=True,
+            ).values_list("field_name", flat=True)
         )
-    if merge_reason == DuplicateMergeReason.ADDITIONAL_ROLE:
-        if not merged_person.primary_contact.is_all_field_confidence_high(
+        if unconfirmed_field_names:
+            ContactFieldConfidence.mark_fields_as_confirmed(
+                surviving_primary, unconfirmed_field_names, user
+            )
+
+        # ---- A. バリデーション（§9.3.1 手順 2） ----
+        if not surviving_primary.is_all_field_confidence_high(
             DUPLICATE_CHECK_FIELDS
         ):
             raise ValidationError(
-                "additional_role でのマージでは merged_person の primary_contact も "
-                "全 high が必要です。"
+                "surviving_person の primary_contact に全 high でないフィールドが残っています。"
             )
+        if DuplicateMergeReason.ADDITIONAL_ROLE in merge_reason:
+            if not merged_person.primary_contact.is_all_field_confidence_high(
+                DUPLICATE_CHECK_FIELDS
+            ):
+                raise ValidationError(
+                    "additional_role でのマージでは merged_person の primary_contact も "
+                    "全 high が必要です。"
+                )
 
-    # ---- B. トランザクション内（§9.3.1 手順 5〜10） ----
-    with transaction.atomic():
+        # ---- B. マージ実行（§9.3.1 手順 5〜10） ----
         # 手順 5: PersonMergeLog 作成 + 2 回目 save で duplicate_candidate / note セット
         merge_log = PersonMergeLog.create(surviving_person, merged_person, user)
         merge_log.duplicate_candidate = candidate

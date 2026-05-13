@@ -1,7 +1,7 @@
 """cards アプリの単体テスト。"""
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
@@ -331,3 +331,36 @@ class CardDetailViewEditableModeTests(TestCase):
         content = resp.content.decode()
         self.assertNotIn("js-contact-field-row", content)
         self.assertIn("Contact が紐付いていません", content)
+
+
+class CardDetailDebugUidTests(TestCase):
+    """DEBUG=True 時の Card UID コピペ表示（D-4d-1 第 6 弾 §2-1）。"""
+
+    def setUp(self):
+        self.user = User.objects.create_superuser(
+            username="card_dbg_user", password="dummy"
+        )
+        self.original = OriginalImage.objects.create(
+            user=self.user, status=OriginalImage.STATUS_EXTRACTED
+        )
+        self.card = BusinessCard.objects.create(
+            original_image=self.original, card_index=0
+        )
+        self.client = Client()
+        self.client.force_login(self.user)
+
+    def _url(self):
+        return reverse("cards:card_detail", kwargs={"pk": self.card.pk})
+
+    @override_settings(DEBUG=True)
+    def test_card_uid_shown_in_debug_mode(self):
+        resp = self.client.get(self._url())
+        self.assertContains(resp, 'class="app-debug-uid"')
+        self.assertContains(resp, "Card UID:")
+        self.assertContains(resp, str(self.card.id))
+
+    @override_settings(DEBUG=False)
+    def test_card_uid_hidden_when_debug_false(self):
+        resp = self.client.get(self._url())
+        self.assertNotContains(resp, "Card UID:")
+

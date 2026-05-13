@@ -151,8 +151,9 @@ class Person(models.Model):
 
         [性質] 副作用あり（DB書込：自身配下の Contact の status / previous_status /
                previous_person / person FK を更新。Contact の他フィールドは触らない）
-        [入力] surviving_person: Person（マージで残る側）
-               merge_reason: str（DuplicateMergeReason の値、merged 系 7 値のいずれか）
+        [入力] surviving_person: Person（マージで残る side）
+               merge_reason: list[str]（DuplicateMergeReason の value のリスト、
+                   D-4d-1 第 4 弾で複数選択化に対応。空リストは想定しない）
         [出力] None
         [前提] 呼び出し元の `transaction.atomic()` 内で実行されること（X-4 指示書 §5.5 / §9.3）。
                本メソッドでは atomic を切らない（呼び出し元の責務）。
@@ -161,7 +162,8 @@ class Person(models.Model):
 
         処理内容（merged 側 Contact 群を PDF 表通りに変換）：
           - 元 primary（最大 1 件）：
-              status → INACTIVE（ただし merge_reason='additional_role' のときは ACTIVE、§9.4.3）
+              status → INACTIVE（ただし ADDITIONAL_ROLE が merge_reason に含まれるときは
+              ACTIVE、§9.4.3。D-4d-1 第 4 弾で in 比較に変更）
               previous_status='primary' / previous_person=self / person=surviving_person
           - 元 active 群：status は 'active' のまま（変更なし）
               previous_status='active' / previous_person=self / person=surviving_person
@@ -183,8 +185,9 @@ class Person(models.Model):
         from contacts.models import Contact  # 循環 import を避けるため遅延 import
 
         # 元 primary の遷移先 status を merge_reason から決定（PDF 表 / §9.4.3）。
-        # additional_role のみ ACTIVE、それ以外の merged 系 6 値は INACTIVE。
-        if merge_reason == DuplicateMergeReason.ADDITIONAL_ROLE:
+        # ADDITIONAL_ROLE が含まれていれば ACTIVE、それ以外は INACTIVE
+        # （D-4d-1 第 4 弾で MultipleChoiceField 化により単一値 == から in 比較へ）。
+        if DuplicateMergeReason.ADDITIONAL_ROLE in merge_reason:
             new_primary_status = Contact.Status.ACTIVE
         else:
             new_primary_status = Contact.Status.INACTIVE

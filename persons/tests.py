@@ -1,10 +1,12 @@
 """persons アプリの View 層テスト（v1.4.2 §11.4 / §11.5）。"""
 
 from django.contrib.auth import get_user_model
-from django.test import Client, TestCase
+from django.db import transaction
+from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
+from config.constants import DuplicateMergeReason
 from contacts.models import Contact
 from duplicates.models import PersonMergeLog
 from persons.models import Person
@@ -408,3 +410,121 @@ class PersonAddAdditionalRoleViewTests(TestCase):
         resp = self.client.post(self._url(), data=data)
         self.assertEqual(resp.status_code, 404)
         self.assertEqual(Contact.objects.count(), before)
+
+
+class PersonTransferContactsToTests(TestCase):
+    """Person.transfer_contacts_to() の単体テスト（D-4d-1 第 4 弾 §6-C）。
+
+    merge_reason が list[str]（MultipleChoiceField 化）に変更されたことに伴い、
+    元 primary の遷移先 status 判定が `== ADDITIONAL_ROLE` → `ADDITIONAL_ROLE in list`
+    に変わった。本テスト群はその挙動を担保する。
+    """
+
+    def setUp(self):
+        self.surviving = Person.objects.create()
+        Contact.objects.create(
+            person=self.surviving,
+            status=Contact.Status.PRIMARY,
+            full_name="surviving",
+        )
+        self.merged = Person.objects.create()
+        self.merged_primary = Contact.objects.create(
+            person=self.merged,
+            status=Contact.Status.PRIMARY,
+            full_name="merged",
+        )
+
+    def _run_transfer(self, merge_reason):
+        with transaction.atomic():
+            self.merged.transfer_contacts_to(self.surviving, merge_reason)
+        self.merged_primary.refresh_from_db()
+
+    def test_additional_role_only_sets_primary_active(self):
+        """ADDITIONAL_ROLE 単独 → 元 primary は ACTIVE に遷移。"""
+        self._run_transfer([DuplicateMergeReason.ADDITIONAL_ROLE.value])
+        self.assertEqual(self.merged_primary.status, Contact.Status.ACTIVE)
+
+    def test_non_additional_role_sets_primary_inactive(self):
+        """ADDITIONAL_ROLE を含まない単独 → 元 primary は INACTIVE に遷移。"""
+        self._run_transfer([DuplicateMergeReason.SAME_CARD.value])
+        self.assertEqual(self.merged_primary.status, Contact.Status.INACTIVE)
+
+    def test_additional_role_in_multiple_sets_primary_active(self):
+        """複数値で ADDITIONAL_ROLE を含む → 元 primary は ACTIVE に遷移。"""
+        self._run_transfer(
+            [
+                DuplicateMergeReason.TRANSFER.value,
+                DuplicateMergeReason.ADDITIONAL_ROLE.value,
+            ]
+        )
+        self.assertEqual(self.merged_primary.status, Contact.Status.ACTIVE)
+
+    def test_multiple_without_additional_role_sets_primary_inactive(self):
+        """複数値で ADDITIONAL_ROLE を含まない → 元 primary は INACTIVE に遷移。"""
+        self._run_transfer(
+            [
+                DuplicateMergeReason.TRANSFER.value,
+                DuplicateMergeReason.PROMOTION.value,
+            ]
+        )
+        self.assertEqual(self.merged_primary.status, Contact.Status.INACTIVE)
+
+
+@override_settings(DEBUG=True)
+class PersonDetailDebugUidTests(TestCase):
+    """DEBUG=True 時の Person UID コピペ表示（D-4d-1 第 6 弾 §2-1）。
+
+    person_detail_orphan / merged / archived の 3 テンプレを覆う。active Person は
+    ContactDetailView へ redirect されるため本クラスでは扱わない（contacts 側でカバー）。
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="person_dbg", password="dummy")
+        self.client = Client()
+        self.client.force_login(self.user)
+
+    def _url(self, person):
+        return reverse("persons:person_detail", kwargs={"pk": person.pk})
+
+    def test_orphan_template_shows_person_uid(self):
+        person = Person.objects.create()  # primary_contact=NULL → orphan テンプレ
+        resp = self.client.get(self._url(person))
+        self.assertContains(resp, 'class="app-debug-uid"')
+        self.assertContains(resp, "Person UID:")
+        self.assertContains(resp, str(person.id))
+
+    def test_merged_template_shows_person_uid(self):
+        surviving = Person.objects.create()
+        merged = Person.objects.create()
+        merged.status = Person.Status.MERGED
+        merged.merged_into = surviving
+        merged.save(update_fields=["status", "merged_into", "updated_at"])
+        resp = self.client.get(self._url(merged))
+        self.assertContains(resp, 'class="app-debug-uid"')
+        self.assertContains(resp, str(merged.id))
+
+    def test_archived_template_shows_person_uid(self):
+        archived = Person.objects.create()
+        archived.status = Person.Status.ARCHIVED
+        archived.save(update_fields=["status", "updated_at"])
+        resp = self.client.get(self._url(archived))
+        self.assertContains(resp, 'class="app-debug-uid"')
+        self.assertContains(resp, str(archived.id))
+
+
+class PersonDetailDebugUidOffTests(TestCase):
+    """DEBUG=False 時に Person UID コピペ表示が出ないこと（orphan 1 シナリオで担保）。"""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="person_dbg_off", password="dummy")
+        self.client = Client()
+        self.client.force_login(self.user)
+
+    @override_settings(DEBUG=False)
+    def test_orphan_template_hides_person_uid(self):
+        person = Person.objects.create()
+        resp = self.client.get(
+            reverse("persons:person_detail", kwargs={"pk": person.pk})
+        )
+        self.assertNotContains(resp, "Person UID:")
+        self.assertNotContains(resp, "app-debug-uid")

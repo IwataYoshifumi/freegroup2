@@ -883,6 +883,17 @@ a { color: inherit; text-decoration: none; }
   font-weight: 600;
 }
 
+/* AppErrorList が出力する <ul class="errorlist app-form__error"> を div 用既存スタイルと
+   視覚的に揃える調整（D-4d-1 第 3 弾 §2 修正項目 5-C、新規スタイル追加は本ルールのみ） */
+.errorlist.app-form__error {
+  list-style: none;
+  padding-left: 0;
+}
+.errorlist.app-form__error li {
+  padding: 0;
+  margin: 0;
+}
+
 .app-form__help {
   display: block;
   margin-top: 6px;
@@ -1272,4 +1283,263 @@ select.app-input {
 .app-form__group.is-warning .app-input {
   border-color: #f59e0b;
   background: #fffbeb;
+}
+
+/* ========== Duplicates: マージレビュー画面 名刺サムネ / フィールドグループ (D-4d) ========== */
+.app-review-thumb {
+  margin-bottom: var(--app-space-sm);
+}
+
+.app-review-thumb button {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: zoom-in;
+}
+
+.app-review-thumb__img {
+  max-height: 160px;
+  max-width: 100%;
+  border-radius: var(--app-radius-sm);
+  display: block;
+}
+
+.app-review-thumb__placeholder {
+  margin-bottom: var(--app-space-sm);
+  padding: var(--app-space-md);
+  background: var(--app-bg);
+  border: 1px dashed var(--app-border);
+  border-radius: var(--app-radius-sm);
+  color: var(--app-muted);
+  text-align: center;
+}
+
+.app-review-field-group__title {
+  font-weight: 600;
+  margin-top: var(--app-space-md);
+  margin-bottom: var(--app-space-xs);
+  padding-bottom: var(--app-space-xs);
+  border-bottom: 1px solid var(--app-border);
+  color: var(--app-muted);
+}
+
+/* マージレビュー画面 フィールド整列（横並び、D-4d-1 続き §2 修正項目 2） */
+.app-detail-list {
+  margin: 0;
+  padding: 0;
+}
+
+.app-detail-list .app-detail-item {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: var(--app-space-sm);
+  align-items: baseline;
+  padding: var(--app-space-xs) 0;
+  border-bottom: 1px dotted var(--app-border);
+}
+
+.app-detail-list .app-detail-label {
+  display: inline;
+  margin-bottom: 0;
+  font-size: 13px;
+}
+
+.app-detail-list .app-detail-value {
+  margin: 0;
+  font-size: 14px;
+}
+
+/* マージレビュー画面 値違いフィールド行のハイライト（D-4d-1 第 3 弾 §2-1 / §4） */
+.app-detail-list .app-detail-item--diff {
+  background: rgba(217, 119, 6, 0.08);
+  box-shadow: inset 4px 0 0 var(--app-color-warning);
+  padding-left: var(--app-space-sm);
+}
+
+/* マージレビュー画面 第 1 段階判定（D-4d-1 第 8 弾 §2-1 で app-merge-survivor は
+   独立ラッパーを廃止し、フィールド比較テーブル内の各 app-form__group 末尾に
+   直配置する構造に変更したため、本セレクタは app-merge-decision のみに整理）。 */
+.app-merge-decision {
+  display: flex;
+  gap: var(--app-space-md);
+  margin-bottom: var(--app-space-md);
+}
+
+.app-merge-decision__btn,
+.app-merge-survivor__btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 180px;
+  padding: var(--app-space-sm) var(--app-space-md);
+  border: 2px solid var(--app-border);
+  border-radius: var(--app-radius);
+  background: var(--app-surface);
+  cursor: pointer;
+  font-weight: 600;
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+
+.app-merge-decision__btn input[type="radio"],
+.app-merge-survivor__btn input[type="radio"] {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.app-merge-decision__btn:hover,
+.app-merge-survivor__btn:hover {
+  border-color: var(--app-color-primary);
+}
+
+.app-merge-decision__btn:has(input:checked),
+.app-merge-survivor__btn:has(input:checked) {
+  border-color: var(--app-color-primary);
+  background: #eff6ff;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+
+/* マージレビュー画面 第 2 段階判定理由（D-4d-1 続き §4） */
+.app-merge-reason {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--app-space-sm);
+  margin-top: var(--app-space-sm);
+}
+
+.app-merge-reason__btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  padding: var(--app-space-xs) var(--app-space-sm);
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-sm);
+  background: var(--app-surface);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.app-merge-reason__btn input[type="radio"],
+.app-merge-reason__btn input[type="checkbox"] {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.app-merge-reason__btn:hover {
+  border-color: var(--app-color-primary);
+}
+
+.app-merge-reason__btn:has(input:checked) {
+  border-color: var(--app-color-primary);
+  background: #eff6ff;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+}
+
+/* マージレビュー画面 セクション出し分け（純 CSS の :has() ベース、
+   D-4d-1 第 4 弾 3 値化版 §3 で additional_role 経路を追加） */
+/* needs-survivor は D-4d-1 第 6 弾 §2-2 で常時表示化（判定ボタン位置ずれ防止）。
+   内側の見出し 4 種（unselected / survivor-only / primary-role-only /
+   survivor-disabled-label）を判定値に応じて 1 つだけ display: block する。 */
+.app-section--merged-only,
+.app-section--additional-role-only,
+.app-section--different-only,
+.app-section--survivor-only,
+.app-section--primary-role-only,
+.app-section--survivor-unselected-label,
+.app-section--survivor-disabled-label,
+.app-section--executes-merge {
+  display: none;
+}
+
+form:has(.js-decision-merged:checked) .app-section--merged-only,
+form:has(.js-decision-merged:checked) .app-section--survivor-only,
+form:has(.js-decision-merged:checked) .app-section--executes-merge {
+  display: block;
+}
+
+form:has(.js-decision-additional_role:checked) .app-section--additional-role-only,
+form:has(.js-decision-additional_role:checked) .app-section--primary-role-only,
+form:has(.js-decision-additional_role:checked) .app-section--executes-merge {
+  display: block;
+}
+
+form:has(.js-decision-different:checked) .app-section--different-only,
+form:has(.js-decision-different:checked) .app-section--survivor-disabled-label {
+  display: block;
+}
+
+/* 未選択時（3 ラジオのいずれも :checked でない）→ unselected 見出しを表示 */
+form:not(:has(.js-decision-merged:checked)):not(:has(.js-decision-additional_role:checked)):not(:has(.js-decision-different:checked)) .app-section--survivor-unselected-label {
+  display: block;
+}
+
+/* 未選択時 + 別人判定時はサバイブ選択ボタンを半透明化 + クリック不能。
+   D-4d-1 第 8 弾 §2-3 でボタンが app-form-grid 内の各 app-form__group 末尾に
+   直配置される構造に変わったため、セレクタを __btn 単位に変更（ラッパー
+   .app-merge-survivor は廃止）。 */
+form:not(:has(.js-decision-merged:checked)):not(:has(.js-decision-additional_role:checked)) .app-merge-survivor__btn {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/* サバイブ選択ボタン：フィールド比較の各 app-form__group 末尾に配置されるため
+   親 grid セル幅いっぱいに広がる（width: 100%）。フィールドグループとの視覚的区切りに
+   上余白（margin-top）。min-width は併記ルールの 180px を 0 で上書き
+   （D-4d-1 第 8 弾 §2-1）。 */
+.app-merge-survivor__btn {
+  min-width: 0;
+  width: 100%;
+  margin-top: var(--app-space-md);
+  transition: opacity 0.2s;
+}
+
+/* サバイブボタンのラベル動的切替（D-4d-1 第 8 弾 §2-2）：
+   ボタン内に 2 span を並べ、判定値に応じて 1 つだけ display: inline。
+   additional_role 時のみ「これを主コンタクトにする」、それ以外（未選択 / merged /
+   different）は「これをサバイブにする」を表示。 */
+.app-merge-survivor__label--survivor,
+.app-merge-survivor__label--primary-role {
+  display: none;
+}
+
+form:not(:has(.js-decision-additional_role:checked)) .app-merge-survivor__label--survivor {
+  display: inline;
+}
+
+form:has(.js-decision-additional_role:checked) .app-merge-survivor__label--primary-role {
+  display: inline;
+}
+
+/* マージレビュー画面 エラーサマリ（D-4d-1 第 4 弾 §2-1 / §4、既存 app-alert--danger 上に積む） */
+.app-form__error-summary__title {
+  font-weight: 600;
+  margin-bottom: var(--app-space-xs);
+}
+
+.app-form__error-summary__list {
+  margin: 0;
+  padding-left: var(--app-space-lg);
+}
+
+.app-form__error-summary__list li {
+  margin-top: var(--app-space-xs);
+}
+
+/* DEBUG 時の UID コピペ表示（D-4d-1 第 6 弾 §2-1）。
+   user-select: all により <code> 要素をクリック 1 回で全選択 → Ctrl+C でコピー可能。 */
+.app-debug-uid {
+  display: inline-block;
+  padding: 0 var(--app-space-xs);
+  margin: 0 var(--app-space-xs);
+  background: var(--app-bg);
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-sm);
+  font-family: ui-monospace, "Consolas", monospace;
+  font-size: 11px;
+  color: var(--app-muted);
+  user-select: all;
+  -webkit-user-select: all;
+  cursor: text;
 }

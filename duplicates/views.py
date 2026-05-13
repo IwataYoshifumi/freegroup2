@@ -25,13 +25,66 @@ from django.shortcuts import redirect, render
 from django.views.generic import ListView, View
 
 from back_navigator.back_navigator import BackNavigator
-from config.constants import DifferentPersonReason
+from config.constants import DifferentPersonReason, DuplicateMergeReason
 
 from .forms import MergeForm
 from .models import DuplicateCandidate
 from .services.merge_executor import (
     Execute_Merge_Only,
     Mark_as_Different_Person,
+)
+
+
+# 17 番マージレビュー画面の Contact フィールド表示用ラベル（仕様書 §11.5.5、D-4d）。
+# contact_update_primary.html のラベルと一致させる。Contact.UPDATABLE_FIELDS（24 個）
+# のすべてに対応するエントリを持つ。
+FIELD_LABEL_JA = {
+    "full_name": "氏名",
+    "last_name": "姓",
+    "first_name": "名",
+    "salutation_name": "敬称付き氏名",
+    "company": "会社",
+    "branch": "支店・店舗",
+    "department": "部署",
+    "title": "役職",
+    "qualification": "資格",
+    "catchphrase": "キャッチコピー",
+    "email": "メール",
+    "mobile": "携帯",
+    "phone": "電話",
+    "fax": "FAX",
+    "website": "ウェブサイト",
+    "postal_code": "郵便番号",
+    "address": "住所",
+    "twitter": "Twitter",
+    "linkedin": "LinkedIn",
+    "facebook": "Facebook",
+    "github": "GitHub",
+    "instagram": "Instagram",
+    "notes": "メモ",
+    "lang": "言語",
+}
+
+
+# 17 番マージレビュー画面のフィールドグルーピング（仕様書 §11.5.5、D-4d）。
+# contact_update_primary.html のグループ構成と一致：6 グループ、合計 24 フィールド。
+FIELD_GROUPS = (
+    ("氏名", ("full_name", "last_name", "first_name", "salutation_name")),
+    (
+        "所属",
+        (
+            "company",
+            "branch",
+            "department",
+            "title",
+            "qualification",
+            "catchphrase",
+        ),
+    ),
+    ("連絡先", ("email", "mobile", "phone", "fax", "website")),
+    ("住所", ("postal_code", "address")),
+    ("SNS", ("twitter", "linkedin", "facebook", "github", "instagram")),
+    ("その他", ("notes", "lang")),
 )
 
 
@@ -282,18 +335,95 @@ class DuplicateCandidateGroupUpdateView(LoginRequiredMixin, View):
         """[性質] 純関数（文字列組み立てのみ）"""
         return f"{self._SESSION_KEY_PREFIX}{group_id}"
 
+    def _build_field_groups(
+        self, contact, peer_contact, hidden_field_names=()
+    ):
+        """両側比較で除外 / 修飾を反映した表示用フィールドグループ構造を返す。
+
+        [性質] 純関数（contact / peer_contact から getattr のみ、DB 操作なし・副作用なし）
+        [入力] contact: 自側 Contact（値を表示する側）
+               peer_contact: 対面側 Contact（両側空判定 / is_diff 算出用）
+               hidden_field_names: Iterable[str]（MergeForm.hidden_name_fields() の
+                 結果。指定された field_name は表示から除外、D-4d-1 第 3 弾 §2-3）
+        [出力] list[dict]（各要素：group_name / fields。fields は
+               {field_name, label, value, is_diff} の list）
+
+        FIELD_GROUPS の順序・グループ名・フィールド構成を踏襲しつつ、以下を適用：
+          - hidden_field_names に含まれるフィールドは除外（§2-3）
+          - 自側・対面側の値がともに空のフィールドは除外（§2-1）
+          - 各フィールドに is_diff フラグを付与（自側 != 対面側、D-4d-1 第 3 弾 §2-1）
+          - フィールドが全消えしたグループはグループ自体も除外（見出しだけ残るのを防止）
+        """
+        hidden_set = set(hidden_field_names)
+        groups = []
+        for group_name, field_names in FIELD_GROUPS:
+            fields = []
+            for fname in field_names:
+                if fname in hidden_set:
+                    continue
+                self_value = getattr(contact, fname)
+                peer_value = getattr(peer_contact, fname)
+                if not self_value and not peer_value:
+                    continue
+                fields.append(
+                    {
+                        "field_name": fname,
+                        "label": FIELD_LABEL_JA[fname],
+                        "value": self_value,
+                        "is_diff": self_value != peer_value,
+                    }
+                )
+            if fields:
+                groups.append({"group_name": group_name, "fields": fields})
+        return groups
+
     def _render_review_page(
         self, request, group_id, candidate, form,
         surviving_person, merged_person,
     ):
         """[性質] 副作用あり（BackNavigator 初期化 + HttpResponse 返却）"""
         back = BackNavigator(request)
+        surviving_primary = surviving_person.primary_contact
+        merged_primary = merged_person.primary_contact
+        surviving_bc = surviving_primary.business_card
+        merged_bc = merged_primary.business_card
         context = {
             "candidate": candidate,
             "group_id": group_id,
             "form": form,
             "surviving_person": surviving_person,
             "merged_person": merged_person,
+            "surviving_card_image_url": (
+                surviving_bc.get_card_image_url() if surviving_bc else ""
+            ),
+            "merged_card_image_url": (
+                merged_bc.get_card_image_url() if merged_bc else ""
+            ),
+            "surviving_field_groups": self._build_field_groups(
+                surviving_primary,
+                merged_primary,
+                form.hidden_name_fields(),
+            ),
+            "merged_field_groups": self._build_field_groups(
+                merged_primary,
+                surviving_primary,
+                form.hidden_name_fields(),
+            ),
+            "surviving_confidences": (
+                surviving_primary.get_field_confidences()
+            ),
+            "merged_confidences": merged_primary.get_field_confidences(),
+            "decision_choices": [
+                ("merged", "同一人物"),
+                ("additional_role", "同一人物（別肩書追加）"),
+                ("different", "別人"),
+            ],
+            "merged_reason_choices": [
+                (v, lbl)
+                for v, lbl in DuplicateMergeReason.choices
+                if v != DuplicateMergeReason.ADDITIONAL_ROLE.value
+            ],
+            "different_reason_choices": DifferentPersonReason.choices,
             "back": back,
             "active_app": "duplicates",
             "active_menu": "duplicates:duplicate_group_list",

@@ -16,10 +16,31 @@ ModelForm 基底クラス。UI 構造を持たず、子 Form から継承して�
 """
 
 from django import forms
+from django.forms.utils import ErrorList
 
 from config.constants import PersonChangeReason
 
 from .models import Contact
+
+
+class AppErrorList(ErrorList):
+    """Django ErrorList の出力に既存 BEM クラス `app-form__error` を付与する。
+
+    [性質] presentation 層クラス（DB 操作なし・副作用なし）
+
+    Django デフォルトは `<ul class="errorlist">` を出力する。本クラスは super に
+    `error_class="app-form__error"` を渡すことで `<ul class="errorlist app-form__error">`
+    として出力させ、static/css/app.css の既存スタイル `.app-form__error`
+    （赤系・小さい・強調）を `{{ form.<field>.errors }}` の自動出力に接続する。
+
+    ContactBaseForm.error_class にセットすることで、ContactBaseForm を継承する
+    全フォーム（ContactUpdateForm / ContactUpdateActiveForm / ContactCreateForm /
+    ContactAddAdditionalRoleForm / MergeForm）に自動波及する。
+    """
+
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault("error_class", "app-form__error")
+        super().__init__(*args, **kwargs)
 
 
 class ContactBaseForm(forms.ModelForm):
@@ -34,9 +55,18 @@ class ContactBaseForm(forms.ModelForm):
     [性質] presentation 層クラス（DB 操作なし・副作用なし、§11.6.3 設計原則）
     """
 
+    # error_class は BaseForm.__init__ のデフォルト引数 error_class=ErrorList で
+    # インスタンス属性として上書きされる。クラス変数だけでは波及しないので、
+    # 下記の __init__ で kwargs に明示注入する（D-4d-1 第 3 弾 §2-5）。
+    error_class = AppErrorList
+
     class Meta:
         model = Contact
         fields = list(Contact.UPDATABLE_FIELDS)
+
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault("error_class", self.error_class)
+        super().__init__(*args, **kwargs)
 
     def get_update_contact(self):
         """フォーム値を反映した未保存の Contact インスタンスを返す（仕様書 §11.6.5）。

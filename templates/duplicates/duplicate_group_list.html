@@ -86,9 +86,11 @@
             {% url 'duplicates:duplicate_group_detail' group_id=group.group_id as detail_url %}
             <tr>
               <td class="app-table__col--action">
+                <!--
                 <a href="#" class="app-btn app-btn--secondary app-btn--sm is-disabled"
                    aria-disabled="true" title="準備中">レビュー開始（準備中）</a>
-                <a href="{% append_back_url detail_url back %}"
+                -->
+                   <a href="{% append_back_url detail_url back %}"
                    class="app-btn app-btn--secondary app-btn--sm">詳細</a>
               </td>
               <td>

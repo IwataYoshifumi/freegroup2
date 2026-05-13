@@ -6,11 +6,12 @@ from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.template import Context, Template
-from django.test import Client, TestCase
+from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
 from contacts.forms import (
+    AppErrorList,
     ContactAddAdditionalRoleForm,
     ContactBaseForm,
     ContactUpdateActiveForm,
@@ -1519,6 +1520,42 @@ class ContactBaseFormTests(TestCase):
             ContactBaseForm.Meta.fields, list(Contact.UPDATABLE_FIELDS)
         )
 
+    def test_error_class_is_app_error_list(self):
+        """ContactBaseForm の error_class が AppErrorList。
+
+        D-4d-1 第 3 弾 §2-5-B。子フォームへの自動波及の起点。
+        """
+        self.assertIs(ContactBaseForm.error_class, AppErrorList)
+
+
+class AppErrorListTests(TestCase):
+    """AppErrorList の出力検証（D-4d-1 第 3 弾 §2 修正項目 5）。"""
+
+    def test_str_output_includes_app_form_error_class(self):
+        """AppErrorList を直接 str 化した出力に `app-form__error` クラスが含まれる。"""
+        el = AppErrorList(["dummy error"])
+        self.assertIn("app-form__error", str(el))
+        self.assertIn("errorlist", str(el))
+
+    def test_contact_update_form_field_errors_use_app_form_error(self):
+        """ContactUpdateForm の field エラー HTML に `app-form__error` クラスが付与される。"""
+        person = Person.objects.create()
+        contact = Contact.objects.create(
+            person=person,
+            status=Contact.Status.PRIMARY,
+            full_name="A",
+        )
+        # change_reason は ChoiceField (required=True) なので空文字で invalid 化
+        data = {f: getattr(contact, f) or "" for f in Contact.UPDATABLE_FIELDS}
+        data["change_reason"] = ""
+        data["note"] = ""
+        form = ContactUpdateForm(data=data, target_contact=contact)
+        self.assertFalse(form.is_valid())
+        self.assertIn(
+            'class="errorlist app-form__error"',
+            str(form["change_reason"].errors),
+        )
+
 
 class _ContactUpdateFormTestBase(TestCase):
     """ContactUpdateForm / ContactUpdateActiveForm 共通の setUp。"""
@@ -2393,3 +2430,45 @@ class PreviewContactViewTests(TestCase):
         )
         resp = self.client.get(url)
         self.assertEqual(resp.status_code, 404)
+
+
+class ContactDetailDebugUidTests(TestCase):
+    """DEBUG=True 時の UID コピペ表示テスト（D-4d-1 第 6 弾 §2-1）。
+
+    Django テストランナーは settings.DEBUG=False を強制するため、本クラスは
+    @override_settings(DEBUG=True) で覆い、django.template.context_processors.debug
+    が REMOTE_ADDR=127.0.0.1（test client デフォルト）+ INTERNAL_IPS で debug=True を
+    context 注入する経路を検証する。
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="debug_uid_user", password="dummy")
+        self.person = Person.objects.create()
+        self.contact = Contact.objects.create(
+            person=self.person,
+            status=Contact.Status.PRIMARY,
+            full_name="dbg",
+        )
+        self.person.primary_contact = self.contact
+        self.person.save(update_fields=["primary_contact", "updated_at"])
+        self.client = Client()
+        self.client.force_login(self.user)
+
+    def _url(self):
+        return reverse("contacts:contact_detail", kwargs={"pk": self.contact.pk})
+
+    @override_settings(DEBUG=True)
+    def test_contact_and_person_uid_shown_in_debug_mode(self):
+        resp = self.client.get(self._url())
+        self.assertContains(resp, 'class="app-debug-uid"')
+        self.assertContains(resp, "Contact UID:")
+        self.assertContains(resp, "Person UID:")
+        self.assertContains(resp, str(self.contact.id))
+        self.assertContains(resp, str(self.person.id))
+
+    @override_settings(DEBUG=False)
+    def test_uid_hidden_when_debug_false(self):
+        resp = self.client.get(self._url())
+        self.assertNotContains(resp, "app-debug-uid")
+        self.assertNotContains(resp, "Contact UID:")
+

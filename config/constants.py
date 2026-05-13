@@ -28,9 +28,10 @@ class DuplicateMergeReason(models.TextChoices):
     PersonChangeReason と 4 つの共通値を持つが独立定義（§14.3.1）。
     """
 
-    SAME_CARD = "same_card", _("同一名刺（撮り直し・重複アップロード）")
+    #SAME_CARD = "same_card", _("同一名刺（撮り直し・重複アップロード）")
+    SAME_CARD = "same_card", _("同一名刺")
     TRANSFER = "transfer", _("異動・部署変更")
-    PROMOTION = "promotion", _("役職変更・昇進")
+    PROMOTION = "promotion", _("役職変更・昇進等")
     JOB_CHANGE = "job_change", _("転職")
     ADDITIONAL_ROLE = "additional_role", _("別肩書追加（副業など）")
     NAME_CHANGE = "name_change", _("結婚等による姓変更")
@@ -43,7 +44,7 @@ class DifferentPersonReason(models.TextChoices):
     仕様書 §14.3.4 / 別表 C.9 参照。3 値。
     """
 
-    SAME_NAME = "same_name", _("同姓同名")
+    SAME_NAME = "same_name", _("同姓同名の別人")
     OCR_ERROR = "ocr_error", _("OCR 誤認識による誤検出")
     OTHER_DIFFERENT = "other_different", _("その他（別人確定）")
 

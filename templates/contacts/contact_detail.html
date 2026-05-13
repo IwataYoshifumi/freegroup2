@@ -20,6 +20,15 @@
     </div>
   </div>
 
+  {% if debug %}
+    <div style="max-width:1100px; margin-bottom:var(--app-space-sm); font-size:12px;">
+      Contact UID: <code class="app-debug-uid">{{ contact.id }}</code>
+      {% if contact.person %}
+        Person UID: <code class="app-debug-uid">{{ contact.person.id }}</code>
+      {% endif %}
+    </div>
+  {% endif %}
+
   {# ============================================================ #}
   {# 操作ボタンセクション                                         #}
   {# ============================================================ #}

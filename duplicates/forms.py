@@ -37,15 +37,19 @@ class MergeForm(ContactBaseForm):
     値違い検出の対象は DUPLICATE_CHECK_FIELDS 限定（仕様書 §11.5.5 と整合）。
     """
 
+    review_decision = forms.ChoiceField(
+        choices=[
+            ("merged", "同一人物"),
+            ("additional_role", "同一人物（別肩書追加）"),
+            ("different", "別人"),
+        ],
+        required=True,
+        label="判定",
+    )
     review_result = forms.MultipleChoiceField(
         choices=DuplicateMergeReason.choices + DifferentPersonReason.choices,
-        widget=forms.CheckboxSelectMultiple,
-        label="判定理由",
-    )
-    merge_reason = forms.ChoiceField(
-        choices=DuplicateMergeReason.choices,
         required=False,
-        label="マージ理由",
+        label="判定理由",
     )
     note = forms.CharField(
         required=False,
@@ -54,8 +58,7 @@ class MergeForm(ContactBaseForm):
     )
     surviving_person_choice = forms.ChoiceField(
         choices=[("person_a", "左側"), ("person_b", "右側")],
-        required=True,
-        initial="person_a",
+        required=False,
         label="サバイブ側選択",
     )
 
@@ -135,45 +138,94 @@ class MergeForm(ContactBaseForm):
                 )
 
     def clean(self):
-        """6 項目バリデーション（仕様書 §11.7.3）。
+        """バリデーション（仕様書 §11.7.3、D-4d-1 第 4 弾 3 値化版で再構成）。
 
         [性質] 純関数（self.cleaned_data から検証、DB 操作なし）
-        [出力] cleaned_data: dict
+        [出力] cleaned_data: dict（review_result は MultipleChoiceField により list[str]）
 
-        バリデーション項目：
-          1. review_result：1 つ以上 + merged / different 系の混在禁止
-          2. other_merged / other_different 選択時の note 必須
-          3. merged 系のときの merge_reason 必須（different 系のみなら不要）
-          4. surviving 側の DUPLICATE_CHECK_FIELDS low/mid 未確認の動的 CB 全 ON
-          5. 値違いフィールドの確認済み（D-4a では最低限、詳細 UI 連動は D-4d）
-          6. surviving_person_choice の必須（required=True で担保）
+        review_decision の 3 値（merged / additional_role / different）に応じた検証：
+          - merged: review_result が 1 個以上 + 全 value がマージ系（ADDITIONAL_ROLE 除く 6 値）
+          - additional_role: review_result は空でも可。整形後 cleaned["review_result"]
+            を `["additional_role"]` に固定（DC.review_result への保存値も追従、
+            ActionLog の record_merge_action が `ADDITIONAL_ROLE in review_result` で
+            検出できるようにする）
+          - different: review_result が 1 個以上 + 全 value が別人系（3 値）
+
+        他項目：
+          - other_merged / other_different 選択時の note 必須
+          - review_decision が merged または additional_role のときのみ、
+            surviving_person_choice の選択を必須化（D-4d-1 第 7 弾 §2-1-B：
+            未選択時 / 別人判定時はテンプレ側でサバイブ選択 UI が disabled 化）
+          - review_decision が merged または additional_role のときのみ、
+            surviving 側 low/mid 未確認 CB の全 ON を要求（D-4d-1 第 5 弾 §2-1：
+            別人判定では確認 CB ブロックがテンプレ側で動的非表示のため、
+            バリデーションも走らせない）
         """
         cleaned = super().clean()
 
+        review_decision = cleaned.get("review_decision")
         review_result = cleaned.get("review_result") or []
-        merged_values = set(DuplicateMergeReason.values)
+        all_merged_values = set(DuplicateMergeReason.values)
+        merged_ui_values = all_merged_values - {
+            DuplicateMergeReason.ADDITIONAL_ROLE.value
+        }
         different_values = set(DifferentPersonReason.values)
-        merged_in_result = [v for v in review_result if v in merged_values]
-        different_in_result = [
-            v for v in review_result if v in different_values
-        ]
+        result_set = set(review_result)
 
-        # 1: review_result 整合性
-        if not review_result:
-            self.add_error(
-                "review_result", "判定理由を1つ以上選択してください"
-            )
-        elif merged_in_result and different_in_result:
-            self.add_error(
-                "review_result",
-                "マージ系（merged）と別人系（different_person）の理由を"
-                "同時に選択できません",
-            )
+        # 1: review_decision ごとの整合性検証
+        if review_decision == "merged":
+            if not result_set:
+                self.add_error(
+                    "review_result",
+                    "「同一人物」を選択した場合は判定理由を 1 つ以上選択してください",
+                )
+            elif not result_set.issubset(merged_ui_values):
+                self.add_error(
+                    "review_result",
+                    "「同一人物」を選択した場合はマージ系の判定理由のみを選択してください",
+                )
+        elif review_decision == "additional_role":
+            # additional_role は判定理由 UI を出さないため、cleaned 上で固定値に整形。
+            # DC.review_result への保存値もこの値（ActionLog の in 検出に必須）。
+            if result_set and not result_set.issubset(all_merged_values):
+                self.add_error(
+                    "review_result",
+                    "「同一人物（別肩書追加）」では別人系の判定理由は選択できません",
+                )
+            cleaned["review_result"] = [
+                DuplicateMergeReason.ADDITIONAL_ROLE.value
+            ]
+            review_result = cleaned["review_result"]
+            result_set = set(review_result)
+        elif review_decision == "different":
+            if not result_set:
+                self.add_error(
+                    "review_result",
+                    "「別人」を選択した場合は判定理由を 1 つ以上選択してください",
+                )
+            elif not result_set.issubset(different_values):
+                self.add_error(
+                    "review_result",
+                    "「別人」を選択した場合は別人系の判定理由のみを選択してください",
+                )
 
-        # 2: other_* 選択時の note 必須
+        # 2: review_decision が merged / additional_role のとき
+        # surviving_person_choice を必須化（D-4d-1 第 7 弾 §2-1-B）。
+        # 未選択時 / different のときはテンプレ側でサバイブ選択 UI が disabled 化、
+        # かつ別人判定ではサバイブ値は使われないため必須化しない。
+        if review_decision in ("merged", "additional_role"):
+            if not cleaned.get("surviving_person_choice"):
+                msg = (
+                    "主コンタクトを選択してください"
+                    if review_decision == "additional_role"
+                    else "サバイブ側を選択してください"
+                )
+                self.add_error("surviving_person_choice", msg)
+
+        # 3: other_* を含む選択時の note 必須
         has_other = (
-            DuplicateMergeReason.OTHER_MERGED in review_result
-            or DifferentPersonReason.OTHER_DIFFERENT in review_result
+            DuplicateMergeReason.OTHER_MERGED in result_set
+            or DifferentPersonReason.OTHER_DIFFERENT in result_set
         )
         if has_other and not cleaned.get("note"):
             self.add_error(
@@ -181,36 +233,56 @@ class MergeForm(ContactBaseForm):
                 "「その他」を選択した場合は備考の入力が必要です",
             )
 
-        # 3: merged 系のときの merge_reason 必須
-        if merged_in_result and not different_in_result:
-            if not cleaned.get("merge_reason"):
-                self.add_error(
-                    "merge_reason", "マージ理由を選択してください"
-                )
-
         # 4: surviving 側 low/mid 未確認の動的 CB が全 ON
-        confidences = (
-            self.surviving_person.primary_contact.get_field_confidences()
-        )
-        for field_name in DUPLICATE_CHECK_FIELDS:
-            conf = confidences.get(field_name)
-            if conf is None:
-                continue
-            if (
-                conf.confidence in ("low", "medium")
-                and conf.confirmed_at is None
-            ):
-                chk_name = f"confirmed_{field_name}"
-                if not cleaned.get(chk_name):
-                    self.add_error(
-                        chk_name,
-                        f"『{field_name}』フィールドの確認チェックを ON にしてください",
-                    )
-
-        # 5: 値違いフィールドの確認済み（D-4a では no-op、D-4d で実装）
-        # 6: surviving_person_choice は required=True で担保
+        # 別人判定（review_decision='different'）では確認チェックブロックが
+        # テンプレ側 app-section--executes-merge ラッパーで動的非表示になっており
+        # ユーザが CB を ON にできない。バリデーションも走らせない（D-4d-1 第 5 弾 §2-1）。
+        if review_decision in ("merged", "additional_role"):
+            confidences = (
+                self.surviving_person.primary_contact.get_field_confidences()
+            )
+            for field_name in DUPLICATE_CHECK_FIELDS:
+                conf = confidences.get(field_name)
+                if conf is None:
+                    continue
+                if (
+                    conf.confidence in ("low", "medium")
+                    and conf.confirmed_at is None
+                ):
+                    chk_name = f"confirmed_{field_name}"
+                    if not cleaned.get(chk_name):
+                        self.add_error(
+                            chk_name,
+                            f"『{field_name}』フィールドの確認チェックを ON にしてください",
+                        )
 
         return cleaned
+
+    def get_merge_reason(self):
+        """review_result からマージ系 value のリストを取り出す（D-4d-1 第 4 弾 §2-4-C）。
+
+        [性質] 純関数（self.cleaned_data から導出、DB 操作なし・副作用なし）
+        [入力] なし
+        [出力] list[str]（review_result の中で DuplicateMergeReason.values に含まれる
+               value だけを順序を維持してリスト化。別人系のみ or 未入力なら空リスト []。
+               review_decision='additional_role' のとき clean() で
+               cleaned_data['review_result']=['additional_role'] に整形済のため、
+               本メソッドは自然に ['additional_role'] を返す）
+
+        Execute_Merge_Only は本メソッドの戻り値の list に対して `ADDITIONAL_ROLE in ...`
+        の所属判定を行う（D-4d-1 第 4 弾 §2-4-E）。
+        """
+        review_result = self.cleaned_data.get("review_result") or []
+        merged_values = set(DuplicateMergeReason.values)
+        return [v for v in review_result if v in merged_values]
+
+    def has_confirm_checkboxes(self):
+        """confirmed_<field> 動的 CB が 1 件以上あるかを返す。
+
+        [性質] 純関数（self.fields のキー走査のみ、DB 操作なし）
+        [出力] bool（テンプレ側で「確認チェック」セクションの表示判定に使用）
+        """
+        return any(name.startswith("confirmed_") for name in self.fields)
 
     def confirmed_field_names(self):
         """ユーザーが確認・編集したフィールド名リスト（仕様書 §11.6.2 / §9.4）。
@@ -270,3 +342,43 @@ class MergeForm(ContactBaseForm):
         [出力] list[str]（D-4d テンプレートで「値が同じ」として目立たせる対象）
         """
         return list(self._value_match_fields)
+
+    def hidden_name_fields(self):
+        """マージレビュー画面で表示を省略する氏名サブフィールド名のリスト（D-4d-1 第 3 弾 §2 修正項目 3）。
+
+        [性質] 純関数（self.surviving_person / self.merged_person.primary_contact から
+               導出、DB 操作なし・副作用なし）
+        [入力] なし
+        [出力] list[str]（`["last_name", "first_name"]` または `[]`）
+
+        full_name が両側一致 + last_name / first_name も両側一致 + last_name / first_name
+        がそれぞれ非空 + full_name に last_name / first_name が部分一致で含まれる、を
+        すべて満たすとき `["last_name", "first_name"]` を返す。それ以外は `[]`。
+
+        full_name で氏名情報が完結している場合に姓・名の重複表示を抑止する用途
+        （View 側で field_groups から除外）。氏名グループは full_name で残るので
+        グループ見出しは消えない。
+        """
+        surviving_primary = self.surviving_person.primary_contact
+        merged_primary = self.merged_person.primary_contact
+
+        sv_full = surviving_primary.full_name
+        sv_last = surviving_primary.last_name
+        sv_first = surviving_primary.first_name
+        mg_full = merged_primary.full_name
+        mg_last = merged_primary.last_name
+        mg_first = merged_primary.first_name
+
+        if sv_full != mg_full:
+            return []
+        if sv_last != mg_last:
+            return []
+        if sv_first != mg_first:
+            return []
+        if not sv_last or not sv_first:
+            return []
+        if sv_last not in sv_full:
+            return []
+        if sv_first not in sv_full:
+            return []
+        return ["last_name", "first_name"]
