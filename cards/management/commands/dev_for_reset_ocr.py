@@ -2,11 +2,12 @@
 
 任意の OriginalImage に対して、関連 BusinessCard / Contact / ContactFieldConfidence /
 孤児 Person と切り抜き画像を削除し、status=pending に戻す。
-保存済みの元画像（OriginalImage.image_file）は保持されるため、process_pending を
-再実行することで OCR を再試行できる。
+保存済みの元画像（OriginalImage.image_file）は保持されるため、process_opencv
+（OpenCV 切り出し）→ process_ocr（OCR）を順次再実行することで OCR を再試行できる。
 
-retry_failed_ocr（v1.2.2 §8.5.5）との違い：
-- retry_failed_ocr は status=failed AND BusinessCard 0件 のみ対象（運用ツール）
+retry_failed_ocr（v1.2.2 §8.5.5、v1.5.0 で --opencv / --ocr 2 系統に拡張）との違い：
+- retry_failed_ocr --opencv は status=failed AND BusinessCard 0件 のみ対象（運用ツール）
+- retry_failed_ocr --ocr は ocr_status=failed の BusinessCard を対象（運用ツール）
 - dev_for_reset_ocr は任意の OriginalImage を対象（開発ツール）
 
 ファイル名・コマンド名のプレフィックスは `dev_*` とし、本番運用ツールと明確に分離する。

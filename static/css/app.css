@@ -1543,3 +1543,156 @@ form:has(.js-decision-additional_role:checked) .app-merge-survivor__label--prima
   -webkit-user-select: all;
   cursor: text;
 }
+
+
+/* ============================================================ */
+/* v1.5.0 OpenCV debug 用クラス（B 側マージ、テーマ 6 で追加）   */
+/* ============================================================ */
+
+.app-original-overlay {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  line-height: 0;
+}
+
+.app-original-overlay__img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+.app-original-overlay__svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.app-debug-polygon {
+  fill: rgba(34, 197, 94, 0.18);
+  stroke: rgb(34, 197, 94);
+  stroke-width: 4;
+  vector-effect: non-scaling-stroke;
+}
+
+/* 巨大候補（results 内 area_ratio 中央値の 1.5 倍以上）= 統合疑い警告 */
+.app-debug-polygon--giant {
+  fill: rgba(244, 63, 94, 0.22);
+  stroke: rgb(244, 63, 94);
+  stroke-width: 6;
+}
+
+.app-debug-polygon__label {
+  fill: #ffffff;
+  stroke: rgba(0, 0, 0, 0.65);
+  stroke-width: 2;
+  paint-order: stroke;
+  font-size: 120px;
+  font-weight: 800;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+.app-debug-polygon__label--giant {
+  fill: #fef3c7;
+  stroke: rgba(120, 0, 30, 0.85);
+}
+
+/* 検出失敗警告ストライプ（セクション 1 の上に表示） */
+.app-warning-stripe {
+  background: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
+  border-left: 5px solid #dc2626;
+  padding: 12px 14px;
+  border-radius: 8px;
+  margin-bottom: var(--app-space-md);
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.app-warning-stripe__items {
+  font-weight: 500;
+}
+
+/* セクション 3: マスク画像 5 枚グリッド */
+.app-mask-grid {
+  display: flex;
+  flex-direction: column;
+  gap: var(--app-space-md);
+}
+
+.app-mask-grid__row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--app-space-md);
+}
+
+.app-mask-grid__item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.app-mask-grid__label {
+  font-weight: 600;
+  font-size: 13px;
+  color: #475569;
+}
+
+.app-mask-grid__img {
+  max-width: 320px;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--app-border);
+  border-radius: 6px;
+  background: #f8fafc;
+}
+
+@media (max-width: 760px) {
+  .app-mask-grid__row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 480px) {
+  .app-mask-grid__row { grid-template-columns: 1fr; }
+}
+
+/* セクション 4: 候補一覧テーブル + 除外候補トグル */
+.app-candidates-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--app-space-sm);
+  margin-bottom: var(--app-space-sm);
+}
+
+.app-candidates-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.app-candidates-counter {
+  color: #475569;
+  font-size: 13px;
+}
+
+.app-candidates-table .is-rejected { display: none; }
+.app-candidates-table.is-show-rejected .is-rejected {
+  display: table-row;
+  background: #fef2f2;
+}
+
+/* セクション 6: warp 失敗 polygon の長文セル */
+.app-warp-polygon-cell {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  white-space: nowrap;
+}

@@ -1,7 +1,6 @@
 """名刺検出インターフェース。
 
 settings.CARD_DETECTOR_BACKEND で実装を切り替える。
-pipeline_coordinator はこのファイルの detect_cards だけを呼ぶ。
 
 戻り値型 CardDetectionResult は実装に関わらず常に固定。
 """

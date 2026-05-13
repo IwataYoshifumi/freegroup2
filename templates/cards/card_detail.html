@@ -191,15 +191,40 @@
         {% url 'originals:original_detail' pk=card.original_image.id as original_url %}
         <a href="{% append_back_url original_url back %}">元画像の詳細画面へ</a>
 
-        {% if card_json_str %}
-          <div class="app-section__header" style="margin-top:var(--app-space-md);">
-            <h2>名刺 JSON（card_index={{ card.card_index }}）</h2>
-            <button type="button" class="app-btn app-btn--secondary app-btn--sm"
-                    data-action="copy-to-clipboard" data-target="card-json-pre">コピー</button>
-          </div>
-          <pre id="card-json-pre" style="background:#f8fafc;border:1px solid var(--app-border);border-radius:8px;padding:12px;overflow-x:auto;font-size:12px;line-height:1.5;">{{ card_json_str }}</pre>
+        {# 1 回目 OCR raw_json（andypf-json-viewer で表示、初期は折りたたみ） #}
+        <div class="app-section__header" style="margin-top:var(--app-space-md);">
+          <h2>1 回目 OCR raw_json（card_index={{ card.card_index }}）</h2>
+        </div>
+        {% if raw_json_1 %}
+          {{ raw_json_1|json_script:"card-json-data-1" }}
+          <andypf-json-viewer id="card-json-viewer-1"
+                              indent="2"
+                              theme="default-light"
+                              show-data-types="true"
+                              show-toolbar="true"
+                              show-copy="true"
+                              show-size="true"
+                              expanded="0"></andypf-json-viewer>
         {% else %}
-          <p class="app-muted" style="margin-top:var(--app-space-md);">名刺 JSON なし（raw_json 未保存または card_index 範囲外）</p>
+          <p class="app-muted">1 回目 OCR raw_json なし（OCR 未実行 / 失敗）</p>
+        {% endif %}
+
+        {# 2 回目 OCR raw_json（andypf-json-viewer で表示、初期は折りたたみ） #}
+        <div class="app-section__header" style="margin-top:var(--app-space-md);">
+          <h2>2 回目 OCR raw_json</h2>
+        </div>
+        {% if raw_json_2 %}
+          {{ raw_json_2|json_script:"card-json-data-2" }}
+          <andypf-json-viewer id="card-json-viewer-2"
+                              indent="2"
+                              theme="default-light"
+                              show-data-types="true"
+                              show-toolbar="true"
+                              show-copy="true"
+                              show-size="true"
+                              expanded="0"></andypf-json-viewer>
+        {% else %}
+          <p class="app-muted">2 回目 OCR 未実行（orientation=normal で完結 / または 1 回目失敗のためスキップ）</p>
         {% endif %}
 
         {% if sibling_cards %}
@@ -228,6 +253,15 @@
   {% endif %}
 
   <div class="app-action-area" style="margin-top:24px; max-width:1100px;">
+    {% if debug %}
+      <form method="post" action="{% url 'cards:card_delete' pk=card.id %}"
+            class="js-card-delete-form" style="margin: 0;">
+        {% csrf_token %}
+        <button type="submit" class="app-btn app-btn--danger js-card-delete-btn">
+          <span class="app-icon--delete"></span> 削除（デバッグ中限定）
+        </button>
+      </form>
+    {% endif %}
     {% if back.back_exist %}
       <a href="{% back_url back %}" class="app-btn app-btn--secondary">戻る</a>
     {% endif %}
@@ -235,6 +269,47 @@
       <a href="{% back_all_url back %}" class="app-btn app-btn--secondary">最初に戻る</a>
     {% endif %}
   </div>
+
+  {% if debug %}
+    {# andypf-json-viewer ライブラリと初期化（raw_json_1 / raw_json_2 viewer 用） #}
+    <script src="https://cdn.jsdelivr.net/npm/@andypf/json-viewer@2.4.0/dist/iife/index.js"></script>
+    <script>
+      (function () {
+        // 名刺削除フォームの確認
+        var deleteForm = document.querySelector('.js-card-delete-form');
+        if (deleteForm) {
+          deleteForm.addEventListener('submit', function (event) {
+            if (!window.confirm('この名刺を削除します。よろしいですか？')) {
+              event.preventDefault();
+              return;
+            }
+            var btn = deleteForm.querySelector('.js-card-delete-btn');
+            if (btn) {
+              btn.disabled = true;
+              btn.textContent = '削除中...';
+            }
+          });
+        }
+
+        // andypf-json-viewer へ JSON データを流し込む
+        function feedJsonViewer(viewerId, dataScriptId) {
+          var viewer = document.getElementById(viewerId);
+          var dataNode = document.getElementById(dataScriptId);
+          if (!viewer || !dataNode) return;
+          viewer.setAttribute('data', dataNode.textContent);
+        }
+        function loadAllViewers() {
+          feedJsonViewer('card-json-viewer-1', 'card-json-data-1');
+          feedJsonViewer('card-json-viewer-2', 'card-json-data-2');
+        }
+        if (window.customElements && customElements.whenDefined) {
+          customElements.whenDefined('andypf-json-viewer').then(loadAllViewers);
+        } else {
+          document.addEventListener('DOMContentLoaded', loadAllViewers);
+        }
+      })();
+    </script>
+  {% endif %}
 
   {% if card.card_image %}
     <div class="app-modal-backdrop" hidden></div>
