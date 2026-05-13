@@ -1,0 +1,116 @@
+{% comment %}
+Contact プレビューの body 部分（14 番、仕様書 §11.3 / §11.4.4）。
+
+AJAX で返す HTML フラグメント。モーダル外枠（背景・閉じるボタン・JS フック）は
+ステップ3b で実装予定のため、本テンプレートは中身（タイトル + フィールド一覧）のみ。
+
+引数（context から）：
+  contact: Contact
+  field_confidences: dict[field_name -> ContactFieldConfidence]
+
+_contact_field.html を is_editable=False で include し、編集 UI なしの読み取り
+専用表示を行う。contact_detail.html の表示モードと同じレイアウト。
+{% endcomment %}
+
+<div class="app-modal__body">
+  <div class="app-section__header">
+    <h2>{{ contact.full_name|default:"(氏名なし)" }}</h2>
+  </div>
+
+  {# 氏名グループ #}
+  {% if contact.full_name or contact.last_name or contact.first_name or contact.salutation_name %}
+    <h3 style="margin-top:var(--app-space-md);">氏名</h3>
+    {% if contact.full_name %}
+      {% include "contacts/_contact_field.html" with field_name="full_name" label="氏名" value=contact.full_name is_editable=False %}
+    {% endif %}
+    {% if contact.last_name %}
+      {% include "contacts/_contact_field.html" with field_name="last_name" label="姓" value=contact.last_name is_editable=False %}
+    {% endif %}
+    {% if contact.first_name %}
+      {% include "contacts/_contact_field.html" with field_name="first_name" label="名" value=contact.first_name is_editable=False %}
+    {% endif %}
+    {% if contact.salutation_name %}
+      {% include "contacts/_contact_field.html" with field_name="salutation_name" label="敬称付き氏名" value=contact.salutation_name is_editable=False %}
+    {% endif %}
+  {% endif %}
+
+  {# 所属グループ #}
+  {% if contact.company or contact.branch or contact.department or contact.title or contact.qualification or contact.catchphrase %}
+    <h3 style="margin-top:var(--app-space-md);">所属</h3>
+    {% if contact.company %}
+      {% include "contacts/_contact_field.html" with field_name="company" label="会社" value=contact.company is_editable=False %}
+    {% endif %}
+    {% if contact.branch %}
+      {% include "contacts/_contact_field.html" with field_name="branch" label="支店・店舗" value=contact.branch is_editable=False %}
+    {% endif %}
+    {% if contact.department %}
+      {% include "contacts/_contact_field.html" with field_name="department" label="部署" value=contact.department is_editable=False %}
+    {% endif %}
+    {% if contact.title %}
+      {% include "contacts/_contact_field.html" with field_name="title" label="役職" value=contact.title is_editable=False %}
+    {% endif %}
+    {% if contact.qualification %}
+      {% include "contacts/_contact_field.html" with field_name="qualification" label="資格" value=contact.qualification is_editable=False %}
+    {% endif %}
+    {% if contact.catchphrase %}
+      {% include "contacts/_contact_field.html" with field_name="catchphrase" label="キャッチコピー" value=contact.catchphrase is_editable=False %}
+    {% endif %}
+  {% endif %}
+
+  {# 連絡先グループ #}
+  {% if contact.email or contact.mobile or contact.phone or contact.fax or contact.website %}
+    <h3 style="margin-top:var(--app-space-md);">連絡先</h3>
+    {% if contact.email %}
+      {% include "contacts/_contact_field.html" with field_name="email" label="メール" value=contact.email is_editable=False %}
+    {% endif %}
+    {% if contact.mobile %}
+      {% include "contacts/_contact_field.html" with field_name="mobile" label="携帯" value=contact.mobile is_editable=False %}
+    {% endif %}
+    {% if contact.phone %}
+      {% include "contacts/_contact_field.html" with field_name="phone" label="電話" value=contact.phone is_editable=False %}
+    {% endif %}
+    {% if contact.fax %}
+      {% include "contacts/_contact_field.html" with field_name="fax" label="FAX" value=contact.fax is_editable=False %}
+    {% endif %}
+    {% if contact.website %}
+      {% include "contacts/_contact_field.html" with field_name="website" label="ウェブサイト" value=contact.website is_editable=False %}
+    {% endif %}
+  {% endif %}
+
+  {# 住所グループ #}
+  {% if contact.postal_code or contact.address %}
+    <h3 style="margin-top:var(--app-space-md);">住所</h3>
+    {% if contact.postal_code %}
+      {% include "contacts/_contact_field.html" with field_name="postal_code" label="郵便番号" value=contact.postal_code is_editable=False %}
+    {% endif %}
+    {% if contact.address %}
+      {% include "contacts/_contact_field.html" with field_name="address" label="住所" value=contact.address is_editable=False %}
+    {% endif %}
+  {% endif %}
+
+  {# SNS グループ #}
+  {% if contact.twitter or contact.linkedin or contact.facebook or contact.github or contact.instagram %}
+    <h3 style="margin-top:var(--app-space-md);">SNS</h3>
+    {% if contact.twitter %}
+      {% include "contacts/_contact_field.html" with field_name="twitter" label="Twitter" value=contact.twitter is_editable=False %}
+    {% endif %}
+    {% if contact.linkedin %}
+      {% include "contacts/_contact_field.html" with field_name="linkedin" label="LinkedIn" value=contact.linkedin is_editable=False %}
+    {% endif %}
+    {% if contact.facebook %}
+      {% include "contacts/_contact_field.html" with field_name="facebook" label="Facebook" value=contact.facebook is_editable=False %}
+    {% endif %}
+    {% if contact.github %}
+      {% include "contacts/_contact_field.html" with field_name="github" label="GitHub" value=contact.github is_editable=False %}
+    {% endif %}
+    {% if contact.instagram %}
+      {% include "contacts/_contact_field.html" with field_name="instagram" label="Instagram" value=contact.instagram is_editable=False %}
+    {% endif %}
+  {% endif %}
+
+  {# その他グループ #}
+  {% if contact.notes %}
+    <h3 style="margin-top:var(--app-space-md);">メモ</h3>
+    {% include "contacts/_contact_field.html" with field_name="notes" label="メモ" value=contact.notes is_editable=False %}
+  {% endif %}
+</div>

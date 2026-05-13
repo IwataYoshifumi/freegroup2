@@ -1,0 +1,196 @@
+{% extends "cards/app_base.html" %}
+{% load back_tags %}
+
+{% block title %}コンタクト新規作成 — FreeGroup2{% endblock %}
+
+{% block content %}
+  <div class="app-page-header" style="max-width:900px;">
+    <div>
+      <div class="app-breadcrumb">名刺管理 / コンタクト一覧 / 新規作成</div>
+      <h1>コンタクト新規作成</h1>
+      <p class="app-muted">手動入力で新規 Contact を作成します。重複候補が見つかった場合は確認画面を表示します。</p>
+    </div>
+    <div class="app-action-area">
+      {% if back.back_exist %}
+        <a href="{% back_url back %}" class="app-btn app-btn--secondary">戻る</a>
+      {% endif %}
+      {% if back.back_all_exist %}
+        <a href="{% back_all_url back %}" class="app-btn app-btn--secondary">最初に戻る</a>
+      {% endif %}
+    </div>
+  </div>
+
+  <form method="post" class="app-card" style="max-width:900px;" novalidate>
+    {% csrf_token %}
+    {% hidden_back_field back %}
+
+    {% if form.non_field_errors %}
+      <div class="app-alert app-alert--danger">
+        {{ form.non_field_errors }}
+      </div>
+    {% endif %}
+
+    {% block contact_fields %}
+      {# ==================== 氏名グループ ==================== #}
+      <div class="app-section__header"><h2>氏名</h2></div>
+      <div class="app-form-grid">
+        <div class="app-form__group">
+          <label for="{{ form.full_name.id_for_label }}">氏名</label>
+          {{ form.full_name }}
+          {{ form.full_name.errors }}
+        </div>
+        <div class="app-form__group">
+          <label for="{{ form.last_name.id_for_label }}">姓</label>
+          {{ form.last_name }}
+          {{ form.last_name.errors }}
+        </div>
+        <div class="app-form__group">
+          <label for="{{ form.first_name.id_for_label }}">名</label>
+          {{ form.first_name }}
+          {{ form.first_name.errors }}
+        </div>
+        <div class="app-form__group">
+          <label for="{{ form.salutation_name.id_for_label }}">敬称付き氏名</label>
+          {{ form.salutation_name }}
+          {{ form.salutation_name.errors }}
+        </div>
+      </div>
+
+      {# ==================== 所属グループ ==================== #}
+      <div class="app-section__header" style="margin-top:var(--app-space-md);"><h2>所属</h2></div>
+      <div class="app-form-grid">
+        <div class="app-form__group">
+          <label for="{{ form.company.id_for_label }}">会社</label>
+          {{ form.company }}
+          {{ form.company.errors }}
+        </div>
+        <div class="app-form__group">
+          <label for="{{ form.branch.id_for_label }}">支店・店舗</label>
+          {{ form.branch }}
+          {{ form.branch.errors }}
+        </div>
+        <div class="app-form__group">
+          <label for="{{ form.department.id_for_label }}">部署</label>
+          {{ form.department }}
+          {{ form.department.errors }}
+        </div>
+        <div class="app-form__group">
+          <label for="{{ form.title.id_for_label }}">役職</label>
+          {{ form.title }}
+          {{ form.title.errors }}
+        </div>
+        <div class="app-form__group">
+          <label for="{{ form.qualification.id_for_label }}">資格</label>
+          {{ form.qualification }}
+          {{ form.qualification.errors }}
+        </div>
+        <div class="app-form__group">
+          <label for="{{ form.catchphrase.id_for_label }}">キャッチコピー</label>
+          {{ form.catchphrase }}
+          {{ form.catchphrase.errors }}
+        </div>
+      </div>
+
+      {# ==================== 連絡先グループ ==================== #}
+      <div class="app-section__header" style="margin-top:var(--app-space-md);"><h2>連絡先</h2></div>
+      <div class="app-form-grid">
+        <div class="app-form__group">
+          <label for="{{ form.email.id_for_label }}">メール</label>
+          {{ form.email }}
+          {{ form.email.errors }}
+        </div>
+        <div class="app-form__group">
+          <label for="{{ form.mobile.id_for_label }}">携帯</label>
+          {{ form.mobile }}
+          {{ form.mobile.errors }}
+        </div>
+        <div class="app-form__group">
+          <label for="{{ form.phone.id_for_label }}">電話</label>
+          {{ form.phone }}
+          {{ form.phone.errors }}
+        </div>
+        <div class="app-form__group">
+          <label for="{{ form.fax.id_for_label }}">FAX</label>
+          {{ form.fax }}
+          {{ form.fax.errors }}
+        </div>
+        <div class="app-form__group">
+          <label for="{{ form.website.id_for_label }}">ウェブサイト</label>
+          {{ form.website }}
+          {{ form.website.errors }}
+        </div>
+      </div>
+
+      {# ==================== 住所グループ ==================== #}
+      <div class="app-section__header" style="margin-top:var(--app-space-md);"><h2>住所</h2></div>
+      <div class="app-form-grid">
+        <div class="app-form__group">
+          <label for="{{ form.postal_code.id_for_label }}">郵便番号</label>
+          {{ form.postal_code }}
+          {{ form.postal_code.errors }}
+        </div>
+        <div class="app-form__group">
+          <label for="{{ form.address.id_for_label }}">住所</label>
+          {{ form.address }}
+          {{ form.address.errors }}
+        </div>
+      </div>
+
+      {# ==================== SNS グループ ==================== #}
+      <div class="app-section__header" style="margin-top:var(--app-space-md);"><h2>SNS</h2></div>
+      <div class="app-form-grid">
+        <div class="app-form__group">
+          <label for="{{ form.twitter.id_for_label }}">Twitter</label>
+          {{ form.twitter }}
+          {{ form.twitter.errors }}
+        </div>
+        <div class="app-form__group">
+          <label for="{{ form.linkedin.id_for_label }}">LinkedIn</label>
+          {{ form.linkedin }}
+          {{ form.linkedin.errors }}
+        </div>
+        <div class="app-form__group">
+          <label for="{{ form.facebook.id_for_label }}">Facebook</label>
+          {{ form.facebook }}
+          {{ form.facebook.errors }}
+        </div>
+        <div class="app-form__group">
+          <label for="{{ form.github.id_for_label }}">GitHub</label>
+          {{ form.github }}
+          {{ form.github.errors }}
+        </div>
+        <div class="app-form__group">
+          <label for="{{ form.instagram.id_for_label }}">Instagram</label>
+          {{ form.instagram }}
+          {{ form.instagram.errors }}
+        </div>
+      </div>
+
+      {# ==================== その他グループ ==================== #}
+      <div class="app-section__header" style="margin-top:var(--app-space-md);"><h2>その他</h2></div>
+      <div class="app-form-grid">
+        <div class="app-form__group">
+          <label for="{{ form.notes.id_for_label }}">メモ</label>
+          {{ form.notes }}
+          {{ form.notes.errors }}
+        </div>
+        <div class="app-form__group">
+          <label for="{{ form.lang.id_for_label }}">言語</label>
+          {{ form.lang }}
+          {{ form.lang.errors }}
+        </div>
+      </div>
+    {% endblock %}
+
+    {# ==================== 操作ボタン ==================== #}
+    <div class="app-action-area" style="margin-top:24px;">
+      <button type="submit" class="app-btn app-btn--primary">新規作成</button>
+      {% if back.back_exist %}
+        <a href="{% back_url back %}" class="app-btn app-btn--secondary">戻る</a>
+      {% endif %}
+      {% if back.back_all_exist %}
+        <a href="{% back_all_url back %}" class="app-btn app-btn--secondary">最初に戻る</a>
+      {% endif %}
+    </div>
+  </form>
+{% endblock %}

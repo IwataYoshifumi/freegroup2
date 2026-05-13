@@ -9,16 +9,19 @@ import json
 from django.contrib.auth import get_user_model
 from django.core.files.base import ContentFile
 from django.db.models import Exists, OuterRef, Q
-from django.http import HttpResponse
+from django.http import HttpResponse, HttpResponseRedirect
 from django.shortcuts import redirect, render
+from django.urls import reverse
 from django.utils.dateparse import parse_date
 from django.views.generic import DetailView, FormView, ListView
 
 from back_navigator.back_navigator import BackNavigator
 
 from .forms import UploadForm
-from .models import BusinessCard, ContactFieldConfidence, OriginalImage
+from .models import BusinessCard, OriginalImage
 from .services.image_processor import convert_to_jpeg
+from config.constants import DUPLICATE_CHECK_FIELDS
+from contacts.models import Contact, ContactFieldConfidence
 
 User = get_user_model()
 
@@ -55,7 +58,12 @@ class UploadView(FormView):
         filename = f"{original.id}.jpg"
         original.image_file.save(filename, ContentFile(jpeg_bytes), save=False)
         original.save()
-        return redirect("originals:original_detail", pk=original.id)
+        back = BackNavigator(self.request)
+        target_url = reverse(
+            "originals:original_detail",
+            kwargs={"pk": original.id},
+        )
+        return HttpResponseRedirect(back.append_url(target_url))
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -148,20 +156,33 @@ class CardListView(ListView):
 
     def get_queryset(self):
         user = get_current_user(self.request)
+        # confidence ドットは DUPLICATE_CHECK_FIELDS のみ対象、confirmed_at で
+        # 「未確認」を区別する（DEBUG=True 時のみ表示）。
         qs = (
             BusinessCard.objects.filter(original_image__user=user)
             .select_related("original_image", "contact")
             .annotate(
-                has_low=Exists(
+                has_unconfirmed_low=Exists(
                     ContactFieldConfidence.objects.filter(
                         contact__business_card=OuterRef("pk"),
-                        confidence=ContactFieldConfidence.CONFIDENCE_LOW,
+                        field_name__in=DUPLICATE_CHECK_FIELDS,
+                        confidence=ContactFieldConfidence.Confidence.LOW,
+                        confirmed_at__isnull=True,
                     )
                 ),
-                has_medium=Exists(
+                has_unconfirmed_medium=Exists(
                     ContactFieldConfidence.objects.filter(
                         contact__business_card=OuterRef("pk"),
-                        confidence=ContactFieldConfidence.CONFIDENCE_MEDIUM,
+                        field_name__in=DUPLICATE_CHECK_FIELDS,
+                        confidence=ContactFieldConfidence.Confidence.MEDIUM,
+                        confirmed_at__isnull=True,
+                    )
+                ),
+                has_confirmed=Exists(
+                    ContactFieldConfidence.objects.filter(
+                        contact__business_card=OuterRef("pk"),
+                        field_name__in=DUPLICATE_CHECK_FIELDS,
+                        confirmed_at__isnull=False,
                     )
                 ),
             )
@@ -208,11 +229,12 @@ class CardListView(ListView):
 
 
 class CardDetailView(DetailView):
-    """名刺詳細画面（仕様書 v1.2.2 / Phase 4）。
+    """名刺詳細画面（仕様書 v1.4.2 / Phase 4）。
 
-    BusinessCard の Contact 情報をグルーピング表示し、
-    ContactFieldConfidence の low/medium マーカーを各フィールドに添える。
-    同じ元画像内の他名刺は下部にサムネイルリストで表示する。
+    OpenCV デバッグ情報の閲覧と Contact フィールド編集（ContactDetailView と同じ
+    AJAX 編集 UI）を併せ持つ業務画面。Contact 編集パーツは _contact_field.html
+    を再利用するため、ContactDetailView と同じ context（field_confidences /
+    is_editable）を提供する。
     """
 
     model = BusinessCard
@@ -235,12 +257,19 @@ class CardDetailView(DetailView):
         context["back"] = BackNavigator(self.request)
 
         contact = getattr(self.object, "contact", None)
-        confidence_map = {}
-        if contact is not None:
-            for entry in contact.confidences.all():
-                confidence_map[entry.field_name] = entry.confidence
         context["contact"] = contact
-        context["confidence_map"] = confidence_map
+
+        # Contact 編集 UI 用 context（ContactDetailView と同等、_contact_field.html 再利用）。
+        # contact が None なら編集セクションを丸ごと出さないため、空辞書 + False で安全に。
+        if contact is not None:
+            context["field_confidences"] = contact.get_field_confidences()
+            context["is_editable"] = (
+                contact.status in (Contact.Status.PRIMARY, Contact.Status.ACTIVE)
+                and contact.person.status == "active"
+            )
+        else:
+            context["field_confidences"] = {}
+            context["is_editable"] = False
 
         sibling_cards = (
             BusinessCard.objects.filter(original_image=self.object.original_image)

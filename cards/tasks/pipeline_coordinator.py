@@ -17,7 +17,7 @@ import jsonschema
 from django.conf import settings
 from django.db import transaction
 
-from cards.models import BusinessCard, Contact, ContactFieldConfidence, OriginalImage, Person
+from cards.models import BusinessCard, OriginalImage
 from cards.services.card_detector import detect_cards
 from cards.services.has_minimum_info import has_minimum_info
 from cards.services.json_normalizer import (
@@ -26,6 +26,8 @@ from cards.services.json_normalizer import (
 )
 from cards.tasks.card_cropper import save_card_image_tmp
 from cards.tasks.ocr_service import OcrService
+from contacts.models import Contact, ContactFieldConfidence
+from persons.models import Person
 
 logger = logging.getLogger(__name__)
 
@@ -203,7 +205,8 @@ class PipelineCoordinator:
         tmp_abs = None
         try:
             with transaction.atomic():
-                person = Person.objects.create()
+                # 仕様書 §15.4：循環 FK を 3 段階で解決する
+                person = Person.objects.create(status=Person.Status.ACTIVE)
                 business_card = BusinessCard.objects.create(
                     original_image=self.original_image,
                     card_image=None,
@@ -213,8 +216,12 @@ class PipelineCoordinator:
                 contact = Contact.objects.create(
                     business_card=business_card,
                     person=person,
+                    status=Contact.Status.PRIMARY,
+                    created_by=self.original_image.user,
                     **contact_dict,
                 )
+                person.primary_contact = contact
+                person.save()
                 for field_name, conf in confidence_map.items():
                     if conf in ("low", "medium"):
                         ContactFieldConfidence.objects.create(

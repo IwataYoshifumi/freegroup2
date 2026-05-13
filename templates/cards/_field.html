@@ -1,13 +1,27 @@
-{# 名刺詳細画面のフィールド1行を表示する部品。 #}
-{# 引数: label（表示ラベル）, value（値）, confidence（'low' / 'medium' / 空文字）。 #}
+{% comment %}
+名刺詳細画面のフィールド 1 行を表示する部品。
+引数: label（表示ラベル）, value（値）, confidence（'low' / 'mid' / 'confirmed' / 空）。
+
+DEBUG=True 時のみ confidence ドットを描画。
+  - 'low'      → 赤ドット（app-status-dot--error）
+  - 'mid'      → 黄ドット（app-status-dot--warning）
+  - 'confirmed'→ 緑ドット（app-status-dot--success）
+  - 空         → 何も描画しない（疑似 high）
+
+通常運用（DEBUG=False、または INTERNAL_IPS 範囲外）では一切表示しない。
+{% endcomment %}
 <div class="app-detail-item">
   <div class="app-detail-label">{{ label }}</div>
   <div class="app-detail-value">
     {{ value }}
-    {% if confidence == 'medium' %}
-      <span class="app-status-dot app-status-dot--warning" title="信頼度: 中" aria-label="信頼度: 中"></span>
-    {% elif confidence == 'low' %}
-      <span class="app-status-dot app-status-dot--error" title="信頼度: 低" aria-label="信頼度: 低"></span>
+    {% if debug %}
+      {% if confidence == 'low' %}
+        <span class="app-status-dot app-status-dot--error" title="信頼度: 低（未確認）" aria-label="信頼度: 低（未確認）"></span>
+      {% elif confidence == 'mid' %}
+        <span class="app-status-dot app-status-dot--warning" title="信頼度: 中（未確認）" aria-label="信頼度: 中（未確認）"></span>
+      {% elif confidence == 'confirmed' %}
+        <span class="app-status-dot app-status-dot--success" title="確認済み" aria-label="確認済み"></span>
+      {% endif %}
     {% endif %}
   </div>
 </div>

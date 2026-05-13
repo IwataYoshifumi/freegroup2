@@ -50,6 +50,10 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "back_navigator",
     "cards",
+    "persons",
+    "contacts",
+    "duplicates",
+    "actionlogs",
 ]
 
 MIDDLEWARE = [

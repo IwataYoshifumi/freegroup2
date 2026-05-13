@@ -1,0 +1,101 @@
+{% extends "cards/app_base.html" %}
+{% load back_tags %}
+
+{% block title %}人物詳細（アーカイブ済み） — FreeGroup2{% endblock %}
+
+{% block content %}
+  <div class="app-page-header" style="max-width:1100px;">
+    <div>
+      <div class="app-breadcrumb">人物管理 / 人物一覧 / 詳細</div>
+      <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+        <h1>人物詳細</h1>
+        <span class="app-status-badge app-status-badge--muted">archived</span>
+      </div>
+    </div>
+    <div class="app-action-area">
+      {% if back.back_exist %}
+        <a href="{% back_url back %}" class="app-btn app-btn--secondary">戻る</a>
+      {% endif %}
+      {% if back.back_all_exist %}
+        <a href="{% back_all_url back %}" class="app-btn app-btn--secondary">最初に戻る</a>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if debug %}
+    <div style="max-width:1100px; margin-bottom:var(--app-space-sm); font-size:12px;">
+      Person UID: <code class="app-debug-uid">{{ person.id }}</code>
+    </div>
+  {% endif %}
+
+  <section class="app-card" style="max-width:1100px;">
+    <div class="app-detail-item">
+      <div class="app-detail-label">Person ID</div>
+      <div class="app-detail-value">{{ person.id }}</div>
+    </div>
+    <div class="app-detail-item">
+      <div class="app-detail-label">代表表示</div>
+      <div class="app-detail-value">{{ person }}</div>
+    </div>
+    <div class="app-detail-item">
+      <div class="app-detail-label">作成日時</div>
+      <div class="app-detail-value">{{ person.created_at|date:"Y/m/d H:i:s" }}</div>
+    </div>
+    <div class="app-detail-item">
+      <div class="app-detail-label">更新日時</div>
+      <div class="app-detail-value">{{ person.updated_at|date:"Y/m/d H:i:s" }}</div>
+    </div>
+  </section>
+
+  <section class="app-card" style="max-width:1100px; margin-top:var(--app-space-md);">
+    <div class="app-section__header"><h2>マージ履歴</h2></div>
+    {% include "persons/_merge_logs.html" %}
+  </section>
+
+  {% if active_contacts_remaining %}
+    <section class="app-card" style="max-width:1100px; margin-top:var(--app-space-md);">
+      <div class="app-section__header"><h2>active Contact</h2></div>
+      <div class="app-table-wrapper">
+        <table class="app-table app-table--nowrap">
+          <thead>
+            <tr>
+              <th>操作</th>
+              <th>氏名</th>
+              <th>会社</th>
+              <th>役職</th>
+              <th>更新日時</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for c in active_contacts_remaining %}
+              {% url 'contacts:contact_detail' pk=c.id as detail_url %}
+              <tr>
+                <td>
+                  <a href="{% append_back_url detail_url back %}" class="app-btn app-btn--secondary app-btn--sm">詳細</a>
+                </td>
+                <td>{{ c.full_name|default:"-" }}</td>
+                <td>{{ c.company|default:"-" }}</td>
+                <td>{{ c.title|default:"-" }}</td>
+                <td>{{ c.updated_at|date:"Y/m/d H:i" }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  {% endif %}
+
+  <section class="app-card" style="max-width:1100px; margin-top:var(--app-space-md);">
+    <div class="app-section__header"><h2>inactive Contact 履歴</h2></div>
+    {% include "contacts/_inactive_contacts.html" %}
+  </section>
+
+  <div class="app-action-area" style="margin-top:24px; max-width:1100px;">
+    {% if back.back_exist %}
+      <a href="{% back_url back %}" class="app-btn app-btn--secondary">戻る</a>
+    {% endif %}
+    {% if back.back_all_exist %}
+      <a href="{% back_all_url back %}" class="app-btn app-btn--secondary">最初に戻る</a>
+    {% endif %}
+  </div>
+{% endblock %}
