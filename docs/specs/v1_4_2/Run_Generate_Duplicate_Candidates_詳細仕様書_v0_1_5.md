@@ -1,8 +1,8 @@
-# **Run_Generate_Duplicate_Candidates 詳細仕様書 v0.1.5**
+# **Run_Generate_Duplicate_Candidates 詳細仕様書 v0.1.6**
 
 **FreeGroup2 名刺管理機能 / 重複候補生成タスクの処理フロー詳細**
 
-**作成日：2026年5月4日（v0.1）／改訂：2026年5月5日（v0.1.1 / v0.1.2 / v0.1.3）／2026年5月6日（v0.1.4 / v0.1.5）**
+**作成日：2026年5月4日（v0.1）／改訂：2026年5月5日（v0.1.1 / v0.1.2 / v0.1.3）／2026年5月6日（v0.1.4 / v0.1.5）／2026年5月13日（v0.1.6）**
 
 **作成者：たんたん**
 
@@ -491,7 +491,7 @@ UniqueConstraint(fields=['person_a', 'person_b'], condition=Q(review_status='pen
 - 同一 cron バッチ内で同 Person ペアの両側（contact_a と contact_b）が `duplicate_checked_at=NULL` で処理対象になるケース（新規 OCR 取り込みで両側が同じバッチに入る、テストデータ生成スクリプト経由の流入、等）
 - 上記ケースでは、最初の contact 処理で生成された pending DC を、次の contact 処理が認識せず重複生成しようとして IntegrityError
 
-X-3 ランナバグ修正（v1.4.2、コミット 4cd1c3e）で **事前フィルタ（3.3 手順 2.5）** を追加し、衝突候補を bulk_create 前に除外する設計に変更した。これにより、IntegrityError は実運用で発生しない想定が再び成立する。
+X-3 ランナバグ修正（v1.4.2、本仕様書 v0.1.6 で反映）で **事前フィルタ（3.3 手順 2.5）** を追加し、衝突候補を bulk_create 前に除外する設計に変更した。これにより、IntegrityError は実運用で発生しない想定が再び成立する。
 
 - 12.7 の処理が Contact 編集時に必ず発火し、関連 pending を invalidated 化する（旧来の経路）
 - マージ実行時の recover 処理（rev5 7.3）が同 Person ペアの pending を整理する（旧来の経路）
@@ -1270,3 +1270,4 @@ v0.1 動作確認は、開発環境（自宅 PC または実家 PC）の SQLite 
 | v0.1.3 | 2026/05/05 | レビュー君（v0.1.2 のレビュー結果）指摘 S-1 / S-2 / S-3 / S-4 / M-1 / M-2 / M-3 / M-4 を反映（クリティカル指摘なし、すべて補足記述）。<br>**S-1**：4.4.1 末尾にステップ A の取得件数とスキップ件数の関係に関する注釈を追加（運用後に評価する旨を明記）。<br>**S-2**：5.3.2 末尾に「バッチ内キャッシュ最適化を 運用後に再評価する妥当性根拠」を追記（rev5 8.5 の候補数見積もりに基づく）。<br>**S-3**：3.5 末尾に二重ネスト `transaction.atomic()` の Django 挙動（外側はトランザクション、内側は savepoint）を明示。<br>**S-4**：3.4.1 末尾に assigned_to が NULL になるケース（Contact.created_by の SET_NULL、OCR 由来でも同様）の扱いを明記。v0.1 では NULL を許容、レビュー画面表示や KPI 集計の挙動は 運用後に詳細化。<br>**M-1**：1.2 の俯瞰の手順（5）に「assigned_to の値を 1 度だけ計算」を明示追加（3.3 との整合）。<br>**M-2**：2.4 のインデックス表に `Contact: (created_at,)` の単独インデックスを追加（4.4.1 ORDER BY 用、運用後に必要性検証）。<br>**M-3**：5.2.2 の SQL 擬似コードに DISTINCT の冗長性に関する注釈を追加（Django ORM 経由では `.distinct()` 不要）。<br>**M-4**：5.3.5 の括弧書きを整理し、「過去判定済みのレコードは group_id 発行ロジックに影響しない」とシンプルに記述。 | たんたん |
 | v0.1.4 | 2026/05/06 | コード君（Claude Code）への引き渡し前最終版。(1) 関数名を v1.4.2 確定版（`Run_Generate_Duplicate_Candidates` 短縮版）に置換。(2) v0.2 送り事項を「v1.4.2 では本書の方針のまま実装、運用後に実測・チューニング」方針に変更（v0.2 は作成しない）。(3) 冒頭に v1.4.2 統合最終版との位置づけセクションを追加。本書は v1.4.2 統合最終版の補助文書として、Run_Generate_Duplicate_Candidates の処理詳細のみを定義する。 | たんたん |
 | v0.1.5 | 2026/05/06 | コード君（Claude Code）への引き渡し前最終版（v0.1.4 のレビュー反映）。(1) 関数配置先を v1.4.2 統合最終版（11.2 / 13.4.1 / 21章）と整合する `duplicates/tasks/duplicate_check_runner.py` に統一。v0.1.4 までの `duplicate_candidate_generator.py` は誤記（統合最終版との不整合）。(2) 冒頭「本書を読む前提」項目 5 を新設し、2 段階ロック方式（ステップ A / ステップ B）と 3 段再チェック（duplicate_checked_at / Contact.status / Person.status）の実装が必須であることを強調。統合最終版 12.4 だけでは実装が `TransactionManagementError` で動かないため。 | たんたん |
+| v0.1.6 | 2026/05/13 | X-3 ランナバグ修正（v1.4.2 仕様書改訂ストック #19）を反映。(1) §3.3 に手順 (2.5) **事前フィルタ** を新規挿入：`contact.person` と既に pending DuplicateCandidate として組まれている Person ID 集合を `person_a` / `person_b` 別々の 2 クエリで取得し、その集合に含まれる候補を bulk_create 前にスキップする。partial unique constraint 違反を **事前に回避** する設計に変更。(2) §3.6 全面書き換え：v1.4.2 改訂前の「実運用では発生しない想定」記述を「事前フィルタで衝突を未然に回避」方針に置換。4.4.3 三段再チェックとの責務分離を明示。(3) §3.6.1 改訂：IntegrityError 発生時は事前フィルタの実装漏れまたは race condition の証拠と解釈を整理、`ignore_conflicts=True` 不採用方針は維持。(4) §5.3.2 補足：事前フィルタ除外候補は group_id 発行対象外を明記。(5) §5.4.1 拡張：履歴参照判断の責務に「既存 pending DC の存在チェック」を追記、v1.4.2 拡張で generate 側責務に加わった旨を明示。(6) §6.2 確認観点 #8 を追加：同一 cron バッチ内で同 Person ペアの両側が処理対象になっても IntegrityError なしで完走することを確認する観点。 | 仕様書改訂担当オーパス君（Claude Code、5/13 引き継ぎ後）|
