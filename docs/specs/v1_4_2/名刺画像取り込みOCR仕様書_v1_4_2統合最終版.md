@@ -28,6 +28,7 @@
 | 8 | **Form クラス継承構造の確立**：5 つの Form（`ContactUpdateForm` / `ContactUpdateActiveForm` / `ContactAddAdditionalRoleForm` / `ContactCreateForm` / `MergeForm`）が `ContactBaseForm` を継承する構造に統一 |
 | 9 | **マージ前後のステータス遷移を別添 PDF として確定**：11 列横長表は別添 PDF（`/docs/spec/マージ前後のコンタクトのステータス等まとめ.pdf`）を正本とし、本文には設計趣旨と切り分け基準のみ記載 |
 | 10 | **UI カスタムタグ・共通モーダル部品の整備**：画像表示・JSON ツリー・信頼度マークの共通化を 5 種類のカスタムタグで実現 |
+| 11 | **OCR / OpenCV パイプラインの分離**：v1.2.0 で採用した「API 1 回呼び出しで全名刺一括取得（パターン A）」を**公式に撤回**。BC 1 枚 = Claude API 1〜2 リクエストに変更し、`process_opencv` / `process_ocr` の 2 本 cron に分離。条件付き 2 回 OCR（orientation 補正後の再 OCR）導入、`Run_Crop_Cards_From_OriginalImage` / `Run_Process_CardImages_With_OCR` 等の新関数群で実装（旧 `Extract_Cards_via_OCR` / `process_pending` / `PipelineCoordinator` は完全削除）|
 
 ## v1.4.0 から継承する主要機能
 
@@ -2364,8 +2365,9 @@ View 層・cron・タスクから直接呼ばれる「処理フロー全体を�
 |---|---|---|
 | `Execute_*` | View 層から（ユーザー操作起点） | `Execute_Merge_Only` / `Execute_Merge_with_Updates` / `Execute_Merge_Undo` |
 | `Mark_as_*` | View 層から(状態遷移系) | `Mark_as_Different_Person` |
-| `Run_*` | cron / タスク起動 | `Run_Generate_Duplicate_Candidates` |
-| `Extract_*` | パイプライン起動 | `Extract_Cards_via_OCR` |
+| `Run_*` | cron / タスク起動 | `Run_Generate_Duplicate_Candidates` / `Run_Crop_Cards_From_OriginalImage` / `Run_Process_CardImages_With_OCR` |
+
+`Extract_*` カテゴリは v1.4.2 で廃止。旧 `Extract_Cards_via_OCR`（1 本パイプライン用上位関数）も廃止し、OpenCV と OCR を担う 2 本の `Run_*` 上位関数に分離した。詳細は §15.6 / §13.4.1 参照。
 
 ### 13.2.3 モジュール内専用ヘルパー関数の接頭辞
 
@@ -2459,7 +2461,12 @@ View 層・cron・タスクから直接呼ばれる「処理フロー全体を�
 | `Execute_Merge_with_Updates` | `(candidate, surviving_person, merged_person, form, user)` | `None` | duplicates/services/merge_executor.py | マージ＋更新（フィールド修正あり） |
 | `Execute_Merge_Undo` | `(merge_log, form, user)` | `None` | duplicates/services/merge_executor.py | マージ復元の本体 |
 | `Run_Generate_Duplicate_Candidates` | `(limit=100)` | （別ドキュメントで定義） | duplicates/tasks/duplicate_check_runner.py | タスク層上位関数。cron から呼ばれる |
-| `Extract_Cards_via_OCR` | （別ドキュメントで定義） | （別ドキュメントで定義） | cards/tasks/ | OCR パイプライン上位関数 |
+| `Run_Crop_Cards_From_OriginalImage` | `(original_image)` | `None` | cards/tasks/crop_cards.py | OpenCV パイプライン上位（`process_opencv` cron 経由）。検出 → BC 作成 → OriginalImage.status=cards_extracted まで |
+| `Run_Process_CardImages_With_OCR` | `()` | `None` | cards/tasks/ocr_runner.py | OCR パイプライン上位（`process_ocr` cron 経由）。BC を CAS で claim → `process_cardimage_with_ocr` 呼び出し |
+| `process_cardimage_with_ocr` | `(business_card, ocr_service)` | `None` | cards/tasks/ocr_runner.py | BC 1 枚を引数に、OCR 実行 → BC 更新 → Contact / Person 生成 → OriginalImage.status 集計遷移までを完結（snake_case、Pascal_Snake_Case 主役関数の補助タスク扱い）|
+| `extract_carddata_via_ocr` | `(card_image, ocr_service)` | `dict` | cards/tasks/ocr_runner.py | 1 枚の card_image に対して条件付き 2 回 OCR を実行し結果を辞書で返す純粋ラッパー（§15.6 参照） |
+
+【v1.4.2 廃止】 旧 `Extract_Cards_via_OCR`（1 本パイプライン用上位関数）は廃止。`PipelineCoordinator` クラスおよび `process_pending` 管理コマンドも完全削除（§17 別表 B 参照）。
 
 ### 13.4.2 モジュール内専用ヘルパー（_snake_case）
 
@@ -2747,6 +2754,50 @@ OCR が判定した名刺の主要言語を ISO 639-1 形式で保存。デフ�
 - catchphrase（キャッチフレーズ）
 - qualification（資格）
 - website / SNS 各種
+
+## 15.6 条件付き 2 回 OCR
+
+v1.4.2 のパイプライン分離（§13.4.1 参照）に伴い、1 BC につき orientation に応じて条件付きで 2 回 OCR を実行する仕様を導入する。`extract_carddata_via_ocr(card_image, ocr_service)` が 1 枚の card_image に対して以下のフローで処理する。
+
+### 15.6.1 処理フロー
+
+1. 1 枚の card_image を `extract_carddata_via_ocr(card_image, ocr_service)` に渡す
+2. 1 回目 OCR を実行 → 結果から `orientation` を取得し `raw_json_1` に格納
+3. `orientation == 'normal'` → 1 回で完結（`raw_json_2 = None`）
+4. `orientation != 'normal'` → `_rotate_card_image()` で補正 → 2 回目 OCR → `raw_json_2` に格納
+5. 1 回目／2 回目とも同じプロンプト（フィールド抽出 + orientation 判定を同時に実施）
+6. 2 回目失敗時は 1 回目結果を採用（`raw_json_2 = None`、`error_message` に「2 回目 OCR 失敗」を追記、`ocr_status = done`）
+7. 1 回目自体失敗時：`ocr_status = failed` / `ocr_result = ocr_failed`、`retry_failed_ocr --ocr` で差し戻し可能（§17 別表 B 参照）
+
+### 15.6.2 採用 raw_json の選択ロジック
+
+| 場面 | 採用 raw_json |
+|---|---|
+| 2 回目成功時 | `raw_json_2` を採用（補正後の OCR 結果） |
+| 2 回目スキップ時（orientation=normal）/ 2 回目失敗時 | `raw_json_1` を採用 |
+
+### 15.6.3 card_image 上書き保存ルール
+
+- 2 回目が走った時点で **必ず補正画像で BC.card_image を上書き**（2 回目が失敗しても、画像補正自体は実施済みのため上書き）
+- 既存 `BusinessCard.orientation` フィールドは「**検出時の元の orientation**」を保存（補正ログとして残す）
+
+### 15.6.4 orientation → 補正回転マップ
+
+| orientation 値 | 補正操作 |
+|---|---|
+| `normal` | 何もしない |
+| `rotate_90_cw` | 反時計回り 90°（Pillow `image.rotate(90, expand=True)`） |
+| `rotate_90_ccw` | 時計回り 90°（Pillow `image.rotate(-90, expand=True)`） |
+| `rotate_180` | 180° 回転（Pillow `image.rotate(180, expand=True)`） |
+| `mirror` | 水平反転（Pillow `ImageOps.mirror(image)`） |
+
+mirror は他 orientation と同じパイプラインで処理するが、業務的に「誤認識ケース」の扱いであり、補正後の精度は保証しない。`cv2.flip` ではなく Pillow `ImageOps.mirror` を採用する理由は、回転処理と同じ Pillow API で揃えることで実装の単純さを優先するため。
+
+### 15.6.5 設計趣旨
+
+- AI OCR は名刺が回転していると読み取り精度が極端に落ちるため、補正後再 OCR で精度を引き上げる
+- 1 回目／2 回目両方の生 JSON を BC に保存（`raw_json_1` / `raw_json_2`、§4.3 参照）することで、回転補正の効果測定・プロンプトチューニング材料がそのまま蓄積される
+- 1 回目で `orientation=normal` のときは 2 回目スキップで API トークンコストを節約
 
 ---
 
