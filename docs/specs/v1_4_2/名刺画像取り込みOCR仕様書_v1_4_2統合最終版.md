@@ -2638,18 +2638,26 @@ DuplicateCandidate.review_result の different_person 系。
 
 ## 15.1 cards 処理ルール一覧
 
+v1.4.2 のパイプライン分離（§13.4.1 / §15.6 参照）に伴い、`process_cardimage_with_ocr` 内での card 処理ルールは以下のとおり。is_business_card / has_minimum_info NG のカードも BC として残置し、`ocr_result` フィールドで種別を区別する（§4.3 / 別表 C.14 参照）。
+
 | ID | ケース | 処理 |
 |---|---|---|
-| C1 | cards 配列が空 | status=garbage、BusinessCard 作成なし |
-| C2 | 全 card が is_business_card=false | status=garbage、BusinessCard 作成なし |
-| C3 | 全 card が has_minimum_info で弾かれた | status=extracted（BusinessCard 0 件）、error_message に記録 |
-| C4 | confidence=low/medium のフィールドあり | ContactFieldConfidence に記録（high は記録しない） |
-| C5 | 切り抜き失敗（card_image=null） | has_minimum_info を満たせば BusinessCard 作成 |
-| C6 | OCR 例外発生 | 当該 card のみ失敗扱い、他 card への波及なし |
+| C1 | cards 配列が空 | OpenCV 段階で BC 0 件確定 → OriginalImage.status=garbage、BusinessCard 作成なし |
+| C2 | card が is_business_card=false | 当該 card は BusinessCard 作成（`ocr_result='not_business_card'`）、Contact / Person 作らず。全 card が is_business_card=false なら OriginalImage.status=garbage、1 件以上 BC が作られたら status=extracted |
+| C3 | card が has_minimum_info で弾かれた | 当該 card は BusinessCard 作成（`ocr_result='insufficient_info'`）、Contact / Person 作らず。error_message には記録しない（silent skip、撮り直し判断・OpenCV 改善のデータ収集用）。全 card 弾かれの場合も status=extracted（BC は残る）|
+| C4 | confidence=low/medium のフィールドあり | ContactFieldConfidence に記録（high は記録しない）|
+| C5 | warp（透視変換）失敗 | 当該 card は detect_cards 段階で除外、BusinessCard 作成なし、OCR 呼び出しもなし（warp 失敗品を OCR に送る意味がないため、OpenCV パイプライン側で除外）|
+| C6 | OCR 例外発生 | 当該 card のみ失敗扱い（`ocr_status=failed` / `ocr_result=ocr_failed`、error_message にエラー集約）、他 card への波及なし。`retry_failed_ocr --ocr` で差し戻し可能 |
+
+【補足】C2 / C3 で BC を残置する設計の狙いは、(1) ユーザーが「OCR が何を読み取ったのか」を確認して撮り直し判断できる、(2) OpenCV 検出精度改善のための実データ蓄積、(3) 処理した事実を BC として残すことで後追い検証が可能、の 3 点。
 
 ## 15.2 部分失敗時の status / error_message
 
-少なくとも 1 件の BusinessCard 作成成功 → status=extracted、error_message に失敗 card の理由を集約。全 card 失敗 → status=failed、error_message に詳細を記録。
+OCR 完了時の OriginalImage.status 集計遷移（§4.2.1 / 別表 C.1 参照）：
+
+- 少なくとも 1 件の BusinessCard で `ocr_status=done` → status=extracted（成功 BC の `ocr_result` が `business_card` / `not_business_card` / `insufficient_info` のいずれであっても集計上は extracted）。失敗 card の理由は error_message に集約
+- 全 BC が `ocr_status=failed` → status=failed、error_message に詳細を記録（致命的失敗）
+- OpenCV 段階で BC 0 件確定（is_business_card=false 全件 / warp 失敗のみ）→ status=garbage
 
 ## 15.3 OCR パイプラインの v1.4.0 修正範囲
 
