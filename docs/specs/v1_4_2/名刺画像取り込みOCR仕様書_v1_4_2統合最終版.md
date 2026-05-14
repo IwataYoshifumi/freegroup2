@@ -1040,42 +1040,21 @@ merge_reason='additional_role' のとき、マージド側元 primary を inacti
 
 その他の Contact（マージド側元 active / 元 inactive、サバイブ側全 Contact）の挙動は他の merge_reason と同じ。
 
-### 9.4.4 切り分け基準（Execute_Merge_Only / Execute_Merge_with_Updates）
+### 9.4.4 切り分け基準（Execute_Merge_Only に統一）
 
-サービス分割の切り分け基準は **「フィールド修正の有無」** であり、merge_reason ではない。
+**v1.4.2 改訂**：マージ実行サービスは `Execute_Merge_Only` のみに統一する。`Execute_Merge_with_Updates` は廃止（D-3 系 Contact 詳細画面 AJAX 化に伴う設計大転換、§11.5 / §11.6.2 参照）。
 
-- **コンタクト修正なし** → `Execute_Merge_Only` を呼ぶ
-- **コンタクト修正あり** → `Execute_Merge_with_Updates` を呼ぶ
+- マージ画面では Contact のフィールド値修正を行わない（マージ画面に来る前に Contact 詳細画面で値修正済みの前提）
+- すべてのマージは `Execute_Merge_Only(candidate, surviving_person, merged_person, form, user)` で処理
+- `merge_reason` は `MergeForm.get_merge_reason()` から `list[str]` で受け取る（§11.6.2 / #58 参照）
 
-`merge_reason` は両サービスとも 7 値すべて受け付ける。
+【v1.4.2 改訂前】 v1.4.2 改訂前は「フィールド修正の有無」で `Execute_Merge_Only` / `Execute_Merge_with_Updates` を分岐していたが、マージ画面の値修正機能廃止により分岐自体が不要になった。
 
-### 9.4.5 same_card かつコンタクト修正ありの特殊扱い
+### 9.4.5 same_card かつコンタクト修正ありの特殊扱い（v1.4.2 で廃止）
 
-PDF 表は merge_reason 7 値すべてに対して同じ遷移パターンを示しているが、`Execute_Merge_with_Updates` の merge_reason='same_card' の場合のみ、実装上の挙動が他と異なる。
+v1.4.2 改訂前は `Execute_Merge_with_Updates` の `merge_reason='same_card'` 修正ありに対する特殊扱い（サバイブ側 primary を直接更新、新規 Contact 作らない、CFC 部分 confirmed 化）を定義していたが、`Execute_Merge_with_Updates` 廃止（§9.4.4）に伴い本特殊扱いも廃止。
 
-**same_card 修正なしの挙動（PDF 表通り）**
-
-サバイブ側元 primary は変更なし（status='primary' のまま、`previous_*` も変更なし）。`Execute_Merge_Only` で処理。
-
-**same_card 修正ありの挙動**
-
-サバイブ側既存 primary について：
-
-- **status は変更しない**（primary のまま）
-- **フィールド値をフォームで修正された値で部分更新**（修正されていないフィールドは触らない）
-- **ContactFieldConfidence は `ContactFieldConfidence.mark_fields_as_confirmed(contact, form.confirmed_field_names(), user)` で部分 confirmed 化**（修正されていないフィールドの confidence は変更しない）
-- **新規 Contact は作らない**
-
-マージド側 Contact 群は他の merge_reason と同じ挙動で transfer。
-
-**設計趣旨**
-
-same_card は「同一名刺の重複取り込み」が前提。値違いは新名刺の発行ではなく OCR 誤認識の可能性が高い。新規 Contact を作ると「同一名刺なのに 2 つの Contact がある」という意味的な不整合が起きる。よって既存 primary を直接更新し、新規 Contact は作らない運用とする。
-
-ContactFieldConfidence の部分 confirmed 化（マージ画面 same_card のみ）と、`contact.fix(form, user)` 内の全 confirmed 化（修正画面 12 番 fix / 13 番 active 修正）の違いに注意：
-
-- **same_card 修正あり（マージ画面）**：ユーザーが値違いを確認したフィールドのみ confirmed 化、それ以外の low/mid フィールドは触らない
-- **fix（12 番 / 13 番）**：Form のバリデーションで全 low/mid フィールドが確認チェック ON されることが保証されているため、`contact.fix` 内で全 confirmed 化
+【設計の移行】 same_card 系の値修正は、マージ画面に来る前に Contact 詳細画面（11 番、§11.3）で AJAX 経由で済ませる流れに変更。マージ画面に到達した時点で surviving 側 Contact のフィールドはすでに確定している状態となる。CFC 確定処理は `Execute_Merge_Only` の atomic 冒頭で一括 confirmed 化する形に置き換え（§9.3.1【v1.4.2 補足】参照）。
 
 ### 9.4.6 副コンタクト増加問題
 
@@ -1643,7 +1622,7 @@ v1.4.x で追加・変更するファイルを以下に示す。
 | 5 | `/originals/` | GET | OriginalListView | 元画像一覧 |
 | 6 | `/originals/<uuid:pk>/` | GET | OriginalDetailView | 元画像詳細。セクション 7「検出された名刺」テーブルは 8 列構成（操作 / サムネイル / 名刺ID / card_index / 向き / OCR結果 / 切り抜き画像 / 作成日時）、名刺詳細への遷移ボタンを含む |
 | 7 | `/persons/` | GET | PersonListView | 人物一覧 |
-| 8 | `/persons/<uuid:pk>/` | GET | PersonDetailView | 人物詳細 |
+| 8 | `/persons/<uuid:pk>/` | GET | PersonDetailView | 人物詳細。**Person.status 別二系統化**：(a) active な Person → 当該 Person の primary_contact を取得し `/contacts/<primary_contact_uuid>/`（11 番 ContactDetailView）へ HTTP 302 リダイレクト、(b) merged な Person → merged 状態の専用詳細画面を表示（過去どんな Contact があったか、誰と統合されたか、マージログ、§4.9 参照）、(c) archived な Person → archived 状態の専用詳細画面を表示（復元ボタン等の操作起点として将来活用） |
 | 9 | `/persons/<uuid:pk>/add-additional-role/` | GET / POST | PersonAddAdditionalRoleView | 別肩書追加。Active コンタクトを追加 |
 | 10 | `/contacts/create/` | GET / POST | ContactCreateView | 名刺なしでプライマリーコンタクトとパーソンを同時生成 |
 | 11 | `/contacts/<uuid:pk>/` | GET | ContactDetailView | コンタクト詳細画面（業務メイン画面）。Contact.status × Person.status による表示モード分岐：(primary or active) × Person.active なら編集可能モード（AJAX で値修正・confidence 確認可、§11.6.2 / D-3 系で詳細仕様確定後反映予定）、inactive または Person.archived/merged なら表示のみモード。セクション構成：操作ボタン（人物詳細リンク、修正画面、別肩書追加、マージ画面）/ Contact ヘッダー（名刺画像 + status バッジ + マージ候補バッジ）/ 一括確定（編集可能モードのみ）/ フィールド表示（high はシンプル、mid/low は信頼度マーク + ラジオ UI）/ **他のアクティブコンタクト**（同 Person 配下の他 active）/ **マージ関連**（DuplicateCandidate / PersonMergeLog / previous_person / inactive Contact 履歴の共通 include）|
@@ -1795,6 +1774,10 @@ URL パラメータやセッションを使った独自実装は避ける。
 
 ### 11.5.5 ペア表示画面の構成
 
+【v1.4.2 改訂】 D-3 系 Contact 詳細画面 AJAX 化に伴うマージ系処理の設計大転換により、マージ画面の値編集 UI は廃止された（廃止項目：マージ画面値編集機能、low/mid 修正・確認 UI、値違いコピーボタン、notes 結合、§11.6.2 MergeForm 廃止記述参照）。確認チェック CB と判定情報の入力（review_decision / review_result / surviving_person_choice / review_note）のみ残る。新 UI 構造の詳細は実装側で確定後に本節を全面整理予定（マッピングではクラスタ H 反映予定）。
+
+以下は v1.4.2 改訂前の旧記述。新 UI 構造への置き換えは別途実施する。
+
 画面は以下の構成。詳細な UI デザインは実装フェーズで調整する。
 
 - 上部：グループ情報（rank、残り件数）
@@ -1823,6 +1806,10 @@ UI 操作のセッション扱い（マージ実行ボタン押下まで DB に�
 
 ### 11.5.6 マージ画面の 3 カラム設計
 
+【v1.4.2 で廃止】 D-3 系 Contact 詳細画面 AJAX 化に伴い、マージ画面の「中央カラム（マージ後の Contact 編集フォーム）」を廃止し 3 カラム → 新 2 カラム + 中央の判定情報入力構造に変更する。値違いコピーボタン、notes 結合、low/mid 修正・確認 UI も廃止。Contact のフィールド値修正はマージ画面に来る前に Contact 詳細画面（11 番）で AJAX 経由で済ませる前提。新仕様の詳細はクラスタ H で別途反映。
+
+以下は v1.4.2 改訂前の旧記述。新 UI 構造への置き換えは別途実施する。
+
 マージ画面は以下の 3 カラム構造とする。
 
 - 左カラム：surviving 候補 1（基準コンタクト推奨側）
@@ -1841,6 +1828,10 @@ UI 操作のセッション扱い（マージ実行ボタン押下まで DB に�
 8. 完了ボタンでマージ確定
 
 ### 11.5.7 マージ画面の表示対象フィールドの拡大
+
+【v1.4.2 改訂】 表示対象フィールドの拡大方針自体は維持するが、「修正対象」ではなく「**比較表示対象**」に変更（マージ画面の値修正廃止に伴い）。新 UI ではフィールド比較表（左 Person A / 右 Person B）として表示し、ユーザーは値違いを目視確認するのみ。値違いの修正は事前に Contact 詳細画面（11 番）で AJAX 経由で行う。フルネーム一致時の姓・名サブフィールド省略（`MergeForm.hidden_name_fields()`、§11.6.2 / #54）、両側空フィールド非表示も新仕様に含まれる。
+
+以下は v1.4.2 改訂前の旧記述。
 
 v1.4.1 では「DUPLICATE_CHECK_FIELDS のみ表示・修正対象」としていたが、v1.4.2 では Contact のほぼ全フィールドに拡大する。
 
@@ -2520,8 +2511,7 @@ View 層・cron・タスクから直接呼ばれる「処理フロー全体を�
 | 関数名 | シグネチャ | 戻り値 | 配置 | 役割 |
 |---|---|---|---|---|
 | `Mark_as_Different_Person` | `(candidate, form, user)` | `None` | duplicates/services/merge_executor.py | 別人判定の本体 |
-| `Execute_Merge_Only` | `(candidate, surviving_person, merged_person, form, user)` | `None` | duplicates/services/merge_executor.py | マージのみ（フィールド修正なし） |
-| `Execute_Merge_with_Updates` | `(candidate, surviving_person, merged_person, form, user)` | `None` | duplicates/services/merge_executor.py | マージ＋更新（フィールド修正あり） |
+| `Execute_Merge_Only` | `(candidate, surviving_person, merged_person, form: MergeForm, user)` | `None` | duplicates/services/merge_executor.py | マージ実行の本体（v1.4.2 で `Execute_Merge_with_Updates` 統合、マージ画面の値修正機能廃止により本サービスに一本化）。atomic 冒頭で surviving 側 primary の未確認 low/mid CFC を `mark_fields_as_confirmed` で一括 confirmed 化（§9.3.1【v1.4.2 補足】参照） |
 | `Execute_Merge_Undo` | `(merge_log, form: MergeUndoForm, user)` | `None` | duplicates/services/merge_executor.py | マージ復元の本体。`form.cleaned_data["note"]` を取り出して `merge_log.record_undo_action(user, note)` に渡す（§4.11.3 / §10.8.2 参照） |
 | `Run_Generate_Duplicate_Candidates` | `(limit=100)` | （別ドキュメントで定義） | duplicates/tasks/duplicate_check_runner.py | タスク層上位関数。cron から呼ばれる |
 | `Run_Crop_Cards_From_OriginalImage` | `(original_image)` | `None` | cards/tasks/crop_cards.py | OpenCV パイプライン上位（`process_opencv` cron 経由）。検出 → BC 作成 → OriginalImage.status=cards_extracted まで |
@@ -2554,8 +2544,7 @@ View 層・cron・タスクから直接呼ばれる「処理フロー全体を�
 | `find_duplicate_contacts(contact)` | 準関数。1 Contact について重複候補を検出 |
 | `determine_base_person(person_a, person_b)` | 準関数。基準コンタクト判定（マージ数等） |
 | `Mark_as_Different_Person(candidate, form, user)` | 副作用あり。別人判定（トランザクション内） |
-| `Execute_Merge_Only(candidate, surviving_person, merged_person, form, user)` | 副作用あり。マージのみ実行（トランザクション内） |
-| `Execute_Merge_with_Updates(candidate, surviving_person, merged_person, form, user)` | 副作用あり。マージ＋更新実行（トランザクション内） |
+| `Execute_Merge_Only(candidate, surviving_person, merged_person, form: MergeForm, user)` | 副作用あり。マージ実行（トランザクション内）。v1.4.2 で `Execute_Merge_with_Updates` を統合し本サービスに一本化 |
 | `Execute_Merge_Undo(merge_log, form: MergeUndoForm, user)` | 副作用あり。復元実行（トランザクション内）。`form.cleaned_data["note"]` を `record_undo_action` に渡す |
 | `recover_duplicate_candidates(merged_person, surviving_person)` | 副作用あり。recover 処理 |
 | `invalidate_pending_candidates(contact)` | 副作用あり。pending invalidated 化 |
