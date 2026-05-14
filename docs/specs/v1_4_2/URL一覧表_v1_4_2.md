@@ -11,26 +11,26 @@
 | No. | ルート | メソッド | View 名 | URL name |
 |---|---|---|---|---|
 | 1 | `/` | GET | HomeView | `home` |
-| 2 | `/cards/upload/` | GET / POST | OriginalImageUploadView | `cards:upload` |
+| 2 | `/cards/upload/` | GET / POST | OriginalImageUploadView | `cards:card_upload` |
 | 3 | `/cards/` | GET | CardListView | `cards:card_list` |
 | 4 | `/cards/<uuid:pk>/` | GET | CardDetailView | `cards:card_detail` |
 | 5 | `/originals/` | GET | OriginalListView | `originals:original_list` |
 | 6 | `/originals/<uuid:pk>/` | GET | OriginalDetailView | `originals:original_detail` |
 | 7 | `/persons/` | GET | PersonListView | `persons:person_list` |
 | 8 | `/persons/<uuid:pk>/` | GET | PersonDetailView | `persons:person_detail` |
-| 9 | `/persons/<uuid:pk>/add-additional-role/` | GET / POST | PersonAddAdditionalRoleView | `persons:add_additional_role` |
+| 9 | `/persons/<uuid:pk>/add-additional-role/` | GET / POST | PersonAddAdditionalRoleView | `persons:person_add_additional_role` |
 | 10 | `/contacts/create/` | GET / POST | ContactCreateView | `contacts:contact_create` |
 | 11 | `/contacts/<uuid:pk>/` | GET | ContactDetailView | `contacts:contact_detail` |
-| 12 | `/contacts/<uuid:pk>/update-primary/` | GET / POST | UpdatePrimaryContactView | `contacts:update_primary` |
-| 13 | `/contacts/<uuid:pk>/update-active/` | GET / POST | UpdateActiveContactView | `contacts:update_active` |
+| 12 | `/contacts/<uuid:pk>/update-primary/` | GET / POST | UpdatePrimaryContactView | `contacts:contact_update_primary` |
+| 13 | `/contacts/<uuid:pk>/update-active/` | GET / POST | UpdateActiveContactView | `contacts:contact_update_active` |
 | 14 | `/contacts/<uuid:pk>/preview/` | GET | PreviewContactView | `contacts:contact_preview` |
 | 15 | `/duplicates/` | GET | DuplicateCandidateGroupListView | `duplicates:duplicate_group_list` |
 | 16 | `/duplicates/groups/<uuid:group_id>/` | GET | DuplicateCandidateGroupDetailView | `duplicates:duplicate_group_detail` |
-| 17 | `/duplicates/groups/<uuid:group_id>/review` | GET / POST | DuplicateCandidateGroupUpdateView | `duplicates:duplicate_group_update` |
+| 17 | `/duplicates/groups/<uuid:group_id>/review/` | GET / POST | DuplicateCandidateGroupUpdateView | `duplicates:duplicate_group_review` |
 | 19 | `/merge-logs/` | GET | PersonMergeLogListView | `duplicates:merge_log_list` |
 | 20 | `/merge-logs/<uuid:pk>/` | GET | PersonMergeLogDetailView | `duplicates:merge_log_detail` |
 | 21 | `/merge-logs/<uuid:pk>/confirm-undo/` | GET / POST | PersonMergeLogConfirmUndoView | `duplicates:merge_log_confirm_undo` |
-| 22 | `/cards/<uuid:pk>/delete/` | POST | CardDeleteView | `cards:card_delete` |
+| 22 | `/cards/<uuid:pk>/delete/` | POST | CardDeleteView | `cards:card_delete`（未実装、ストック #17 で仕様確定済み）|
 | 23 | `/contacts/` | GET | ContactListView | `contacts:contact_list` |
 
 ---
