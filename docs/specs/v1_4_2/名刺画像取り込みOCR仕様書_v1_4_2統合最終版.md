@@ -1772,80 +1772,68 @@ transfer / promotion / job_change / name_change で新規 Contact を作成す�
 
 URL パラメータやセッションを使った独自実装は避ける。
 
-### 11.5.5 ペア表示画面の構成
+### 11.5.5 マージレビュー画面の構成（v1.4.2 全面刷新）
 
-【v1.4.2 改訂】 D-3 系 Contact 詳細画面 AJAX 化に伴うマージ系処理の設計大転換により、マージ画面の値編集 UI は廃止された（廃止項目：マージ画面値編集機能、low/mid 修正・確認 UI、値違いコピーボタン、notes 結合、§11.6.2 MergeForm 廃止記述参照）。確認チェック CB と判定情報の入力（review_decision / review_result / surviving_person_choice / review_note）のみ残る。新 UI 構造の詳細は実装側で確定後に本節を全面整理予定（マッピングではクラスタ H 反映予定）。
+マージレビュー画面（17 番 DuplicateCandidateGroupUpdateView）の UI は、D-3 系 Contact 詳細画面 AJAX 化に伴う設計大転換（§11.6.2 / #20 廃止系参照）を受けて、v1.4.2 で全面刷新する。Contact のフィールド値修正機能は持たず、ユーザーは「判定情報の入力」と「確認チェック」のみを行う。値違いの修正は事前に Contact 詳細画面（11 番）で AJAX 経由で済ませている前提。
 
-以下は v1.4.2 改訂前の旧記述。新 UI 構造への置き換えは別途実施する。
+#### 画面の縦順序
 
-画面は以下の構成。詳細な UI デザインは実装フェーズで調整する。
+| 順 | ブロック | 内容 |
+|---|---|---|
+| 1 | ヘッダー | breadcrumb / h1 / 戻るボタン |
+| 2 | 名刺画像比較 | 左右 2 枚、クリックで拡大モーダル |
+| 3 | フィールド比較 | Contact `UPDATABLE_FIELDS` 全 24 フィールドをグルーピング表示。フルネーム省略（`MergeForm.hidden_name_fields()`、§11.6.2 / ストック #54）、値違いハイライト（`app-detail-item--diff`、§11.8.6）、両側空フィールド非表示 |
+| 4 | サバイブ/主コンタクト選択 | フィールド比較の直下、テーブル組み込み。`review_decision` に応じてラベル動的切替（`merged` → 「サバイブ側を選択」、`additional_role` → 「主コンタクトを選択」）、`different` 時は disabled 化 |
+| 5 | 判定 | `review_decision` 3 値（merged / additional_role / different）、ボタン形式ラジオ |
+| 6 | 判定理由 | `review_result` の複数選択 CB（マージ系 6 個 / 別人系 3 個）、第 1 段階に応じて動的表示（CSS `:has()`、§11.8.7） |
+| 7 | 確認チェック | マージ系判定時のみ表示（`MergeForm.has_confirm_checkboxes()`、§11.6.2 / ストック #54）。`different` 判定時は非表示 |
+| 8 | 備考 | `review_note`（CharField、required=False） |
+| 9 | 決定ボタン | エラーサマリーは画面トップに表示（`app-form__error-summary`、§11.8.6） |
 
-- 上部：グループ情報（rank、残り件数）
-- 中央：左右並列表示。左 = 基準コンタクト（surviving 推奨）、右 = 候補コンタクト
-- 各 Contact に「詳細を見る」ボタン（モーダルで詳細表示）
-- 判定選択：「同じ人物」「別人として確定」「次の候補」のラジオボタン
-- surviving 選択：「同じ人物」を選んだ場合のみ表示（デフォルト：左側）
-- review_result 選択：複数選択可、merged 系と different_person 系で表示切替
-- note 入力：other_* 選択時は必須
-- 「決定」「キャンセル」ボタン
+#### 設計趣旨
 
-【設計案 A 対応追加項目】
-
-- DUPLICATE_CHECK_FIELDS の各フィールド表示（surviving 側 / merged 側を並列）
-- mid / low または値違いのフィールドにマークと修正・確認 UI（チェックボックス、merged 値採用ボタン、手入力編集）
-- マージ理由選択時の動的 UI 切り替え（additional_role なら merged 側修正・確認 UI も追加表示）
-- 確認必須フィールドがすべて確認済みになるまで、マージ確定ボタンは非活性
-
-詳細な UI レイアウト・操作フロー（マージ理由選択を先か surviving 選択を先か、「全部一括で確認」ボタンの有無等）は実装フェーズでプロトタイプして決定する。
+旧 3 カラム（surviving / merged / 中央編集）構造は `Execute_Merge_with_Updates`（マージ実行とフィールド値修正の同時実行）の廃止（#20 廃止 1）に伴って意味を失った。新 2 カラム + 比較表 + ボタン形式ラジオ + 動的表示の構造は、人が業務判定する際の視線移動・誤判定リスクを最小化する UX 設計として確定。
 
 #### マージ画面の前提
 
-マージ画面は情報密度が高い。PC 横長レイアウト（最低 1280px 幅）を前提とする。スマホ・タブレットでの最適化は v1.5.0 以降に送る。レイアウトは既存の app.css の BEM 命名規則に従い、新規クラスは app-merge-* prefix で定義する。
+マージ画面は情報密度が高い。PC 横長レイアウト（最低 1280px 幅）を前提とする。スマホ・タブレットでの最適化は v1.5.0 以降に送る。レイアウトは既存の app.css の BEM 命名規則に従い、新規クラスは `app-merge-*` / `app-section--*` / `app-detail-item--*` prefix で定義する（§11.8.6 参照）。
 
-UI 操作のセッション扱い（マージ実行ボタン押下まで DB に反映されない、キャンセルで全変更が破棄される）については 8.5.4 を参照する。
+### 11.5.6 マージ画面のレイアウト（2 カラム + 中央判定情報）
 
-### 11.5.6 マージ画面の 3 カラム設計
+| 観点 | 仕様 |
+|---|---|
+| カラム構造 | 左：Person A（基準コンタクト推奨側）、右：Person B（候補コンタクト） |
+| 編集機能 | **なし**（マージ画面では Contact のフィールド値を修正しない、§11.5.5 参照） |
+| 中央 | 判定情報入力（review_decision / surviving_person_choice / review_result / 確認チェック / review_note） |
+| 比較表 | フィールド比較は両カラムを横並びで表示。値違いは行ごとに `app-detail-item--diff` クラスでハイライト |
+| 前提幅 | PC 横長 1280px 以上（マージ画面のスマホ対応は v1.5.0 以降、§20.1 参照） |
 
-【v1.4.2 で廃止】 D-3 系 Contact 詳細画面 AJAX 化に伴い、マージ画面の「中央カラム（マージ後の Contact 編集フォーム）」を廃止し 3 カラム → 新 2 カラム + 中央の判定情報入力構造に変更する。値違いコピーボタン、notes 結合、low/mid 修正・確認 UI も廃止。Contact のフィールド値修正はマージ画面に来る前に Contact 詳細画面（11 番）で AJAX 経由で済ませる前提。新仕様の詳細はクラスタ H で別途反映。
+【v1.4.2 改訂前との差分】 旧 3 カラム（左 surviving 候補 1 / 右 surviving 候補 2 / 中央マージ後 Contact 編集）を廃止、新 2 カラム + 中央判定情報に置換。中央カラムでの Contact 編集、フィールド横の「→」コピーボタン、notes 結合、low/mid 修正・確認 UI、値違い採用 3 通り選択肢（左カラム採用 / 右カラム採用 / 手入力）はすべて廃止。
 
-以下は v1.4.2 改訂前の旧記述。新 UI 構造への置き換えは別途実施する。
+### 11.5.7 表示対象フィールドの拡張（9 → 24 フィールド比較表示）
 
-マージ画面は以下の 3 カラム構造とする。
+v1.4.2 で表示対象を `DUPLICATE_CHECK_FIELDS`（9 フィールド）から Contact `UPDATABLE_FIELDS`（24 フィールド、§4.4.1 のユーザー入力対象フィールド全体）に拡大する。マージ画面では「修正対象」ではなく「**比較表示対象**」として扱う（値違いの修正 UI は提供しない、修正は事前に Contact 詳細画面 11 番で済ませる前提）。
 
-- 左カラム：surviving 候補 1（基準コンタクト推奨側）
-- 右カラム：surviving 候補 2
-- 中央カラム：マージ後の Contact（編集可能）
+#### 表示制御
 
-操作フロー：
+| 制御 | 内容 |
+|---|---|
+| 両側空フィールド非表示 | 両 Contact ともに空のフィールドは行ごと非表示。表示密度を上げる |
+| フルネーム省略 | `MergeForm.hidden_name_fields()` が `["last_name", "first_name"]` を返すケース（両側 full_name 一致 + 姓・名サブフィールドが full_name に含まれる）では last_name / first_name 行を省略表示。重複情報の冗長表示を防ぐ |
+| 値違いハイライト | 両側で値が異なるフィールドは `app-detail-item--diff` クラスでハイライト |
+| confidence 表示 | 各フィールドの両側 confidence を表示（high / mid / low / confirmed の 4 状態、`{% confidence %}` カスタムタグ、§11.8.2 参照） |
 
-1. 判定選択：「同一人物（マージ）」「同一人物だが別肩書」「同性同名の別人」の 3 択
-2. surviving 側の選択（左／右）
-3. 中央フォームに選択側の値が初期値として入る
-4. 各フィールドに confidence ラベル（low / mid / high）を表示
-5. low / mid のフィールドは、修正または確認チェックボックス ON が必須（DUPLICATE_CHECK_FIELDS のみ対象）
-6. 反対側から値をコピーしたい場合は、フィールド横の「→」ボタンで中央にコピー可能
-7. notes フィールドは、surviving 側と merged 側の notes を結合した文字列が中央フォームの初期値として入る
-8. 完了ボタンでマージ確定
+#### 拡大対象（v1.4.1 → v1.4.2 で追加）
 
-### 11.5.7 マージ画面の表示対象フィールドの拡大
+| カテゴリ | フィールド |
+|---|---|
+| 氏名サブ | last_name / first_name / salutation_name |
+| 連絡先補足 | fax / website / qualification / catchphrase |
+| SNS 各種 | twitter / instagram / github / linkedin / facebook |
+| 自由記述 | notes |
+| 補助情報 | postal_code / lang |
 
-【v1.4.2 改訂】 表示対象フィールドの拡大方針自体は維持するが、「修正対象」ではなく「**比較表示対象**」に変更（マージ画面の値修正廃止に伴い）。新 UI ではフィールド比較表（左 Person A / 右 Person B）として表示し、ユーザーは値違いを目視確認するのみ。値違いの修正は事前に Contact 詳細画面（11 番）で AJAX 経由で行う。フルネーム一致時の姓・名サブフィールド省略（`MergeForm.hidden_name_fields()`、§11.6.2 / #54）、両側空フィールド非表示も新仕様に含まれる。
-
-以下は v1.4.2 改訂前の旧記述。
-
-v1.4.1 では「DUPLICATE_CHECK_FIELDS のみ表示・修正対象」としていたが、v1.4.2 では Contact のほぼ全フィールドに拡大する。
-
-理由：マージは破壊的操作であり、merged 側のフィールドが付け替え後どう扱われるかが曖昧なまま実装すると、ユーザーが意図しないデータ消失が起きる可能性がある。
-
-表示対象（追加）：
-
-- last_name / first_name / salutation_name
-- fax / website / qualification / catchphrase
-- twitter / instagram / github / linkedin / facebook
-- notes
-- postal_code / lang
-
-これらは confidence 関係なし、値違いまたは片方空のフィールドのみ表示・選択対象。
+これらは confidence による表示分岐なし、値違いまたは片方空のフィールドのみ表示対象とする。
 
 ### 11.5.8 DuplicateCandidateGroupListView の絞り込み仕様（15 番）
 
@@ -2209,6 +2197,79 @@ v1.4.2 で `@andypf/json-viewer@2.4.0`（CDN）カスタム要素に統一。テ
 | 8 | マージログ | 19 番 PersonMergeLogListView | v1.4.2 で新規追加（ストック #67） |
 
 各項目には `active_menu` パラメータでハイライト連動。例：`active_menu="duplicates:merge_log_list"` のとき 19 / 20 / 21 番画面で項目 8 に `is-active` クラスを付与する。
+
+### 11.8.6 マージレビュー画面の BEM 階層
+
+マージレビュー画面（17 番）の v1.4.2 全面刷新（§11.5.5）で追加された BEM クラスを以下に整理する。命名規則は CLAUDE.md §7 の `app-* / __ / -- / is-* / js-*` に従う。
+
+| BEM クラス | 用途 |
+|---|---|
+| `app-merge-decision` / `app-merge-decision__btn` | 第 1 段階判定ボタン群（review_decision 3 値、§11.6.2） |
+| `app-merge-survivor` / `app-merge-survivor__btn` | サバイブ/主コンタクト選択ボタン群（surviving_person_choice、§11.6.2） |
+| `app-merge-survivor__label--survivor` / `app-merge-survivor__label--primary-role` | ボタンラベル動的切替（CSS で `:has(.js-decision-additional_role:checked)` 連動、§11.8.7） |
+| `app-merge-reason` / `app-merge-reason__btn` | 第 2 段階判定理由ボタン群（review_result、CB ボタン形式） |
+| `app-section--merged-only` / `app-section--additional-role-only` / `app-section--different-only` | 判定値に応じた動的セクション表示（§11.8.7） |
+| `app-section--needs-survivor` / `app-section--executes-merge` / `app-section--survivor-only` / `app-section--primary-role-only` / `app-section--survivor-unselected-label` / `app-section--survivor-disabled-label` | サバイブ選択・判定状態に応じた動的表示（§11.8.7） |
+| `app-form__error-summary` / `app-form__error-summary__title` / `app-form__error-summary__list` | 画面トップのエラーサマリブロック |
+| `app-detail-item--diff` | フィールド比較の値違い行ハイライト |
+| `app-review-thumb` / `app-review-thumb__img` / `app-review-thumb__placeholder` / `app-review-field-group__title` | 名刺画像サムネ + フィールドグループ見出し |
+| `app-debug-uid` | DEBUG=True 時の UID コピペ用要素（§11.8.8） |
+
+JS 識別クラス（イベントフック・CSS セレクタの両方で使用）：
+
+| `js-` クラス | 用途 |
+|---|---|
+| `js-decision-merged` / `js-decision-additional_role` / `js-decision-different` | 第 1 段階ラジオの判定値別識別（CSS `:has()` の引数として使用） |
+| `js-reason-merged` / `js-reason-different` | 第 2 段階 CB の系統別識別 |
+
+### 11.8.7 CSS `:has()` による動的 UI 切替パターン
+
+マージレビュー画面の動的セクション表示は、**JS なしで CSS の `:has()` 擬似クラス** で実現する。第 1 段階判定（review_decision）の値に応じて、第 2 段階セクション・サバイブ選択ブロック・判定理由 CB のラベル等を出し分ける。
+
+#### セレクタパターン
+
+`form:has(.js-decision-X:checked) .app-section--Y { display: block; }`
+
+「`form` 内に `js-decision-X` のチェックが入っているとき、`app-section--Y` を表示」のロジックを CSS だけで記述。
+
+#### 適用ケース
+
+| 場面 | パターン |
+|---|---|
+| 判定値による第 2 段階セクションの出し分け | `form:has(.js-decision-merged:checked) .app-section--merged-only` など |
+| サバイブ選択ブロックの常時表示 + 別人判定時 disabled 化 | `form:has(.js-decision-different:checked) .app-merge-survivor { opacity: 0.5; pointer-events: none; }` |
+| 判定理由 CB のラベル動的切替 | `form:has(.js-decision-additional_role:checked) .app-merge-survivor__label--survivor { display: none; }` |
+
+#### ブラウザ要件
+
+`:has()` 対応：Chrome 105+ / Safari 15.4+ / Firefox 121+。フォールバックは不要（社内利用前提、PC 横長 1280px 以上、§20.1）。
+
+#### 設計趣旨
+
+JS なしで動的 UI が実現できるため、CLAUDE.md §7 の「新規 JS ファイル追加禁止 / `app.js` への追記のみ」方針と整合する。実装パターンを仕様書に明文化することで、将来他の画面でも同じパターンを再利用できる。
+
+### 11.8.8 DEBUG=True 時の UID コピペ機能
+
+開発・デバッグ時に DB レコードの UID（UUID 文字列）を頻繁にコピペする運用上の利便性を上げるため、各詳細画面に DEBUG モード限定で UID を表示する。
+
+#### 対象画面
+
+| 対象画面 | 表示する UID |
+|---|---|
+| contact_detail（11 番 ContactDetailView） | Contact UID + Person UID の 2 件併記（active Person は ContactDetailView へ redirect される設計のため Person UID も併記） |
+| card_detail（4 番 CardDetailView） | BusinessCard UID |
+| person_detail_orphan / person_detail_merged / person_detail_archived（8 番 PersonDetailView の各分岐） | Person UID |
+
+#### 表示形式
+
+- 表示位置：`app-page-header` 直下
+- HTML：`<code class="app-debug-uid">{{ object.id }}</code>`
+- DEBUG 制御：`{% if debug %}` で囲む（Django 標準 `django.template.context_processors.debug` 経由、`INTERNAL_IPS` 一致時のみ `debug=True`）
+- CSS：`.app-debug-uid` に `user-select: all; cursor: text;` + inline-block / monospace / 11px / 軽い背景色（1 クリック全選択コピー可能、JS なし）
+
+#### 設計趣旨
+
+開発・デバッグ時に DB レコードの UID をシェル / DB クライアント / 別画面に貼り付ける場面が多いため、画面上のテキストをワンクリックで全選択できる UI を CSS の `user-select: all` で実装。本番環境では `INTERNAL_IPS` 制御により表示されないため運用上の懸念なし。
 
 ---
 
