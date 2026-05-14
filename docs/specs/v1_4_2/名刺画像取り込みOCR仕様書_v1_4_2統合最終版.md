@@ -2108,7 +2108,7 @@ View から Form を生成する際、`__init__` の引数として渡す：
 
 ## 11.8 UI カスタムタグ・追加ルート・共通モーダル部品
 
-UI 共通化のためのカスタムタグ 5 種・追加ルート 2 本・共通モーダル部品を提供する。
+UI 共通化のためのカスタムタグ 6 種・追加ルート 2 本・共通モーダル部品を提供する。
 
 ### 11.8.1 カスタムタグ一覧
 
@@ -2116,9 +2116,12 @@ UI 共通化のためのカスタムタグ 5 種・追加ルート 2 本・共�
 |---|---|---|
 | `{% card_image url size %}` | url, small/medium/large | 名刺画像表示（モーダル trigger 付き） |
 | `{% original_image_thumbnail url %}` | url | 元画像サムネイル表示（モーダル trigger 付き） |
-| `{% json_tree data %}` | JSON データ | JSON ツリー表示（json-view ラップ） |
 | `{% confidence confidences field_name format %}` | confidences dict, field名, 表示形式 | フィールド単位の信頼度マーク |
 | `{% contact_confidence contact format %}` | contact オブジェクト, 表示形式 | Contact 単位の信頼度サマリー |
+| `{% confidence_state ... %}` | （引数は実装側で確定） | 単一フィールドの確認状態（high / confirmed / unconfirmed）の表示状態判定 |
+| `{% ocr_result_badge bc %}` | BusinessCard インスタンス | OCR 処理結果のバッジ表示（v1.4.2 で新規追加） |
+
+JSON ツリー表示は v1.4.2 から `@andypf/json-viewer` カスタム要素（CDN）に統一し、カスタムタグ化はしない（テンプレ側で `<andypf-json-viewer>` 要素を直接記述、§11.8.2 末尾参照）。
 
 ### 11.8.2 カスタムタグの詳細
 
@@ -2130,17 +2133,6 @@ UI 共通化のためのカスタムタグ 5 種・追加ルート 2 本・共�
 
 元画像のサムネイル表示。`{% card_image %}` と同様にモーダル trigger 自動付与。
 
-#### `{% json_tree data %}`
-
-JSON データをツリー表示する汎用タグ。内部で json-view ライブラリ（CDN 経由）に合わせた HTML と初期化 JS を出力する。
-
-利用画面：
-
-- OriginalDetailView（OriginalImage.raw_json の表示）
-- CardDetailView（BusinessCard 関連の JSON 表示）
-
-将来 json-view を別ライブラリに変えたくなっても、タグの内部だけ修正すれば全画面に反映される。
-
 #### `{% confidence confidences field_name format %}`
 
 フィールド単位の信頼度マーク表示。第 1 引数は `contact.get_field_confidences()` の戻り値（dict）。format で表示形式（icon / badge / count 等）を切り替え可能。
@@ -2150,6 +2142,38 @@ JSON データをツリー表示する汎用タグ。内部で json-view ライ�
 #### `{% contact_confidence contact format %}`
 
 Contact 単位の信頼度サマリー表示。Contact 全体で何個の low/mid フィールドが残っているか、何個が確認済みかを集計表示する。
+
+#### `{% confidence_state ... %}`
+
+単一フィールドの確認状態（high / confirmed / unconfirmed）の表示状態判定。`_contact_field.html` パーツ内で個別フィールドの「OK / 修正中」UI 切替に使用する。引数仕様は実装側で確定（cards/templatetags/ui_tags.py、§11.6.2 / §11.3 No.11 ContactDetailView 参照）。
+
+#### `{% ocr_result_badge bc %}`
+
+BusinessCard の `ocr_result` 値に応じて、業務上の警戒度を表すバッジを表示する。引数 `bc` が None 時は空文字を返す防御あり。
+
+| `ocr_result` 値 | バッジクラス | 表示テキスト |
+|---|---|---|
+| `business_card` | （バッジなし、空文字を返す） | - |
+| `not_business_card` | `app-status-badge--muted` | 名刺ではない |
+| `insufficient_info` | `app-status-badge--warning` | 情報不足 |
+| `ocr_failed` | `app-status-badge--error` | OCR失敗 |
+| `others` | `app-status-badge--muted` | その他 |
+
+ラベルは `bc.get_ocr_result_display()` 経由で TextChoices 定義から取得する（仕様書で表示名が変わっても自動追従）。
+
+【v1.4.2 拡張：`ocr_status` 分岐】 `BC.ocr_status` を見て、`pending` → 「OCR 待ち」バッジ（`app-status-badge--muted`）、`processing` → 「OCR 中」バッジ（`app-status-badge--info`）を表示。`done` / `failed` のときは上記 5 値表示ロジックに従う（新規 CSS / JS の追加なし、既存クラスのみ使用）。
+
+【バッジ色の設計思想】 業務上の警戒度で割り当て：muted = 想定外だが警戒度低、info = 処理中の通知、warning = ユーザーに撮り直しを促す系、error = 明確な失敗。`not_business_card` と `others` が同じ muted になっているのは、現時点で `others` がセットされる経路自体がない（v1.4.x 時点では将来用受け皿のみ）ため実用上の問題なし。実際に `others` が出る経路ができたタイミングで色分けを再検討する。
+
+#### JSON ツリー表示（カスタムタグ化なし）
+
+v1.4.2 で `@andypf/json-viewer@2.4.0`（CDN）カスタム要素に統一。テンプレ側で `<andypf-json-viewer>` 要素を直接記述する（カスタムタグ経由ではない）。
+
+- 利用画面：CardDetailView（BC.raw_json_1 / raw_json_2 表示）、OriginalDetailView（debug_json 表示）
+- 初期状態：折りたたみ（`expanded="0"`）
+- 検索・コピー・サイズ表示は viewer 内蔵ツールバーで提供
+- **OriginalImage.raw_json の表示は v1.4.2 で廃止**（§4.2 / ストック #35 参照、生 JSON は BC.raw_json_1 / raw_json_2 経由で参照）
+- admin の readonly_fields も整理：OriginalImageAdmin から `raw_json` を削除、BusinessCardAdmin に `raw_json_1` / `raw_json_2` / `ocr_status` / `claimed_at` / `error_message` を追加、`list_display` / `list_filter` に `ocr_status` / `ocr_result` を追加
 
 ### 11.8.3 共通モーダル部品
 
