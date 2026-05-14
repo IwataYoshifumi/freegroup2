@@ -400,15 +400,26 @@ Person.status による絞り込みは Contact 側の複合インデックスで
 
 （2）`find_duplicate_contacts(contact, excluded_persons=...)` を呼び、重複候補のタプル列を取得する。`excluded_persons` には手順（1）で取得した Person リストを渡す。
 
-（3）取得したタプル列が空の場合、（4）（5）（6）をスキップして（7）に進む。
+（2.5）**事前フィルタ（v1.4.2 で追加、X-3 ランナバグ修正）**：`contact.person` と既に pending DuplicateCandidate として組まれている Person ID 集合を取得し、その集合に含まれる candidate をスキップする。
+
+- 取得方法：`person_a=contact.person AND review_status='pending'` のクエリで person_b の ID 集合、`person_b=contact.person AND review_status='pending'` のクエリで person_a の ID 集合を、**person_a / person_b 別々の 2 クエリ** で取得する。
+- 2 つの ID 集合を合算（`set` の union）して「既存 pending ペアの相手 Person ID 集合」を得る。
+- 手順（2）のタプル列を走査し、`candidate.person.id` が上記集合に含まれるものをスキップする。
+- スキップ判定は **person_id レベル** で行う（DuplicateCandidate インスタンス比較ではない）。
+
+★ なぜ 2 クエリに分けるか：`Q(person_a=p) | Q(person_b=p)` の OR 検索は SQLite 3.51.2 の planner bug でインデックスを使わない最悪計画が選ばれるケースがあり、件数が増えると性能が落ちる。person_a / person_b を別クエリで取得することで、両方ともインデックスを使った高速な実行計画を保証できる。
+
+★ なぜ事前フィルタが必要か：partial unique constraint（3.6）違反を **事前に回避**するため。同一 cron バッチ内で同 Person ペアの両側が処理対象になるケース（新規 OCR 取り込み・テストデータ生成スクリプト経由の流入等）で、12.7 / recover の事前整理経路を経由せずに pending DC が衝突する経路がある。事前フィルタで衝突候補自体を除外することで、IntegrityError の発生経路を排除する。
+
+（3）（2.5）の事前フィルタ通過後のタプル列が空の場合、（4）（5）（6）をスキップして（7）に進む。
 
 （4）`assigned_to` の値を 1 度だけ計算する。3.4 の決定ロジックに従い、入力 contact から `business_card.original_image.user` または `created_by` のどちらかを取得する。この値はループ内で生成するすべての DuplicateCandidate に共通で適用される（候補ごとに違う値にはならない）。
 
-（5）各タプル `(candidate, score, rank)` から、DuplicateCandidate のインスタンスを構築する。フィールドの値は 3.4 を参照。`assigned_to` は手順（4）で計算した値を使う。
+（5）（2.5）の事前フィルタを通過した各タプル `(candidate, score, rank)` から、DuplicateCandidate のインスタンスを構築する。フィールドの値は 3.4 を参照。`assigned_to` は手順（4）で計算した値を使う。
 
 （6）構築したインスタンス群を `DuplicateCandidate.objects.bulk_create(...)` で一括書き込みする。
 
-（7）`contact.duplicate_checked_at = timezone.now()` を設定し、`contact.save(update_fields=['duplicate_checked_at'])` で保存する。
+（7）`contact.duplicate_checked_at = timezone.now()` を設定し、`contact.save(update_fields=['duplicate_checked_at'])` で保存する。事前フィルタで全候補がスキップされた場合も、処理完了として duplicate_checked_at を更新する。
 
 （8）トランザクションを正常終了する（コミット）。
 
@@ -465,7 +476,7 @@ else:
 
 ★ 二重ネスト atomic の挙動について：上位関数（4.4.2）で `with transaction.atomic():` を張った内側で、本関数（3.3）が再度 `transaction.atomic()` を張る形になるが、これは Django として有効な使い方である。Django の `transaction.atomic()` はネストされた場合、**外側のトランザクションは通常のトランザクションとして動作し、内側のトランザクションは savepoint として動作する**。内側のトランザクションが例外でロールバックされても、savepoint の範囲だけがロールバックされ、外側のトランザクションは継続できる（ただし本仕様では内側で発生した例外は外側にも伝播させてロールバックするため、実質的に二重ネストでも振る舞いは「1 Contact 単位でコミット / ロールバック」と同じになる）。コード君が「二重ネストで大丈夫か」と迷う必要はない。
 
-## **3.6 partial unique constraint との関係**
+## **3.6 partial unique constraint との関係（v1.4.2 改訂）**
 
 DuplicateCandidate モデルには、`review_status='pending'` に限定した partial unique constraint が設定されている（v1.4.1 4.7）。
 
@@ -473,22 +484,30 @@ DuplicateCandidate モデルには、`review_status='pending'` に限定した p
 UniqueConstraint(fields=['person_a', 'person_b'], condition=Q(review_status='pending'))
 ```
 
-この制約により、bulk_create が IntegrityError で失敗するケースが理論上ありうる。たとえば、12.7（Contact 編集時の処理）が同じ Person ペアの pending DuplicateCandidate を invalidated 化していない状態で、cron が新規 pending を作ろうとすると衝突する。
+この制約により、bulk_create が IntegrityError で失敗するケースが理論上ありうる。
 
-ただし、本仕様の運用では以下の理由により、この衝突は実運用上発生しない想定とする。
+【v1.4.2 改訂：事前フィルタで衝突を未然に回避】 v1.4.2 改訂前は「12.7 / recover が事前に整理する経路でのみ pending DC が作られる」想定で衝突は実運用上発生しないとしていたが、以下のケースで成立しない経路があった：
 
-- 12.7 の処理が Contact 編集時に必ず発火し、関連 pending を invalidated 化する
-- マージ実行時の recover 処理（rev5 7.3）が同 Person ペアの pending を整理する
-- `duplicate_checked_at = NULL` の Contact のみが本関数の処理対象となるため、過去 pending の存在は cron 起動時点では想定されない
-- 上位関数 `Run_Generate_Duplicate_Candidates` の 4.4.3 で 3 段の再チェック（duplicate_checked_at / Contact.status / Person.status）を行うため、ロック取得から processing までの間の状態変化による競合経路は排除される
+- 同一 cron バッチ内で同 Person ペアの両側（contact_a と contact_b）が `duplicate_checked_at=NULL` で処理対象になるケース（新規 OCR 取り込みで両側が同じバッチに入る、テストデータ生成スクリプト経由の流入、等）
+- 上記ケースでは、最初の contact 処理で生成された pending DC を、次の contact 処理が認識せず重複生成しようとして IntegrityError
 
-### **3.6.1 IntegrityError 発生時の挙動（v0.1.2 で確定）**
+X-3 ランナバグ修正（v1.4.2、コミット 4cd1c3e）で **事前フィルタ（3.3 手順 2.5）** を追加し、衝突候補を bulk_create 前に除外する設計に変更した。これにより、IntegrityError は実運用で発生しない想定が再び成立する。
 
-万一 IntegrityError が発生した場合の挙動は以下のとおり。`bulk_create` の引数として `ignore_conflicts=True` は **付けない**。
+- 12.7 の処理が Contact 編集時に必ず発火し、関連 pending を invalidated 化する（旧来の経路）
+- マージ実行時の recover 処理（rev5 7.3）が同 Person ペアの pending を整理する（旧来の経路）
+- `duplicate_checked_at = NULL` の Contact のみが本関数の処理対象となるため、過去 pending の存在は cron 起動時点では想定されない（旧来の経路）
+- 上位関数 `Run_Generate_Duplicate_Candidates` の 4.4.3 で 3 段の再チェック（duplicate_checked_at / Contact.status / Person.status）を行うため、ロック取得から processing までの間の状態変化による競合経路は排除される（旧来の経路）
+- **事前フィルタ（3.3 手順 2.5）が同一 cron バッチ内の両側処理ケースを吸収する（v1.4.2 で追加）**
+
+4.4.3 の 3 段再チェックは引き続き有効。事前フィルタは「衝突を bulk_create より前に除外する」レイヤー、3 段再チェックは「ロック取得から processing までの状態変化に対する防御」レイヤーで、責務が異なる別レイヤーとして共存する。
+
+### **3.6.1 IntegrityError 発生時の挙動（v1.4.2 改訂）**
+
+万一 IntegrityError が発生した場合の挙動は以下のとおり。`bulk_create` の引数として `ignore_conflicts=True` は **付けない**（v0.1.2 確定、v1.4.2 でも維持）。
 
 ```
 DuplicateCandidate.objects.bulk_create(candidates)
-# ignore_conflicts=True は付けない（v0.1.2 確定）
+# ignore_conflicts=True は付けない
 ```
 
 挙動：
@@ -498,9 +517,11 @@ DuplicateCandidate.objects.bulk_create(candidates)
 - `contact.duplicate_checked_at` が NULL のまま残る
 - 次回 cron 起動時に、当該 contact が再度処理対象に含まれる（rev5 12.6 のエラーハンドリング方針と整合）
 
-★ v0.1.2 で `ignore_conflicts=True` を付けない理由：
+【v1.4.2 改訂：発生時の解釈】 v1.4.2 改訂前は「IntegrityError は実運用で発生しない想定」だけ書いていたが、事前フィルタ（3.3 手順 2.5）追加により発生経路がより明確に排除された。万一 IntegrityError が発生した場合は、**事前フィルタの実装漏れまたは race condition の証拠** であり、業務データ・コードベースの整合性異常として扱う。当該 contact のトランザクションをロールバックして上位ループに伝播させる挙動は §1.3 / §4.5 と整合する。
 
-- 4.4.3 の 3 段再チェックで競合経路を排除しているため、IntegrityError は実運用で発生しない想定
+★ `ignore_conflicts=True` を付けない理由（v0.1.2 確定）：
+
+- 事前フィルタと 4.4.3 の 3 段再チェックで競合経路を排除しているため、IntegrityError は実運用で発生しない想定
 - `ignore_conflicts=True` を付けると「衝突をなかったことにする」挙動になり、後から「なぜこの候補が作られなかったのか」が追えない（隠蔽的）
 - Django の標準挙動を活かし、競合が起きたら例外で気付ける状態の方が、開発・運用上の透明性が高い
 - たんたんの設計思想「異常を隠さない」と整合する
@@ -940,6 +961,8 @@ DuplicateCandidate.objects.filter(
 
 このロジックを candidate 1 件ごとに実行する。同じバッチ内で、起点 Person・ランクが同じ複数の candidate がある場合、同じ group_id が付くようにする（バッチ内でのキャッシュは 運用後に詳細化）。
 
+【v1.4.2 補足】 3.3 手順 (2.5) の事前フィルタで除外された候補には group_id 発行を行わない（DuplicateCandidate インスタンス自体を構築する手順 (5) に到達しないため、自然にそうなる）。本ロジック (1)〜(3) は事前フィルタを通過した候補のみを対象とする。
+
 ★ v0.1 段階で「バッチ内キャッシュ最適化」を 運用後に再評価する妥当性根拠：rev5 8.5 の見積もりにより、N=5000 規模でも 1 contact あたりの候補数は 0〜数件と想定されている。candidate 1 件ごとに 1 回の group_id 検索クエリ（インデックスを使った高速な検索）が走るため、1 contact あたり 0〜数回の追加クエリにとどまる。limit=100 件処理で最大数十回〜数百回程度のクエリ増加であり、5 分間隔の cron 実行では実害ない見込みである。N=5000 想定での実測は 運用後の実測で行い、必要に応じて最適化を実装する。
 
 ### **5.3.3 person_a / person_b の順序ルールとの関係**
@@ -975,11 +998,13 @@ group_id 検索時、起点 Person が person_a 側か person_b 側かは決ま�
 
 `find_duplicate_contacts` はスコア計算の純粋なロジックであり、フィールド値（contact / candidate）と confidence の情報だけで結果が決まる。DuplicateCandidate テーブルや他の履歴テーブルを参照しない設計とする。
 
-履歴参照判断（different_person 除外、group_id 発行）はすべて `generate_duplicate_candidates_for_contact` 側で実施し、`find_duplicate_contacts` には除外対象 Person を引数として渡す形にする。これにより：
+履歴参照判断（different_person 除外、group_id 発行、**既存 pending DC の存在チェック**）はすべて `generate_duplicate_candidates_for_contact` 側で実施し、`find_duplicate_contacts` には除外対象 Person を引数として渡す形にする。これにより：
 
 - `find_duplicate_contacts` のテストが書きやすくなる（Mock 不要、純粋な入出力検証）
 - `find_duplicate_contacts` を ContactCreateView から呼ぶ際、履歴参照を最小限にできる
 - 「DB 履歴を見る判断」の責務が generate 側に一極集中する
+
+【v1.4.2 拡張】 X-3 ランナバグ修正で「既存 pending DC の存在チェック」（3.3 手順 2.5 の事前フィルタ）も generate 側の責務として加わった。これにより、`find_duplicate_contacts` の純粋性（履歴参照なし）を維持しつつ、pending 衝突を generate 側で事前回避する設計となる。
 
 ### **5.4.2 なぜ「pending のみを見る」か**
 
@@ -1045,6 +1070,7 @@ v0.1 段階では「`find_duplicate_contacts` をループで回すところま�
 | 5 | group_id が起点 Person・同ランクで共有されること | 同じ起点 Person について複数の候補が出るケースで、同ランクの DuplicateCandidate が同じ group_id を持つことを確認。加えて、DB クエリログを観察して group_id 検索が candidate 数と同じだけ走ることを確認（運用後の最適化対象として 5.5 に記載済み） |
 | 6 | --limit が効くこと | duplicate_checked_at=NULL の Contact を limit 件以上用意し、limit 件のみ処理されることを確認 |
 | 7 | different_person 判定済みのペアが再度候補に上がらないこと | Person A vs Person B を different_person 判定済みの状態で、Person A を起点として Run_Generate_Duplicate_Candidates を実行。Person B が候補に上がらない（DuplicateCandidate が作られない）ことを確認。`get_persons_confirmed_as_different(A)` が B を含むリストを返すこと、およびその結果が `find_duplicate_contacts` に渡されて NOT IN で除外されることを併せて確認 |
+| 8 | 同一 cron バッチ内で同 Person ペアの両側が処理対象になっても IntegrityError なしで完走すること（v1.4.2 で追加、X-3 ランナバグ修正の確認観点）| テストデータ生成スクリプト経由などで、同 Person ペアの両側（contact_a と contact_b）が `duplicate_checked_at=NULL` の状態を作る。`dev_create_test_contact_data --reset → check_duplicates --limit 100` で再現可能。事前フィルタ（3.3 手順 2.5）により衝突候補が除外され、両側の処理が IntegrityError なしで完走することを確認 |
 
 ## **6.3 確認しない事項（運用後にチューニング）**
 
