@@ -125,11 +125,12 @@ OCR 結果から Contact を生成する際にフィールドの正規化を実�
 システム全体の処理フローは以下のとおり。
 
 1. ユーザーが画像をアップロード（同期処理） → OriginalImage 作成（status=pending）
-2. cron による process_pending 起動 → OCR 実行 → 名刺画像切り抜き → BusinessCard / Contact / Person 作成
-3. cron による check_duplicates 起動 → 主コンタクト同士で重複検出 → DuplicateCandidate 作成
-4. ユーザーがレビュー画面を開き、1 ペアごとに判定（マージ / 別人 / 次の候補）
-5. マージ実行 → PersonMergeLog 作成 → Contact 付け替え → Person.status='merged' に変更 → recover_duplicate_candidates 実行
-6. 必要に応じて復元実行 → Contact を previous_person に戻す → ログを undone に
+2. cron による `process_opencv` 起動 → OpenCV で名刺画像切り抜き → BusinessCard 作成（`status=cards_extracted`、`ocr_status=pending`）
+3. cron による `process_ocr` 起動 → BC 単位で条件付き 2 回 OCR 実行 → Contact / Person 作成、`status=extracted`（OpenCV と OCR は独立した 2 本 cron に分離、§15.6 / §17 別表 B 参照）
+4. cron による `check_duplicates` 起動 → 主コンタクト同士で重複検出 → DuplicateCandidate 作成
+5. ユーザーがレビュー画面を開き、1 ペアごとに判定（マージ / 別人 / 次の候補）
+6. マージ実行 → PersonMergeLog 作成 → Contact 付け替え → Person.status='merged' に変更 → recover_duplicate_candidates 実行
+7. 必要に応じて復元実行 → Contact を previous_person に戻す → ログを undone に
 
 View 層の責務は元画像の保存（OriginalImage 作成、status=pending）までに限定される。OCR 処理、重複チェック処理、マージ処理は別プロセスまたは別 View で実行される。
 
@@ -2513,13 +2514,16 @@ View 層・cron・タスクから直接呼ばれる「処理フロー全体を�
 
 | コマンド | オプション | 用途 |
 |---|---|---|
-| `process_pending` | `--limit` | cron 起動。pending 画像を OCR 処理 |
-| `retry_failed_ocr` | `--all / --id / --limit / --dry-run` | failed を pending に戻す |
+| `process_opencv` | `--limit` / `--id <oid>` | cron 起動。OpenCV パイプライン専用。pending かつ BC 0 件の OriginalImage を取得 → OpenCV 検出 → BC 作成 → `status=cards_extracted` まで。BC が 1 件でも存在する OriginalImage は対象外（再実行禁止、card_index 不変担保） |
+| `process_ocr` | `--limit` / `--id <bc>` | cron 起動。OCR パイプライン専用。`BC.ocr_status=pending` を取得 → 条件付き 2 回 OCR → Contact / Person 生成 → OriginalImage.status の集計遷移 |
+| `retry_failed_ocr` | `--opencv` / `--ocr` (mutually exclusive、必須) + `--limit` / `--id` / `--dry-run` | 失敗の差し戻し。`--opencv`：`status=failed` AND BC 0 件の OriginalImage を `pending` に戻す。`--ocr`：`BC.ocr_status=failed` の BC を `pending` に戻し所属 OriginalImage.status を `cards_extracted` に戻す（所属 Contact 削除・孤立 Person 削除を含む。共通ヘルパー `cards/tasks/ocr_recovery.py` に集約） |
 | `reconcile_card_images` | `--apply` | DB↔MEDIA_ROOT 整合検査・修復 |
-| `dev_reset_ocr` | `--all / --id / --limit / --dry-run` | 開発用 OCR リセット（旧 `dev_for_reset_ocr` から改名） |
+| `dev_reset_ocr` | `--all / --id / --limit / --dry-run` | 開発用 OCR リセット |
 | `check_duplicates` | `--limit`（デフォルト 100） | cron 起動。重複チェック実行 |
 | `recheck_duplicates` | `--all / --dry-run` | 運用用。判定ロジック変更後の全件再判定 |
-| `dev_reset_duplicates` | `--all / --id / --limit / --dry-run` | 開発用重複チェックリセット（旧 `dev_for_reset_duplicates` から改名） |
+| `dev_reset_duplicates` | `--all / --id / --limit / --dry-run` | 開発用重複チェックリセット |
+
+【v1.4.2 廃止】 旧 `process_pending`（1 本パイプライン用）は完全削除。`cards/tasks/pipeline_coordinator.py`（PipelineCoordinator クラス）と `cards/tasks/card_cropper.py` の `save_card_image_tmp` 関数も削除（§15.x card_image 同期書きへの変更と整合）。
 
 ## 13.6 設計思想の明文化
 
@@ -2894,8 +2898,9 @@ Django 標準の CSRF 保護を継続。画像アップロードはバリデー�
 
 - 画像アップロード → 名刺一覧表示まで：画像 1 枚あたり 30 秒以内
 - OCR API 1 回あたりのタイムアウト：60 秒
-- process_pending の cron 起動間隔：1〜5 分
-- stuck sweeper のしきい値：30 分（OCR 処理）
+- `process_opencv` の cron 起動間隔：1〜5 分（OpenCV は API 不使用のため高頻度実行可）
+- `process_ocr` の cron 起動間隔：1〜5 分（API レートに応じて調整）
+- stuck sweeper のしきい値：30 分（OpenCV / OCR 共通、`settings.OCR_STUCK_THRESHOLD_MINUTES`）
 - check_duplicates の cron 起動間隔：5 分（推奨）
 - 1 Contact の重複チェック処理時間：数秒以内
 
@@ -3340,8 +3345,9 @@ v1.4.2 のマイグレーション適用は以下の順序で行う。
 
 | コマンド | オプション | 用途 |
 |---|---|---|
-| process_pending | --limit | cron 起動。OCR 処理 |
-| retry_failed_ocr | --all / --id / --limit / --dry-run | failed を pending に戻す |
+| process_opencv | --limit / --id | cron 起動。OpenCV パイプライン専用（BC 0 件の OriginalImage を pending→opencv_processing→cards_extracted、再実行禁止）|
+| process_ocr | --limit / --id | cron 起動。OCR パイプライン専用（BC.ocr_status=pending を CAS→条件付き 2 回 OCR→Contact/Person 生成→OriginalImage.status 集計遷移）|
+| retry_failed_ocr | --opencv / --ocr (必須) + --limit / --id / --dry-run | 失敗の差し戻し。--opencv は OpenCV 段階、--ocr は OCR 段階。共通ヘルパー cards/tasks/ocr_recovery.py に集約 |
 | reconcile_card_images | --apply | DB ↔ MEDIA_ROOT 整合検査・修復 |
 | dev_reset_ocr | --all / --id / --limit / --dry-run | 開発用 OCR リセット |
 | check_duplicates | --limit（デフォルト 100） | cron 起動。重複チェック実行 |
