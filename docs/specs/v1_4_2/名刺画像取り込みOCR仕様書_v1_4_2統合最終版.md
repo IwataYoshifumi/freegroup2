@@ -578,6 +578,27 @@ ActionLog は DB 上のモデルであるため、DB 自体が障害時には Ac
 
 これにより、DB 障害時でも最低限の障害情報が残り、原因調査が可能になる。
 
+## 4.12 DebugMask（OpenCV デバッグ用マスク画像 DB）
+
+DebugMask は、OpenCV 検出パイプラインで生成されるデバッグ用マスク画像（5 種）を DB 管理するための補助モデル。OriginalImage 1 件に対して最大 5 件（mask_type ごとに 1 件）の DebugMask が紐づく。BusinessCard と同じく cards アプリ配下に配置する。
+
+| フィールド名 | 型 | 説明 |
+|---|---|---|
+| id | UUIDField (PK) | プライマリキー |
+| original_image | FK(OriginalImage, CASCADE, related_name='debug_masks') | 元画像への外部キー |
+| mask_type | CharField(20, choices) | マスク種別（5 値、別表 C.15 参照） |
+| mask_image | ImageField | マスク画像実体（保存先：`media/debug_masks/<original_id>/<mask_type>.png`） |
+| metadata | JSONField (default=dict, null=False, blank=True) | マスク個別の属性（white_ratio 等） |
+| created_at | DateTimeField | auto_now_add |
+
+制約：UniqueConstraint(original_image, mask_type)。
+
+### 4.12.1 設計趣旨：DB 1 次ソース、FS 実体は従属物
+
+DebugMask は「DB レコードを 1 次ソースとし、FS 実体は DB レコードに紐付いた従属物」として扱う設計を採る。OriginalImage / BusinessCard / DebugMask それぞれに `post_delete` シグナルを定義し、レコード削除時に対応する FS 実体（image_file / card_image / mask_image）が自動削除される。
+
+開発フェーズで OpenCV チューニングを繰り返す前提で、開発環境完全リセット手順「`db.sqlite3` 削除＋ migrate」だけで完結する状態を担保する。v1.4.2 改訂前は mask 画像が DB と独立して FS 上に存在し、`db.sqlite3` を削除しても media 配下の FS 実体が残る問題があったが、本モデル導入で解消する。
+
 ---
 
 # 第5章 OCR 結果 JSON 仕様
@@ -2493,6 +2514,7 @@ DuplicateCandidate.review_result の different_person 系。
 | BusinessCard.Orientation | normal / rotate_90_cw / rotate_90_ccw / rotate_180 / mirror |
 | BusinessCard.OcrStatus | pending / processing / done / failed |
 | BusinessCard.OcrResult | business_card / not_business_card / insufficient_info / ocr_failed / others |
+| DebugMask.MaskType | diff / edge / sat / or / closed |
 | ContactFieldConfidence.Confidence | low / medium（high は記録対象外） |
 | DuplicateCandidate.Rank | exact_match / possible_high / possible_mid / possible_low / none |
 | DuplicateCandidate.ReviewStatus | pending / merged / different_person / invalidated |
@@ -2981,6 +3003,7 @@ v1.4.2 のマイグレーション適用は以下の順序で行う。
 |---|---|
 | 元画像 | OriginalImage |
 | 名刺 | BusinessCard |
+| デバッグマスク | DebugMask |
 | 人物 | Person |
 | コンタクト | Contact |
 | 信頼度メタ | ContactFieldConfidence |
@@ -3137,7 +3160,18 @@ v1.4.2 のマイグレーション適用は以下の順序で行う。
 | 補足メモ | note |
 | 作成日時 | created_at |
 
-### A.11 主要なプロパティ・属性
+### A.11 DebugMask のフィールド
+
+| 日本語名 | コーディング名 |
+|---|---|
+| プライマリキー | id |
+| 元画像 | original_image |
+| マスク種別 | mask_type |
+| マスク画像 | mask_image |
+| メタデータ | metadata |
+| 作成日時 | created_at |
+
+### A.12 主要なプロパティ・属性
 
 | 日本語名 | コーディング名 |
 |---|---|
@@ -3317,6 +3351,18 @@ BC 単位の OCR 処理結果の分類。null 許容（OpenCV cron 完了直後�
 | others | その他 | 上記いずれにも該当しない予期せぬケース |
 
 `ocr_failed` と `others` は将来用の受け皿として定義のみ。v1.4.2 時点での実装上のセット箇所はステップ 2 以降で確定する。
+
+### C.15 DebugMask.MaskType
+
+OpenCV 検出パイプラインで生成されるデバッグ用マスク画像の種別（5 種）。
+
+| コード値 | 表示名 | 意味 |
+|---|---|---|
+| diff | 差分マスク | 差分検出マスク |
+| edge | エッジマスク | エッジ検出マスク |
+| sat | 彩度マスク | 彩度ベースのマスク |
+| or | OR 合成マスク | 複数マスクの OR 合成結果 |
+| closed | クローズマスク | モルフォロジー処理後のマスク |
 
 ---
 
