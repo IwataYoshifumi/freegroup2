@@ -271,9 +271,9 @@ Contact は「ある時点での名刺情報のスナップショット」とし
 | duplicate_checked_at | DateTimeField (null=True) | 重複チェック実行日時 |
 | created_by | FK(User, SET_NULL, null=True) | Contact 作成者 |
 | updated_by | FK(User, SET_NULL, null=True) | 直近の更新者 |
-| lang | CharField (default='ja') | 言語コード（ISO 639-1） |
+| lang | CharField (default='ja', blank=True) | 言語コード（ISO 639-1） |
 | postal_code | CharField | 郵便番号（数字のみ正規化済み） |
-| full_name | CharField(255) | 氏名（正規化済み） |
+| full_name | CharField(255, blank=False) | 氏名（正規化済み、必須） |
 | last_name / first_name | CharField(255) | 姓 / 名（オプション） |
 | salutation_name | CharField(255) | 敬称表記 |
 | company | CharField(255) | 会社名（正規化済み） |
@@ -289,6 +289,8 @@ Contact は「ある時点での名刺情報のスナップショット」とし
 | linkedin / facebook | CharField(500) | SNS（URL 系） |
 | notes | TextField | 自由記述メモ（正規化対象外） |
 | created_at / updated_at | DateTimeField | 自動付与 |
+
+`full_name` は必須フィールド。OCR 由来・手動入力・マージ画面・AJAX 更新を含むすべての経路で空文字を弾く（DB 制約 + Form clean + AJAX View ガード）。詳細は §15.5.3 の正規化ルールを参照。
 
 ### 4.4.2 Contact.status の値
 
@@ -2583,6 +2585,7 @@ ContactCreateView / ContactUpdateView も同じ normalization の関数を呼ぶ
 - 半角空白を除去（空白なしで比較）
 - 全角英数字 → 半角英数字
 - 前後の空白除去
+- 正規化後に空文字となった場合は `ValidationError` を raise する（保存・更新前バリデーション、§4.4.1 の必須フィールド制約と整合）
 
 #### 会社名（company）
 
