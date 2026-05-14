@@ -979,6 +979,18 @@ calculate_score の呼び出し回数：素朴な実装で N-1 = 4999 回 → �
 
 【補足】手順 1 はユーザーがデフォルト推奨をそのまま使った場合と、明示的に切り替えた場合の両方をカバーする。手順 2 のバリデーションは、UI 側のバリデーションが破られた場合の最後の砦として機能する。手順 6 の状態遷移は確定後の merged 側に対して適用される。
 
+【v1.4.2 補足：手順順序とサービス責務の明示】 マージ実行サービス（Execute_Merge_Only）は、上記手順を atomic 内で以下の順に呼ぶ：
+
+1. **atomic 冒頭：CFC 確定処理** — surviving 側 primary_contact に紐づく `confirmed_at IS NULL` の CFC（未確認 low/mid）を `ContactFieldConfidence.mark_fields_as_confirmed(surviving_primary, field_names, user)` で一括 confirmed 化（マージ画面の確認 CB を ON でマージ実行した場合の CFC 反映を担保、Contact.fix() と同じパターン）
+2. バリデーション（手順 2）
+3. `merged_person.transfer_contacts_to(surviving_person, merge_reason)` 等の Contact 引き渡し
+4. `merged_person.mark_as_merged(surviving_person)` を呼ぶ
+5. `candidate.mark_as_merged(user, review_result, note)` を呼ぶ
+6. `recover_duplicate_candidates(merged_person, surviving_person)`（冪等性のための防御チェックのみ、§12.8.3 参照）
+7. surviving_person.duplicate_checked_at の更新
+
+「mark_as_merged → recover」の順序を明示するのは、recover 関数の責務を「冪等性チェックのみ」に縮小し、状態変更の主体を呼び出し元（Execute_Merge_*）に集約する設計思想（§12.8.3）と整合させるため。マージ画面 UI の刷新と Execute_Merge_with_Updates 廃止に伴う §9.3.1 全面整理は、別途実施予定。
+
 ### 9.3.2 復元時の Person.primary_contact 同期
 
 復元処理（9.5.2）では、Contact の status を previous_status に戻した後、Person.primary_contact の同期処理を実施する。Contact.status='primary' のものが Person.primary_contact と一致するように再同期する。同期処理は `Person.set_primary_contact()` インスタンスメソッド経由で実行する。
@@ -1068,9 +1080,10 @@ additional_role を多用すると、サバイブ側に多数の active 副コ�
 | 2 | 対象 Contact の status を previous_status に戻す |
 | 3 | 対象 Contact の previous_person を NULL に戻す |
 | 4 | 対象 Contact の previous_status を NULL に戻す |
-| 5 | merged_person.status を 'active' に戻す、merged_into を NULL に |
+| 5 | `merged_person.mark_as_active()` を呼ぶ（status='active' / merged_into=NULL、§10.4.1 参照） |
 | 6 | Person.primary_contact の同期処理（Contact.status='primary' のものが Person.primary_contact と一致するように再同期、`Person.set_primary_contact()` 経由） |
 | 7 | PersonMergeLog.status を 'undone' に変更、undone_by、undone_at を記録 |
+| 8 | `merged_person.primary_contact.duplicate_checked_at = None` をセット（次回 cron で再判定対象にするため） |
 
 すべての処理を 1 つのトランザクション内で実行する。
 
@@ -2180,20 +2193,22 @@ review_status='merged' / 'different_person' のレコードはそのまま（過
 
 ### 12.8.3 recover 処理の手順
 
+`recover_duplicate_candidates(merged_person, surviving_person)` は、マージ実行サービス（Execute_Merge_Only）から **mark_as_merged 後に呼び出される後処理**である。v1.4.2 の責務縮小により、recover 関数は「冪等性のための防御チェック」と「DuplicateCandidate の再復帰」を担い、Person / DuplicateCandidate の状態遷移そのものは呼び出し元（Execute_Merge_*）が事前に実行する前提とする。
+
 1. **merged_person を含む他の pending DuplicateCandidate を invalidated 化**（A / B 以外の Person 集合を保持）
-2. **当該マージの DuplicateCandidate を 'merged' に変更**
+2. **当該マージの DuplicateCandidate の状態確認**（冪等性チェックのみ）：呼び出し元（Execute_Merge_*）が事前に `candidate.mark_as_merged(user, review_result, note)` を呼んでいる前提。recover 関数内では DuplicateCandidate を改めて 'merged' に変更する処理は行わない（呼び出し元責務）
 3. **保持した DuplicateCandidate を再復帰**：
    - **`DuplicateCandidate.create_recovered_from(old_candidate, new_surviving_person)` クラスメソッド**で新規作成
    - score / rank / group_id は old_candidate からコピー（再スコア計算は不要）
    - merged_person だった側を surviving_person（new_surviving_person）に置き換え
    - review_status='pending' で作成
-4. **surviving_person.duplicate_checked_at の更新**：
-   - 値修正があった場合（has_field_updates=True） → NULL（次回 cron で再判定）
-   - 値修正がなかった場合（has_field_updates=False） → now()
+4. **surviving_person.duplicate_checked_at の更新は recover 関数では行わない**（呼び出し元 Execute_Merge_* の責務）。v1.4.2 改訂前は recover 内で更新していたが、責務分担の明確化のため呼び出し元に移管。
 
 【再復帰の除外条件】 相手側 Person が active 以外（merged / archived）になっている場合は、当該 DuplicateCandidate は再復帰させない。
 
 手順 3 の DuplicateCandidate 新規作成は、`merge_executor.py` 内で直接 `DuplicateCandidate.objects.create()` を呼ぶのではなく、`DuplicateCandidate.create_recovered_from(old_candidate, new_surviving_person)` クラスメソッド経由で行う。これにより「old_candidate からスコア・ランク・group_id 等をコピーして新規作成する」処理ロジックが DuplicateCandidate モデル側に集約され、関数名から意図が読める。
+
+【設計思想】「DB 履歴を見る判断」を generate 側（および呼び出し元）に集約し、recover の責務は冪等性チェックと再復帰のみに絞る。これは X-3 ランナバグ修正で確定した generate_duplicate_candidates_for_contact 側への履歴参照集約（v0.1.5 詳細仕様書 §5.4.1 参照）と同じ思想である。
 
 ### 12.8.4 スコアコピーが論理的に正しい理由
 
