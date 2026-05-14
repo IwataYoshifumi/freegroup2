@@ -1609,8 +1609,11 @@ v1.4.x で追加・変更するファイルを以下に示す。
 | persons/models.py | Person モデル |
 | persons/views.py | PersonListView、PersonDetailView、PersonAddAdditionalRoleView |
 | contacts/models.py | Contact モデル、ContactFieldConfidence モデル |
-| contacts/views.py | ContactCreateView、ContactDetailView、UpdatePrimaryContactView、UpdateActiveContactView、PreviewContactView |
+| contacts/views.py | ContactListView、ContactCreateView、ContactDetailView、UpdatePrimaryContactView、UpdateActiveContactView、PreviewContactView |
+| contacts/urls.py | `/contacts/` 配下の URL ルーティング（list / create / detail / update-primary / update-active / preview 等） |
 | contacts/forms.py | ContactBaseForm、ContactUpdateForm、ContactUpdateActiveForm、ContactAddAdditionalRoleForm、ContactCreateForm |
+| templates/contacts/_contact_field.html | Contact フィールド表示・編集の共通 include パーツ。ContactDetailView と CardDetailView が再利用 |
+| templates/contacts/_inactive_contacts.html | inactive Contact 履歴セクションの共通 include。contacts / persons 両方から再利用（ContactDetailView マージ関連セクション内、PersonDetailView merged / archived から） |
 | contacts/services/normalization.py | フィールド正規化（純関数） |
 | contacts/services/json_parser.py | raw_json → Contact 用辞書（v1.3.4 の json_normalizer から移動・拡張） |
 | duplicates/models.py | DuplicateCandidate、PersonMergeLog モデル |
@@ -1636,14 +1639,14 @@ v1.4.x で追加・変更するファイルを以下に示す。
 | 1 | `/` | GET | HomeView | ホーム画面 |
 | 2 | `/cards/upload/` | GET / POST | OriginalImageUploadView | 名刺画像アップロード |
 | 3 | `/cards/` | GET | CardListView | 名刺一覧。7 値フィルタ（`ocr_result` 5 値 + `_pending` / `_processing` の仮想値）対応、初回は `business_card` のみ表示。BackNavigator 保持パラメータに `ocr_result` を含む |
-| 4 | `/cards/<uuid:pk>/` | GET | CardDetailView | 名刺詳細。`{% if debug %}` 外に「同じ画像に含まれる他の名刺」セクションを通常表示（sibling_cards 全件、ocr_result_badge 付き） |
+| 4 | `/cards/<uuid:pk>/` | GET | CardDetailView | 名刺詳細 + Contact 編集。OpenCV デバッグセクションと業務操作セクションを併設。Contact が紐づく BC については `_contact_field.html` パーツを include して ContactDetailView と同じ編集 UI（個別フィールドの確認 OK / 値修正）を提供する。`{% if debug %}` 外に「同じ画像に含まれる他の名刺」セクションを通常表示（sibling_cards 全件、ocr_result_badge 付き）|
 | 5 | `/originals/` | GET | OriginalListView | 元画像一覧 |
 | 6 | `/originals/<uuid:pk>/` | GET | OriginalDetailView | 元画像詳細。セクション 7「検出された名刺」テーブルは 8 列構成（操作 / サムネイル / 名刺ID / card_index / 向き / OCR結果 / 切り抜き画像 / 作成日時）、名刺詳細への遷移ボタンを含む |
 | 7 | `/persons/` | GET | PersonListView | 人物一覧 |
 | 8 | `/persons/<uuid:pk>/` | GET | PersonDetailView | 人物詳細 |
 | 9 | `/persons/<uuid:pk>/add-additional-role/` | GET / POST | PersonAddAdditionalRoleView | 別肩書追加。Active コンタクトを追加 |
 | 10 | `/contacts/create/` | GET / POST | ContactCreateView | 名刺なしでプライマリーコンタクトとパーソンを同時生成 |
-| 11 | `/contacts/<uuid:pk>/` | GET | ContactDetailView | コンタクトの表示画面 |
+| 11 | `/contacts/<uuid:pk>/` | GET | ContactDetailView | コンタクト詳細画面（業務メイン画面）。Contact.status × Person.status による表示モード分岐：(primary or active) × Person.active なら編集可能モード（AJAX で値修正・confidence 確認可、§11.6.2 / D-3 系で詳細仕様確定後反映予定）、inactive または Person.archived/merged なら表示のみモード。セクション構成：操作ボタン（人物詳細リンク、修正画面、別肩書追加、マージ画面）/ Contact ヘッダー（名刺画像 + status バッジ + マージ候補バッジ）/ 一括確定（編集可能モードのみ）/ フィールド表示（high はシンプル、mid/low は信頼度マーク + ラジオ UI）/ **他のアクティブコンタクト**（同 Person 配下の他 active）/ **マージ関連**（DuplicateCandidate / PersonMergeLog / previous_person / inactive Contact 履歴の共通 include）|
 | 12 | `/contacts/<uuid:pk>/update-primary/` | GET / POST | UpdatePrimaryContactView | プライマリーコンタクトの修正画面（fix の場合は既存コンタクトを上書き、transfer / promotion / job_change / name_change の場合は新規コンタクトを追加し既存を inactive 化）。プライマリーコンタクト以外がこのルートに入ってきたらガード |
 | 13 | `/contacts/<uuid:pk>/update-active/` | GET / POST | UpdateActiveContactView | アクティブコンタクトの修正画面。プライマリーのように新規コンタクト生成なし、コンタクト値の修正のみ。change_reason フィールドは置かない（fix 相当の処理に固定）。アクティブコンタクト以外がこのルートに入ってきたらガード |
 | 14 | `/contacts/<uuid:pk>/preview/` | GET | PreviewContactView | コンタクト一覧画面からのモーダルプレビュー用、AJAX 専用 |
@@ -1654,6 +1657,7 @@ v1.4.x で追加・変更するファイルを以下に示す。
 | 20 | `/merge-logs/<uuid:pk>/` | GET | PersonMergeLogDetailView | マージログ詳細 |
 | 21 | `/merge-logs/<uuid:pk>/confirm-undo/` | GET / POST | PersonMergeLogConfirmUndoView | マージ復元の確認画面と実行処理。実行完了後は詳細画面へリダイレクト。メッセージで詳細画面に復元実行結果を表示 |
 | 22 | `/cards/<uuid:pk>/delete/` | POST | CardDeleteView | 名刺ハード削除（POST 専用、GET 等は 405）。認証ガード後 `bc.delete()` を呼ぶだけ。Contact CASCADE → CFC CASCADE → card_image post_delete の連鎖が走る（§4.3.2 参照）。削除後は元画像詳細（6 番）に 302 リダイレクト |
+| 23 | `/contacts/` | GET | ContactListView | コンタクト一覧画面。7 フィールド検索（氏名 / 会社 / 部署 / 役職 / メール / 電話 / 住所）AND 検索、status 3 チェックボックス絞り込み（primary / active / inactive、初回アクセス時は primary のみ ON）、ページネーション 20 件/ページ、BackNavigator 連携。Person.status='active' のみ表示（merged Person 配下は常に除外）、updated_at 降順 → created_at 降順。電話フィールドは phone / mobile / fax の OR 一致 |
 
 一覧画面なし：`/persons/<uuid>/update/`（Person 編集）。
 
@@ -3013,7 +3017,6 @@ Django 標準の CSRF 保護を継続。画像アップロードはバリデー�
 - Person の archived 化は Django Admin のみ（一般ユーザー UI は v1.5.0 以降）
 - 物理削除は一般ユーザー UI なし、Django Admin のみ
 - 認証は仮実装、本格認証は v1.5.0 以降
-- Contact 一覧画面は実装しない（Person 一覧と名刺一覧で代替）
 - Person 編集画面は実装しない（Person 自体に編集対象が少ない）
 - KPI レポート、メール通知、due_date による期限管理は v1.5.0 以降
 - マージ画面のスマホ対応は v1.5.0 以降（v1.4.2 では PC 横長 1280px 前提）
