@@ -3331,8 +3331,8 @@ v1.4.2 のパイプライン分離（§13.4.1）と BusinessCard モデル拡張
 - [ ] Contact = スナップショット設計（4.4.0）の理解確認
 - [ ] recover 一本化の設計趣旨（12.8.1）の理解確認
 - [ ] サバイブ側 Contact の previous_* は変更しないという原則（9.4.1）の理解確認
-- [ ] same_card 修正ありの特殊扱い（9.4.5）の理解確認
 - [ ] ContactFieldConfidence の生成・更新タイミング 3 ケース別（10.6.4）の理解確認
+- [ ] マージ画面の値修正廃止と Contact 詳細画面 AJAX 化（11.5.5 / 11.6.2 / D-3 系）の理解確認
 
 ---
 
@@ -3636,13 +3636,15 @@ DuplicateCandidate.review_result の merged 系（マージ画面専用）。
 
 | コード値 | 表示名 |
 |---|---|
-| same_card | 同一名刺（撮り直し・重複アップロード） |
+| same_card | 同一名刺 |
 | transfer | 異動・部署変更 |
-| promotion | 役職変更・昇進 |
+| promotion | 役職変更・昇進等 |
 | job_change | 転職 |
 | additional_role | 別肩書追加（副業など） |
 | name_change | 結婚等による姓変更 |
 | other_merged | その他（マージ実行） |
+
+【v1.4.2 ラベル微調整】 `same_card` の旧表示名「同一名刺（撮り直し・重複アップロード）」はボタン形式ラジオで長すぎたため「同一名刺」に短縮（ストック #69）。`promotion` の旧表示名「役職変更・昇進」は「役職変更・昇進等」に拡張し、PersonChangeReason 側の同名値とは独立に運用する。
 
 ### C.9 DifferentPersonReason 値一覧（3 値）
 
@@ -3650,9 +3652,11 @@ DuplicateCandidate.review_result の different_person 系。
 
 | コード値 | 表示名 |
 |---|---|
-| same_name | 同姓同名 |
+| same_name | 同姓同名の別人 |
 | ocr_error | OCR 誤認識による誤検出 |
 | other_different | その他（別人確定） |
+
+【v1.4.2 ラベル変更】 `same_name` の表示名を「同姓同名」→「同姓同名の別人」に変更（ストック #68）。「同姓同名」だけでは「同姓同名で同一人物」とも読み取れる曖昧さがあり、別人判定の意図を明確にするため。enum value（`same_name`）は維持。
 
 ### C.10 Contact.Status
 
