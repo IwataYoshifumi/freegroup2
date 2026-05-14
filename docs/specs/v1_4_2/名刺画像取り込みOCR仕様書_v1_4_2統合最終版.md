@@ -666,7 +666,26 @@ v1.3.0 で横長統一処理を削除し、縦書き名刺対応とした。orie
 
 ## 6.2 切り抜き失敗時の扱い
 
-切り抜き後の画像 width < 100 または height < 50 は失敗扱い（判定は opencv_detector._warp_card() 内で行う）。切り抜き失敗時も BusinessCard / Contact は作成可能（card_image=null）。失敗理由は OriginalImage.error_message に記録する。
+切り抜き後の画像 width < 100 または height < 50 は失敗扱い（判定は `opencv_detector._warp_card()` 内で行う）。
+
+v1.4.2 のパイプライン分離（§13.4.1 / §15.6 参照）に伴い、warp（透視変換）失敗カードは **detect_cards 段階で除外し BusinessCard 自体を作成しない** 方針に変更（§15.1 ルール C5）。OCR に送る意味がない切り抜き失敗品を BC として残さないことで、OCR cron の処理対象を「OpenCV が成功したカードのみ」に絞り込む。
+
+失敗理由は OriginalImage.error_message に記録する。
+
+【card_image=null になる経路】 v1.4.2 改訂後は、`save_card_image` の JPEG 書き込み失敗時のみ `card_image=null` の BC が残る経路となる（warp 失敗は BC を作らないため対象外）。書き込み失敗時は OriginalImage.error_message に「card_index=N: 切り抜き失敗 (理由)」を追記し、当該 BC は OCR cron 側で処理対象外として扱う。
+
+## 6.3 card_image の保存方式
+
+v1.4.2 のパイプライン分離に伴い、切り出し画像の保存方式を **tmp ファイル + `transaction.on_commit` リネーム** から **同期書き** に変更する。
+
+| 観点 | 旧方式（v1.4.2 改訂前） | 新方式（v1.4.2） |
+|---|---|---|
+| 書き込み手順 | BC を `card_image=None` で DB 先行作成 → `save_card_image_tmp` で tmp 拡張子で書き込み → `transaction.on_commit` で tmp → final にリネーム + BC.card_image を UPDATE | BC 作成と同タイミングで card_image を最終パス `cards/YYYY/MM/DD/<oid>-<idx>.jpg` に **同期書き**、`BC.objects.create(card_image=final_rel)` を atomic 内で実行 |
+| 失敗時のクリーンアップ | tmp ファイルが残る可能性あり、cron 経由の reconcile_card_images で回収 | BC 作成失敗時：書き込み済みファイルを `os.unlink` でクリーンアップ |
+| BC 作成失敗時 | （上記の通り） | 書き込み済みファイルを削除して整合性を維持 |
+| 補正回転後の上書き | （該当なし） | 2 回目 OCR が走った時点で補正画像で `BC.card_image` を上書き保存（2 回目失敗でも上書き、§15.6.3 参照）|
+
+【廃止】 `save_card_image_tmp` 関数および `transaction.on_commit` リネーム方式は v1.4.2 で廃止。OpenCV cron が card_image を確定書きしてから OCR cron に渡す新構造では、tmp + on_commit リネームの利点（複数段階処理の中間状態保護）が失われたため。同期書きの方が読みやすく、デバッグしやすい。
 
 ---
 
@@ -3110,6 +3129,17 @@ v1.4.2 のマイグレーション適用は以下の順序で行う。
 12. サービス層関数の実装（第13章 13.4 参照）
 13. UI カスタムタグ・共通モーダル部品の実装（第11章 11.8 参照）
 14. テンプレート実装
+
+### 21.5.1 v1.4.2 で追加される主なマイグレーション
+
+v1.4.2 のパイプライン分離（§13.4.1）と BusinessCard モデル拡張（§4.3）に伴い、以下のマイグレーションを追加する。マイグレーション番号は A 側（feature/v1.4.2-models）／ B 側（feature/v1.5.0-pipeline-split）の main マージ順序によりずれるため、ここでは論理的な追加内容のみ記す。
+
+| 種別 | 内容 |
+|---|---|
+| スキーマ（自動生成） | BusinessCard に `raw_json_1` / `raw_json_2` / `ocr_status` / `ocr_result` / `claimed_at` / `error_message` を追加（§4.3）、OriginalImage.STATUS_CHOICES に `opencv_processing` / `cards_extracted` を追加（§4.2.1）、Contact.lang に `blank=True` を追加（§4.4.1）、Contact.full_name に `blank=False` を明示（§4.4.1）、DebugMask モデル新規作成（§4.12）、ActionLog アプリ独立に伴う移動、ActionLog から diff 削除・extra → data 改名（§4.10）、DuplicateCandidate から match_reason / matched_fields 削除（§4.7） |
+| データ（手書き） | 旧 OriginalImage.raw_json → BC.raw_json_1 への移行（§4.3 / §4.2 raw_json deprecated に対応）：全 BC をループし、`bc.original_image.raw_json["cards"][bc.card_index]` を取り出し `{"cards": [<card_data>], "api_response": <raw_json.get("api_response", {})>}` の形に組み直して `bc.raw_json_1` に格納。`bc.raw_json_2=None` / `bc.ocr_status='done'` 固定（既存 BC は OCR 完了済み前提）。`bc.ocr_result` は既存値維持。例外時は当該 BC スキップ＋ログ出力、他は続行。reverse は no-op |
+
+【物理残置】 OriginalImage.raw_json フィールドそのものは v1.4.2 では物理残置（既存データ後方互換、§4.2 / §35 参照）。物理削除は v1.4.x 以降の別マイグレーションで対応する。
 
 ## 21.6 開発 DB の confidence='high' 確認
 
