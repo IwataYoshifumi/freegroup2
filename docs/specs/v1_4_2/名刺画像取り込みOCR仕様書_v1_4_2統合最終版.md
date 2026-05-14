@@ -195,7 +195,7 @@ OriginalImage は元画像 1 件に対応するレコード。
 | status | CharField(20) | 処理状態（7 値、4.2.1 参照） |
 | claimed_at | DateTimeField (null) | CAS で processing / opencv_processing 遷移時刻を記録 |
 | raw_json | JSONField (null) | OCR 結果 JSON（**v1.4.2 で deprecated**：読み出しは BC.raw_json_1 / raw_json_2 経由に統一、フィールド自体は物理残置）|
-| detected_count | IntegerField (default=0) | 検出された名刺数 |
+| detected_count | IntegerField (default=0) | 検出された名刺数（OriginalImage に紐づく BusinessCard レコードの総数。ocr_result の値に関わらず DB に保存された BC 全件をカウントする） |
 | error_message | TextField (default='') | 失敗理由・部分失敗ログ |
 | created_at | DateTimeField | auto_now_add |
 | updated_at | DateTimeField | auto_now |
@@ -246,6 +246,25 @@ BusinessCard は切り抜き済み名刺画像に対応するレコード。v1.4
 | `business_card.get_card_image_url()` | インスタンスメソッド | サムネイル用 URL を返す |
 | `business_card.get_card_image_url_full()` | インスタンスメソッド | フルサイズ用 URL を返す |
 
+### 4.3.2 BusinessCard と Contact の関係
+
+v1.4.2 で has_minimum_info NG ケース等でも BC を残置する仕様（第 15 章参照）を採用したため、BusinessCard と Contact の関係は v1.4.2 改訂前の「常に 1:1」から「条件付きの 1:0..1」に変わる。
+
+| BC.ocr_result | Contact の有無 |
+|---|---|
+| `business_card` | Contact を必ず持つ（OneToOne、§4.4 Contact 参照） |
+| `not_business_card` / `insufficient_info` / `ocr_failed` / `others` | Contact を持たない |
+| null（OpenCV cron 完了直後、OCR 未実行） | Contact を持たない |
+
+【削除カスケード】 BC を削除すると、以下の順で連鎖削除される：
+
+1. BC レコード削除（`bc.delete()`）
+2. Contact（OneToOneField、CASCADE）が連鎖削除
+3. ContactFieldConfidence（Contact への ForeignKey、CASCADE）が連鎖削除
+4. `card_image` の FS 実体が `post_delete` シグナルで自動削除
+
+`OriginalImage.raw_json` には削除した BC に対応する cards 配列要素が温存される（§5.4 不変ルール v1.2.1）。CardDeleteView 経由のハード削除でも本カスケードルールに従う（第 11 章参照）。
+
 ## 4.4 Contact（コンタクトDB）
 
 ### 4.4.0 設計趣旨：Contact はなぜ「スナップショット」か
@@ -256,9 +275,11 @@ Contact は「ある時点での名刺情報のスナップショット」とし
 
 なお fix（誤字訂正）の場合のみ既存 Contact を更新するが、これは「同じ名刺の入力をやり直す」操作であり、新しい時点の情報ではないため例外的に上書きを許容している。
 
+BusinessCard と Contact の関係は条件付きの 1:0..1（OCR 成功 BC は Contact を持つ、それ以外の BC は Contact を持たない）。詳細は §4.3.2 参照。
+
 ### 4.4.1 Contact のフィールド定義
 
-名刺ごとまたは手動入力ごとのスナップショット。BusinessCard と OneToOne 関係（手動入力時は null 許容）。Person への FK は NOT NULL。
+名刺ごとまたは手動入力ごとのスナップショット。BusinessCard と OneToOne 関係（手動入力時は null 許容、また BC 側の ocr_result が `business_card` 以外のときも Contact は存在しない、§4.3.2 参照）。Person への FK は NOT NULL。
 
 | フィールド名 | 型 | 説明 |
 |---|---|---|
