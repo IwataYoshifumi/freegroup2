@@ -495,7 +495,7 @@ FK の強度：surviving_person / merged_person は PROTECT。マージログか
 | `merge_log.is_undoable()` | インスタンスメソッド | 復元可能かどうかの判定 |
 | `merge_log.mark_as_undone(user)` | インスタンスメソッド | 自身の状態遷移（status='undone'） |
 | `merge_log.record_merge_action(user)` | インスタンスメソッド | マージ実行を ActionLog に記録（action='merged'） |
-| `merge_log.record_undo_action(user)` | インスタンスメソッド | 復元実行を ActionLog に記録（action='undone'） |
+| `merge_log.record_undo_action(user, note="")` | インスタンスメソッド | 復元実行を ActionLog に記録（action='undone'、data に {"note": str} を保存） |
 | `merge_log.get_undo_preview()` | インスタンスメソッド | 復元後の予測状態を返す（確認画面用） |
 
 ## 4.9 status='merged' の Person の制約
@@ -569,7 +569,7 @@ ActionLog に記録する対象は、すべて仕様書で明示的に定める�
 
 - マージ実行（Execute_Merge_Only / Execute_Merge_with_Updates）→ `merge_log.record_merge_action(user)` 経由
 - 別人判定（Mark_as_Different_Person）→ `candidate.record_different_person_action(user)` 経由
-- マージ復元（Execute_Merge_Undo）→ `merge_log.record_undo_action(user)` 経由
+- マージ復元（Execute_Merge_Undo）→ `merge_log.record_undo_action(user, note)` 経由（note は MergeUndoForm の cleaned_data["note"]、空文字でも `{"note": ""}` 形式で data に保存して集計時のキーを揃える）
 - cron 重複チェック実行（Run_Generate_Duplicate_Candidates）→ `ActionLog.record(...)` 直接呼び
 - OCR 処理結果（使用トークン数、処理時間、読み取り名刺枚数等のレスポンスメタデータ）→ `ActionLog.record(...)` 直接呼び
 
@@ -1171,13 +1171,34 @@ v1.4.1 までは `merge_helpers.py` などのサービス層関数で「マー�
 
 ### 10.4.1 インスタンスメソッド
 
+Person の状態遷移を表すインスタンスメソッドは **`mark_as_*` シリーズ** で命名を揃える設計。`mark_as_merged` ↔ `mark_as_active` は対称ペアとして隣接配置する（PersonMergeLog の `mark_as_undone()` 等とも命名スタイルが揃う）。
+
 | メソッド | 責務 | 配置先 |
 |---|---|---|
 | `person.mark_as_merged(surviving_person)` | 自身の状態遷移（status='merged' / merged_into=surviving_person / primary_contact=NULL） | persons/models.py |
-| `person.transfer_contacts_to(surviving_person, merge_reason)` | 自身のコンタクト群を surviving に引き渡す（merge_reason に応じて 9.4 状態遷移を適用、全 Contact 対象：primary / active / inactive すべて） | persons/models.py |
+| `person.mark_as_active()` | 自身の状態遷移（status='active' / merged_into=NULL）。マージ復元処理（§9.5.2）で merged → active に戻す際に呼ぶ。archived → active も汎用化（archived 中は対象 Person を誰も触れないため安全）。primary_contact の復元は `set_primary_contact()` 側で同期させるため、本メソッドには含めない | persons/models.py |
+| `person.transfer_contacts_to(surviving_person, merge_reason)` | 自身のコンタクト群を surviving に引き渡す。`merge_reason` は `list[str]`（DuplicateMergeReason value のリスト、複数可）。Case A〜D（§9.4）のステータス遷移を適用、全 Contact 対象：primary / active / inactive すべて。詳細は §10.4.1.1 参照 | persons/models.py |
 | `person.set_primary_contact(new_contact, old_primary_new_status='active')` | 既存 Person の primary_contact 切り替え（派生情報の同期） | persons/models.py |
 | `person.get_active_contacts()` | status='active' の Contact 一覧を返す | persons/models.py |
 | `person.get_inactive_contacts()` | status='inactive' の Contact 一覧を返す | persons/models.py |
+
+#### 10.4.1.1 `person.transfer_contacts_to()` の詳細仕様
+
+| 観点 | 記述内容 |
+|---|---|
+| 引数 | `surviving_person`（マージ先 Person）、`merge_reason: list[str]`（`DuplicateMergeReason.values` の部分集合、空リストは不可） |
+| 対象 | 自 Person に紐づく全 Contact（status=primary / active / inactive すべて） |
+| 処理 | `merge_reason` に応じて Case A〜D（§9.4）のステータス遷移を適用 |
+| Case A | `same_card` 等：直接更新パターン（§9.4 / 別添 PDF 参照） |
+| Case B | `transfer` / `promotion` / `job_change` / `name_change` / `other_merged`：標準的な引き渡しパターン（旧 primary は inactive、副コンタクト群も引き渡し） |
+| Case C | `additional_role`：別肩書追加の特殊パターン。マージド側 primary を一時的に active に降格してから引き渡し、サバイブ側 primary は維持。partial unique constraint（Person.primary_contact が高々 1 件）違反を避ける順序制御を内部で行う |
+| Case D | 復元時：previous_* を NULL にする不変原則を保つ（§9.4 参照） |
+| 制約 | partial unique constraint 違反を避けるため、引き渡し順序を内部的に制御する |
+| additional_role 判定 | `DuplicateMergeReason.ADDITIONAL_ROLE in merge_reason` で判定（複数選択可なので `in` 比較を使う） |
+
+【サバイブ側 previous_* 不変原則】`transfer_contacts_to` はマージド側 Person の Contact を引き渡す処理であり、サバイブ側 Person の Contact の previous_* フィールドには一切触れない（業務所有権の分離）。
+
+詳細な状態遷移は §9.4 および別添 PDF『マージ前後のコンタクトのステータス等まとめ.pdf』を参照。
 
 ### 10.4.2 クラスメソッド
 
@@ -1199,14 +1220,15 @@ v1.4.1 までは `merge_helpers.py` などのサービス層関数で「マー�
 
 | 値 | 旧 primary の遷移先 | 使用場面 |
 |---|---|---|
-| `'active'` | active（副コンタクト化）| デフォルト。修正画面 fix 系 |
+| `'active'` | active（副コンタクト化）| デフォルト値として保持。**v1.4.2 時点では実装上の使用場面なし**（呼び出し元はすべて `'inactive'` を明示。将来の拡張余地として API は維持） |
 | `'inactive'` | inactive（過去情報化）| 修正画面 transfer / promotion / job_change / name_change、マージ画面 transfer 等 |
 
 #### 呼ばれる場所
 
-- 修正画面 ContactUpdateView（change_reason='fix' のとき）：`person.set_primary_contact(new_contact)` または `person.set_primary_contact(new_contact, old_primary_new_status='active')`
 - 修正画面 ContactUpdateView（change_reason='transfer' / 'promotion' / 'job_change' / 'name_change' のとき）：`person.set_primary_contact(new_contact, old_primary_new_status='inactive')`
-- `Execute_Merge_with_Updates`（merge_reason='transfer' / 'promotion' / 'job_change' / 'name_change' / 'other_merged' のとき）：`surviving_person.set_primary_contact(new_contact, old_primary_new_status='inactive')`
+- 新規 Person 作成時（contacts/views.py `_create_person_and_contact` 内）：`person.set_primary_contact(contact)`（デフォルト引数で呼ぶが、旧 primary が存在しないため status 変更ステップはスキップされ、`old_primary_new_status` の値は実質不使用）
+
+`change_reason='fix'` の場合は `contact.fix(form, user)` で既存 Contact を上書きするため `set_primary_contact` は呼ばない（§11.4.1 修正理由による処理分岐を正とする）。
 
 #### 設計趣旨
 
@@ -1399,7 +1421,7 @@ OCR で取り込まれた Contact のみ、Claude の confidence 判定により
 | `merge_log.is_undoable()` | 復元可能かどうかの判定（status='undoable' なら True） | duplicates/models.py |
 | `merge_log.mark_as_undone(user)` | 自身の状態遷移（status='undone' / undone_by / undone_at） | duplicates/models.py |
 | `merge_log.record_merge_action(user)` | マージ実行を ActionLog に記録（action='merged'、data に surviving/merged Person 情報、duplicate_candidate ID 等） | duplicates/models.py |
-| `merge_log.record_undo_action(user)` | 復元実行を ActionLog に記録（action='undone'、data に復元理由＋復元内容として surviving 側 Person・復元側 Person のインスタンス情報を JSON で保存） | duplicates/models.py |
+| `merge_log.record_undo_action(user, note="")` | 復元実行を ActionLog に記録（action='undone'、data に `{"note": str}` 形式で MergeUndoForm から受け取った備考を保存。空文字でも `{"note": ""}` で記録し、集計時のキーを揃える） | duplicates/models.py |
 | `merge_log.get_undo_preview()` | 復元後の予測状態を返す（確認画面表示用：復元 Person・復元 Person に戻る Contact の集合・surviving 側 Person に残る Contact の集合） | duplicates/models.py |
 
 ### 10.8.3 `merge_log.get_undo_preview()` の戻り値設計
