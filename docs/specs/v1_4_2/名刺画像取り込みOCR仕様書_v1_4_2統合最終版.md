@@ -1940,10 +1940,18 @@ MergeUndoForm（21 番用、forms.Form 直接継承、error_class = AppErrorList
 
 #### MergeUndoForm（21 番用、独立クラス）
 
-- **責務**：マージ復元画面用
+- **責務**：マージ復元画面用。復元実行時の備考と確認チェックを受け取る。破壊的操作（DB に影響）の誤操作防止を Form レベルで強制する
 - **配置**：`duplicates/forms.py`
-- **継承元**：`forms.Form`（`ContactBaseForm` は継承しない）
-- **追加フィールド**：`undo_note`（CharField、required=False）
+- **継承元**：`forms.Form`（`ContactBaseForm` は継承しない、`MergeForm` と同様）
+- **クラス変数**：`error_class = AppErrorList`（§11.6.6 参照、明示的に設定）
+- **追加フィールド**：
+  - `note`（CharField、required=False、widget=Textarea、ラベル「復元の備考」）。`PersonMergeLog.record_undo_action(user, note)` 経由で ActionLog の data に `{"note": str}` 形式で保存される（§4.11.3 参照）
+  - `confirmed`（BooleanField、required=True、ラベル「この操作は取り消せません。内容を理解しました」）。誤操作防止のための確認チェック
+- **メソッド**：
+  - `clean()`：追加バリデーションなし（`confirmed` の `required=True` で Form 標準の必須チェックが効くため）
+- **`__init__` の引数**：特になし（通常の Form 生成、`form = MergeUndoForm(request.POST)`）
+
+【設計趣旨】 マージ復元は破壊的操作（DB に影響）で、誤操作防止のため確認チェック CB を Form レベルで強制する。`note` は復元理由を任意で記録できる導線として `MergeForm` との対称性で持つ（マージ実行時も `review_note` 任意記録、復元時も `note` 任意記録）。
 
 ### 11.6.3 Form の設計原則
 
@@ -2505,7 +2513,7 @@ View 層・cron・タスクから直接呼ばれる「処理フロー全体を�
 | `Mark_as_Different_Person` | `(candidate, form, user)` | `None` | duplicates/services/merge_executor.py | 別人判定の本体 |
 | `Execute_Merge_Only` | `(candidate, surviving_person, merged_person, form, user)` | `None` | duplicates/services/merge_executor.py | マージのみ（フィールド修正なし） |
 | `Execute_Merge_with_Updates` | `(candidate, surviving_person, merged_person, form, user)` | `None` | duplicates/services/merge_executor.py | マージ＋更新（フィールド修正あり） |
-| `Execute_Merge_Undo` | `(merge_log, form, user)` | `None` | duplicates/services/merge_executor.py | マージ復元の本体 |
+| `Execute_Merge_Undo` | `(merge_log, form: MergeUndoForm, user)` | `None` | duplicates/services/merge_executor.py | マージ復元の本体。`form.cleaned_data["note"]` を取り出して `merge_log.record_undo_action(user, note)` に渡す（§4.11.3 / §10.8.2 参照） |
 | `Run_Generate_Duplicate_Candidates` | `(limit=100)` | （別ドキュメントで定義） | duplicates/tasks/duplicate_check_runner.py | タスク層上位関数。cron から呼ばれる |
 | `Run_Crop_Cards_From_OriginalImage` | `(original_image)` | `None` | cards/tasks/crop_cards.py | OpenCV パイプライン上位（`process_opencv` cron 経由）。検出 → BC 作成 → OriginalImage.status=cards_extracted まで |
 | `Run_Process_CardImages_With_OCR` | `()` | `None` | cards/tasks/ocr_runner.py | OCR パイプライン上位（`process_ocr` cron 経由）。BC を CAS で claim → `process_cardimage_with_ocr` 呼び出し |
@@ -2539,7 +2547,7 @@ View 層・cron・タスクから直接呼ばれる「処理フロー全体を�
 | `Mark_as_Different_Person(candidate, form, user)` | 副作用あり。別人判定（トランザクション内） |
 | `Execute_Merge_Only(candidate, surviving_person, merged_person, form, user)` | 副作用あり。マージのみ実行（トランザクション内） |
 | `Execute_Merge_with_Updates(candidate, surviving_person, merged_person, form, user)` | 副作用あり。マージ＋更新実行（トランザクション内） |
-| `Execute_Merge_Undo(merge_log, form, user)` | 副作用あり。復元実行（トランザクション内） |
+| `Execute_Merge_Undo(merge_log, form: MergeUndoForm, user)` | 副作用あり。復元実行（トランザクション内）。`form.cleaned_data["note"]` を `record_undo_action` に渡す |
 | `recover_duplicate_candidates(merged_person, surviving_person)` | 副作用あり。recover 処理 |
 | `invalidate_pending_candidates(contact)` | 副作用あり。pending invalidated 化 |
 
