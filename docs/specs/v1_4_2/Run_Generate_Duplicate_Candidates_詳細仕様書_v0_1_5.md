@@ -407,9 +407,11 @@ Person.status による絞り込みは Contact 側の複合インデックスで
 - 手順（2）のタプル列を走査し、`candidate.person.id` が上記集合に含まれるものをスキップする。
 - スキップ判定は **person_id レベル** で行う（DuplicateCandidate インスタンス比較ではない）。
 
-★ なぜ 2 クエリに分けるか：`Q(person_a=p) | Q(person_b=p)` の OR 検索は SQLite 3.51.2 の planner bug でインデックスを使わない最悪計画が選ばれるケースがあり、件数が増えると性能が落ちる。person_a / person_b を別クエリで取得することで、両方ともインデックスを使った高速な実行計画を保証できる。
+★ なぜ事前フィルタが必要か：partial unique constraint（§3.6）違反を **事前に回避** するため。同一 cron バッチ内で同 Person ペアの両側が処理対象になるケース（新規 OCR 取り込み・テストデータ生成スクリプト経由の流入等）で、§12.7 / recover の事前整理経路を経由せずに pending DC が衝突する経路がある。事前フィルタで衝突候補自体を除外することで、IntegrityError の発生経路を排除する。
 
-★ なぜ事前フィルタが必要か：partial unique constraint（3.6）違反を **事前に回避**するため。同一 cron バッチ内で同 Person ペアの両側が処理対象になるケース（新規 OCR 取り込み・テストデータ生成スクリプト経由の流入等）で、12.7 / recover の事前整理経路を経由せずに pending DC が衝突する経路がある。事前フィルタで衝突候補自体を除外することで、IntegrityError の発生経路を排除する。
+★ なぜ 2 クエリに分けるか（ホットパス特性）：本箇所は bulk_create 直前のホットパスであり、partial unique constraint 違反が起きると当該 contact のトランザクション全体がロールバックされる致命的経路である。確実性を最優先し、**インデックスを使った実行計画を確実に得る 2 クエリ分割** を採用する。`Q(person_a=p) | Q(person_b=p)` の OR 検索は、SQLite 3.51.2 の planner bug でインデックスを使わない実行計画が選ばれる経路が存在するため、**致命的経路では使わない**。
+
+ただし本 2 クエリ分割は本箇所固有の判断であり、**§5.2.2 / §5.3.2 の履歴参照クエリ（selectivity 高 + 非致命）は OR 1 クエリのまま維持** する。3 箇所の使い分け方針の整理は §5.4.6 を参照。
 
 （3）（2.5）の事前フィルタ通過後のタプル列が空の場合、（4）（5）（6）をスキップして（7）に進む。
 
@@ -963,7 +965,7 @@ DuplicateCandidate.objects.filter(
 
 【v1.4.2 補足】 3.3 手順 (2.5) の事前フィルタで除外された候補には group_id 発行を行わない（DuplicateCandidate インスタンス自体を構築する手順 (5) に到達しないため、自然にそうなる）。本ロジック (1)〜(3) は事前フィルタを通過した候補のみを対象とする。
 
-★ v0.1 段階で「バッチ内キャッシュ最適化」を 運用後に再評価する妥当性根拠：rev5 8.5 の見積もりにより、N=5000 規模でも 1 contact あたりの候補数は 0〜数件と想定されている。candidate 1 件ごとに 1 回の group_id 検索クエリ（インデックスを使った高速な検索）が走るため、1 contact あたり 0〜数回の追加クエリにとどまる。limit=100 件処理で最大数十回〜数百回程度のクエリ増加であり、5 分間隔の cron 実行では実害ない見込みである。N=5000 想定での実測は 運用後の実測で行い、必要に応じて最適化を実装する。
+★ v0.1 段階で「バッチ内キャッシュ最適化」を 運用後に再評価する妥当性根拠：rev5 8.5 の見積もりにより、N=5000 規模でも 1 contact あたりの候補数は 0〜数件と想定されている。candidate 1 件ごとに 1 回の group_id 検索クエリ（起点 Person + 同 rank + pending の組み合わせは selectivity が高く、Django ORM が生成する OR クエリでもインデックスを使った実用上問題ない実行計画になる、§5.4.6 参照）が走るため、1 contact あたり 0〜数回の追加クエリにとどまる。limit=100 件処理で最大数十回〜数百回程度のクエリ増加であり、5 分間隔の cron 実行では実害ない見込みである。N=5000 想定での実測は 運用後の実測で行い、必要に応じて最適化を実装する。
 
 ### **5.3.3 person_a / person_b の順序ルールとの関係**
 
@@ -1035,6 +1037,30 @@ cron 新規生成側は recover とは別の経路で動き、独立して group
 `find_duplicate_contacts` の `excluded_persons` 引数はオプション（デフォルト None）である。これにより、cron 経由（generate_duplicate_candidates_for_contact から呼ぶ）と ContactCreateView 経由（手動作成時の警告ダイアログから呼ぶ）の両方が同じ関数を共有できる。
 
 ContactCreateView 経由では、Contact 作成「前」に警告ダイアログを表示するため、入力中の Contact に対応する Person はまだ DB に存在しない。そのため `get_persons_confirmed_as_different` を呼び出すことができず、`excluded_persons=None` で `find_duplicate_contacts` を呼ぶことになる。これは v0.1 段階の制約であり、v1.5.0 以降で「Person が確定する前の警告でも過去の different_person 履歴を考慮する」仕組みは別途検討する。
+
+### **5.4.6 person_a / person_b 検索クエリの使い分け方針（v0.1.6 で追記）**
+
+本仕様書では person_a / person_b 両側を見る検索クエリが 3 箇所に登場するが、**書き方を意図的に使い分けている**。読者の混乱を避けるため、選択理由を以下に整理する。
+
+| 箇所 | 方式 | selectivity | クリティカル度 | 選択理由 |
+|---|---|---|---|---|
+| §3.3 手順 (2.5) 事前フィルタ | **2 クエリ分割**（`person_a=p` / `person_b=p` 別々） | - | **致命的**（bulk_create 直前のホットパス、partial unique constraint 違反は当該 contact のトランザクション全体をロールバック）| インデックスを使った実行計画を確実に得るため、SQLite 3.51.2 planner bug の発生経路自体を排除する |
+| §5.2.2 `get_persons_confirmed_as_different` | **OR 1 クエリ**（`Q(person_a=p) | Q(person_b=p)`）| 高（起点 Person + `review_status='different_person'` で大幅に絞り込まれる）| 非致命（履歴参照、ヒット 0 件でも処理は続く）| selectivity が高いため OR クエリでも planner は実用上問題ない実行計画を選ぶ。シンプル記述を優先 |
+| §5.3.2 `_resolve_group_id` 内 group_id 検索 | **OR 1 クエリ**（`Q(person_a=p) | Q(person_b=p)`）| 高（起点 Person + 同 rank + `review_status='pending'` で大幅に絞り込まれる、§5.3.5 末尾参照）| 非致命（group_id 再利用ロジック、見つからなければ新規 UUID で続行）| 同上 |
+
+#### v0.1.6 改訂前後の整合性
+
+v0.1.6 改訂前の §3.3 (2.5) は「`Q(person_a=p) | Q(person_b=p)` は SQLite planner bug でインデックスを使わない最悪計画が選ばれるため 2 クエリ分割を必須とする」と記述していた。この表現は **本箇所固有の判断**（ホットパス・致命性高）として正しいが、§5.2.2 / §5.3.2 の OR 1 クエリ維持と一見矛盾する読み方ができた。v0.1.6 で本節 §5.4.6 を追加し、3 箇所の使い分け方針を明文化することで矛盾を解消する。
+
+#### 実装側の対応状況
+
+`duplicates/tasks/duplicate_check_runner.py` で本仕様書の使い分け方針通りに実装済み：
+
+- 事前フィルタ：`generate_duplicate_candidates_for_contact` 内で 2 クエリ分割（コメントで「SQLite 3.51.2 planner bug 回避のため Q(person_a=p)|Q(person_b=p) を使わず」と明記）
+- `_resolve_group_id`：OR 1 クエリ
+- `get_persons_confirmed_as_different`（`duplicates/services/duplicate_detection.py`）：OR 1 クエリ
+
+運用後に §5.2.2 / §5.3.2 の OR 1 クエリでも planner bug の影響が観測された場合は、本節の方針を「全箇所 2 クエリ分割」に再評価する余地がある。
 
 ## **5.5 v1.4.2 では本書の方針のまま実装、運用後に再評価する事項**
 
