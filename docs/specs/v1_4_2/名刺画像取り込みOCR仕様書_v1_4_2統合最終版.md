@@ -1866,11 +1866,13 @@ MergeUndoForm（21 番用、独立クラス、ContactBaseForm を継承しない
 
 #### ContactBaseForm（抽象基底クラス）
 
-- **責務**：Contact のフィールド定義のみを持つ抽象基底クラス。UI 構造は持たない
+- **責務**：Contact のフィールド定義のみを持つ抽象基底クラス。UI 構造は持たない。継承する全フォームに `AppErrorList`（§11.6.6 参照）を `error_class` として配り、フィールドエラーの BEM クラスを統一する
 - **配置**：`contacts/forms.py`
 - **継承元**：`forms.ModelForm`
 - **Meta.fields**：Contact のユーザー入力対象フィールド（full_name / last_name / first_name / name_order / company / department / title / email / mobile / phone / fax / postal_code / address / branch / website / SNS各種 / notes / lang など）
 - **除外フィールド**：`status` / `previous_status` / `previous_person` / `confirmed_at` / `confirmed_by` などシステムが管理する派生情報
+- **クラス変数**：`error_class = AppErrorList`（継承する全フォームの個別フィールドエラーに既存 BEM クラス `app-form__error` を自動付与）
+- **`__init__`**：`kwargs.setdefault("error_class", self.error_class)` を実装（Django `BaseForm.__init__` のデフォルト引数による上書き対策）
 
 #### ContactUpdateForm（12 番用）
 
@@ -1880,12 +1882,12 @@ MergeUndoForm（21 番用、独立クラス、ContactBaseForm を継承しない
 - **追加フィールド**：
   - `change_reason`（ChoiceField、PersonChangeReason の 5 値：fix / transfer / promotion / job_change / name_change）
   - `note`（CharField、required=False）
-  - ContactFieldConfidence の確認チェックボックス（low/mid フィールドのみ動的追加）
+  - ContactFieldConfidence の確認チェックボックス（**low/mid 信頼度 かつ `confirmed_at is None` のフィールドのみ動的追加**。既に `confirmed_at` が記録された過去確認済みフィールドは追加対象外）
 - **メソッド**：
-  - `clean()`：low/mid フィールドはすべて確認チェックボックス ON であることをバリデーション（11.7 参照）
+  - `clean()`：動的追加された確認チェックボックスがすべて ON であることをバリデーション（§11.7.1 参照）
   - `get_update_contact()`：フォーム値だけを持った新規 Contact インスタンス（pk なし）を返す
   - `confirmed_field_names()`：ユーザーが確認・編集したフィールド名のリストを返す（戻り値: `list[str]`）
-- **`__init__` の引数**：`target_contact: Contact`（バリデーション時に既存 Contact の confidence 状態を参照するため必須、11.7 参照）
+- **`__init__` の引数**：`target_contact: Contact`（バリデーション時に既存 Contact の confidence 状態を参照するため必須、§11.7 参照）
 
 #### ContactUpdateActiveForm（13 番用）
 
@@ -1978,19 +1980,30 @@ Contact フィールド定義を 1 箇所に集約し、Contact 修正系・別�
 
 Form は「ユーザー入力の整形」までが責務。「既存レコード上書きか新規追加か」の判断は Form ではなく View またはサービス層が行う。これにより、Form の責務を明確に保ち、再利用性を高める。
 
+### 11.6.6 AppErrorList（共通エラー出力クラス）
+
+- **責務**：Django `forms.utils.ErrorList` のサブクラスとして、`<ul class="errorlist">` の出力に既存 BEM クラス `app-form__error` を追加し、`<ul class="errorlist app-form__error">` を出力させる
+- **配置**：`contacts/forms.py`
+- **継承元**：`django.forms.utils.ErrorList`
+- **実装**：`__init__` で `kwargs.setdefault("error_class", "app-form__error")` を super に渡す
+- **適用範囲**：`ContactBaseForm.error_class = AppErrorList` で配り、`ContactBaseForm` を継承する全フォーム（`ContactUpdateForm` / `ContactUpdateActiveForm` / `ContactCreateForm` / `ContactAddAdditionalRoleForm` / `MergeForm` / `MergeUndoForm`）に自動波及
+- **CSS との接続**：`.errorlist.app-form__error` の最小スタイル調整（`list-style: none` / `padding-left: 0` 等で `<ul>` ベースでも既存 `.app-form__error` スタイルが効くようにする）。詳細は §11.8 を参照
+
+【設計趣旨】 Django デフォルトの `<ul class="errorlist">` 出力はブラウザデフォルトで目立たないため、ユーザーがバリデーションエラーに気付けない問題があった。既存 `.app-form__error` スタイル（赤系・小さい・強調）を Django 自動出力に接続することで、テンプレ側に変更を加えずに全フォームのエラー表示が統一される。
+
 ## 11.7 Form のバリデーション仕様
 
 ### 11.7.1 ContactUpdateForm.clean()
 
 #### 責務
 
-- low/mid confidence のフィールドはすべて確認チェックボックス ON であることをバリデーション
+- 動的追加された確認チェックボックス（low/mid 信頼度 かつ `confirmed_at is None` のフィールドのみ）がすべて ON であることをバリデーション
 - バリデーション失敗時は `ValidationError` を発生させる
 
 #### バリデーションロジックの方針
 
-1. `target_contact`（`__init__` で受け取った既存 Contact）の `get_field_confidences()` を呼び、low/mid フィールドのリストを取得
-2. フォームの確認チェックボックスのうち、low/mid フィールドに対応するものがすべて ON か確認
+1. `target_contact`（`__init__` で受け取った既存 Contact）の `get_field_confidences()` を呼び、**low/mid かつ `confirmed_at is None`** のフィールドのリストを取得（過去に確認済みのフィールドは対象外）
+2. フォームの確認チェックボックスのうち、上記フィールドに対応するものがすべて ON か確認
 3. 1 つでも OFF があれば `ValidationError` を発生させる
 4. エラーメッセージは「『〇〇』フィールドの確認チェックを ON にしてください」のような形式
 
