@@ -1852,15 +1852,17 @@ v1.4.1 では「DUPLICATE_CHECK_FIELDS のみ表示・修正対象」として�
 ### 11.6.1 Form クラス継承図
 
 ```
-ContactBaseForm（抽象基底、Contact フィールドのみ）
+ContactBaseForm（抽象基底、Contact フィールドのみ、error_class = AppErrorList）
 ├── ContactUpdateForm（12 番用：change_reason + ContactFieldConfidence の confirmed チェックボックス追加）
 │   └── ContactUpdateActiveForm（13 番用：change_reason を除外、それ以外は親と同じ）
 ├── ContactAddAdditionalRoleForm（9 番用：Contact フィールドのみ）
-├── ContactCreateForm（10 番用：手動で新規 Person + 新規 Contact 作成）
-└── MergeForm（マージ画面 17 番用：merge_reason + 値違い確認 + 3 カラム構造のヘルパー）
+└── ContactCreateForm（10 番用：手動で新規 Person + 新規 Contact 作成）
 
-MergeUndoForm（21 番用、独立クラス、ContactBaseForm を継承しない）
+MergeForm（17 番用、forms.Form 直接継承、error_class = AppErrorList を明示）
+MergeUndoForm（21 番用、forms.Form 直接継承、error_class = AppErrorList を明示）
 ```
+
+【v1.4.2 改訂】 `MergeForm` は `ContactBaseForm` 継承から独立した。マージ画面が Contact のフィールド値修正機能を持たなくなった（Contact 詳細画面 AJAX 化に伴う設計大転換、D-3 系）ため、Contact フィールド継承の必要性がなくなった。新しい `MergeForm` はマージ判定情報（`review_decision` / `review_result` / `surviving_person_choice` / `review_note`）のみを受け持つ独立フォーム。
 
 ### 11.6.2 各 Form の責務
 
@@ -1918,19 +1920,23 @@ MergeUndoForm（21 番用、独立クラス、ContactBaseForm を継承しない
 
 #### MergeForm（マージ画面 17 番用）
 
-- **責務**：マージ画面用。3 カラム構造、値違い確認、merge_reason / different_person reason の選択
+- **責務**：マージ画面用。**3 段階判定モデル**（第 1 段階：review_decision、第 2 段階：review_result、第 3 段階：確認チェック）でユーザの判定情報を受け取る。値修正機能は持たず、Contact のフィールド値には触らない（マージ画面に来る前に Contact 詳細画面で値修正済みの前提）
 - **配置**：`duplicates/forms.py`
-- **継承元**：`ContactBaseForm`
+- **継承元**：`forms.Form`（v1.4.2 で `ContactBaseForm` 継承から独立。Contact フィールドや値修正の責務を持たないため）
+- **クラス変数**：`error_class = AppErrorList`（§11.6.6 参照、ContactBaseForm 経由ではないため明示的に設定）
 - **追加フィールド**：
-  - `review_result`（MultipleChoiceField、merged 系 7 値 + different 系 3 値）
-  - `merge_reason`（ChoiceField、DuplicateMergeReason の 7 値、review_result が merged 系のときのみ有効）
+  - `review_decision`（ChoiceField、3 値 [`merged` / `additional_role` / `different`]、required=True）。第 1 段階判定として UI で先に選ばせる。`additional_role` の場合、第 2 段階の review_result は UI に表示せず、`clean()` で `["additional_role"]` を自動セット
+  - `review_result`（**MultipleChoiceField**、複数選択可、required=False）。choices は `DuplicateMergeReason.choices` + `DifferentPersonReason.choices`（合計 10 値）。widget はテンプレ側で手動描画（`<input type="checkbox" name="review_result">` 形式、CheckboxSelectMultiple 相当）。required=False なのは `review_decision='additional_role'` 時に空でも通る必要があるため
+  - `surviving_person_choice`（ChoiceField、choices=[`person_a` / `person_b`]、required=False、initial 設定なし）。`clean()` で `review_decision in ('merged', 'additional_role')` のときのみ必須化。required=False と initial なし設計の狙いは「判定未選択 / 別人選択時に disabled 化したサバイブ選択 UI で誤誘導を起こさない」こと
   - `review_note`（CharField、required=False）
-  - 値違い確認の選択肢（左カラム採用 / 右カラム採用 / 手入力）
 - **メソッド**：
-  - `clean()`：マージ用バリデーション（11.7 参照）
-  - `get_update_contact()`：中央フォームの値だけを持った新規 Contact インスタンス（pk なし）を返す
-  - `confirmed_field_names()`：ユーザーが確認・編集したフィールド名のリストを返す
+  - `clean()`：第 1 段階・第 2 段階・サバイブ選択の整合性をまとめて検証（§11.7.3 参照）
+  - `get_merge_reason()`：**純関数**（`self.cleaned_data` から導出）。戻り値 `list[str]`。`review_result` のうち `DuplicateMergeReason.values` に含まれる value だけをリスト化して返す。別人系のみ / 空のとき `[]` を返す。`review_decision='additional_role'` のとき `clean()` で `review_result=["additional_role"]` に整形済みのため、自動的に `["additional_role"]` を返す
+  - `hidden_name_fields()`：**純関数**（DB 操作なし）。戻り値 `list[str]`。両側 full_name が一致 + 両側 last_name 一致 + 両側 first_name 一致 + last_name / first_name が空でない + full_name に last_name と first_name の両方が部分一致で含まれる、を全部満たすとき `["last_name", "first_name"]` を返す。それ以外は `[]`。View 側で field_groups 整形時に省略対象を除外するための判定
+  - `has_confirm_checkboxes()`：**純関数**（`self.fields` のキー走査のみ）。戻り値 `bool`。`self.fields` に `confirmed_` 始まりのフィールドが 1 個以上あれば True。テンプレ側で確認チェックブロックの表示判定に使用
 - **`__init__` の引数**：`candidate: DuplicateCandidate`、`surviving_person: Person`、`merged_person: Person`（マージのコンテキストを View から渡す）
+
+【v1.4.2 廃止】 v1.4.2 改訂前の `merge_reason` フィールド、`get_update_contact()` メソッド、`confirmed_field_names()` メソッド、`has_field_updates()` メソッド、値違い確認の選択肢（左カラム採用 / 右カラム採用 / 手入力）、中央フォーム初期値ロジックはすべて廃止。Contact 詳細画面 AJAX 化に伴うマージ系処理の設計方針大転換による（D-3 系で詳細仕様確定後、別途反映予定）。
 
 #### MergeUndoForm（21 番用、独立クラス）
 
@@ -2025,16 +2031,23 @@ View から Form を生成する際、`__init__` の引数として既存 Contac
 
 #### 責務
 
-マージ画面のバリデーション。以下を確認：
+マージ画面のバリデーション。第 1 段階・第 2 段階・サバイブ選択・確認チェックの整合性をまとめて検証する：
 
-1. **review_result の整合性**：merged 系 / different_person 系の混在禁止。最低 1 つ必須
-2. **other_* 選択時の note 必須**：review_result に other_merged / other_different が含まれるなら、review_note が必須
-3. **merge_reason の必須性**：review_result が merged 系のときのみ merge_reason が必須
-4. **DUPLICATE_CHECK_FIELDS の全 high 化**：surviving 側 Contact の DUPLICATE_CHECK_FIELDS（9 フィールド）が全 high であることを確認（マージ画面で修正・確認することで全 high 化、8.5）。additional_role の場合は merged 側 Contact も同条件
-5. **値違いフィールドの確認済み**：surviving / merged で値違いがあるフィールドは、ユーザーが採用判断（左カラム採用 / 右カラム採用 / 手入力）を済ませていることを確認
-6. **surviving_person の選択**：必須
+1. **review_decision の必須性**：`required=True` で担保（Form の required 機能）
+2. **review_decision と review_result の整合性検証（`set.issubset()` ベース）**：
+   - `merged`：`review_result` が 1 個以上 + すべてマージ系 value（`DuplicateMergeReason` から `ADDITIONAL_ROLE` を除く 6 値）。`set.issubset(MERGED_VALUES)` で判定
+   - `additional_role`：`clean()` 内で `cleaned_data["review_result"] = ["additional_role"]` を自動整形（UI 上は review_result を表示しないため、入力値は空でよい）
+   - `different`：`review_result` が 1 個以上 + すべて別人系 value（`DifferentPersonReason` 3 値）。`set.issubset(DIFFERENT_VALUES)` で判定
+3. **surviving_person_choice の必須性**：`review_decision in ('merged', 'additional_role')` のときのみ必須化。エラーメッセージは review_decision に応じて「サバイブ側を選択してください」/「主コンタクトを選択してください」を切替
+4. **確認チェック CB のバリデーション**：`review_decision in ('merged', 'additional_role')` のときのみ走らせる。`different` 判定時は **CB 検証をスキップ**（別人判定では surviving 側 Contact をマージしないため CFC を confirmed 化する必要がない、UI 上も CB は disabled / 非表示）
+5. **other_* 選択時の review_note 必須**：`review_result` に `other_merged` / `other_different` が含まれるなら、`review_note` が必須
 
-バリデーション失敗時は `ValidationError` を発生させる。エラーメッセージはフィールドごとに表示される。
+バリデーション失敗時は `ValidationError` を発生させる。エラーメッセージはフィールドごとに表示される（§11.6.6 `AppErrorList` 経由で `app-form__error` クラスが自動付与）。
+
+【v1.4.2 廃止された旧バリデーション】
+- 「マージ系と別人系の同時選択禁止」チェック：`review_decision` 3 値判定の構造上、物理的に起き得ないため削除
+- 「マージ系のときの `merge_reason` 必須」チェック：`merge_reason` フィールド廃止（§11.6.2 参照、`get_merge_reason()` メソッド導出に置換）に伴い削除
+- 「DUPLICATE_CHECK_FIELDS の全 high 化」「値違いフィールドの確認済み」：マージ画面での値修正廃止（D-3 系設計大転換）に伴い、マージ画面に来る前に Contact 詳細画面で対応する流れに変更（D-3 系で詳細仕様確定後、別途反映予定）
 
 #### `candidate` / `surviving_person` / `merged_person` をフォームに渡す方法
 
