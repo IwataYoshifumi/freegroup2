@@ -711,21 +711,62 @@ Contact が新規作成または重複判定対象フィールドが更新され
 
 ## 8.3 スコア表
 
-各フィールドの完全一致に対して、点数を加算する。confidence=high のフィールドのみが加算対象（low / medium は加算しない）。
+各フィールドの完全一致に対して、点数を加算する。両 Contact の confidence=high（DB 上の low / medium レコードは加算対象外、ただし high はデフォルト値のため大半のフィールドが加算対象になりうる）かつ正規化後の値が完全一致した場合のみ加算する。
 
-スコア表とランク閾値は `config/constants.py` で管理する。運用後にチューニング可能とするため、定数化された設計とする。
+スコア表とランク閾値は `config/constants.py` の `DUPLICATE_FIELD_SCORES` / `DUPLICATE_SCORE_EMAIL_PERSONAL` / `DUPLICATE_SCORE_EMAIL_GENERIC` / `POSSIBLE_*_MIN_SCORE` で管理する。運用後にチューニング可能とするため、定数化された設計とする。初期値は以下のとおり。
+
+| フィールド | スコア（high 一致時の加算点） |
+|---|---|
+| mobile | 80 |
+| email（個人メール） | 80 |
+| full_name | 40 |
+| company | 10 |
+| department | 10 |
+| address | 10 |
+| title | 5 |
+| phone | 5 |
+| email（代表メール） | 5 |
+| branch | 0（配点なし。所属5フィールド判定にのみ参加、§8.4 参照） |
+
+email は個人メール（`DUPLICATE_GENERIC_EMAIL_LOCALPARTS` に該当しないローカル部）と代表メール（該当するローカル部）で配点を分ける。判定は §8.7 のロジックでサービス層が行い、どちらの定数を使うかを決める。
+
+合計スコアの 200 点到達例（参考）：
+
+- `mobile` + `email`（個人）+ `full_name` = 80 + 80 + 40 = 200
+- `mobile` + `email`（個人）+ `company` + `department` + `address` = 80 + 80 + 10 + 10 + 10 = 190（200 点に届かない）
+- `mobile` + `email`（個人）+ `full_name` + `company` = 80 + 80 + 40 + 10 = 210
 
 ## 8.4 ランク判定
 
-合計スコアと一致条件の組み合わせでランクを判定する。
+合計スコアと一致条件の組み合わせでランクを判定する。判定は以下のランクを **exact_match → possible_high → possible_mid → possible_low の順に上から評価し、最初に該当した条件のランクを採用する**。各ランクの「必須条件」内に列挙された条件はすべて **AND 関係**（すべて満たす必要がある）。
 
 | ランク | 必須条件 |
 |---|---|
-| exact_match | 200点以上 + 所属5フィールド両方一致 or 両方空 |
-| possible_high | 200点以上（フルネーム不一致でもメール+携帯+所属で達成可能） |
-| possible_mid | フルネーム一致 + メール or 携帯一致 |
-| possible_low | 40〜119点 + フルネーム一致 |
+| exact_match | 200点以上 AND 所属5フィールドが「両方一致」もしくは「両方空」 |
+| possible_high | 200点以上（フルネーム不一致でも mobile + email + 所属系の加算で達成可能） |
+| possible_mid | フルネーム一致 AND（email 一致 OR mobile 一致） |
+| possible_low | 40〜119点 AND フルネーム一致 |
 | none | 上記いずれにも該当しない |
+
+ランク閾値の具体値（`config/constants.py`）：
+
+| 定数 | 値 | 用途 |
+|---|---|---|
+| `POSSIBLE_LOW_MIN_SCORE` | 40 | possible_low の下限 |
+| `POSSIBLE_MID_MIN_SCORE` | 120 | possible_mid のフォールバック上限（possible_low の上限 119 と接続） |
+| `POSSIBLE_HIGH_MIN_SCORE` | 200 | possible_high / exact_match の下限 |
+
+**所属5フィールド**：exact_match 判定の「両方一致 or 両方空」評価に用いる 5 項目。
+
+| 所属5フィールド | コーディング名（`DUPLICATE_LOCATION_FIELDS`）|
+|---|---|
+| 会社名 | company |
+| 部署 | department |
+| 役職 | title |
+| 支店 | branch |
+| 住所 | address |
+
+`DUPLICATE_CHECK_FIELDS`（9 フィールド）から個人系 4 項目（full_name / email / phone / mobile）を除いた残りが所属5フィールドに対応する。
 
 ### 8.4.1 ランク閾値の根拠
 
@@ -787,11 +828,11 @@ group_id 生成ロジック：バックグラウンド処理で重複チェッ�
 
 ## 8.7 代表メール判定
 
-メールアドレスのローカル部（@ より前）が以下のリストに該当する、または該当語の前後にハイフン・アンダースコアが付くバリエーションに該当する場合、代表メールと判定する。
+メールアドレスのローカル部（@ より前）が以下のリストに該当する、または該当語の前後にハイフン・アンダースコア・ドットが付くバリエーションに該当する場合、代表メールと判定する。
 
 初期リスト：info / contact / support / sales / admin / office / mail / inquiry / help / service / shop / customer / reception
 
-バリエーション例：info-jp@、sales_team@、support2@ なども代表メール扱い。
+バリエーション例：`info-jp@`、`sales_team@`、`info.jp@`、`sales.team@`、`support2@` なども代表メール扱い。
 
 運用：config/constants.py の DUPLICATE_GENERIC_EMAIL_LOCALPARTS で管理。運用しながら追加可能。
 
