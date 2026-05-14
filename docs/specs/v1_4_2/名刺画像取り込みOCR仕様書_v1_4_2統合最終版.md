@@ -19,7 +19,7 @@
 | # | 改訂内容 |
 |---|---|
 | 1 | **マージ後処理の recover 一本化**：値修正の有無を問わず `recover_duplicate_candidates` を呼ぶ統一設計に変更。連続レビュー UX を維持しつつ、補助レコードの整合性は次回 cron で収束させる |
-| 2 | **サービス分割**：v1.4.1 の単一 `execute_merge` を 4 つの公開サービス（`Mark_as_Different_Person` / `Execute_Merge_Only` / `Execute_Merge_with_Updates` / `Execute_Merge_Undo`）に分割し、責務を明確化 |
+| 2 | **サービス分割**：v1.4.1 の単一 `execute_merge` を公開サービスに分割し責務を明確化。v1.4.2 改訂後は 3 サービス（`Mark_as_Different_Person` / `Execute_Merge_Only` / `Execute_Merge_Undo`）に確定（改訂途中で導入した `Execute_Merge_with_Updates` は D-3 系 Contact 詳細画面 AJAX 化に伴い `Execute_Merge_Only` に統合、§9.4.4 参照）|
 | 3 | **Django モデルメソッド化の体系化**：`merge_helpers.py` を全削除し、Person / Contact / ContactFieldConfidence / DuplicateCandidate / PersonMergeLog / ActionLog の各モデルメソッドに分散配置。判断基準を仕様書として明文化 |
 | 4 | **Form クラス活用方針の確定**：抽象基底クラス `ContactBaseForm` を導入。Form は DB に触らず `get_update_contact()` で新規 Contact インスタンスを返すまでに留める設計を確立 |
 | 5 | **重複検出の効率化アルゴリズム**：N×(N-1)/2 の素朴比較を、フルネーム/メール/携帯一致の OR 絞り込みで現実的な時間に短縮 |
@@ -569,7 +569,7 @@ ActionLog に記録する対象は、すべて仕様書で明示的に定める�
 
 【v1.4.2 で ActionLog に記録する対象】
 
-- マージ実行（Execute_Merge_Only / Execute_Merge_with_Updates）→ `merge_log.record_merge_action(user)` 経由
+- マージ実行（Execute_Merge_Only）→ `merge_log.record_merge_action(user)` 経由
 - 別人判定（Mark_as_Different_Person）→ `candidate.record_different_person_action(user)` 経由
 - マージ復元（Execute_Merge_Undo）→ `merge_log.record_undo_action(user, note)` 経由（note は MergeUndoForm の cleaned_data["note"]、空文字でも `{"note": ""}` 形式で data に保存して集計時のキーを揃える）
 - cron 重複チェック実行（Run_Generate_Duplicate_Candidates）→ `ActionLog.record(...)` 直接呼び
@@ -1287,7 +1287,7 @@ form 引数の型は `ContactUpdateForm` に限定（`MergeForm` は受け付け
 - 12 番 UpdatePrimaryContactView（change_reason='fix' のとき）
 - 13 番 UpdateActiveContactView（change_reason フィールドなし、fix 相当の処理に固定）
 
-マージ画面 same_card は `contact.fix` を呼ばない（`Execute_Merge_with_Updates` 内で別処理として書き分け、9.4.5 参照）。
+マージ画面では `contact.fix` を呼ばない。Contact のフィールド値修正は事前に Contact 詳細画面（11 番）で AJAX 経由で済ませている前提（§11.5.5 / §11.6.2 / ストック #20 廃止系参照）。マージ画面到達時の CFC 確定処理は `Execute_Merge_Only` の atomic 冒頭で一括 confirmed 化される（§9.3.1【v1.4.2 補足】/ ストック #57 参照）。
 
 ### 10.5.3 `contact.get_field_confidences()` の戻り値仕様
 
@@ -1369,10 +1369,13 @@ Contact 側は薄いラッパーとして `ContactFieldConfidence.get_for_contac
 - 既存の low/mid フィールドの ContactFieldConfidence は `mark_fields_as_confirmed()` で全 confirmed 化（confirmed_at / confirmed_by を記録）
 - 新規に ContactFieldConfidence を作成することはない（既存レコードの更新のみ）
 
-#### ケース 3：マージ画面 same_card 特殊処理（17 番 `Execute_Merge_with_Updates` で merge_reason='same_card' かつ修正あり）
+#### ケース 3：マージ実行時の CFC 確定処理（17 番 `Execute_Merge_Only` の atomic 冒頭）
 
-- ユーザーが値違いを確認したフィールドのみ `mark_fields_as_confirmed()` で部分 confirmed 化
-- それ以外の low/mid フィールドの ContactFieldConfidence は触らない（部分 confirmed 化）
+【v1.4.2 改訂】 v1.4.2 改訂前は「マージ画面 same_card 特殊処理（旧 `Execute_Merge_with_Updates` で merge_reason='same_card' かつ修正あり）」として部分 confirmed 化を定義していたが、マージ画面の値修正機能廃止と `Execute_Merge_with_Updates` 統合（§9.4.4 / §9.4.5 / ストック #20 廃止系）に伴い、本ケースを以下に書き換える。
+
+- マージ画面に到達した時点で、surviving 側 Contact の値修正は Contact 詳細画面（11 番、AJAX）で済ませている前提（D-3 系）
+- `Execute_Merge_Only` の atomic 冒頭で、surviving 側 primary_contact に紐づく `confirmed_at IS NULL` の低/中信頼度 CFC を `ContactFieldConfidence.mark_fields_as_confirmed()` で一括 confirmed 化する（マージ画面の確認 CB を ON でマージ実行した場合の CFC 反映を担保、§9.3.1【v1.4.2 補足】/ ストック #57 参照）
+- 個別の値違いフィールドに対する部分 confirmed 化は行わない（Contact 詳細画面の AJAX 個別確認で対応する経路に置換）
 
 #### ContactFieldConfidence が作成される唯一の場面
 
@@ -1523,9 +1526,9 @@ ActionLog の書き込みは 2 通り：
 | View / 起動契機 | 使用するメソッド・タグ |
 |---|---|
 | CardListView | `DuplicateCandidate.get_pending(contact)` / `business_card.get_card_image_url()` / `{% card_image %}` |
-| CardDetailView | `business_card.get_card_image_url()` / `business_card.get_card_image_url_full()` / `{% json_tree %}` |
+| CardDetailView | `business_card.get_card_image_url()` / `business_card.get_card_image_url_full()` / `{% ocr_result_badge %}` / `<andypf-json-viewer>`（raw_json_1 / raw_json_2 表示） |
 | OriginalListView | `original_image.get_image_url()` / `{% original_image_thumbnail %}` |
-| OriginalDetailView | `original_image.get_image_url()` / `original_image.get_image_url_full()` / `{% json_tree %}` |
+| OriginalDetailView | `original_image.get_image_url()` / `original_image.get_image_url_full()` / `<andypf-json-viewer>`（debug_json 表示） |
 | PersonListView | `Person.get_active()` / `DuplicateCandidate.get_pending(contact)` |
 | PersonDetailView | `person.get_active_contacts()` / `person.get_inactive_contacts()` / `DuplicateCandidate.get_pending(contact)` / `PersonMergeLog.get_for_person(person)` |
 | ContactDetailView | `contact.get_field_confidences()` / `DuplicateCandidate.get_pending(contact)` / `{% contact_confidence %}` |
@@ -1535,7 +1538,7 @@ ActionLog の書き込みは 2 通り：
 | PersonAddAdditionalRoleView（9 番） | View 直書き（save 済み Contact が前提でないため、`set_primary_contact()` は使えない、10.12 参照） |
 | DuplicateCandidateGroupListView（15 番） | `DuplicateCandidate.get_pending(contact)` / `DuplicateCandidate.get_by_group()` |
 | DuplicateCandidateGroupDetailView（16 番） | 当該グループの DuplicateCandidate を review_status ごとに集計 |
-| DuplicateCandidateGroupUpdateView（17 番） | `Execute_Merge_Only()` / `Execute_Merge_with_Updates()` / `Mark_as_Different_Person()` / `Contact.is_all_field_confidence_high()` / `contact.get_field_confidences()` |
+| DuplicateCandidateGroupUpdateView（17 番） | `Execute_Merge_Only()` / `Mark_as_Different_Person()` / `MergeForm.get_merge_reason()` / `MergeForm.hidden_name_fields()` / `MergeForm.has_confirm_checkboxes()` / `contact.get_field_confidences()` |
 | PersonMergeLogListView（19 番） | `PersonMergeLog.get_for_person()` / `PersonMergeLog.get_undoable()` |
 | PersonMergeLogDetailView（20 番） | `merge_log.is_undoable()` |
 | PersonMergeLogConfirmUndoView（21 番） | `Execute_Merge_Undo()` / `merge_log.get_undo_preview()` |
@@ -1600,7 +1603,7 @@ v1.4.x で追加・変更するファイルを以下に示す。
 | duplicates/views.py | DuplicateCandidateGroupListView、DuplicateCandidateGroupDetailView、DuplicateCandidateGroupUpdateView、PersonMergeLogListView、PersonMergeLogDetailView、PersonMergeLogConfirmUndoView |
 | duplicates/forms.py | MergeForm、MergeUndoForm |
 | duplicates/services/duplicate_detection.py | find_duplicate_contacts、_calculate_score、_determine_rank、determine_base_person |
-| duplicates/services/merge_executor.py | Mark_as_Different_Person、Execute_Merge_Only、Execute_Merge_with_Updates、Execute_Merge_Undo、recover_duplicate_candidates、invalidate_pending_candidates |
+| duplicates/services/merge_executor.py | Mark_as_Different_Person、Execute_Merge_Only、Execute_Merge_Undo、recover_duplicate_candidates、invalidate_pending_candidates（v1.4.2 で Execute_Merge_with_Updates は廃止し Execute_Merge_Only に統合、§9.4.4 参照） |
 | duplicates/tasks/duplicate_check_runner.py | generate_duplicate_candidates_for_contact（タスク層下位関数） |
 | cards/management/commands/check_duplicates.py | cron 起動。Run_Generate_Duplicate_Candidates 呼び出し |
 | cards/management/commands/recheck_duplicates.py | 全 Contact の duplicate_checked_at リセット |
@@ -1631,7 +1634,7 @@ v1.4.x で追加・変更するファイルを以下に示す。
 | 14 | `/contacts/<uuid:pk>/preview/` | GET | PreviewContactView | コンタクト一覧画面からのモーダルプレビュー用、AJAX 専用 |
 | 15 | `/duplicates/` | GET | DuplicateCandidateGroupListView | 重複候補グループ一覧。group_id 単位で集約表示。絞り込みフォーム（rank の複数選択 / 進捗の複数選択 / ユーザー絞り込み）あり。詳細は §11.5.x「DuplicateCandidateGroupListView の絞り込み仕様」参照 |
 | 16 | `/duplicates/groups/<uuid:group_id>/` | GET | DuplicateCandidateGroupDetailView | 同一グループ DuplicateCandidate の詳細表示。マージのレビューの最終結果表示画面（17 番からのリダイレクト直後は Django messages で完了メッセージを表示） |
-| 17 | `/duplicates/groups/<uuid:group_id>/review` | GET / POST | DuplicateCandidateGroupUpdateView | マージレビュー画面。GET で次のペアを表示、POST で処理（Mark_as_Different_Person / Execute_Merge_Only / Execute_Merge_with_Updates のいずれか）→ 同一 URL に GET リダイレクト（PRG パターン）。すべて処理完了したら 16 番にリダイレクト + Django messages で結果メッセージ |
+| 17 | `/duplicates/groups/<uuid:group_id>/review` | GET / POST | DuplicateCandidateGroupUpdateView | マージレビュー画面。GET で次のペアを表示、POST で処理（Mark_as_Different_Person / Execute_Merge_Only のいずれか）→ 同一 URL に GET リダイレクト（PRG パターン）。すべて処理完了したら 16 番にリダイレクト + Django messages で結果メッセージ。UI 詳細は §11.5.5 / §11.6.2 参照 |
 | 19 | `/merge-logs/` | GET | PersonMergeLogListView | マージログ一覧。LoginRequiredMixin + ListView。絞り込み 3 種（status: undoable / undone / locked の複数選択 / user: 'me' で executed_by=ログインユーザー / searched=1 で絞り込み実行済みフラグ、未指定の初回は status='undoable' のみ）。ソート -executed_at（最新優先）、20 件/ページ。N+1 回避は select_related で surviving_person / merged_person の primary_contact / executed_by / undone_by |
 | 20 | `/merge-logs/<uuid:pk>/` | GET | PersonMergeLogDetailView | マージログ詳細。LoginRequiredMixin + View。1 件取得（select_related 5 段：surviving / merged primary_contact / executed_by / undone_by / duplicate_candidate）。DoesNotExist → Http404。context に `is_undoable()` + `get_undo_preview()` + 復元ボタン関連（21 番への遷移）を含む |
 | 21 | `/merge-logs/<uuid:pk>/confirm-undo/` | GET / POST | PersonMergeLogConfirmUndoView | マージ復元の確認画面と実行処理。LoginRequiredMixin + View。GET：is_undoable=False なら `messages.error` + 20 番リダイレクト、True なら `MergeUndoForm` を空で render。POST：is_undoable 再チェック → MergeUndoForm 検証 → `Execute_Merge_Undo` 呼び出し → ValidationError キャッチで `messages.error` + 20 番リダイレクト → 成功時 `messages.success` + 20 番リダイレクト。競合検出（GET / POST 両方）：他ユーザによる先行復元への防御 |
@@ -1706,9 +1709,8 @@ transfer / promotion / job_change / name_change で新規 Contact を作成す�
 
 1. POST データを `MergeForm` に渡してバリデーション（11.6 参照）
 2. バリデーション通過後、`form.cleaned_data['review_result']` を取得
-3. **review_result が different 系**（same_name / ocr_error / other_different のいずれかを含む）→ `Mark_as_Different_Person` を呼ぶ
-4. **review_result が merged 系 + フィールド修正あり** → `Execute_Merge_with_Updates` を呼ぶ
-5. **review_result が merged 系 + フィールド修正なし** → `Execute_Merge_Only` を呼ぶ
+3. **review_decision='different'**（review_result が different 系：same_name / ocr_error / other_different のいずれかを含む）→ `Mark_as_Different_Person` を呼ぶ
+4. **review_decision in ('merged', 'additional_role')** → `Execute_Merge_Only(candidate, surviving_person, merged_person, form: MergeForm, user)` を呼ぶ（v1.4.2 で `Execute_Merge_with_Updates` 統合、§9.4.4 / §13.4.1 参照）
 6. すべて完了後、PRG パターンで GET リダイレクト（17 番の URL に）
 
 #### 「フィールド修正あり / なし」の判定
@@ -1756,9 +1758,9 @@ transfer / promotion / job_change / name_change で新規 Contact を作成す�
 
 ### 11.5.3 POST /duplicates/groups/<uuid:group_id>/review（17 番、DuplicateCandidateGroupUpdateView）
 
-1. アクションを取得（review_result の値で判定：merged 系 / different_person 系）
-2. **merged 系**：`Execute_Merge_Only` / `Execute_Merge_with_Updates` のいずれかを呼ぶ（フィールド修正の有無で分岐）
-3. **different_person 系**：`Mark_as_Different_Person` を呼ぶ
+1. アクションを取得（`MergeForm.cleaned_data['review_decision']` の値で判定：`merged` / `additional_role` / `different`）
+2. **review_decision in ('merged', 'additional_role')**：`Execute_Merge_Only(candidate, surviving_person, merged_person, form: MergeForm, user)` を呼ぶ（v1.4.2 で `Execute_Merge_with_Updates` を統合、§9.4.4 / §13.4.1 参照）
+3. **review_decision='different'**：`Mark_as_Different_Person` を呼ぶ
 4. shown_pair_ids に当該ペア ID を追加
 5. 同じ URL（/duplicates/groups/<group_id>/review）に GET でリダイレクト（PRG パターン）
 
@@ -2003,7 +2005,7 @@ Contact フィールド定義を 1 箇所に集約し、Contact 修正系・別�
 | 呼び出し画面 | View の処理 |
 |---|---|
 | 修正画面（12 番 / 13 番） | `change_reason` に応じて、既存 Contact への値反映（`contact.fix(form, user)` 経由）or 新規 Contact 作成を判断 |
-| マージ画面（17 番） | サービス層（`Execute_Merge_with_Updates`）に渡し、サービス層内で適切に処理 |
+| マージ画面（17 番） | サービス層（`Execute_Merge_Only`）に Form を渡す。マージ画面では Contact のフィールド値修正を行わないため、`get_update_contact()` 等の値修正系メソッドは廃止された（v1.4.2 改訂、§11.6.2 / §9.4.4 参照） |
 
 **設計趣旨**：
 
@@ -2529,7 +2531,7 @@ v1.4.2 では cron + 管理コマンドによる同期処理だが、将来的�
 | find_* / get_* / search_* / determine_* | 準関数 | find_duplicate_contacts / determine_base_person |
 | validate_* | 副作用あり（例外） | validate_image |
 | convert_* / save_* / create_* / update_* / delete_* | 副作用あり（変換・DB 書込） | convert_to_jpeg / save_card_image |
-| run_* / process_* / send_* / execute_* / extract_* / generate_* | 副作用あり（複合処理） | run_ocr / Extract_Cards_via_OCR / generate_duplicate_candidates_for_contact |
+| run_* / process_* / send_* / execute_* / extract_* / generate_* | 副作用あり（複合処理） | run_ocr / extract_carddata_via_ocr / generate_duplicate_candidates_for_contact |
 | retry_* | 副作用あり（再投入） | retry_failed_ocr |
 
 ### 13.2.2 サービス層主要関数の命名規則（Pascal_Snake_Case）
@@ -2546,7 +2548,7 @@ View 層・cron・タスクから直接呼ばれる「処理フロー全体を�
 
 | カテゴリ | 起動契機 | 例 |
 |---|---|---|
-| `Execute_*` | View 層から（ユーザー操作起点） | `Execute_Merge_Only` / `Execute_Merge_with_Updates` / `Execute_Merge_Undo` |
+| `Execute_*` | View 層から（ユーザー操作起点） | `Execute_Merge_Only` / `Execute_Merge_Undo` |
 | `Mark_as_*` | View 層から(状態遷移系) | `Mark_as_Different_Person` |
 | `Run_*` | cron / タスク起動 | `Run_Generate_Duplicate_Candidates` / `Run_Crop_Cards_From_OriginalImage` / `Run_Process_CardImages_With_OCR` |
 
@@ -3218,14 +3220,14 @@ Django 標準の CSRF 保護を継続。画像アップロードはバリデー�
 | 10 | duplicates/views.py | DuplicateCandidateGroupListView、DuplicateCandidateGroupDetailView、DuplicateCandidateGroupUpdateView、PersonMergeLogListView、PersonMergeLogDetailView、PersonMergeLogConfirmUndoView |
 | 11 | duplicates/forms.py | MergeForm、MergeUndoForm |
 | 12 | duplicates/services/duplicate_detection.py | find_duplicate_contacts、_calculate_score、_determine_rank、determine_base_person |
-| 13 | duplicates/services/merge_executor.py | Mark_as_Different_Person、Execute_Merge_Only、Execute_Merge_with_Updates、Execute_Merge_Undo、recover_duplicate_candidates、invalidate_pending_candidates |
+| 13 | duplicates/services/merge_executor.py | Mark_as_Different_Person、Execute_Merge_Only、Execute_Merge_Undo、recover_duplicate_candidates、invalidate_pending_candidates（v1.4.2 で Execute_Merge_with_Updates は廃止し Execute_Merge_Only に統合、§9.4.4 参照） |
 | 14 | duplicates/tasks/duplicate_check_runner.py | generate_duplicate_candidates_for_contact、Run_Generate_Duplicate_Candidates |
 | 15 | cards/management/commands/check_duplicates.py | cron 起動。Run_Generate_Duplicate_Candidates 呼び出し |
 | 16 | cards/management/commands/recheck_duplicates.py | 全 Contact の duplicate_checked_at リセット |
 | 17 | cards/management/commands/dev_reset_duplicates.py | 開発用 DuplicateCandidate リセット |
 | 18 | cards/management/commands/dev_reset_ocr.py | 開発用 OCR リセット（旧 dev_for_reset_ocr から改名） |
 | 19 | cards/templatetags/back_tags.py | BackNavigator 用カスタムタグ（append_back_url / back_url / back_all_url / hidden_back_field） |
-| 20 | cards/templatetags/ui_tags.py | UI カスタムタグ（card_image / original_image_thumbnail / json_tree / confidence / contact_confidence） |
+| 20 | cards/templatetags/ui_tags.py | UI カスタムタグ（card_image / original_image_thumbnail / confidence / contact_confidence / confidence_state / ocr_result_badge）。json_tree は v1.4.2 で廃止し andypf-json-viewer に統一（§11.8.1 / §11.8.2 参照） |
 | 21 | static/css/app.css | UI 全体のスタイル（マージ画面用 app-merge-* prefix のクラス追加） |
 | 22 | static/js/app.js | 共通モーダル制御、BackNavigator JS、マージ画面の JS |
 | 23 | templates/contacts/ ほか | 各画面のテンプレート（base.html、各 View 用テンプレート、共通モーダル部品） |
