@@ -19,7 +19,7 @@
 | # | 改訂内容 |
 |---|---|
 | 1 | **マージ後処理の recover 一本化**：値修正の有無を問わず `recover_duplicate_candidates` を呼ぶ統一設計に変更。連続レビュー UX を維持しつつ、補助レコードの整合性は次回 cron で収束させる |
-| 2 | **サービス分割**：v1.4.1 の単一 `execute_merge` を 4 つの公開サービス（`Mark_as_Different_Person` / `Execute_Merge_Only` / `Execute_Merge_with_Updates` / `Execute_Merge_Undo`）に分割し、責務を明確化 |
+| 2 | **サービス分割**：v1.4.1 の単一 `execute_merge` を公開サービスに分割し責務を明確化。v1.4.2 改訂後は 3 サービス（`Mark_as_Different_Person` / `Execute_Merge_Only` / `Execute_Merge_Undo`）に確定（改訂途中で導入した `Execute_Merge_with_Updates` は D-3 系 Contact 詳細画面 AJAX 化に伴い `Execute_Merge_Only` に統合、§9.4.4 参照）|
 | 3 | **Django モデルメソッド化の体系化**：`merge_helpers.py` を全削除し、Person / Contact / ContactFieldConfidence / DuplicateCandidate / PersonMergeLog / ActionLog の各モデルメソッドに分散配置。判断基準を仕様書として明文化 |
 | 4 | **Form クラス活用方針の確定**：抽象基底クラス `ContactBaseForm` を導入。Form は DB に触らず `get_update_contact()` で新規 Contact インスタンスを返すまでに留める設計を確立 |
 | 5 | **重複検出の効率化アルゴリズム**：N×(N-1)/2 の素朴比較を、フルネーム/メール/携帯一致の OR 絞り込みで現実的な時間に短縮 |
@@ -28,6 +28,7 @@
 | 8 | **Form クラス継承構造の確立**：5 つの Form（`ContactUpdateForm` / `ContactUpdateActiveForm` / `ContactAddAdditionalRoleForm` / `ContactCreateForm` / `MergeForm`）が `ContactBaseForm` を継承する構造に統一 |
 | 9 | **マージ前後のステータス遷移を別添 PDF として確定**：11 列横長表は別添 PDF（`/docs/spec/マージ前後のコンタクトのステータス等まとめ.pdf`）を正本とし、本文には設計趣旨と切り分け基準のみ記載 |
 | 10 | **UI カスタムタグ・共通モーダル部品の整備**：画像表示・JSON ツリー・信頼度マークの共通化を 5 種類のカスタムタグで実現 |
+| 11 | **OCR / OpenCV パイプラインの分離**：v1.2.0 で採用した「API 1 回呼び出しで全名刺一括取得（パターン A）」を**公式に撤回**。BC 1 枚 = Claude API 1〜2 リクエストに変更し、`process_opencv` / `process_ocr` の 2 本 cron に分離。条件付き 2 回 OCR（orientation 補正後の再 OCR）導入、`Run_Crop_Cards_From_OriginalImage` / `Run_Process_CardImages_With_OCR` 等の新関数群で実装（旧 `Extract_Cards_via_OCR` / `process_pending` / `PipelineCoordinator` は完全削除）|
 
 ## v1.4.0 から継承する主要機能
 
@@ -124,11 +125,12 @@ OCR 結果から Contact を生成する際にフィールドの正規化を実�
 システム全体の処理フローは以下のとおり。
 
 1. ユーザーが画像をアップロード（同期処理） → OriginalImage 作成（status=pending）
-2. cron による process_pending 起動 → OCR 実行 → 名刺画像切り抜き → BusinessCard / Contact / Person 作成
-3. cron による check_duplicates 起動 → 主コンタクト同士で重複検出 → DuplicateCandidate 作成
-4. ユーザーがレビュー画面を開き、1 ペアごとに判定（マージ / 別人 / 次の候補）
-5. マージ実行 → PersonMergeLog 作成 → Contact 付け替え → Person.status='merged' に変更 → recover_duplicate_candidates 実行
-6. 必要に応じて復元実行 → Contact を previous_person に戻す → ログを undone に
+2. cron による `process_opencv` 起動 → OpenCV で名刺画像切り抜き → BusinessCard 作成（`status=cards_extracted`、`ocr_status=pending`）
+3. cron による `process_ocr` 起動 → BC 単位で条件付き 2 回 OCR 実行 → Contact / Person 作成、`status=extracted`（OpenCV と OCR は独立した 2 本 cron に分離、§15.6 / §17 別表 B 参照）
+4. cron による `check_duplicates` 起動 → 主コンタクト同士で重複検出 → DuplicateCandidate 作成
+5. ユーザーがレビュー画面を開き、1 ペアごとに判定（マージ / 別人 / 次の候補）
+6. マージ実行 → PersonMergeLog 作成 → Contact 付け替え → Person.status='merged' に変更 → recover_duplicate_candidates 実行
+7. 必要に応じて復元実行 → Contact を previous_person に戻す → ログを undone に
 
 View 層の責務は元画像の保存（OriginalImage 作成、status=pending）までに限定される。OCR 処理、重複チェック処理、マージ処理は別プロセスまたは別 View で実行される。
 
@@ -192,17 +194,19 @@ OriginalImage は元画像 1 件に対応するレコード。
 | id | UUIDField (PK) | プライマリキー（uuid.uuid4） |
 | user | FK(User, CASCADE) | アップロードしたユーザー |
 | image_file | ImageField | 元画像ファイル |
-| status | CharField(20) | 処理状態（5 値、4.2.1 参照） |
-| claimed_at | DateTimeField (null) | CAS で processing 遷移時刻を記録 |
-| raw_json | JSONField (null) | OCR 結果 JSON（不変） |
-| detected_count | IntegerField (default=0) | 検出された名刺数 |
+| status | CharField(20) | 処理状態（7 値、4.2.1 参照） |
+| claimed_at | DateTimeField (null) | CAS で processing / opencv_processing 遷移時刻を記録 |
+| raw_json | JSONField (null) | OCR 結果 JSON（**v1.4.2 で deprecated**：読み出しは BC.raw_json_1 / raw_json_2 経由に統一、フィールド自体は物理残置）|
+| detected_count | IntegerField (default=0) | 検出された名刺数（OriginalImage に紐づく BusinessCard レコードの総数。ocr_result の値に関わらず DB に保存された BC 全件をカウントする） |
 | error_message | TextField (default='') | 失敗理由・部分失敗ログ |
 | created_at | DateTimeField | auto_now_add |
 | updated_at | DateTimeField | auto_now |
 
 ### 4.2.1 OriginalImage.status の値
 
-詳細は別表 C.1 参照。pending / processing / extracted / garbage / failed の 5 値。
+詳細は別表 C.1 参照。pending / processing / opencv_processing / cards_extracted / extracted / garbage / failed の 7 値。
+
+旧 v1.4.2 改訂前の 1 本パイプライン用の `processing` は後方互換のため物理残置するが、v1.4.2 以降のパイプライン分離（第 8 章参照）では `opencv_processing` / `cards_extracted` に置き換わる。
 
 ### 4.2.2 OriginalImage のモデルメソッド
 
@@ -217,15 +221,21 @@ OriginalImage は元画像 1 件に対応するレコード。
 
 ## 4.3 BusinessCard（名刺DB）
 
-BusinessCard は切り抜き済み名刺画像に対応するレコード。
+BusinessCard は切り抜き済み名刺画像に対応するレコード。v1.4.2 のパイプライン分離（第 8 章参照）に伴い、BC 単位で OCR 処理状態・OCR 生 JSON・エラーメッセージを保持する。
 
 | フィールド名 | 型 | 説明 |
 |---|---|---|
 | id | UUIDField (PK) | プライマリキー |
 | original_image | FK(OriginalImage, CASCADE) | 元画像への外部キー |
-| card_image | ImageField (null) | 正規化後の名刺画像 |
-| card_index | IntegerField | raw_json["cards"] 配列内インデックス |
-| orientation | CharField(20, choices) | 名刺の向き（5 値、別表 C.2 参照） |
+| card_image | ImageField (null) | 正規化後の名刺画像（補正回転後の画像で上書きされる場合あり、第 15 章参照） |
+| card_index | IntegerField | OpenCV 検出結果の配列内インデックス |
+| orientation | CharField(20, choices) | 検出時の元の orientation（5 値、別表 C.2 参照、補正ログ） |
+| raw_json_1 | JSONField (null=True) | 1 回目 OCR の生 JSON 全体（OcrService.run_ocr の戻り値まるごと） |
+| raw_json_2 | JSONField (null=True) | 2 回目 OCR の生 JSON 全体（orientation=normal なら null、補正再 OCR 時のみ格納） |
+| ocr_status | CharField(20, choices) | OCR 処理状態（4 値、別表 C.13 参照、default=pending） |
+| ocr_result | CharField(20, choices, null=True) | OCR 処理結果の分類（5 値、別表 C.14 参照、default=None。OpenCV cron で BC 作成直後は null、OCR 完了時に確定） |
+| claimed_at | DateTimeField (null=True) | OCR cron の CAS 時刻 |
+| error_message | TextField (blank=True, default='') | OCR 失敗時のエラー集約 |
 | created_at | DateTimeField | auto_now_add |
 | updated_at | DateTimeField | auto_now |
 
@@ -238,6 +248,25 @@ BusinessCard は切り抜き済み名刺画像に対応するレコード。
 | `business_card.get_card_image_url()` | インスタンスメソッド | サムネイル用 URL を返す |
 | `business_card.get_card_image_url_full()` | インスタンスメソッド | フルサイズ用 URL を返す |
 
+### 4.3.2 BusinessCard と Contact の関係
+
+v1.4.2 で has_minimum_info NG ケース等でも BC を残置する仕様（第 15 章参照）を採用したため、BusinessCard と Contact の関係は v1.4.2 改訂前の「常に 1:1」から「条件付きの 1:0..1」に変わる。
+
+| BC.ocr_result | Contact の有無 |
+|---|---|
+| `business_card` | Contact を必ず持つ（OneToOne、§4.4 Contact 参照） |
+| `not_business_card` / `insufficient_info` / `ocr_failed` / `others` | Contact を持たない |
+| null（OpenCV cron 完了直後、OCR 未実行） | Contact を持たない |
+
+【削除カスケード】 BC を削除すると、以下の順で連鎖削除される：
+
+1. BC レコード削除（`bc.delete()`）
+2. Contact（OneToOneField、CASCADE）が連鎖削除
+3. ContactFieldConfidence（Contact への ForeignKey、CASCADE）が連鎖削除
+4. `card_image` の FS 実体が `post_delete` シグナルで自動削除
+
+`OriginalImage.raw_json` には削除した BC に対応する cards 配列要素が温存される（§5.4 不変ルール v1.2.1）。CardDeleteView 経由のハード削除でも本カスケードルールに従う（第 11 章参照）。
+
 ## 4.4 Contact（コンタクトDB）
 
 ### 4.4.0 設計趣旨：Contact はなぜ「スナップショット」か
@@ -248,9 +277,11 @@ Contact は「ある時点での名刺情報のスナップショット」とし
 
 なお fix（誤字訂正）の場合のみ既存 Contact を更新するが、これは「同じ名刺の入力をやり直す」操作であり、新しい時点の情報ではないため例外的に上書きを許容している。
 
+BusinessCard と Contact の関係は条件付きの 1:0..1（OCR 成功 BC は Contact を持つ、それ以外の BC は Contact を持たない）。詳細は §4.3.2 参照。
+
 ### 4.4.1 Contact のフィールド定義
 
-名刺ごとまたは手動入力ごとのスナップショット。BusinessCard と OneToOne 関係（手動入力時は null 許容）。Person への FK は NOT NULL。
+名刺ごとまたは手動入力ごとのスナップショット。BusinessCard と OneToOne 関係（手動入力時は null 許容、また BC 側の ocr_result が `business_card` 以外のときも Contact は存在しない、§4.3.2 参照）。Person への FK は NOT NULL。
 
 | フィールド名 | 型 | 説明 |
 |---|---|---|
@@ -263,9 +294,9 @@ Contact は「ある時点での名刺情報のスナップショット」とし
 | duplicate_checked_at | DateTimeField (null=True) | 重複チェック実行日時 |
 | created_by | FK(User, SET_NULL, null=True) | Contact 作成者 |
 | updated_by | FK(User, SET_NULL, null=True) | 直近の更新者 |
-| lang | CharField (default='ja') | 言語コード（ISO 639-1） |
+| lang | CharField (default='ja', blank=True) | 言語コード（ISO 639-1） |
 | postal_code | CharField | 郵便番号（数字のみ正規化済み） |
-| full_name | CharField(255) | 氏名（正規化済み） |
+| full_name | CharField(255, blank=False) | 氏名（正規化済み、必須） |
 | last_name / first_name | CharField(255) | 姓 / 名（オプション） |
 | salutation_name | CharField(255) | 敬称表記 |
 | company | CharField(255) | 会社名（正規化済み） |
@@ -281,6 +312,8 @@ Contact は「ある時点での名刺情報のスナップショット」とし
 | linkedin / facebook | CharField(500) | SNS（URL 系） |
 | notes | TextField | 自由記述メモ（正規化対象外） |
 | created_at / updated_at | DateTimeField | 自動付与 |
+
+`full_name` は必須フィールド。OCR 由来・手動入力・マージ画面・AJAX 更新を含むすべての経路で空文字を弾く（DB 制約 + Form clean + AJAX View ガード）。詳細は §15.5.3 の正規化ルールを参照。
 
 ### 4.4.2 Contact.status の値
 
@@ -396,8 +429,6 @@ Contact フィールドごとの信頼度を別テーブルで管理する。hum
 | person_b | FK(Person, CASCADE) | 候補の Person（順序ルールあり） |
 | score | IntegerField | 合計スコア（confidence=high のみ加算） |
 | rank | CharField(TextChoices) | exact_match / possible_high / possible_mid / possible_low |
-| match_reason | CharField | email / mobile / name_strong / name_score 等 |
-| matched_fields | JSONField | 一致したフィールド名の配列 |
 | review_status | CharField(TextChoices) | pending / merged / different_person / invalidated |
 | review_result | JSONField | 判定理由の配列（複数選択可） |
 | note | TextField (default='') | 任意メモ（other_* 選択時は必須） |
@@ -466,7 +497,7 @@ FK の強度：surviving_person / merged_person は PROTECT。マージログか
 | `merge_log.is_undoable()` | インスタンスメソッド | 復元可能かどうかの判定 |
 | `merge_log.mark_as_undone(user)` | インスタンスメソッド | 自身の状態遷移（status='undone'） |
 | `merge_log.record_merge_action(user)` | インスタンスメソッド | マージ実行を ActionLog に記録（action='merged'） |
-| `merge_log.record_undo_action(user)` | インスタンスメソッド | 復元実行を ActionLog に記録（action='undone'） |
+| `merge_log.record_undo_action(user, note="")` | インスタンスメソッド | 復元実行を ActionLog に記録（action='undone'、data に {"note": str} を保存） |
 | `merge_log.get_undo_preview()` | インスタンスメソッド | 復元後の予測状態を返す（確認画面用） |
 
 ## 4.9 status='merged' の Person の制約
@@ -492,8 +523,7 @@ status='merged' の Person は以下の操作ができない。
 | object_id | CharField (null=True, blank=True) | 操作対象の PK（UUID 文字列、システム実行は NULL） |
 | content_object | GenericForeignKey | 上 2 つを合わせた仮想 FK |
 | object_repr | CharField | 操作時点の対象オブジェクトの文字列表現またはコマンド名 |
-| diff | JSONField (null=True) | 変更前後の値（更新時のみ） |
-| extra | JSONField (default=dict) | モデルごとの追加情報を自由に格納 |
+| data | JSONField (default=dict) | モデルごとの追加情報を自由に格納（変更前後の差分が必要な場合もこのフィールドに格納する） |
 | note | TextField (default='') | 補足メモ |
 | created_at | DateTimeField (auto_now_add) | 操作日時 |
 
@@ -501,7 +531,7 @@ status='merged' の Person は以下の操作ができない。
 
 | メソッド | 種別 | 責務 |
 |---|---|---|
-| `ActionLog.record(user, action, content_object=None, object_repr='', diff=None, extra=None, note='')` | クラスメソッド | 任意の業務イベントを直接記録（cron 実行ログなど、モデルインスタンスを持たない場面で使用） |
+| `ActionLog.record(user, action, content_object=None, object_repr='', data=None, note='')` | クラスメソッド | 任意の業務イベントを直接記録（cron 実行ログなど、モデルインスタンスを持たない場面で使用） |
 
 ## 4.11 ActionLog と PersonMergeLog の関係
 
@@ -512,7 +542,7 @@ status='merged' の Person は以下の操作ができない。
 | 状態の更新 | あり（undoable→undone→locked） | なし（不変履歴） |
 | 書き込みタイミング | マージと同トランザクション | マージと同トランザクション |
 | 失敗時の挙動 | マージ全体ロールバック | マージ全体ロールバック |
-| note | 操作履歴 + ユーザー入力（文字列） | extra に構造化データで格納 |
+| note | 操作履歴 + ユーザー入力（文字列） | data に構造化データで格納 |
 
 両者は共存させる。マージ実行時は両方に書き込む。
 
@@ -539,9 +569,9 @@ ActionLog に記録する対象は、すべて仕様書で明示的に定める�
 
 【v1.4.2 で ActionLog に記録する対象】
 
-- マージ実行（Execute_Merge_Only / Execute_Merge_with_Updates）→ `merge_log.record_merge_action(user)` 経由
+- マージ実行（Execute_Merge_Only）→ `merge_log.record_merge_action(user)` 経由
 - 別人判定（Mark_as_Different_Person）→ `candidate.record_different_person_action(user)` 経由
-- マージ復元（Execute_Merge_Undo）→ `merge_log.record_undo_action(user)` 経由
+- マージ復元（Execute_Merge_Undo）→ `merge_log.record_undo_action(user, note)` 経由（note は MergeUndoForm の cleaned_data["note"]、空文字でも `{"note": ""}` 形式で data に保存して集計時のキーを揃える）
 - cron 重複チェック実行（Run_Generate_Duplicate_Candidates）→ `ActionLog.record(...)` 直接呼び
 - OCR 処理結果（使用トークン数、処理時間、読み取り名刺枚数等のレスポンスメタデータ）→ `ActionLog.record(...)` 直接呼び
 
@@ -572,6 +602,27 @@ ActionLog は DB 上のモデルであるため、DB 自体が障害時には Ac
 - 開発環境：標準出力（icecream や Django logging）
 
 これにより、DB 障害時でも最低限の障害情報が残り、原因調査が可能になる。
+
+## 4.12 DebugMask（OpenCV デバッグ用マスク画像 DB）
+
+DebugMask は、OpenCV 検出パイプラインで生成されるデバッグ用マスク画像（5 種）を DB 管理するための補助モデル。OriginalImage 1 件に対して最大 5 件（mask_type ごとに 1 件）の DebugMask が紐づく。BusinessCard と同じく cards アプリ配下に配置する。
+
+| フィールド名 | 型 | 説明 |
+|---|---|---|
+| id | UUIDField (PK) | プライマリキー |
+| original_image | FK(OriginalImage, CASCADE, related_name='debug_masks') | 元画像への外部キー |
+| mask_type | CharField(20, choices) | マスク種別（5 値、別表 C.15 参照） |
+| mask_image | ImageField | マスク画像実体（保存先：`media/debug_masks/<original_id>/<mask_type>.png`） |
+| metadata | JSONField (default=dict, null=False, blank=True) | マスク個別の属性（white_ratio 等） |
+| created_at | DateTimeField | auto_now_add |
+
+制約：UniqueConstraint(original_image, mask_type)。
+
+### 4.12.1 設計趣旨：DB 1 次ソース、FS 実体は従属物
+
+DebugMask は「DB レコードを 1 次ソースとし、FS 実体は DB レコードに紐付いた従属物」として扱う設計を採る。OriginalImage / BusinessCard / DebugMask それぞれに `post_delete` シグナルを定義し、レコード削除時に対応する FS 実体（image_file / card_image / mask_image）が自動削除される。
+
+開発フェーズで OpenCV チューニングを繰り返す前提で、開発環境完全リセット手順「`db.sqlite3` 削除＋ migrate」だけで完結する状態を担保する。v1.4.2 改訂前は mask 画像が DB と独立して FS 上に存在し、`db.sqlite3` を削除しても media 配下の FS 実体が残る問題があったが、本モデル導入で解消する。
 
 ---
 
@@ -615,7 +666,26 @@ v1.3.0 で横長統一処理を削除し、縦書き名刺対応とした。orie
 
 ## 6.2 切り抜き失敗時の扱い
 
-切り抜き後の画像 width < 100 または height < 50 は失敗扱い（判定は opencv_detector._warp_card() 内で行う）。切り抜き失敗時も BusinessCard / Contact は作成可能（card_image=null）。失敗理由は OriginalImage.error_message に記録する。
+切り抜き後の画像 width < 100 または height < 50 は失敗扱い（判定は `opencv_detector._warp_card()` 内で行う）。
+
+v1.4.2 のパイプライン分離（§13.4.1 / §15.6 参照）に伴い、warp（透視変換）失敗カードは **detect_cards 段階で除外し BusinessCard 自体を作成しない** 方針に変更（§15.1 ルール C5）。OCR に送る意味がない切り抜き失敗品を BC として残さないことで、OCR cron の処理対象を「OpenCV が成功したカードのみ」に絞り込む。
+
+失敗理由は OriginalImage.error_message に記録する。
+
+【card_image=null になる経路】 v1.4.2 改訂後は、`save_card_image` の JPEG 書き込み失敗時のみ `card_image=null` の BC が残る経路となる（warp 失敗は BC を作らないため対象外）。書き込み失敗時は OriginalImage.error_message に「card_index=N: 切り抜き失敗 (理由)」を追記し、当該 BC は OCR cron 側で処理対象外として扱う。
+
+## 6.3 card_image の保存方式
+
+v1.4.2 のパイプライン分離に伴い、切り出し画像の保存方式を **tmp ファイル + `transaction.on_commit` リネーム** から **同期書き** に変更する。
+
+| 観点 | 旧方式（v1.4.2 改訂前） | 新方式（v1.4.2） |
+|---|---|---|
+| 書き込み手順 | BC を `card_image=None` で DB 先行作成 → `save_card_image_tmp` で tmp 拡張子で書き込み → `transaction.on_commit` で tmp → final にリネーム + BC.card_image を UPDATE | BC 作成と同タイミングで card_image を最終パス `cards/YYYY/MM/DD/<oid>-<idx>.jpg` に **同期書き**、`BC.objects.create(card_image=final_rel)` を atomic 内で実行 |
+| 失敗時のクリーンアップ | tmp ファイルが残る可能性あり、cron 経由の reconcile_card_images で回収 | BC 作成失敗時：書き込み済みファイルを `os.unlink` でクリーンアップ |
+| BC 作成失敗時 | （上記の通り） | 書き込み済みファイルを削除して整合性を維持 |
+| 補正回転後の上書き | （該当なし） | 2 回目 OCR が走った時点で補正画像で `BC.card_image` を上書き保存（2 回目失敗でも上書き、§15.6.3 参照）|
+
+【廃止】 `save_card_image_tmp` 関数および `transaction.on_commit` リネーム方式は v1.4.2 で廃止。OpenCV cron が card_image を確定書きしてから OCR cron に渡す新構造では、tmp + on_commit リネームの利点（複数段階処理の中間状態保護）が失われたため。同期書きの方が読みやすく、デバッグしやすい。
 
 ---
 
@@ -662,21 +732,62 @@ Contact が新規作成または重複判定対象フィールドが更新され
 
 ## 8.3 スコア表
 
-各フィールドの完全一致に対して、点数を加算する。confidence=high のフィールドのみが加算対象（low / medium は加算しない）。
+各フィールドの完全一致に対して、点数を加算する。両 Contact の confidence=high（DB 上の low / medium レコードは加算対象外、ただし high はデフォルト値のため大半のフィールドが加算対象になりうる）かつ正規化後の値が完全一致した場合のみ加算する。
 
-スコア表とランク閾値は `config/constants.py` で管理する。運用後にチューニング可能とするため、定数化された設計とする。
+スコア表とランク閾値は `config/constants.py` の `DUPLICATE_FIELD_SCORES` / `DUPLICATE_SCORE_EMAIL_PERSONAL` / `DUPLICATE_SCORE_EMAIL_GENERIC` / `POSSIBLE_*_MIN_SCORE` で管理する。運用後にチューニング可能とするため、定数化された設計とする。初期値は以下のとおり。
+
+| フィールド | スコア（high 一致時の加算点） |
+|---|---|
+| mobile | 80 |
+| email（個人メール） | 80 |
+| full_name | 40 |
+| company | 10 |
+| department | 10 |
+| address | 10 |
+| title | 5 |
+| phone | 5 |
+| email（代表メール） | 5 |
+| branch | 0（配点なし。所属5フィールド判定にのみ参加、§8.4 参照） |
+
+email は個人メール（`DUPLICATE_GENERIC_EMAIL_LOCALPARTS` に該当しないローカル部）と代表メール（該当するローカル部）で配点を分ける。判定は §8.7 のロジックでサービス層が行い、どちらの定数を使うかを決める。
+
+合計スコアの 200 点到達例（参考）：
+
+- `mobile` + `email`（個人）+ `full_name` = 80 + 80 + 40 = 200
+- `mobile` + `email`（個人）+ `company` + `department` + `address` = 80 + 80 + 10 + 10 + 10 = 190（200 点に届かない）
+- `mobile` + `email`（個人）+ `full_name` + `company` = 80 + 80 + 40 + 10 = 210
 
 ## 8.4 ランク判定
 
-合計スコアと一致条件の組み合わせでランクを判定する。
+合計スコアと一致条件の組み合わせでランクを判定する。判定は以下のランクを **exact_match → possible_high → possible_mid → possible_low の順に上から評価し、最初に該当した条件のランクを採用する**。各ランクの「必須条件」内に列挙された条件はすべて **AND 関係**（すべて満たす必要がある）。
 
 | ランク | 必須条件 |
 |---|---|
-| exact_match | 200点以上 + 所属5フィールド両方一致 or 両方空 |
-| possible_high | 200点以上（フルネーム不一致でもメール+携帯+所属で達成可能） |
-| possible_mid | フルネーム一致 + メール or 携帯一致 |
-| possible_low | 40〜119点 + フルネーム一致 |
+| exact_match | 200点以上 AND 所属5フィールドが「両方一致」もしくは「両方空」 |
+| possible_high | 200点以上（フルネーム不一致でも mobile + email + 所属系の加算で達成可能） |
+| possible_mid | フルネーム一致 AND（email 一致 OR mobile 一致） |
+| possible_low | 40〜119点 AND フルネーム一致 |
 | none | 上記いずれにも該当しない |
+
+ランク閾値の具体値（`config/constants.py`）：
+
+| 定数 | 値 | 用途 |
+|---|---|---|
+| `POSSIBLE_LOW_MIN_SCORE` | 40 | possible_low の下限 |
+| `POSSIBLE_MID_MIN_SCORE` | 120 | possible_mid のフォールバック上限（possible_low の上限 119 と接続） |
+| `POSSIBLE_HIGH_MIN_SCORE` | 200 | possible_high / exact_match の下限 |
+
+**所属5フィールド**：exact_match 判定の「両方一致 or 両方空」評価に用いる 5 項目。
+
+| 所属5フィールド | コーディング名（`DUPLICATE_LOCATION_FIELDS`）|
+|---|---|
+| 会社名 | company |
+| 部署 | department |
+| 役職 | title |
+| 支店 | branch |
+| 住所 | address |
+
+`DUPLICATE_CHECK_FIELDS`（9 フィールド）から個人系 4 項目（full_name / email / phone / mobile）を除いた残りが所属5フィールドに対応する。
 
 ### 8.4.1 ランク閾値の根拠
 
@@ -738,11 +849,11 @@ group_id 生成ロジック：バックグラウンド処理で重複チェッ�
 
 ## 8.7 代表メール判定
 
-メールアドレスのローカル部（@ より前）が以下のリストに該当する、または該当語の前後にハイフン・アンダースコアが付くバリエーションに該当する場合、代表メールと判定する。
+メールアドレスのローカル部（@ より前）が以下のリストに該当する、または該当語の前後にハイフン・アンダースコア・ドットが付くバリエーションに該当する場合、代表メールと判定する。
 
 初期リスト：info / contact / support / sales / admin / office / mail / inquiry / help / service / shop / customer / reception
 
-バリエーション例：info-jp@、sales_team@、support2@ なども代表メール扱い。
+バリエーション例：`info-jp@`、`sales_team@`、`info.jp@`、`sales.team@`、`support2@` なども代表メール扱い。
 
 運用：config/constants.py の DUPLICATE_GENERIC_EMAIL_LOCALPARTS で管理。運用しながら追加可能。
 
@@ -889,6 +1000,18 @@ calculate_score の呼び出し回数：素朴な実装で N-1 = 4999 回 → �
 
 【補足】手順 1 はユーザーがデフォルト推奨をそのまま使った場合と、明示的に切り替えた場合の両方をカバーする。手順 2 のバリデーションは、UI 側のバリデーションが破られた場合の最後の砦として機能する。手順 6 の状態遷移は確定後の merged 側に対して適用される。
 
+【v1.4.2 補足：手順順序とサービス責務の明示】 マージ実行サービス（Execute_Merge_Only）は、上記手順を atomic 内で以下の順に呼ぶ：
+
+1. **atomic 冒頭：CFC 確定処理** — surviving 側 primary_contact に紐づく `confirmed_at IS NULL` の CFC（未確認 low/mid）を `ContactFieldConfidence.mark_fields_as_confirmed(surviving_primary, field_names, user)` で一括 confirmed 化（マージ画面の確認 CB を ON でマージ実行した場合の CFC 反映を担保、Contact.fix() と同じパターン）
+2. バリデーション（手順 2）
+3. `merged_person.transfer_contacts_to(surviving_person, merge_reason)` 等の Contact 引き渡し
+4. `merged_person.mark_as_merged(surviving_person)` を呼ぶ
+5. `candidate.mark_as_merged(user, review_result, note)` を呼ぶ
+6. `recover_duplicate_candidates(merged_person, surviving_person)`（冪等性のための防御チェックのみ、§12.8.3 参照）
+7. surviving_person.duplicate_checked_at の更新
+
+「mark_as_merged → recover」の順序を明示するのは、recover 関数の責務を「冪等性チェックのみ」に縮小し、状態変更の主体を呼び出し元（Execute_Merge_*）に集約する設計思想（§12.8.3）と整合させるため。マージ画面 UI の刷新と Execute_Merge_with_Updates 廃止に伴う §9.3.1 全面整理は、別途実施予定。
+
 ### 9.3.2 復元時の Person.primary_contact 同期
 
 復元処理（9.5.2）では、Contact の status を previous_status に戻した後、Person.primary_contact の同期処理を実施する。Contact.status='primary' のものが Person.primary_contact と一致するように再同期する。同期処理は `Person.set_primary_contact()` インスタンスメソッド経由で実行する。
@@ -917,42 +1040,21 @@ merge_reason='additional_role' のとき、マージド側元 primary を inacti
 
 その他の Contact（マージド側元 active / 元 inactive、サバイブ側全 Contact）の挙動は他の merge_reason と同じ。
 
-### 9.4.4 切り分け基準（Execute_Merge_Only / Execute_Merge_with_Updates）
+### 9.4.4 切り分け基準（Execute_Merge_Only に統一）
 
-サービス分割の切り分け基準は **「フィールド修正の有無」** であり、merge_reason ではない。
+**v1.4.2 改訂**：マージ実行サービスは `Execute_Merge_Only` のみに統一する。`Execute_Merge_with_Updates` は廃止（D-3 系 Contact 詳細画面 AJAX 化に伴う設計大転換、§11.5 / §11.6.2 参照）。
 
-- **コンタクト修正なし** → `Execute_Merge_Only` を呼ぶ
-- **コンタクト修正あり** → `Execute_Merge_with_Updates` を呼ぶ
+- マージ画面では Contact のフィールド値修正を行わない（マージ画面に来る前に Contact 詳細画面で値修正済みの前提）
+- すべてのマージは `Execute_Merge_Only(candidate, surviving_person, merged_person, form, user)` で処理
+- `merge_reason` は `MergeForm.get_merge_reason()` から `list[str]` で受け取る（§11.6.2 / #58 参照）
 
-`merge_reason` は両サービスとも 7 値すべて受け付ける。
+【v1.4.2 改訂前】 v1.4.2 改訂前は「フィールド修正の有無」で `Execute_Merge_Only` / `Execute_Merge_with_Updates` を分岐していたが、マージ画面の値修正機能廃止により分岐自体が不要になった。
 
-### 9.4.5 same_card かつコンタクト修正ありの特殊扱い
+### 9.4.5 same_card かつコンタクト修正ありの特殊扱い（v1.4.2 で廃止）
 
-PDF 表は merge_reason 7 値すべてに対して同じ遷移パターンを示しているが、`Execute_Merge_with_Updates` の merge_reason='same_card' の場合のみ、実装上の挙動が他と異なる。
+v1.4.2 改訂前は `Execute_Merge_with_Updates` の `merge_reason='same_card'` 修正ありに対する特殊扱い（サバイブ側 primary を直接更新、新規 Contact 作らない、CFC 部分 confirmed 化）を定義していたが、`Execute_Merge_with_Updates` 廃止（§9.4.4）に伴い本特殊扱いも廃止。
 
-**same_card 修正なしの挙動（PDF 表通り）**
-
-サバイブ側元 primary は変更なし（status='primary' のまま、`previous_*` も変更なし）。`Execute_Merge_Only` で処理。
-
-**same_card 修正ありの挙動**
-
-サバイブ側既存 primary について：
-
-- **status は変更しない**（primary のまま）
-- **フィールド値をフォームで修正された値で部分更新**（修正されていないフィールドは触らない）
-- **ContactFieldConfidence は `ContactFieldConfidence.mark_fields_as_confirmed(contact, form.confirmed_field_names(), user)` で部分 confirmed 化**（修正されていないフィールドの confidence は変更しない）
-- **新規 Contact は作らない**
-
-マージド側 Contact 群は他の merge_reason と同じ挙動で transfer。
-
-**設計趣旨**
-
-same_card は「同一名刺の重複取り込み」が前提。値違いは新名刺の発行ではなく OCR 誤認識の可能性が高い。新規 Contact を作ると「同一名刺なのに 2 つの Contact がある」という意味的な不整合が起きる。よって既存 primary を直接更新し、新規 Contact は作らない運用とする。
-
-ContactFieldConfidence の部分 confirmed 化（マージ画面 same_card のみ）と、`contact.fix(form, user)` 内の全 confirmed 化（修正画面 12 番 fix / 13 番 active 修正）の違いに注意：
-
-- **same_card 修正あり（マージ画面）**：ユーザーが値違いを確認したフィールドのみ confirmed 化、それ以外の low/mid フィールドは触らない
-- **fix（12 番 / 13 番）**：Form のバリデーションで全 low/mid フィールドが確認チェック ON されることが保証されているため、`contact.fix` 内で全 confirmed 化
+【設計の移行】 same_card 系の値修正は、マージ画面に来る前に Contact 詳細画面（11 番、§11.3）で AJAX 経由で済ませる流れに変更。マージ画面に到達した時点で surviving 側 Contact のフィールドはすでに確定している状態となる。CFC 確定処理は `Execute_Merge_Only` の atomic 冒頭で一括 confirmed 化する形に置き換え（§9.3.1【v1.4.2 補足】参照）。
 
 ### 9.4.6 副コンタクト増加問題
 
@@ -978,9 +1080,10 @@ additional_role を多用すると、サバイブ側に多数の active 副コ�
 | 2 | 対象 Contact の status を previous_status に戻す |
 | 3 | 対象 Contact の previous_person を NULL に戻す |
 | 4 | 対象 Contact の previous_status を NULL に戻す |
-| 5 | merged_person.status を 'active' に戻す、merged_into を NULL に |
+| 5 | `merged_person.mark_as_active()` を呼ぶ（status='active' / merged_into=NULL、§10.4.1 参照） |
 | 6 | Person.primary_contact の同期処理（Contact.status='primary' のものが Person.primary_contact と一致するように再同期、`Person.set_primary_contact()` 経由） |
 | 7 | PersonMergeLog.status を 'undone' に変更、undone_by、undone_at を記録 |
+| 8 | `merged_person.primary_contact.duplicate_checked_at = None` をセット（次回 cron で再判定対象にするため） |
 
 すべての処理を 1 つのトランザクション内で実行する。
 
@@ -1081,13 +1184,34 @@ v1.4.1 までは `merge_helpers.py` などのサービス層関数で「マー�
 
 ### 10.4.1 インスタンスメソッド
 
+Person の状態遷移を表すインスタンスメソッドは **`mark_as_*` シリーズ** で命名を揃える設計。`mark_as_merged` ↔ `mark_as_active` は対称ペアとして隣接配置する（PersonMergeLog の `mark_as_undone()` 等とも命名スタイルが揃う）。
+
 | メソッド | 責務 | 配置先 |
 |---|---|---|
 | `person.mark_as_merged(surviving_person)` | 自身の状態遷移（status='merged' / merged_into=surviving_person / primary_contact=NULL） | persons/models.py |
-| `person.transfer_contacts_to(surviving_person, merge_reason)` | 自身のコンタクト群を surviving に引き渡す（merge_reason に応じて 9.4 状態遷移を適用、全 Contact 対象：primary / active / inactive すべて） | persons/models.py |
+| `person.mark_as_active()` | 自身の状態遷移（status='active' / merged_into=NULL）。マージ復元処理（§9.5.2）で merged → active に戻す際に呼ぶ。archived → active も汎用化（archived 中は対象 Person を誰も触れないため安全）。primary_contact の復元は `set_primary_contact()` 側で同期させるため、本メソッドには含めない | persons/models.py |
+| `person.transfer_contacts_to(surviving_person, merge_reason)` | 自身のコンタクト群を surviving に引き渡す。`merge_reason` は `list[str]`（DuplicateMergeReason value のリスト、複数可）。Case A〜D（§9.4）のステータス遷移を適用、全 Contact 対象：primary / active / inactive すべて。詳細は §10.4.1.1 参照 | persons/models.py |
 | `person.set_primary_contact(new_contact, old_primary_new_status='active')` | 既存 Person の primary_contact 切り替え（派生情報の同期） | persons/models.py |
 | `person.get_active_contacts()` | status='active' の Contact 一覧を返す | persons/models.py |
 | `person.get_inactive_contacts()` | status='inactive' の Contact 一覧を返す | persons/models.py |
+
+#### 10.4.1.1 `person.transfer_contacts_to()` の詳細仕様
+
+| 観点 | 記述内容 |
+|---|---|
+| 引数 | `surviving_person`（マージ先 Person）、`merge_reason: list[str]`（`DuplicateMergeReason.values` の部分集合、空リストは不可） |
+| 対象 | 自 Person に紐づく全 Contact（status=primary / active / inactive すべて） |
+| 処理 | `merge_reason` に応じて Case A〜D（§9.4）のステータス遷移を適用 |
+| Case A | `same_card` 等：直接更新パターン（§9.4 / 別添 PDF 参照） |
+| Case B | `transfer` / `promotion` / `job_change` / `name_change` / `other_merged`：標準的な引き渡しパターン（旧 primary は inactive、副コンタクト群も引き渡し） |
+| Case C | `additional_role`：別肩書追加の特殊パターン。マージド側 primary を一時的に active に降格してから引き渡し、サバイブ側 primary は維持。partial unique constraint（Person.primary_contact が高々 1 件）違反を避ける順序制御を内部で行う |
+| Case D | 復元時：previous_* を NULL にする不変原則を保つ（§9.4 参照） |
+| 制約 | partial unique constraint 違反を避けるため、引き渡し順序を内部的に制御する |
+| additional_role 判定 | `DuplicateMergeReason.ADDITIONAL_ROLE in merge_reason` で判定（複数選択可なので `in` 比較を使う） |
+
+【サバイブ側 previous_* 不変原則】`transfer_contacts_to` はマージド側 Person の Contact を引き渡す処理であり、サバイブ側 Person の Contact の previous_* フィールドには一切触れない（業務所有権の分離）。
+
+詳細な状態遷移は §9.4 および別添 PDF『マージ前後のコンタクトのステータス等まとめ.pdf』を参照。
 
 ### 10.4.2 クラスメソッド
 
@@ -1109,14 +1233,15 @@ v1.4.1 までは `merge_helpers.py` などのサービス層関数で「マー�
 
 | 値 | 旧 primary の遷移先 | 使用場面 |
 |---|---|---|
-| `'active'` | active（副コンタクト化）| デフォルト。修正画面 fix 系 |
+| `'active'` | active（副コンタクト化）| デフォルト値として保持。**v1.4.2 時点では実装上の使用場面なし**（呼び出し元はすべて `'inactive'` を明示。将来の拡張余地として API は維持） |
 | `'inactive'` | inactive（過去情報化）| 修正画面 transfer / promotion / job_change / name_change、マージ画面 transfer 等 |
 
 #### 呼ばれる場所
 
-- 修正画面 ContactUpdateView（change_reason='fix' のとき）：`person.set_primary_contact(new_contact)` または `person.set_primary_contact(new_contact, old_primary_new_status='active')`
 - 修正画面 ContactUpdateView（change_reason='transfer' / 'promotion' / 'job_change' / 'name_change' のとき）：`person.set_primary_contact(new_contact, old_primary_new_status='inactive')`
-- `Execute_Merge_with_Updates`（merge_reason='transfer' / 'promotion' / 'job_change' / 'name_change' / 'other_merged' のとき）：`surviving_person.set_primary_contact(new_contact, old_primary_new_status='inactive')`
+- 新規 Person 作成時（contacts/views.py `_create_person_and_contact` 内）：`person.set_primary_contact(contact)`（デフォルト引数で呼ぶが、旧 primary が存在しないため status 変更ステップはスキップされ、`old_primary_new_status` の値は実質不使用）
+
+`change_reason='fix'` の場合は `contact.fix(form, user)` で既存 Contact を上書きするため `set_primary_contact` は呼ばない（§11.4.1 修正理由による処理分岐を正とする）。
 
 #### 設計趣旨
 
@@ -1162,7 +1287,7 @@ form 引数の型は `ContactUpdateForm` に限定（`MergeForm` は受け付け
 - 12 番 UpdatePrimaryContactView（change_reason='fix' のとき）
 - 13 番 UpdateActiveContactView（change_reason フィールドなし、fix 相当の処理に固定）
 
-マージ画面 same_card は `contact.fix` を呼ばない（`Execute_Merge_with_Updates` 内で別処理として書き分け、9.4.5 参照）。
+マージ画面では `contact.fix` を呼ばない。Contact のフィールド値修正は事前に Contact 詳細画面（11 番）で AJAX 経由で済ませている前提（§11.5.5 / §11.6.2 / ストック #20 廃止系参照）。マージ画面到達時の CFC 確定処理は `Execute_Merge_Only` の atomic 冒頭で一括 confirmed 化される（§9.3.1【v1.4.2 補足】/ ストック #57 参照）。
 
 ### 10.5.3 `contact.get_field_confidences()` の戻り値仕様
 
@@ -1244,10 +1369,13 @@ Contact 側は薄いラッパーとして `ContactFieldConfidence.get_for_contac
 - 既存の low/mid フィールドの ContactFieldConfidence は `mark_fields_as_confirmed()` で全 confirmed 化（confirmed_at / confirmed_by を記録）
 - 新規に ContactFieldConfidence を作成することはない（既存レコードの更新のみ）
 
-#### ケース 3：マージ画面 same_card 特殊処理（17 番 `Execute_Merge_with_Updates` で merge_reason='same_card' かつ修正あり）
+#### ケース 3：マージ実行時の CFC 確定処理（17 番 `Execute_Merge_Only` の atomic 冒頭）
 
-- ユーザーが値違いを確認したフィールドのみ `mark_fields_as_confirmed()` で部分 confirmed 化
-- それ以外の low/mid フィールドの ContactFieldConfidence は触らない（部分 confirmed 化）
+【v1.4.2 改訂】 v1.4.2 改訂前は「マージ画面 same_card 特殊処理（旧 `Execute_Merge_with_Updates` で merge_reason='same_card' かつ修正あり）」として部分 confirmed 化を定義していたが、マージ画面の値修正機能廃止と `Execute_Merge_with_Updates` 統合（§9.4.4 / §9.4.5 / ストック #20 廃止系）に伴い、本ケースを以下に書き換える。
+
+- マージ画面に到達した時点で、surviving 側 Contact の値修正は Contact 詳細画面（11 番、AJAX）で済ませている前提（D-3 系）
+- `Execute_Merge_Only` の atomic 冒頭で、surviving 側 primary_contact に紐づく `confirmed_at IS NULL` の低/中信頼度 CFC を `ContactFieldConfidence.mark_fields_as_confirmed()` で一括 confirmed 化する（マージ画面の確認 CB を ON でマージ実行した場合の CFC 反映を担保、§9.3.1【v1.4.2 補足】/ ストック #57 参照）
+- 個別の値違いフィールドに対する部分 confirmed 化は行わない（Contact 詳細画面の AJAX 個別確認で対応する経路に置換）
 
 #### ContactFieldConfidence が作成される唯一の場面
 
@@ -1273,7 +1401,7 @@ OCR で取り込まれた Contact のみ、Claude の confidence 判定により
 |---|---|---|
 | `candidate.mark_as_merged(user, review_result, note)` | 自身の状態遷移（review_status='merged' / review_result / reviewed_by / reviewed_at / note） | duplicates/models.py |
 | `candidate.mark_as_different_person(user, review_result, note=None)` | 自身の状態遷移（review_status='different_person' / reviewed_by / reviewed_at / note） | duplicates/models.py |
-| `candidate.record_different_person_action(user)` | 自身の別人判定操作を ActionLog に記録（action='different_person'、extra に判定理由を格納） | duplicates/models.py |
+| `candidate.record_different_person_action(user)` | 自身の別人判定操作を ActionLog に記録（action='different_person'、data に判定理由を格納） | duplicates/models.py |
 
 ### 10.7.3 設計趣旨
 
@@ -1308,8 +1436,8 @@ OCR で取り込まれた Contact のみ、Claude の confidence 判定により
 |---|---|---|
 | `merge_log.is_undoable()` | 復元可能かどうかの判定（status='undoable' なら True） | duplicates/models.py |
 | `merge_log.mark_as_undone(user)` | 自身の状態遷移（status='undone' / undone_by / undone_at） | duplicates/models.py |
-| `merge_log.record_merge_action(user)` | マージ実行を ActionLog に記録（action='merged'、extra に surviving/merged Person 情報、duplicate_candidate ID 等） | duplicates/models.py |
-| `merge_log.record_undo_action(user)` | 復元実行を ActionLog に記録（action='undone'、extra に復元理由＋復元内容として surviving 側 Person・復元側 Person のインスタンス情報を JSON で保存） | duplicates/models.py |
+| `merge_log.record_merge_action(user)` | マージ実行を ActionLog に記録（action='merged'、data に surviving/merged Person 情報、duplicate_candidate ID 等） | duplicates/models.py |
+| `merge_log.record_undo_action(user, note="")` | 復元実行を ActionLog に記録（action='undone'、data に `{"note": str}` 形式で MergeUndoForm から受け取った備考を保存。空文字でも `{"note": ""}` で記録し、集計時のキーを揃える） | duplicates/models.py |
 | `merge_log.get_undo_preview()` | 復元後の予測状態を返す（確認画面表示用：復元 Person・復元 Person に戻る Contact の集合・surviving 側 Person に残る Contact の集合） | duplicates/models.py |
 
 ### 10.8.3 `merge_log.get_undo_preview()` の戻り値設計
@@ -1357,7 +1485,7 @@ ActionLog 記録メソッドの 2 分離（`record_merge_action` / `record_undo_
 
 | メソッド | 責務 | 配置先 |
 |---|---|---|
-| `ActionLog.record(user, action, content_object=None, object_repr='', diff=None, extra=None, note='')` | 任意の業務イベントを直接記録（cron 実行ログなど、モデルインスタンスを持たない場面で使用） | duplicates/models.py または共通アプリ |
+| `ActionLog.record(user, action, content_object=None, object_repr='', data=None, note='')` | 任意の業務イベントを直接記録（cron 実行ログなど、モデルインスタンスを持たない場面で使用） | actionlogs/models.py |
 
 ### 10.9.2 設計趣旨
 
@@ -1398,9 +1526,9 @@ ActionLog の書き込みは 2 通り：
 | View / 起動契機 | 使用するメソッド・タグ |
 |---|---|
 | CardListView | `DuplicateCandidate.get_pending(contact)` / `business_card.get_card_image_url()` / `{% card_image %}` |
-| CardDetailView | `business_card.get_card_image_url()` / `business_card.get_card_image_url_full()` / `{% json_tree %}` |
+| CardDetailView | `business_card.get_card_image_url()` / `business_card.get_card_image_url_full()` / `{% ocr_result_badge %}` / `<andypf-json-viewer>`（raw_json_1 / raw_json_2 表示） |
 | OriginalListView | `original_image.get_image_url()` / `{% original_image_thumbnail %}` |
-| OriginalDetailView | `original_image.get_image_url()` / `original_image.get_image_url_full()` / `{% json_tree %}` |
+| OriginalDetailView | `original_image.get_image_url()` / `original_image.get_image_url_full()` / `<andypf-json-viewer>`（debug_json 表示） |
 | PersonListView | `Person.get_active()` / `DuplicateCandidate.get_pending(contact)` |
 | PersonDetailView | `person.get_active_contacts()` / `person.get_inactive_contacts()` / `DuplicateCandidate.get_pending(contact)` / `PersonMergeLog.get_for_person(person)` |
 | ContactDetailView | `contact.get_field_confidences()` / `DuplicateCandidate.get_pending(contact)` / `{% contact_confidence %}` |
@@ -1410,7 +1538,7 @@ ActionLog の書き込みは 2 通り：
 | PersonAddAdditionalRoleView（9 番） | View 直書き（save 済み Contact が前提でないため、`set_primary_contact()` は使えない、10.12 参照） |
 | DuplicateCandidateGroupListView（15 番） | `DuplicateCandidate.get_pending(contact)` / `DuplicateCandidate.get_by_group()` |
 | DuplicateCandidateGroupDetailView（16 番） | 当該グループの DuplicateCandidate を review_status ごとに集計 |
-| DuplicateCandidateGroupUpdateView（17 番） | `Execute_Merge_Only()` / `Execute_Merge_with_Updates()` / `Mark_as_Different_Person()` / `Contact.is_all_field_confidence_high()` / `contact.get_field_confidences()` |
+| DuplicateCandidateGroupUpdateView（17 番） | `Execute_Merge_Only()` / `Mark_as_Different_Person()` / `MergeForm.get_merge_reason()` / `MergeForm.hidden_name_fields()` / `MergeForm.has_confirm_checkboxes()` / `contact.get_field_confidences()` |
 | PersonMergeLogListView（19 番） | `PersonMergeLog.get_for_person()` / `PersonMergeLog.get_undoable()` |
 | PersonMergeLogDetailView（20 番） | `merge_log.is_undoable()` |
 | PersonMergeLogConfirmUndoView（21 番） | `Execute_Merge_Undo()` / `merge_log.get_undo_preview()` |
@@ -1439,14 +1567,15 @@ ActionLog の書き込みは 2 通り：
 
 ## 11.1 アプリケーション構成
 
-v1.4.0 では既存の cards アプリに加えて、新たに 3 つのアプリを追加する。
+v1.4.0 では既存の cards アプリに加えて、新たに 4 つのアプリを追加する。
 
 | アプリ | 用途 |
 |---|---|
 | cards（既存） | BusinessCard、OriginalImage 関連 |
 | persons(新規) | Person 関連 |
 | contacts（新規） | Contact 関連 |
-| duplicates（新規） | DuplicateCandidate、PersonMergeLog、ActionLog 関連 |
+| duplicates（新規） | DuplicateCandidate、PersonMergeLog 関連 |
+| actionlogs（新規） | ActionLog 関連（モデル横断の汎用ログ） |
 
 ## 11.2 ディレクトリ構成
 
@@ -1455,18 +1584,26 @@ v1.4.x で追加・変更するファイルを以下に示す。
 | パス | 用途 |
 |---|---|
 | config/constants.py | 共通 TextChoices、定数（DUPLICATE_CHECK_FIELDS、DUPLICATE_GENERIC_EMAIL_LOCALPARTS 等） |
+| cards/views.py | CardListView、CardDetailView、CardDeleteView、OriginalListView、OriginalDetailView、OriginalImageUploadView |
+| cards/urls.py | `/cards/<uuid:pk>/delete/` を含む URL ルーティング（`name='card_delete'` 等） |
+| cards/templatetags/__init__.py | カスタムタグ用パッケージ初期化 |
+| cards/templatetags/ui_tags.py | UI 系カスタムタグ（`ocr_result_badge` 等、§11.8 参照） |
 | persons/models.py | Person モデル |
 | persons/views.py | PersonListView、PersonDetailView、PersonAddAdditionalRoleView |
 | contacts/models.py | Contact モデル、ContactFieldConfidence モデル |
-| contacts/views.py | ContactCreateView、ContactDetailView、UpdatePrimaryContactView、UpdateActiveContactView、PreviewContactView |
+| contacts/views.py | ContactListView、ContactCreateView、ContactDetailView、UpdatePrimaryContactView、UpdateActiveContactView、PreviewContactView |
+| contacts/urls.py | `/contacts/` 配下の URL ルーティング（list / create / detail / update-primary / update-active / preview 等） |
 | contacts/forms.py | ContactBaseForm、ContactUpdateForm、ContactUpdateActiveForm、ContactAddAdditionalRoleForm、ContactCreateForm |
+| templates/contacts/_contact_field.html | Contact フィールド表示・編集の共通 include パーツ。ContactDetailView と CardDetailView が再利用 |
+| templates/contacts/_inactive_contacts.html | inactive Contact 履歴セクションの共通 include。contacts / persons 両方から再利用（ContactDetailView マージ関連セクション内、PersonDetailView merged / archived から） |
 | contacts/services/normalization.py | フィールド正規化（純関数） |
 | contacts/services/json_parser.py | raw_json → Contact 用辞書（v1.3.4 の json_normalizer から移動・拡張） |
-| duplicates/models.py | DuplicateCandidate、PersonMergeLog、ActionLog モデル |
+| duplicates/models.py | DuplicateCandidate、PersonMergeLog モデル |
+| actionlogs/models.py | ActionLog モデル |
 | duplicates/views.py | DuplicateCandidateGroupListView、DuplicateCandidateGroupDetailView、DuplicateCandidateGroupUpdateView、PersonMergeLogListView、PersonMergeLogDetailView、PersonMergeLogConfirmUndoView |
 | duplicates/forms.py | MergeForm、MergeUndoForm |
 | duplicates/services/duplicate_detection.py | find_duplicate_contacts、_calculate_score、_determine_rank、determine_base_person |
-| duplicates/services/merge_executor.py | Mark_as_Different_Person、Execute_Merge_Only、Execute_Merge_with_Updates、Execute_Merge_Undo、recover_duplicate_candidates、invalidate_pending_candidates |
+| duplicates/services/merge_executor.py | Mark_as_Different_Person、Execute_Merge_Only、Execute_Merge_Undo、recover_duplicate_candidates、invalidate_pending_candidates（v1.4.2 で Execute_Merge_with_Updates は廃止し Execute_Merge_Only に統合、§9.4.4 参照） |
 | duplicates/tasks/duplicate_check_runner.py | generate_duplicate_candidates_for_contact（タスク層下位関数） |
 | cards/management/commands/check_duplicates.py | cron 起動。Run_Generate_Duplicate_Candidates 呼び出し |
 | cards/management/commands/recheck_duplicates.py | 全 Contact の duplicate_checked_at リセット |
@@ -1483,26 +1620,28 @@ v1.4.x で追加・変更するファイルを以下に示す。
 |---|---|---|---|---|
 | 1 | `/` | GET | HomeView | ホーム画面 |
 | 2 | `/cards/upload/` | GET / POST | OriginalImageUploadView | 名刺画像アップロード |
-| 3 | `/cards/` | GET | CardListView | 名刺一覧 |
-| 4 | `/cards/<uuid:pk>/` | GET | CardDetailView | 名刺詳細 |
+| 3 | `/cards/` | GET | CardListView | 名刺一覧。7 値フィルタ（`ocr_result` 5 値 + `_pending` / `_processing` の仮想値）対応、初回は `business_card` のみ表示。BackNavigator 保持パラメータに `ocr_result` を含む |
+| 4 | `/cards/<uuid:pk>/` | GET | CardDetailView | 名刺詳細 + Contact 編集。OpenCV デバッグセクションと業務操作セクションを併設。Contact が紐づく BC については `_contact_field.html` パーツを include して ContactDetailView と同じ編集 UI（個別フィールドの確認 OK / 値修正）を提供する。`{% if debug %}` 外に「同じ画像に含まれる他の名刺」セクションを通常表示（sibling_cards 全件、ocr_result_badge 付き）|
 | 5 | `/originals/` | GET | OriginalListView | 元画像一覧 |
-| 6 | `/originals/<uuid:pk>/` | GET | OriginalDetailView | 元画像詳細 |
+| 6 | `/originals/<uuid:pk>/` | GET | OriginalDetailView | 元画像詳細。セクション 7「検出された名刺」テーブルは 8 列構成（操作 / サムネイル / 名刺ID / card_index / 向き / OCR結果 / 切り抜き画像 / 作成日時）、名刺詳細への遷移ボタンを含む |
 | 7 | `/persons/` | GET | PersonListView | 人物一覧 |
-| 8 | `/persons/<uuid:pk>/` | GET | PersonDetailView | 人物詳細 |
+| 8 | `/persons/<uuid:pk>/` | GET | PersonDetailView | 人物詳細。**Person.status 別二系統化**：(a) active な Person → 当該 Person の primary_contact を取得し `/contacts/<primary_contact_uuid>/`（11 番 ContactDetailView）へ HTTP 302 リダイレクト、(b) merged な Person → merged 状態の専用詳細画面を表示（過去どんな Contact があったか、誰と統合されたか、マージログ、§4.9 参照）、(c) archived な Person → archived 状態の専用詳細画面を表示（復元ボタン等の操作起点として将来活用） |
 | 9 | `/persons/<uuid:pk>/add-additional-role/` | GET / POST | PersonAddAdditionalRoleView | 別肩書追加。Active コンタクトを追加 |
 | 10 | `/contacts/create/` | GET / POST | ContactCreateView | 名刺なしでプライマリーコンタクトとパーソンを同時生成 |
-| 11 | `/contacts/<uuid:pk>/` | GET | ContactDetailView | コンタクトの表示画面 |
+| 11 | `/contacts/<uuid:pk>/` | GET | ContactDetailView | コンタクト詳細画面（業務メイン画面）。Contact.status × Person.status による表示モード分岐：(primary or active) × Person.active なら編集可能モード（AJAX で値修正・confidence 確認可、§11.6.2 / D-3 系で詳細仕様確定後反映予定）、inactive または Person.archived/merged なら表示のみモード。セクション構成：操作ボタン（人物詳細リンク、修正画面、別肩書追加、マージ画面）/ Contact ヘッダー（名刺画像 + status バッジ + マージ候補バッジ）/ 一括確定（編集可能モードのみ）/ フィールド表示（high はシンプル、mid/low は信頼度マーク + ラジオ UI）/ **他のアクティブコンタクト**（同 Person 配下の他 active）/ **マージ関連**（DuplicateCandidate / PersonMergeLog / previous_person / inactive Contact 履歴の共通 include）|
 | 12 | `/contacts/<uuid:pk>/update-primary/` | GET / POST | UpdatePrimaryContactView | プライマリーコンタクトの修正画面（fix の場合は既存コンタクトを上書き、transfer / promotion / job_change / name_change の場合は新規コンタクトを追加し既存を inactive 化）。プライマリーコンタクト以外がこのルートに入ってきたらガード |
 | 13 | `/contacts/<uuid:pk>/update-active/` | GET / POST | UpdateActiveContactView | アクティブコンタクトの修正画面。プライマリーのように新規コンタクト生成なし、コンタクト値の修正のみ。change_reason フィールドは置かない（fix 相当の処理に固定）。アクティブコンタクト以外がこのルートに入ってきたらガード |
 | 14 | `/contacts/<uuid:pk>/preview/` | GET | PreviewContactView | コンタクト一覧画面からのモーダルプレビュー用、AJAX 専用 |
-| 15 | `/duplicates/` | GET | DuplicateCandidateGroupListView | 重複候補グループ一覧 |
+| 15 | `/duplicates/` | GET | DuplicateCandidateGroupListView | 重複候補グループ一覧。group_id 単位で集約表示。絞り込みフォーム（rank の複数選択 / 進捗の複数選択 / ユーザー絞り込み）あり。詳細は §11.5.x「DuplicateCandidateGroupListView の絞り込み仕様」参照 |
 | 16 | `/duplicates/groups/<uuid:group_id>/` | GET | DuplicateCandidateGroupDetailView | 同一グループ DuplicateCandidate の詳細表示。マージのレビューの最終結果表示画面（17 番からのリダイレクト直後は Django messages で完了メッセージを表示） |
-| 17 | `/duplicates/groups/<uuid:group_id>/review` | GET / POST | DuplicateCandidateGroupUpdateView | マージレビュー画面。GET で次のペアを表示、POST で処理（Mark_as_Different_Person / Execute_Merge_Only / Execute_Merge_with_Updates のいずれか）→ 同一 URL に GET リダイレクト（PRG パターン）。すべて処理完了したら 16 番にリダイレクト + Django messages で結果メッセージ |
-| 19 | `/merge-logs/` | GET | PersonMergeLogListView | マージログ一覧 |
-| 20 | `/merge-logs/<uuid:pk>/` | GET | PersonMergeLogDetailView | マージログ詳細 |
-| 21 | `/merge-logs/<uuid:pk>/confirm-undo/` | GET / POST | PersonMergeLogConfirmUndoView | マージ復元の確認画面と実行処理。実行完了後は詳細画面へリダイレクト。メッセージで詳細画面に復元実行結果を表示 |
+| 17 | `/duplicates/groups/<uuid:group_id>/review/` | GET / POST | DuplicateCandidateGroupUpdateView | マージレビュー画面。GET で次のペアを表示、POST で処理（Mark_as_Different_Person / Execute_Merge_Only のいずれか）→ 同一 URL に GET リダイレクト（PRG パターン）。すべて処理完了したら 16 番にリダイレクト + Django messages で結果メッセージ。UI 詳細は §11.5.5 / §11.6.2 参照 |
+| 19 | `/merge-logs/` | GET | PersonMergeLogListView | マージログ一覧。LoginRequiredMixin + ListView。絞り込み 3 種（status: undoable / undone / locked の複数選択 / user: 'me' で executed_by=ログインユーザー / searched=1 で絞り込み実行済みフラグ、未指定の初回は status='undoable' のみ）。ソート -executed_at（最新優先）、20 件/ページ。N+1 回避は select_related で surviving_person / merged_person の primary_contact / executed_by / undone_by |
+| 20 | `/merge-logs/<uuid:pk>/` | GET | PersonMergeLogDetailView | マージログ詳細。LoginRequiredMixin + View。1 件取得（select_related 5 段：surviving / merged primary_contact / executed_by / undone_by / duplicate_candidate）。DoesNotExist → Http404。context に `is_undoable()` + `get_undo_preview()` + 復元ボタン関連（21 番への遷移）を含む |
+| 21 | `/merge-logs/<uuid:pk>/confirm-undo/` | GET / POST | PersonMergeLogConfirmUndoView | マージ復元の確認画面と実行処理。LoginRequiredMixin + View。GET：is_undoable=False なら `messages.error` + 20 番リダイレクト、True なら `MergeUndoForm` を空で render。POST：is_undoable 再チェック → MergeUndoForm 検証 → `Execute_Merge_Undo` 呼び出し → ValidationError キャッチで `messages.error` + 20 番リダイレクト → 成功時 `messages.success` + 20 番リダイレクト。競合検出（GET / POST 両方）：他ユーザによる先行復元への防御 |
+| 22 | `/cards/<uuid:pk>/delete/` | POST | CardDeleteView | 名刺ハード削除（POST 専用、GET 等は 405）。認証ガード後 `bc.delete()` を呼ぶだけ。Contact CASCADE → CFC CASCADE → card_image post_delete の連鎖が走る（§4.3.2 参照）。削除後は元画像詳細（6 番）に 302 リダイレクト |
+| 23 | `/contacts/` | GET | ContactListView | コンタクト一覧画面。7 フィールド検索（氏名 / 会社 / 部署 / 役職 / メール / 電話 / 住所）AND 検索、status 3 チェックボックス絞り込み（primary / active / inactive、初回アクセス時は primary のみ ON）、ページネーション 20 件/ページ、BackNavigator 連携。Person.status='active' のみ表示（merged Person 配下は常に除外）、updated_at 降順 → created_at 降順。電話フィールドは phone / mobile / fax の OR 一致 |
 
-一覧画面なし：`/contacts/`（Contact 一覧）、`/persons/<uuid>/update/`（Person 編集）。
+一覧画面なし：`/persons/<uuid>/update/`（Person 編集）。
 
 命名規則：URL 名は update（edit ではない）、Class 名は XxxUpdateView / XxxCreateView 等。
 
@@ -1570,9 +1709,8 @@ transfer / promotion / job_change / name_change で新規 Contact を作成す�
 
 1. POST データを `MergeForm` に渡してバリデーション（11.6 参照）
 2. バリデーション通過後、`form.cleaned_data['review_result']` を取得
-3. **review_result が different 系**（same_name / ocr_error / other_different のいずれかを含む）→ `Mark_as_Different_Person` を呼ぶ
-4. **review_result が merged 系 + フィールド修正あり** → `Execute_Merge_with_Updates` を呼ぶ
-5. **review_result が merged 系 + フィールド修正なし** → `Execute_Merge_Only` を呼ぶ
+3. **review_decision='different'**（review_result が different 系：same_name / ocr_error / other_different のいずれかを含む）→ `Mark_as_Different_Person` を呼ぶ
+4. **review_decision in ('merged', 'additional_role')** → `Execute_Merge_Only(candidate, surviving_person, merged_person, form: MergeForm, user)` を呼ぶ（v1.4.2 で `Execute_Merge_with_Updates` 統合、§9.4.4 / §13.4.1 参照）
 6. すべて完了後、PRG パターンで GET リダイレクト（17 番の URL に）
 
 #### 「フィールド修正あり / なし」の判定
@@ -1620,9 +1758,9 @@ transfer / promotion / job_change / name_change で新規 Contact を作成す�
 
 ### 11.5.3 POST /duplicates/groups/<uuid:group_id>/review（17 番、DuplicateCandidateGroupUpdateView）
 
-1. アクションを取得（review_result の値で判定：merged 系 / different_person 系）
-2. **merged 系**：`Execute_Merge_Only` / `Execute_Merge_with_Updates` のいずれかを呼ぶ（フィールド修正の有無で分岐）
-3. **different_person 系**：`Mark_as_Different_Person` を呼ぶ
+1. アクションを取得（`MergeForm.cleaned_data['review_decision']` の値で判定：`merged` / `additional_role` / `different`）
+2. **review_decision in ('merged', 'additional_role')**：`Execute_Merge_Only(candidate, surviving_person, merged_person, form: MergeForm, user)` を呼ぶ（v1.4.2 で `Execute_Merge_with_Updates` を統合、§9.4.4 / §13.4.1 参照）
+3. **review_decision='different'**：`Mark_as_Different_Person` を呼ぶ
 4. shown_pair_ids に当該ペア ID を追加
 5. 同じ URL（/duplicates/groups/<group_id>/review）に GET でリダイレクト（PRG パターン）
 
@@ -1636,93 +1774,124 @@ transfer / promotion / job_change / name_change で新規 Contact を作成す�
 
 URL パラメータやセッションを使った独自実装は避ける。
 
-### 11.5.5 ペア表示画面の構成
+### 11.5.5 マージレビュー画面の構成（v1.4.2 全面刷新）
 
-画面は以下の構成。詳細な UI デザインは実装フェーズで調整する。
+マージレビュー画面（17 番 DuplicateCandidateGroupUpdateView）の UI は、D-3 系 Contact 詳細画面 AJAX 化に伴う設計大転換（§11.6.2 / #20 廃止系参照）を受けて、v1.4.2 で全面刷新する。Contact のフィールド値修正機能は持たず、ユーザーは「判定情報の入力」と「確認チェック」のみを行う。値違いの修正は事前に Contact 詳細画面（11 番）で AJAX 経由で済ませている前提。
 
-- 上部：グループ情報（rank、残り件数）
-- 中央：左右並列表示。左 = 基準コンタクト（surviving 推奨）、右 = 候補コンタクト
-- 各 Contact に「詳細を見る」ボタン（モーダルで詳細表示）
-- 判定選択：「同じ人物」「別人として確定」「次の候補」のラジオボタン
-- surviving 選択：「同じ人物」を選んだ場合のみ表示（デフォルト：左側）
-- review_result 選択：複数選択可、merged 系と different_person 系で表示切替
-- note 入力：other_* 選択時は必須
-- 「決定」「キャンセル」ボタン
+#### 画面の縦順序
 
-【設計案 A 対応追加項目】
+| 順 | ブロック | 内容 |
+|---|---|---|
+| 1 | ヘッダー | breadcrumb / h1 / 戻るボタン |
+| 2 | 名刺画像比較 | 左右 2 枚、クリックで拡大モーダル |
+| 3 | フィールド比較 | Contact `UPDATABLE_FIELDS` 全 24 フィールドをグルーピング表示。フルネーム省略（`MergeForm.hidden_name_fields()`、§11.6.2 / ストック #54）、値違いハイライト（`app-detail-item--diff`、§11.8.6）、両側空フィールド非表示 |
+| 4 | サバイブ/主コンタクト選択 | フィールド比較の直下、テーブル組み込み。`review_decision` に応じてラベル動的切替（`merged` → 「サバイブ側を選択」、`additional_role` → 「主コンタクトを選択」）、`different` 時は disabled 化 |
+| 5 | 判定 | `review_decision` 3 値（merged / additional_role / different）、ボタン形式ラジオ |
+| 6 | 判定理由 | `review_result` の複数選択 CB（マージ系 6 個 / 別人系 3 個）、第 1 段階に応じて動的表示（CSS `:has()`、§11.8.7） |
+| 7 | 確認チェック | マージ系判定時のみ表示（`MergeForm.has_confirm_checkboxes()`、§11.6.2 / ストック #54）。`different` 判定時は非表示 |
+| 8 | 備考 | `review_note`（CharField、required=False） |
+| 9 | 決定ボタン | エラーサマリーは画面トップに表示（`app-form__error-summary`、§11.8.6） |
 
-- DUPLICATE_CHECK_FIELDS の各フィールド表示（surviving 側 / merged 側を並列）
-- mid / low または値違いのフィールドにマークと修正・確認 UI（チェックボックス、merged 値採用ボタン、手入力編集）
-- マージ理由選択時の動的 UI 切り替え（additional_role なら merged 側修正・確認 UI も追加表示）
-- 確認必須フィールドがすべて確認済みになるまで、マージ確定ボタンは非活性
+#### 設計趣旨
 
-詳細な UI レイアウト・操作フロー（マージ理由選択を先か surviving 選択を先か、「全部一括で確認」ボタンの有無等）は実装フェーズでプロトタイプして決定する。
+旧 3 カラム（surviving / merged / 中央編集）構造は `Execute_Merge_with_Updates`（マージ実行とフィールド値修正の同時実行）の廃止（#20 廃止 1）に伴って意味を失った。新 2 カラム + 比較表 + ボタン形式ラジオ + 動的表示の構造は、人が業務判定する際の視線移動・誤判定リスクを最小化する UX 設計として確定。
 
 #### マージ画面の前提
 
-マージ画面は情報密度が高い。PC 横長レイアウト（最低 1280px 幅）を前提とする。スマホ・タブレットでの最適化は v1.5.0 以降に送る。レイアウトは既存の app.css の BEM 命名規則に従い、新規クラスは app-merge-* prefix で定義する。
+マージ画面は情報密度が高い。PC 横長レイアウト（最低 1280px 幅）を前提とする。スマホ・タブレットでの最適化は v1.5.0 以降に送る。レイアウトは既存の app.css の BEM 命名規則に従い、新規クラスは `app-merge-*` / `app-section--*` / `app-detail-item--*` prefix で定義する（§11.8.6 参照）。
 
-UI 操作のセッション扱い（マージ実行ボタン押下まで DB に反映されない、キャンセルで全変更が破棄される）については 8.5.4 を参照する。
+### 11.5.6 マージ画面のレイアウト（2 カラム + 中央判定情報）
 
-### 11.5.6 マージ画面の 3 カラム設計
+| 観点 | 仕様 |
+|---|---|
+| カラム構造 | 左：Person A（基準コンタクト推奨側）、右：Person B（候補コンタクト） |
+| 編集機能 | **なし**（マージ画面では Contact のフィールド値を修正しない、§11.5.5 参照） |
+| 中央 | 判定情報入力（review_decision / surviving_person_choice / review_result / 確認チェック / review_note） |
+| 比較表 | フィールド比較は両カラムを横並びで表示。値違いは行ごとに `app-detail-item--diff` クラスでハイライト |
+| 前提幅 | PC 横長 1280px 以上（マージ画面のスマホ対応は v1.5.0 以降、§20.1 参照） |
 
-マージ画面は以下の 3 カラム構造とする。
+【v1.4.2 改訂前との差分】 旧 3 カラム（左 surviving 候補 1 / 右 surviving 候補 2 / 中央マージ後 Contact 編集）を廃止、新 2 カラム + 中央判定情報に置換。中央カラムでの Contact 編集、フィールド横の「→」コピーボタン、notes 結合、low/mid 修正・確認 UI、値違い採用 3 通り選択肢（左カラム採用 / 右カラム採用 / 手入力）はすべて廃止。
 
-- 左カラム：surviving 候補 1（基準コンタクト推奨側）
-- 右カラム：surviving 候補 2
-- 中央カラム：マージ後の Contact（編集可能）
+### 11.5.7 表示対象フィールドの拡張（9 → 24 フィールド比較表示）
 
-操作フロー：
+v1.4.2 で表示対象を `DUPLICATE_CHECK_FIELDS`（9 フィールド）から Contact `UPDATABLE_FIELDS`（24 フィールド、§4.4.1 のユーザー入力対象フィールド全体）に拡大する。マージ画面では「修正対象」ではなく「**比較表示対象**」として扱う（値違いの修正 UI は提供しない、修正は事前に Contact 詳細画面 11 番で済ませる前提）。
 
-1. 判定選択：「同一人物（マージ）」「同一人物だが別肩書」「同性同名の別人」の 3 択
-2. surviving 側の選択（左／右）
-3. 中央フォームに選択側の値が初期値として入る
-4. 各フィールドに confidence ラベル（low / mid / high）を表示
-5. low / mid のフィールドは、修正または確認チェックボックス ON が必須（DUPLICATE_CHECK_FIELDS のみ対象）
-6. 反対側から値をコピーしたい場合は、フィールド横の「→」ボタンで中央にコピー可能
-7. notes フィールドは、surviving 側と merged 側の notes を結合した文字列が中央フォームの初期値として入る
-8. 完了ボタンでマージ確定
+#### 表示制御
 
-### 11.5.7 マージ画面の表示対象フィールドの拡大
+| 制御 | 内容 |
+|---|---|
+| 両側空フィールド非表示 | 両 Contact ともに空のフィールドは行ごと非表示。表示密度を上げる |
+| フルネーム省略 | `MergeForm.hidden_name_fields()` が `["last_name", "first_name"]` を返すケース（両側 full_name 一致 + 姓・名サブフィールドが full_name に含まれる）では last_name / first_name 行を省略表示。重複情報の冗長表示を防ぐ |
+| 値違いハイライト | 両側で値が異なるフィールドは `app-detail-item--diff` クラスでハイライト |
+| confidence 表示 | 各フィールドの両側 confidence を表示（high / mid / low / confirmed の 4 状態、`{% confidence %}` カスタムタグ、§11.8.2 参照） |
 
-v1.4.1 では「DUPLICATE_CHECK_FIELDS のみ表示・修正対象」としていたが、v1.4.2 では Contact のほぼ全フィールドに拡大する。
+#### 拡大対象（v1.4.1 → v1.4.2 で追加）
 
-理由：マージは破壊的操作であり、merged 側のフィールドが付け替え後どう扱われるかが曖昧なまま実装すると、ユーザーが意図しないデータ消失が起きる可能性がある。
+| カテゴリ | フィールド |
+|---|---|
+| 氏名サブ | last_name / first_name / salutation_name |
+| 連絡先補足 | fax / website / qualification / catchphrase |
+| SNS 各種 | twitter / instagram / github / linkedin / facebook |
+| 自由記述 | notes |
+| 補助情報 | postal_code / lang |
 
-表示対象（追加）：
+これらは confidence による表示分岐なし、値違いまたは片方空のフィールドのみ表示対象とする。
 
-- last_name / first_name / salutation_name
-- fax / website / qualification / catchphrase
-- twitter / instagram / github / linkedin / facebook
-- notes
-- postal_code / lang
+### 11.5.8 DuplicateCandidateGroupListView の絞り込み仕様（15 番）
 
-これらは confidence 関係なし、値違いまたは片方空のフィールドのみ表示・選択対象。
+15 番 DuplicateCandidateGroupListView（重複候補グループ一覧画面）の絞り込みフォームと並び順は以下のとおり。
+
+| 絞り込み | 仕様 |
+|---|---|
+| **rank フィルタ** | 4 値（exact_match / possible_high / possible_mid / possible_low）の複数選択。初回（`searched` 未指定）はデフォルトで全 rank |
+| **progress フィルタ** | 「未レビュー（pending）」「完了（completed）」の複数選択。初回はデフォルトで「未レビュー」のみ |
+| **user フィルタ** | チェックボックス 1 つ（`user=me`）。ON のとき `person_a.primary_contact.created_by` または `person_b.primary_contact.created_by` がログインユーザーに一致するペアの group のみ（OR 条件、自分が読み取った Person を含む候補を抽出） |
+
+【並び順】 未レビュー優先（pending_count > 0 を先）→ rank 順（exact_match → possible_low）→ group_id 順。
+
+【除外】 `group_id IS NULL` のレコードは集約対象外（単発候補は本画面の対象外）。
+
+### 11.5.9 マージログ系 3 画面の実装詳細（19 / 20 / 21 番）
+
+3 画面の責務・処理フローは §11.3 URL 一覧表 No.19 / 20 / 21 を参照。実装上の補足は以下のとおり。
+
+| 観点 | 内容 |
+|---|---|
+| 認証 | 3 画面とも `LoginRequiredMixin` を付与 |
+| select_related | DetailView は 5 段（surviving / merged primary_contact / executed_by / undone_by / duplicate_candidate）、ListView は surviving / merged primary_contact / executed_by / undone_by |
+| ページネーション | ListView は 20 件 / ページ、`-executed_at`（最新優先） |
+| 競合検出 | 21 番 GET / POST 両方で `is_undoable()` を再チェック、他ユーザーによる先行復元時は `messages.error` + 20 番リダイレクト |
+| メッセージング | Django `messages` framework で復元実行の成否を 20 番画面に伝達 |
+| URL ルート | `duplicates/urls.py` に 3 ルートを登録：`merge_log_list` / `merge_log_detail` / `merge_log_confirm_undo`（末尾スラッシュ付き） |
 
 ## 11.6 Form クラス設計
 
 ### 11.6.1 Form クラス継承図
 
 ```
-ContactBaseForm（抽象基底、Contact フィールドのみ）
+ContactBaseForm（抽象基底、Contact フィールドのみ、error_class = AppErrorList）
 ├── ContactUpdateForm（12 番用：change_reason + ContactFieldConfidence の confirmed チェックボックス追加）
 │   └── ContactUpdateActiveForm（13 番用：change_reason を除外、それ以外は親と同じ）
 ├── ContactAddAdditionalRoleForm（9 番用：Contact フィールドのみ）
-├── ContactCreateForm（10 番用：手動で新規 Person + 新規 Contact 作成）
-└── MergeForm（マージ画面 17 番用：merge_reason + 値違い確認 + 3 カラム構造のヘルパー）
+└── ContactCreateForm（10 番用：手動で新規 Person + 新規 Contact 作成）
 
-MergeUndoForm（21 番用、独立クラス、ContactBaseForm を継承しない）
+MergeForm（17 番用、forms.Form 直接継承、error_class = AppErrorList を明示）
+MergeUndoForm（21 番用、forms.Form 直接継承、error_class = AppErrorList を明示）
 ```
+
+【v1.4.2 改訂】 `MergeForm` は `ContactBaseForm` 継承から独立した。マージ画面が Contact のフィールド値修正機能を持たなくなった（Contact 詳細画面 AJAX 化に伴う設計大転換、D-3 系）ため、Contact フィールド継承の必要性がなくなった。新しい `MergeForm` はマージ判定情報（`review_decision` / `review_result` / `surviving_person_choice` / `review_note`）のみを受け持つ独立フォーム。
 
 ### 11.6.2 各 Form の責務
 
 #### ContactBaseForm（抽象基底クラス）
 
-- **責務**：Contact のフィールド定義のみを持つ抽象基底クラス。UI 構造は持たない
+- **責務**：Contact のフィールド定義のみを持つ抽象基底クラス。UI 構造は持たない。継承する全フォームに `AppErrorList`（§11.6.6 参照）を `error_class` として配り、フィールドエラーの BEM クラスを統一する
 - **配置**：`contacts/forms.py`
 - **継承元**：`forms.ModelForm`
 - **Meta.fields**：Contact のユーザー入力対象フィールド（full_name / last_name / first_name / name_order / company / department / title / email / mobile / phone / fax / postal_code / address / branch / website / SNS各種 / notes / lang など）
 - **除外フィールド**：`status` / `previous_status` / `previous_person` / `confirmed_at` / `confirmed_by` などシステムが管理する派生情報
+- **クラス変数**：`error_class = AppErrorList`（継承する全フォームの個別フィールドエラーに既存 BEM クラス `app-form__error` を自動付与）
+- **`__init__`**：`kwargs.setdefault("error_class", self.error_class)` を実装（Django `BaseForm.__init__` のデフォルト引数による上書き対策）
 
 #### ContactUpdateForm（12 番用）
 
@@ -1732,12 +1901,12 @@ MergeUndoForm（21 番用、独立クラス、ContactBaseForm を継承しない
 - **追加フィールド**：
   - `change_reason`（ChoiceField、PersonChangeReason の 5 値：fix / transfer / promotion / job_change / name_change）
   - `note`（CharField、required=False）
-  - ContactFieldConfidence の確認チェックボックス（low/mid フィールドのみ動的追加）
+  - ContactFieldConfidence の確認チェックボックス（**low/mid 信頼度 かつ `confirmed_at is None` のフィールドのみ動的追加**。既に `confirmed_at` が記録された過去確認済みフィールドは追加対象外）
 - **メソッド**：
-  - `clean()`：low/mid フィールドはすべて確認チェックボックス ON であることをバリデーション（11.7 参照）
+  - `clean()`：動的追加された確認チェックボックスがすべて ON であることをバリデーション（§11.7.1 参照）
   - `get_update_contact()`：フォーム値だけを持った新規 Contact インスタンス（pk なし）を返す
   - `confirmed_field_names()`：ユーザーが確認・編集したフィールド名のリストを返す（戻り値: `list[str]`）
-- **`__init__` の引数**：`target_contact: Contact`（バリデーション時に既存 Contact の confidence 状態を参照するため必須、11.7 参照）
+- **`__init__` の引数**：`target_contact: Contact`（バリデーション時に既存 Contact の confidence 状態を参照するため必須、§11.7 参照）
 
 #### ContactUpdateActiveForm（13 番用）
 
@@ -1768,26 +1937,38 @@ MergeUndoForm（21 番用、独立クラス、ContactBaseForm を継承しない
 
 #### MergeForm（マージ画面 17 番用）
 
-- **責務**：マージ画面用。3 カラム構造、値違い確認、merge_reason / different_person reason の選択
+- **責務**：マージ画面用。**3 段階判定モデル**（第 1 段階：review_decision、第 2 段階：review_result、第 3 段階：確認チェック）でユーザの判定情報を受け取る。値修正機能は持たず、Contact のフィールド値には触らない（マージ画面に来る前に Contact 詳細画面で値修正済みの前提）
 - **配置**：`duplicates/forms.py`
-- **継承元**：`ContactBaseForm`
+- **継承元**：`forms.Form`（v1.4.2 で `ContactBaseForm` 継承から独立。Contact フィールドや値修正の責務を持たないため）
+- **クラス変数**：`error_class = AppErrorList`（§11.6.6 参照、ContactBaseForm 経由ではないため明示的に設定）
 - **追加フィールド**：
-  - `review_result`（MultipleChoiceField、merged 系 7 値 + different 系 3 値）
-  - `merge_reason`（ChoiceField、DuplicateMergeReason の 7 値、review_result が merged 系のときのみ有効）
+  - `review_decision`（ChoiceField、3 値 [`merged` / `additional_role` / `different`]、required=True）。第 1 段階判定として UI で先に選ばせる。`additional_role` の場合、第 2 段階の review_result は UI に表示せず、`clean()` で `["additional_role"]` を自動セット
+  - `review_result`（**MultipleChoiceField**、複数選択可、required=False）。choices は `DuplicateMergeReason.choices` + `DifferentPersonReason.choices`（合計 10 値）。widget はテンプレ側で手動描画（`<input type="checkbox" name="review_result">` 形式、CheckboxSelectMultiple 相当）。required=False なのは `review_decision='additional_role'` 時に空でも通る必要があるため
+  - `surviving_person_choice`（ChoiceField、choices=[`person_a` / `person_b`]、required=False、initial 設定なし）。`clean()` で `review_decision in ('merged', 'additional_role')` のときのみ必須化。required=False と initial なし設計の狙いは「判定未選択 / 別人選択時に disabled 化したサバイブ選択 UI で誤誘導を起こさない」こと
   - `review_note`（CharField、required=False）
-  - 値違い確認の選択肢（左カラム採用 / 右カラム採用 / 手入力）
 - **メソッド**：
-  - `clean()`：マージ用バリデーション（11.7 参照）
-  - `get_update_contact()`：中央フォームの値だけを持った新規 Contact インスタンス（pk なし）を返す
-  - `confirmed_field_names()`：ユーザーが確認・編集したフィールド名のリストを返す
+  - `clean()`：第 1 段階・第 2 段階・サバイブ選択の整合性をまとめて検証（§11.7.3 参照）
+  - `get_merge_reason()`：**純関数**（`self.cleaned_data` から導出）。戻り値 `list[str]`。`review_result` のうち `DuplicateMergeReason.values` に含まれる value だけをリスト化して返す。別人系のみ / 空のとき `[]` を返す。`review_decision='additional_role'` のとき `clean()` で `review_result=["additional_role"]` に整形済みのため、自動的に `["additional_role"]` を返す
+  - `hidden_name_fields()`：**純関数**（DB 操作なし）。戻り値 `list[str]`。両側 full_name が一致 + 両側 last_name 一致 + 両側 first_name 一致 + last_name / first_name が空でない + full_name に last_name と first_name の両方が部分一致で含まれる、を全部満たすとき `["last_name", "first_name"]` を返す。それ以外は `[]`。View 側で field_groups 整形時に省略対象を除外するための判定
+  - `has_confirm_checkboxes()`：**純関数**（`self.fields` のキー走査のみ）。戻り値 `bool`。`self.fields` に `confirmed_` 始まりのフィールドが 1 個以上あれば True。テンプレ側で確認チェックブロックの表示判定に使用
 - **`__init__` の引数**：`candidate: DuplicateCandidate`、`surviving_person: Person`、`merged_person: Person`（マージのコンテキストを View から渡す）
+
+【v1.4.2 廃止】 v1.4.2 改訂前の `merge_reason` フィールド、`get_update_contact()` メソッド、`confirmed_field_names()` メソッド、`has_field_updates()` メソッド、値違い確認の選択肢（左カラム採用 / 右カラム採用 / 手入力）、中央フォーム初期値ロジックはすべて廃止。Contact 詳細画面 AJAX 化に伴うマージ系処理の設計方針大転換による（D-3 系で詳細仕様確定後、別途反映予定）。
 
 #### MergeUndoForm（21 番用、独立クラス）
 
-- **責務**：マージ復元画面用
+- **責務**：マージ復元画面用。復元実行時の備考と確認チェックを受け取る。破壊的操作（DB に影響）の誤操作防止を Form レベルで強制する
 - **配置**：`duplicates/forms.py`
-- **継承元**：`forms.Form`（`ContactBaseForm` は継承しない）
-- **追加フィールド**：`undo_note`（CharField、required=False）
+- **継承元**：`forms.Form`（`ContactBaseForm` は継承しない、`MergeForm` と同様）
+- **クラス変数**：`error_class = AppErrorList`（§11.6.6 参照、明示的に設定）
+- **追加フィールド**：
+  - `note`（CharField、required=False、widget=Textarea、ラベル「復元の備考」）。`PersonMergeLog.record_undo_action(user, note)` 経由で ActionLog の data に `{"note": str}` 形式で保存される（§4.11.3 参照）
+  - `confirmed`（BooleanField、required=True、ラベル「この操作は取り消せません。内容を理解しました」）。誤操作防止のための確認チェック
+- **メソッド**：
+  - `clean()`：追加バリデーションなし（`confirmed` の `required=True` で Form 標準の必須チェックが効くため）
+- **`__init__` の引数**：特になし（通常の Form 生成、`form = MergeUndoForm(request.POST)`）
+
+【設計趣旨】 マージ復元は破壊的操作（DB に影響）で、誤操作防止のため確認チェック CB を Form レベルで強制する。`note` は復元理由を任意で記録できる導線として `MergeForm` との対称性で持つ（マージ実行時も `review_note` 任意記録、復元時も `note` 任意記録）。
 
 ### 11.6.3 Form の設計原則
 
@@ -1824,11 +2005,22 @@ Contact フィールド定義を 1 箇所に集約し、Contact 修正系・別�
 | 呼び出し画面 | View の処理 |
 |---|---|
 | 修正画面（12 番 / 13 番） | `change_reason` に応じて、既存 Contact への値反映（`contact.fix(form, user)` 経由）or 新規 Contact 作成を判断 |
-| マージ画面（17 番） | サービス層（`Execute_Merge_with_Updates`）に渡し、サービス層内で適切に処理 |
+| マージ画面（17 番） | サービス層（`Execute_Merge_Only`）に Form を渡す。マージ画面では Contact のフィールド値修正を行わないため、`get_update_contact()` 等の値修正系メソッドは廃止された（v1.4.2 改訂、§11.6.2 / §9.4.4 参照） |
 
 **設計趣旨**：
 
 Form は「ユーザー入力の整形」までが責務。「既存レコード上書きか新規追加か」の判断は Form ではなく View またはサービス層が行う。これにより、Form の責務を明確に保ち、再利用性を高める。
+
+### 11.6.6 AppErrorList（共通エラー出力クラス）
+
+- **責務**：Django `forms.utils.ErrorList` のサブクラスとして、`<ul class="errorlist">` の出力に既存 BEM クラス `app-form__error` を追加し、`<ul class="errorlist app-form__error">` を出力させる
+- **配置**：`contacts/forms.py`
+- **継承元**：`django.forms.utils.ErrorList`
+- **実装**：`__init__` で `kwargs.setdefault("error_class", "app-form__error")` を super に渡す
+- **適用範囲**：`ContactBaseForm.error_class = AppErrorList` で配り、`ContactBaseForm` を継承する全フォーム（`ContactUpdateForm` / `ContactUpdateActiveForm` / `ContactCreateForm` / `ContactAddAdditionalRoleForm` / `MergeForm` / `MergeUndoForm`）に自動波及
+- **CSS との接続**：`.errorlist.app-form__error` の最小スタイル調整（`list-style: none` / `padding-left: 0` 等で `<ul>` ベースでも既存 `.app-form__error` スタイルが効くようにする）。詳細は §11.8 を参照
+
+【設計趣旨】 Django デフォルトの `<ul class="errorlist">` 出力はブラウザデフォルトで目立たないため、ユーザーがバリデーションエラーに気付けない問題があった。既存 `.app-form__error` スタイル（赤系・小さい・強調）を Django 自動出力に接続することで、テンプレ側に変更を加えずに全フォームのエラー表示が統一される。
 
 ## 11.7 Form のバリデーション仕様
 
@@ -1836,13 +2028,13 @@ Form は「ユーザー入力の整形」までが責務。「既存レコード
 
 #### 責務
 
-- low/mid confidence のフィールドはすべて確認チェックボックス ON であることをバリデーション
+- 動的追加された確認チェックボックス（low/mid 信頼度 かつ `confirmed_at is None` のフィールドのみ）がすべて ON であることをバリデーション
 - バリデーション失敗時は `ValidationError` を発生させる
 
 #### バリデーションロジックの方針
 
-1. `target_contact`（`__init__` で受け取った既存 Contact）の `get_field_confidences()` を呼び、low/mid フィールドのリストを取得
-2. フォームの確認チェックボックスのうち、low/mid フィールドに対応するものがすべて ON か確認
+1. `target_contact`（`__init__` で受け取った既存 Contact）の `get_field_confidences()` を呼び、**low/mid かつ `confirmed_at is None`** のフィールドのリストを取得（過去に確認済みのフィールドは対象外）
+2. フォームの確認チェックボックスのうち、上記フィールドに対応するものがすべて ON か確認
 3. 1 つでも OFF があれば `ValidationError` を発生させる
 4. エラーメッセージは「『〇〇』フィールドの確認チェックを ON にしてください」のような形式
 
@@ -1864,16 +2056,23 @@ View から Form を生成する際、`__init__` の引数として既存 Contac
 
 #### 責務
 
-マージ画面のバリデーション。以下を確認：
+マージ画面のバリデーション。第 1 段階・第 2 段階・サバイブ選択・確認チェックの整合性をまとめて検証する：
 
-1. **review_result の整合性**：merged 系 / different_person 系の混在禁止。最低 1 つ必須
-2. **other_* 選択時の note 必須**：review_result に other_merged / other_different が含まれるなら、review_note が必須
-3. **merge_reason の必須性**：review_result が merged 系のときのみ merge_reason が必須
-4. **DUPLICATE_CHECK_FIELDS の全 high 化**：surviving 側 Contact の DUPLICATE_CHECK_FIELDS（9 フィールド）が全 high であることを確認（マージ画面で修正・確認することで全 high 化、8.5）。additional_role の場合は merged 側 Contact も同条件
-5. **値違いフィールドの確認済み**：surviving / merged で値違いがあるフィールドは、ユーザーが採用判断（左カラム採用 / 右カラム採用 / 手入力）を済ませていることを確認
-6. **surviving_person の選択**：必須
+1. **review_decision の必須性**：`required=True` で担保（Form の required 機能）
+2. **review_decision と review_result の整合性検証（`set.issubset()` ベース）**：
+   - `merged`：`review_result` が 1 個以上 + すべてマージ系 value（`DuplicateMergeReason` から `ADDITIONAL_ROLE` を除く 6 値）。`set.issubset(MERGED_VALUES)` で判定
+   - `additional_role`：`clean()` 内で `cleaned_data["review_result"] = ["additional_role"]` を自動整形（UI 上は review_result を表示しないため、入力値は空でよい）
+   - `different`：`review_result` が 1 個以上 + すべて別人系 value（`DifferentPersonReason` 3 値）。`set.issubset(DIFFERENT_VALUES)` で判定
+3. **surviving_person_choice の必須性**：`review_decision in ('merged', 'additional_role')` のときのみ必須化。エラーメッセージは review_decision に応じて「サバイブ側を選択してください」/「主コンタクトを選択してください」を切替
+4. **確認チェック CB のバリデーション**：`review_decision in ('merged', 'additional_role')` のときのみ走らせる。`different` 判定時は **CB 検証をスキップ**（別人判定では surviving 側 Contact をマージしないため CFC を confirmed 化する必要がない、UI 上も CB は disabled / 非表示）
+5. **other_* 選択時の review_note 必須**：`review_result` に `other_merged` / `other_different` が含まれるなら、`review_note` が必須
 
-バリデーション失敗時は `ValidationError` を発生させる。エラーメッセージはフィールドごとに表示される。
+バリデーション失敗時は `ValidationError` を発生させる。エラーメッセージはフィールドごとに表示される（§11.6.6 `AppErrorList` 経由で `app-form__error` クラスが自動付与）。
+
+【v1.4.2 廃止された旧バリデーション】
+- 「マージ系と別人系の同時選択禁止」チェック：`review_decision` 3 値判定の構造上、物理的に起き得ないため削除
+- 「マージ系のときの `merge_reason` 必須」チェック：`merge_reason` フィールド廃止（§11.6.2 参照、`get_merge_reason()` メソッド導出に置換）に伴い削除
+- 「DUPLICATE_CHECK_FIELDS の全 high 化」「値違いフィールドの確認済み」：マージ画面での値修正廃止（D-3 系設計大転換）に伴い、マージ画面に来る前に Contact 詳細画面で対応する流れに変更（D-3 系で詳細仕様確定後、別途反映予定）
 
 #### `candidate` / `surviving_person` / `merged_person` をフォームに渡す方法
 
@@ -1899,7 +2098,7 @@ View から Form を生成する際、`__init__` の引数として渡す：
 
 ## 11.8 UI カスタムタグ・追加ルート・共通モーダル部品
 
-UI 共通化のためのカスタムタグ 5 種・追加ルート 2 本・共通モーダル部品を提供する。
+UI 共通化のためのカスタムタグ 6 種・追加ルート 2 本・共通モーダル部品を提供する。
 
 ### 11.8.1 カスタムタグ一覧
 
@@ -1907,9 +2106,12 @@ UI 共通化のためのカスタムタグ 5 種・追加ルート 2 本・共�
 |---|---|---|
 | `{% card_image url size %}` | url, small/medium/large | 名刺画像表示（モーダル trigger 付き） |
 | `{% original_image_thumbnail url %}` | url | 元画像サムネイル表示（モーダル trigger 付き） |
-| `{% json_tree data %}` | JSON データ | JSON ツリー表示（json-view ラップ） |
 | `{% confidence confidences field_name format %}` | confidences dict, field名, 表示形式 | フィールド単位の信頼度マーク |
 | `{% contact_confidence contact format %}` | contact オブジェクト, 表示形式 | Contact 単位の信頼度サマリー |
+| `{% confidence_state ... %}` | （引数は実装側で確定） | 単一フィールドの確認状態（high / confirmed / unconfirmed）の表示状態判定 |
+| `{% ocr_result_badge bc %}` | BusinessCard インスタンス | OCR 処理結果のバッジ表示（v1.4.2 で新規追加） |
+
+JSON ツリー表示は v1.4.2 から `@andypf/json-viewer` カスタム要素（CDN）に統一し、カスタムタグ化はしない（テンプレ側で `<andypf-json-viewer>` 要素を直接記述、§11.8.2 末尾参照）。
 
 ### 11.8.2 カスタムタグの詳細
 
@@ -1921,17 +2123,6 @@ UI 共通化のためのカスタムタグ 5 種・追加ルート 2 本・共�
 
 元画像のサムネイル表示。`{% card_image %}` と同様にモーダル trigger 自動付与。
 
-#### `{% json_tree data %}`
-
-JSON データをツリー表示する汎用タグ。内部で json-view ライブラリ（CDN 経由）に合わせた HTML と初期化 JS を出力する。
-
-利用画面：
-
-- OriginalDetailView（OriginalImage.raw_json の表示）
-- CardDetailView（BusinessCard 関連の JSON 表示）
-
-将来 json-view を別ライブラリに変えたくなっても、タグの内部だけ修正すれば全画面に反映される。
-
 #### `{% confidence confidences field_name format %}`
 
 フィールド単位の信頼度マーク表示。第 1 引数は `contact.get_field_confidences()` の戻り値（dict）。format で表示形式（icon / badge / count 等）を切り替え可能。
@@ -1941,6 +2132,38 @@ JSON データをツリー表示する汎用タグ。内部で json-view ライ�
 #### `{% contact_confidence contact format %}`
 
 Contact 単位の信頼度サマリー表示。Contact 全体で何個の low/mid フィールドが残っているか、何個が確認済みかを集計表示する。
+
+#### `{% confidence_state ... %}`
+
+単一フィールドの確認状態（high / confirmed / unconfirmed）の表示状態判定。`_contact_field.html` パーツ内で個別フィールドの「OK / 修正中」UI 切替に使用する。引数仕様は実装側で確定（cards/templatetags/ui_tags.py、§11.6.2 / §11.3 No.11 ContactDetailView 参照）。
+
+#### `{% ocr_result_badge bc %}`
+
+BusinessCard の `ocr_result` 値に応じて、業務上の警戒度を表すバッジを表示する。引数 `bc` が None 時は空文字を返す防御あり。
+
+| `ocr_result` 値 | バッジクラス | 表示テキスト |
+|---|---|---|
+| `business_card` | （バッジなし、空文字を返す） | - |
+| `not_business_card` | `app-status-badge--muted` | 名刺ではない |
+| `insufficient_info` | `app-status-badge--warning` | 情報不足 |
+| `ocr_failed` | `app-status-badge--error` | OCR失敗 |
+| `others` | `app-status-badge--muted` | その他 |
+
+ラベルは `bc.get_ocr_result_display()` 経由で TextChoices 定義から取得する（仕様書で表示名が変わっても自動追従）。
+
+【v1.4.2 拡張：`ocr_status` 分岐】 `BC.ocr_status` を見て、`pending` → 「OCR 待ち」バッジ（`app-status-badge--muted`）、`processing` → 「OCR 中」バッジ（`app-status-badge--info`）を表示。`done` / `failed` のときは上記 5 値表示ロジックに従う（新規 CSS / JS の追加なし、既存クラスのみ使用）。
+
+【バッジ色の設計思想】 業務上の警戒度で割り当て：muted = 想定外だが警戒度低、info = 処理中の通知、warning = ユーザーに撮り直しを促す系、error = 明確な失敗。`not_business_card` と `others` が同じ muted になっているのは、現時点で `others` がセットされる経路自体がない（v1.4.x 時点では将来用受け皿のみ）ため実用上の問題なし。実際に `others` が出る経路ができたタイミングで色分けを再検討する。
+
+#### JSON ツリー表示（カスタムタグ化なし）
+
+v1.4.2 で `@andypf/json-viewer@2.4.0`（CDN）カスタム要素に統一。テンプレ側で `<andypf-json-viewer>` 要素を直接記述する（カスタムタグ経由ではない）。
+
+- 利用画面：CardDetailView（BC.raw_json_1 / raw_json_2 表示）、OriginalDetailView（debug_json 表示）
+- 初期状態：折りたたみ（`expanded="0"`）
+- 検索・コピー・サイズ表示は viewer 内蔵ツールバーで提供
+- **OriginalImage.raw_json の表示は v1.4.2 で廃止**（§4.2 / ストック #35 参照、生 JSON は BC.raw_json_1 / raw_json_2 経由で参照）
+- admin の readonly_fields も整理：OriginalImageAdmin から `raw_json` を削除、BusinessCardAdmin に `raw_json_1` / `raw_json_2` / `ocr_status` / `claimed_at` / `error_message` を追加、`list_display` / `list_filter` に `ocr_status` / `ocr_result` を追加
 
 ### 11.8.3 共通モーダル部品
 
@@ -1959,6 +2182,96 @@ Contact 単位の信頼度サマリー表示。Contact 全体で何個の low/mi
 - テンプレートタグは 4 種：`append_back_url` / `back_url` / `back_all_url` / `hidden_back_field`
 
 詳細は別途「BackNavigator 使い方ガイド」を参照。
+
+### 11.8.5 サイドバー構成
+
+共通サイドバー（`templates/cards/_sidebar.html`）の最終構成（v1.4.2、8 項目）：
+
+| 順 | 項目名 | 遷移先 | 備考 |
+|---|---|---|---|
+| 1 | 名刺アップロード | 2 番 OriginalImageUploadView | - |
+| 2 | 名刺一覧 | 3 番 CardListView | - |
+| 3 | 元画像一覧 | 5 番 OriginalListView | - |
+| 4 | 人物一覧 | 7 番 PersonListView | - |
+| 5 | コンタクト一覧 | 23 番 ContactListView | v1.4.2 で新規追加（ストック #29） |
+| 6 | コンタクト新規作成 | 10 番 ContactCreateView | - |
+| 7 | 重複候補一覧 | 15 番 DuplicateCandidateGroupListView | v1.4.2 で明文化（ストック #49） |
+| 8 | マージログ | 19 番 PersonMergeLogListView | v1.4.2 で新規追加（ストック #67） |
+
+各項目には `active_menu` パラメータでハイライト連動。例：`active_menu="duplicates:merge_log_list"` のとき 19 / 20 / 21 番画面で項目 8 に `is-active` クラスを付与する。
+
+### 11.8.6 マージレビュー画面の BEM 階層
+
+マージレビュー画面（17 番）の v1.4.2 全面刷新（§11.5.5）で追加された BEM クラスを以下に整理する。命名規則は CLAUDE.md §7 の `app-* / __ / -- / is-* / js-*` に従う。
+
+| BEM クラス | 用途 |
+|---|---|
+| `app-merge-decision` / `app-merge-decision__btn` | 第 1 段階判定ボタン群（review_decision 3 値、§11.6.2） |
+| `app-merge-survivor` / `app-merge-survivor__btn` | サバイブ/主コンタクト選択ボタン群（surviving_person_choice、§11.6.2） |
+| `app-merge-survivor__label--survivor` / `app-merge-survivor__label--primary-role` | ボタンラベル動的切替（CSS で `:has(.js-decision-additional_role:checked)` 連動、§11.8.7） |
+| `app-merge-reason` / `app-merge-reason__btn` | 第 2 段階判定理由ボタン群（review_result、CB ボタン形式） |
+| `app-section--merged-only` / `app-section--additional-role-only` / `app-section--different-only` | 判定値に応じた動的セクション表示（§11.8.7） |
+| `app-section--needs-survivor` / `app-section--executes-merge` / `app-section--survivor-only` / `app-section--primary-role-only` / `app-section--survivor-unselected-label` / `app-section--survivor-disabled-label` | サバイブ選択・判定状態に応じた動的表示（§11.8.7） |
+| `app-form__error-summary` / `app-form__error-summary__title` / `app-form__error-summary__list` | 画面トップのエラーサマリブロック |
+| `app-detail-item--diff` | フィールド比較の値違い行ハイライト |
+| `app-review-thumb` / `app-review-thumb__img` / `app-review-thumb__placeholder` / `app-review-field-group__title` | 名刺画像サムネ + フィールドグループ見出し |
+| `app-debug-uid` | DEBUG=True 時の UID コピペ用要素（§11.8.8） |
+
+JS 識別クラス（イベントフック・CSS セレクタの両方で使用）：
+
+| `js-` クラス | 用途 |
+|---|---|
+| `js-decision-merged` / `js-decision-additional_role` / `js-decision-different` | 第 1 段階ラジオの判定値別識別（CSS `:has()` の引数として使用） |
+| `js-reason-merged` / `js-reason-different` | 第 2 段階 CB の系統別識別 |
+
+### 11.8.7 CSS `:has()` による動的 UI 切替パターン
+
+マージレビュー画面の動的セクション表示は、**JS なしで CSS の `:has()` 擬似クラス** で実現する。第 1 段階判定（review_decision）の値に応じて、第 2 段階セクション・サバイブ選択ブロック・判定理由 CB のラベル等を出し分ける。
+
+#### セレクタパターン
+
+`form:has(.js-decision-X:checked) .app-section--Y { display: block; }`
+
+「`form` 内に `js-decision-X` のチェックが入っているとき、`app-section--Y` を表示」のロジックを CSS だけで記述。
+
+#### 適用ケース
+
+| 場面 | パターン |
+|---|---|
+| 判定値による第 2 段階セクションの出し分け | `form:has(.js-decision-merged:checked) .app-section--merged-only` など |
+| サバイブ選択ブロックの常時表示 + 別人判定時 disabled 化 | `form:has(.js-decision-different:checked) .app-merge-survivor { opacity: 0.5; pointer-events: none; }` |
+| 判定理由 CB のラベル動的切替 | `form:has(.js-decision-additional_role:checked) .app-merge-survivor__label--survivor { display: none; }` |
+
+#### ブラウザ要件
+
+`:has()` 対応：Chrome 105+ / Safari 15.4+ / Firefox 121+。フォールバックは不要（社内利用前提、PC 横長 1280px 以上、§20.1）。
+
+#### 設計趣旨
+
+JS なしで動的 UI が実現できるため、CLAUDE.md §7 の「新規 JS ファイル追加禁止 / `app.js` への追記のみ」方針と整合する。実装パターンを仕様書に明文化することで、将来他の画面でも同じパターンを再利用できる。
+
+### 11.8.8 DEBUG=True 時の UID コピペ機能
+
+開発・デバッグ時に DB レコードの UID（UUID 文字列）を頻繁にコピペする運用上の利便性を上げるため、各詳細画面に DEBUG モード限定で UID を表示する。
+
+#### 対象画面
+
+| 対象画面 | 表示する UID |
+|---|---|
+| contact_detail（11 番 ContactDetailView） | Contact UID + Person UID の 2 件併記（active Person は ContactDetailView へ redirect される設計のため Person UID も併記） |
+| card_detail（4 番 CardDetailView） | BusinessCard UID |
+| person_detail_orphan / person_detail_merged / person_detail_archived（8 番 PersonDetailView の各分岐） | Person UID |
+
+#### 表示形式
+
+- 表示位置：`app-page-header` 直下
+- HTML：`<code class="app-debug-uid">{{ object.id }}</code>`
+- DEBUG 制御：`{% if debug %}` で囲む（Django 標準 `django.template.context_processors.debug` 経由、`INTERNAL_IPS` 一致時のみ `debug=True`）
+- CSS：`.app-debug-uid` に `user-select: all; cursor: text;` + inline-block / monospace / 11px / 軽い背景色（1 クリック全選択コピー可能、JS なし）
+
+#### 設計趣旨
+
+開発・デバッグ時に DB レコードの UID をシェル / DB クライアント / 別画面に貼り付ける場面が多いため、画面上のテキストをワンクリックで全選択できる UI を CSS の `user-select: all` で実装。本番環境では `INTERNAL_IPS` 制御により表示されないため運用上の懸念なし。
 
 ---
 
@@ -2066,20 +2379,22 @@ review_status='merged' / 'different_person' のレコードはそのまま（過
 
 ### 12.8.3 recover 処理の手順
 
+`recover_duplicate_candidates(merged_person, surviving_person)` は、マージ実行サービス（Execute_Merge_Only）から **mark_as_merged 後に呼び出される後処理**である。v1.4.2 の責務縮小により、recover 関数は「冪等性のための防御チェック」と「DuplicateCandidate の再復帰」を担い、Person / DuplicateCandidate の状態遷移そのものは呼び出し元（Execute_Merge_*）が事前に実行する前提とする。
+
 1. **merged_person を含む他の pending DuplicateCandidate を invalidated 化**（A / B 以外の Person 集合を保持）
-2. **当該マージの DuplicateCandidate を 'merged' に変更**
+2. **当該マージの DuplicateCandidate の状態確認**（冪等性チェックのみ）：呼び出し元（Execute_Merge_*）が事前に `candidate.mark_as_merged(user, review_result, note)` を呼んでいる前提。recover 関数内では DuplicateCandidate を改めて 'merged' に変更する処理は行わない（呼び出し元責務）
 3. **保持した DuplicateCandidate を再復帰**：
    - **`DuplicateCandidate.create_recovered_from(old_candidate, new_surviving_person)` クラスメソッド**で新規作成
-   - score / rank / matched_fields / group_id は old_candidate からコピー（再スコア計算は不要）
+   - score / rank / group_id は old_candidate からコピー（再スコア計算は不要）
    - merged_person だった側を surviving_person（new_surviving_person）に置き換え
    - review_status='pending' で作成
-4. **surviving_person.duplicate_checked_at の更新**：
-   - 値修正があった場合（has_field_updates=True） → NULL（次回 cron で再判定）
-   - 値修正がなかった場合（has_field_updates=False） → now()
+4. **surviving_person.duplicate_checked_at の更新は recover 関数では行わない**（呼び出し元 Execute_Merge_* の責務）。v1.4.2 改訂前は recover 内で更新していたが、責務分担の明確化のため呼び出し元に移管。
 
 【再復帰の除外条件】 相手側 Person が active 以外（merged / archived）になっている場合は、当該 DuplicateCandidate は再復帰させない。
 
 手順 3 の DuplicateCandidate 新規作成は、`merge_executor.py` 内で直接 `DuplicateCandidate.objects.create()` を呼ぶのではなく、`DuplicateCandidate.create_recovered_from(old_candidate, new_surviving_person)` クラスメソッド経由で行う。これにより「old_candidate からスコア・ランク・group_id 等をコピーして新規作成する」処理ロジックが DuplicateCandidate モデル側に集約され、関数名から意図が読める。
+
+【設計思想】「DB 履歴を見る判断」を generate 側（および呼び出し元）に集約し、recover の責務は冪等性チェックと再復帰のみに絞る。これは X-3 ランナバグ修正で確定した generate_duplicate_candidates_for_contact 側への履歴参照集約（v0.1.5 詳細仕様書 §5.4.1 参照）と同じ思想である。
 
 ### 12.8.4 スコアコピーが論理的に正しい理由
 
@@ -2101,7 +2416,7 @@ review_status='merged' / 'different_person' のレコードはそのまま（過
 - `(B, C)` `(B, D)` を invalidated 化
 - 新たに `(A, C, score=150, rank=possible_mid, group_id=G2, pending)` を作成
 - 新たに `(A, D, score=130, rank=possible_mid, group_id=G2, pending)` を作成
-- score / rank / matched_fields / group_id は元のものをそのままコピー
+- score / rank / group_id は元のものをそのままコピー
 
 **ここで誤解されやすいのが「surviving 側が B から A に変わったのだから、比較対象も変わってスコアも変わるはず」という直感である。**
 
@@ -2160,7 +2475,7 @@ recheck_duplicates --all の処理自体は数秒で完了する（duplicate_che
 | content_type | NULL |
 | object_repr | 'check_duplicates'（管理コマンド名） |
 
-extra に以下を格納：
+data に以下を格納：
 
 - search_target_count（duplicate_checked_at が NULL の Contact 総数）
 - processed_count（実際に処理した件数、--limit で制限後）
@@ -2216,7 +2531,7 @@ v1.4.2 では cron + 管理コマンドによる同期処理だが、将来的�
 | find_* / get_* / search_* / determine_* | 準関数 | find_duplicate_contacts / determine_base_person |
 | validate_* | 副作用あり（例外） | validate_image |
 | convert_* / save_* / create_* / update_* / delete_* | 副作用あり（変換・DB 書込） | convert_to_jpeg / save_card_image |
-| run_* / process_* / send_* / execute_* / extract_* / generate_* | 副作用あり（複合処理） | run_ocr / Extract_Cards_via_OCR / generate_duplicate_candidates_for_contact |
+| run_* / process_* / send_* / execute_* / extract_* / generate_* | 副作用あり（複合処理） | run_ocr / extract_carddata_via_ocr / generate_duplicate_candidates_for_contact |
 | retry_* | 副作用あり（再投入） | retry_failed_ocr |
 
 ### 13.2.2 サービス層主要関数の命名規則（Pascal_Snake_Case）
@@ -2233,10 +2548,11 @@ View 層・cron・タスクから直接呼ばれる「処理フロー全体を�
 
 | カテゴリ | 起動契機 | 例 |
 |---|---|---|
-| `Execute_*` | View 層から（ユーザー操作起点） | `Execute_Merge_Only` / `Execute_Merge_with_Updates` / `Execute_Merge_Undo` |
+| `Execute_*` | View 層から（ユーザー操作起点） | `Execute_Merge_Only` / `Execute_Merge_Undo` |
 | `Mark_as_*` | View 層から(状態遷移系) | `Mark_as_Different_Person` |
-| `Run_*` | cron / タスク起動 | `Run_Generate_Duplicate_Candidates` |
-| `Extract_*` | パイプライン起動 | `Extract_Cards_via_OCR` |
+| `Run_*` | cron / タスク起動 | `Run_Generate_Duplicate_Candidates` / `Run_Crop_Cards_From_OriginalImage` / `Run_Process_CardImages_With_OCR` |
+
+`Extract_*` カテゴリは v1.4.2 で廃止。旧 `Extract_Cards_via_OCR`（1 本パイプライン用上位関数）も廃止し、OpenCV と OCR を担う 2 本の `Run_*` 上位関数に分離した。詳細は §15.6 / §13.4.1 参照。
 
 ### 13.2.3 モジュール内専用ヘルパー関数の接頭辞
 
@@ -2326,11 +2642,15 @@ View 層・cron・タスクから直接呼ばれる「処理フロー全体を�
 | 関数名 | シグネチャ | 戻り値 | 配置 | 役割 |
 |---|---|---|---|---|
 | `Mark_as_Different_Person` | `(candidate, form, user)` | `None` | duplicates/services/merge_executor.py | 別人判定の本体 |
-| `Execute_Merge_Only` | `(candidate, surviving_person, merged_person, form, user)` | `None` | duplicates/services/merge_executor.py | マージのみ（フィールド修正なし） |
-| `Execute_Merge_with_Updates` | `(candidate, surviving_person, merged_person, form, user)` | `None` | duplicates/services/merge_executor.py | マージ＋更新（フィールド修正あり） |
-| `Execute_Merge_Undo` | `(merge_log, form, user)` | `None` | duplicates/services/merge_executor.py | マージ復元の本体 |
+| `Execute_Merge_Only` | `(candidate, surviving_person, merged_person, form: MergeForm, user)` | `None` | duplicates/services/merge_executor.py | マージ実行の本体（v1.4.2 で `Execute_Merge_with_Updates` 統合、マージ画面の値修正機能廃止により本サービスに一本化）。atomic 冒頭で surviving 側 primary の未確認 low/mid CFC を `mark_fields_as_confirmed` で一括 confirmed 化（§9.3.1【v1.4.2 補足】参照） |
+| `Execute_Merge_Undo` | `(merge_log, form: MergeUndoForm, user)` | `None` | duplicates/services/merge_executor.py | マージ復元の本体。`form.cleaned_data["note"]` を取り出して `merge_log.record_undo_action(user, note)` に渡す（§4.11.3 / §10.8.2 参照） |
 | `Run_Generate_Duplicate_Candidates` | `(limit=100)` | （別ドキュメントで定義） | duplicates/tasks/duplicate_check_runner.py | タスク層上位関数。cron から呼ばれる |
-| `Extract_Cards_via_OCR` | （別ドキュメントで定義） | （別ドキュメントで定義） | cards/tasks/ | OCR パイプライン上位関数 |
+| `Run_Crop_Cards_From_OriginalImage` | `(original_image)` | `None` | cards/tasks/crop_cards.py | OpenCV パイプライン上位（`process_opencv` cron 経由）。検出 → BC 作成 → OriginalImage.status=cards_extracted まで |
+| `Run_Process_CardImages_With_OCR` | `()` | `None` | cards/tasks/ocr_runner.py | OCR パイプライン上位（`process_ocr` cron 経由）。BC を CAS で claim → `process_cardimage_with_ocr` 呼び出し |
+| `process_cardimage_with_ocr` | `(business_card, ocr_service)` | `None` | cards/tasks/ocr_runner.py | BC 1 枚を引数に、OCR 実行 → BC 更新 → Contact / Person 生成 → OriginalImage.status 集計遷移までを完結（snake_case、Pascal_Snake_Case 主役関数の補助タスク扱い）|
+| `extract_carddata_via_ocr` | `(card_image, ocr_service)` | `dict` | cards/tasks/ocr_runner.py | 1 枚の card_image に対して条件付き 2 回 OCR を実行し結果を辞書で返す純粋ラッパー（§15.6 参照） |
+
+【v1.4.2 廃止】 旧 `Extract_Cards_via_OCR`（1 本パイプライン用上位関数）は廃止。`PipelineCoordinator` クラスおよび `process_pending` 管理コマンドも完全削除（§17 別表 B 参照）。
 
 ### 13.4.2 モジュール内専用ヘルパー（_snake_case）
 
@@ -2355,9 +2675,8 @@ View 層・cron・タスクから直接呼ばれる「処理フロー全体を�
 | `find_duplicate_contacts(contact)` | 準関数。1 Contact について重複候補を検出 |
 | `determine_base_person(person_a, person_b)` | 準関数。基準コンタクト判定（マージ数等） |
 | `Mark_as_Different_Person(candidate, form, user)` | 副作用あり。別人判定（トランザクション内） |
-| `Execute_Merge_Only(candidate, surviving_person, merged_person, form, user)` | 副作用あり。マージのみ実行（トランザクション内） |
-| `Execute_Merge_with_Updates(candidate, surviving_person, merged_person, form, user)` | 副作用あり。マージ＋更新実行（トランザクション内） |
-| `Execute_Merge_Undo(merge_log, form, user)` | 副作用あり。復元実行（トランザクション内） |
+| `Execute_Merge_Only(candidate, surviving_person, merged_person, form: MergeForm, user)` | 副作用あり。マージ実行（トランザクション内）。v1.4.2 で `Execute_Merge_with_Updates` を統合し本サービスに一本化 |
+| `Execute_Merge_Undo(merge_log, form: MergeUndoForm, user)` | 副作用あり。復元実行（トランザクション内）。`form.cleaned_data["note"]` を `record_undo_action` に渡す |
 | `recover_duplicate_candidates(merged_person, surviving_person)` | 副作用あり。recover 処理 |
 | `invalidate_pending_candidates(contact)` | 副作用あり。pending invalidated 化 |
 
@@ -2377,13 +2696,16 @@ View 層・cron・タスクから直接呼ばれる「処理フロー全体を�
 
 | コマンド | オプション | 用途 |
 |---|---|---|
-| `process_pending` | `--limit` | cron 起動。pending 画像を OCR 処理 |
-| `retry_failed_ocr` | `--all / --id / --limit / --dry-run` | failed を pending に戻す |
+| `process_opencv` | `--limit` / `--id <oid>` | cron 起動。OpenCV パイプライン専用。pending かつ BC 0 件の OriginalImage を取得 → OpenCV 検出 → BC 作成 → `status=cards_extracted` まで。BC が 1 件でも存在する OriginalImage は対象外（再実行禁止、card_index 不変担保） |
+| `process_ocr` | `--limit` / `--id <bc>` | cron 起動。OCR パイプライン専用。`BC.ocr_status=pending` を取得 → 条件付き 2 回 OCR → Contact / Person 生成 → OriginalImage.status の集計遷移 |
+| `retry_failed_ocr` | `--opencv` / `--ocr` (mutually exclusive、必須) + `--limit` / `--id` / `--dry-run` | 失敗の差し戻し。`--opencv`：`status=failed` AND BC 0 件の OriginalImage を `pending` に戻す。`--ocr`：`BC.ocr_status=failed` の BC を `pending` に戻し所属 OriginalImage.status を `cards_extracted` に戻す（所属 Contact 削除・孤立 Person 削除を含む。共通ヘルパー `cards/tasks/ocr_recovery.py` に集約） |
 | `reconcile_card_images` | `--apply` | DB↔MEDIA_ROOT 整合検査・修復 |
-| `dev_reset_ocr` | `--all / --id / --limit / --dry-run` | 開発用 OCR リセット（旧 `dev_for_reset_ocr` から改名） |
+| `dev_reset_ocr` | `--all / --id / --limit / --dry-run` | 開発用 OCR リセット |
 | `check_duplicates` | `--limit`（デフォルト 100） | cron 起動。重複チェック実行 |
 | `recheck_duplicates` | `--all / --dry-run` | 運用用。判定ロジック変更後の全件再判定 |
-| `dev_reset_duplicates` | `--all / --id / --limit / --dry-run` | 開発用重複チェックリセット（旧 `dev_for_reset_duplicates` から改名） |
+| `dev_reset_duplicates` | `--all / --id / --limit / --dry-run` | 開発用重複チェックリセット |
+
+【v1.4.2 廃止】 旧 `process_pending`（1 本パイプライン用）は完全削除。`cards/tasks/pipeline_coordinator.py`（PipelineCoordinator クラス）と `cards/tasks/card_cropper.py` の `save_card_image_tmp` 関数も削除（§15.x card_image 同期書きへの変更と整合）。
 
 ## 13.6 設計思想の明文化
 
@@ -2482,12 +2804,14 @@ DuplicateCandidate.review_result の different_person 系。
 |---|---|
 | Contact.Status | primary / active / inactive |
 | Person.Status | active / merged / archived |
-| OriginalImage.Status | pending / processing / extracted / garbage / failed |
+| OriginalImage.Status | pending / processing / opencv_processing / cards_extracted / extracted / garbage / failed |
 | BusinessCard.Orientation | normal / rotate_90_cw / rotate_90_ccw / rotate_180 / mirror |
+| BusinessCard.OcrStatus | pending / processing / done / failed |
+| BusinessCard.OcrResult | business_card / not_business_card / insufficient_info / ocr_failed / others |
+| DebugMask.MaskType | diff / edge / sat / or / closed |
 | ContactFieldConfidence.Confidence | low / medium（high は記録対象外） |
 | DuplicateCandidate.Rank | exact_match / possible_high / possible_mid / possible_low / none |
 | DuplicateCandidate.ReviewStatus | pending / merged / different_person / invalidated |
-| DuplicateCandidate.MatchReason | email / mobile / name_strong / name_score |
 | PersonMergeLog.Status | undoable / undone / locked |
 
 ---
@@ -2496,18 +2820,26 @@ DuplicateCandidate.review_result の different_person 系。
 
 ## 15.1 cards 処理ルール一覧
 
+v1.4.2 のパイプライン分離（§13.4.1 / §15.6 参照）に伴い、`process_cardimage_with_ocr` 内での card 処理ルールは以下のとおり。is_business_card / has_minimum_info NG のカードも BC として残置し、`ocr_result` フィールドで種別を区別する（§4.3 / 別表 C.14 参照）。
+
 | ID | ケース | 処理 |
 |---|---|---|
-| C1 | cards 配列が空 | status=garbage、BusinessCard 作成なし |
-| C2 | 全 card が is_business_card=false | status=garbage、BusinessCard 作成なし |
-| C3 | 全 card が has_minimum_info で弾かれた | status=extracted（BusinessCard 0 件）、error_message に記録 |
-| C4 | confidence=low/medium のフィールドあり | ContactFieldConfidence に記録（high は記録しない） |
-| C5 | 切り抜き失敗（card_image=null） | has_minimum_info を満たせば BusinessCard 作成 |
-| C6 | OCR 例外発生 | 当該 card のみ失敗扱い、他 card への波及なし |
+| C1 | cards 配列が空 | OpenCV 段階で BC 0 件確定 → OriginalImage.status=garbage、BusinessCard 作成なし |
+| C2 | card が is_business_card=false | 当該 card は BusinessCard 作成（`ocr_result='not_business_card'`）、Contact / Person 作らず。全 card が is_business_card=false なら OriginalImage.status=garbage、1 件以上 BC が作られたら status=extracted |
+| C3 | card が has_minimum_info で弾かれた | 当該 card は BusinessCard 作成（`ocr_result='insufficient_info'`）、Contact / Person 作らず。error_message には記録しない（silent skip、撮り直し判断・OpenCV 改善のデータ収集用）。全 card 弾かれの場合も status=extracted（BC は残る）|
+| C4 | confidence=low/medium のフィールドあり | ContactFieldConfidence に記録（high は記録しない）|
+| C5 | warp（透視変換）失敗 | 当該 card は detect_cards 段階で除外、BusinessCard 作成なし、OCR 呼び出しもなし（warp 失敗品を OCR に送る意味がないため、OpenCV パイプライン側で除外）|
+| C6 | OCR 例外発生 | 当該 card のみ失敗扱い（`ocr_status=failed` / `ocr_result=ocr_failed`、error_message にエラー集約）、他 card への波及なし。`retry_failed_ocr --ocr` で差し戻し可能 |
+
+【補足】C2 / C3 で BC を残置する設計の狙いは、(1) ユーザーが「OCR が何を読み取ったのか」を確認して撮り直し判断できる、(2) OpenCV 検出精度改善のための実データ蓄積、(3) 処理した事実を BC として残すことで後追い検証が可能、の 3 点。
 
 ## 15.2 部分失敗時の status / error_message
 
-少なくとも 1 件の BusinessCard 作成成功 → status=extracted、error_message に失敗 card の理由を集約。全 card 失敗 → status=failed、error_message に詳細を記録。
+OCR 完了時の OriginalImage.status 集計遷移（§4.2.1 / 別表 C.1 参照）：
+
+- 少なくとも 1 件の BusinessCard で `ocr_status=done` → status=extracted（成功 BC の `ocr_result` が `business_card` / `not_business_card` / `insufficient_info` のいずれであっても集計上は extracted）。失敗 card の理由は error_message に集約
+- 全 BC が `ocr_status=failed` → status=failed、error_message に詳細を記録（致命的失敗）
+- OpenCV 段階で BC 0 件確定（is_business_card=false 全件 / warp 失敗のみ）→ status=garbage
 
 ## 15.3 OCR パイプラインの v1.4.0 修正範囲
 
@@ -2553,6 +2885,7 @@ ContactCreateView / ContactUpdateView も同じ normalization の関数を呼ぶ
 - 半角空白を除去（空白なしで比較）
 - 全角英数字 → 半角英数字
 - 前後の空白除去
+- 正規化後に空文字となった場合は `ValidationError` を raise する（保存・更新前バリデーション、§4.4.1 の必須フィールド制約と整合）
 
 #### 会社名（company）
 
@@ -2615,6 +2948,50 @@ OCR が判定した名刺の主要言語を ISO 639-1 形式で保存。デフ�
 - catchphrase（キャッチフレーズ）
 - qualification（資格）
 - website / SNS 各種
+
+## 15.6 条件付き 2 回 OCR
+
+v1.4.2 のパイプライン分離（§13.4.1 参照）に伴い、1 BC につき orientation に応じて条件付きで 2 回 OCR を実行する仕様を導入する。`extract_carddata_via_ocr(card_image, ocr_service)` が 1 枚の card_image に対して以下のフローで処理する。
+
+### 15.6.1 処理フロー
+
+1. 1 枚の card_image を `extract_carddata_via_ocr(card_image, ocr_service)` に渡す
+2. 1 回目 OCR を実行 → 結果から `orientation` を取得し `raw_json_1` に格納
+3. `orientation == 'normal'` → 1 回で完結（`raw_json_2 = None`）
+4. `orientation != 'normal'` → `_rotate_card_image()` で補正 → 2 回目 OCR → `raw_json_2` に格納
+5. 1 回目／2 回目とも同じプロンプト（フィールド抽出 + orientation 判定を同時に実施）
+6. 2 回目失敗時は 1 回目結果を採用（`raw_json_2 = None`、`error_message` に「2 回目 OCR 失敗」を追記、`ocr_status = done`）
+7. 1 回目自体失敗時：`ocr_status = failed` / `ocr_result = ocr_failed`、`retry_failed_ocr --ocr` で差し戻し可能（§17 別表 B 参照）
+
+### 15.6.2 採用 raw_json の選択ロジック
+
+| 場面 | 採用 raw_json |
+|---|---|
+| 2 回目成功時 | `raw_json_2` を採用（補正後の OCR 結果） |
+| 2 回目スキップ時（orientation=normal）/ 2 回目失敗時 | `raw_json_1` を採用 |
+
+### 15.6.3 card_image 上書き保存ルール
+
+- 2 回目が走った時点で **必ず補正画像で BC.card_image を上書き**（2 回目が失敗しても、画像補正自体は実施済みのため上書き）
+- 既存 `BusinessCard.orientation` フィールドは「**検出時の元の orientation**」を保存（補正ログとして残す）
+
+### 15.6.4 orientation → 補正回転マップ
+
+| orientation 値 | 補正操作 |
+|---|---|
+| `normal` | 何もしない |
+| `rotate_90_cw` | 反時計回り 90°（Pillow `image.rotate(90, expand=True)`） |
+| `rotate_90_ccw` | 時計回り 90°（Pillow `image.rotate(-90, expand=True)`） |
+| `rotate_180` | 180° 回転（Pillow `image.rotate(180, expand=True)`） |
+| `mirror` | 水平反転（Pillow `ImageOps.mirror(image)`） |
+
+mirror は他 orientation と同じパイプラインで処理するが、業務的に「誤認識ケース」の扱いであり、補正後の精度は保証しない。`cv2.flip` ではなく Pillow `ImageOps.mirror` を採用する理由は、回転処理と同じ Pillow API で揃えることで実装の単純さを優先するため。
+
+### 15.6.5 設計趣旨
+
+- AI OCR は名刺が回転していると読み取り精度が極端に落ちるため、補正後再 OCR で精度を引き上げる
+- 1 回目／2 回目両方の生 JSON を BC に保存（`raw_json_1` / `raw_json_2`、§4.3 参照）することで、回転補正の効果測定・プロンプトチューニング材料がそのまま蓄積される
+- 1 回目で `orientation=normal` のときは 2 回目スキップで API トークンコストを節約
 
 ---
 
@@ -2711,8 +3088,9 @@ Django 標準の CSRF 保護を継続。画像アップロードはバリデー�
 
 - 画像アップロード → 名刺一覧表示まで：画像 1 枚あたり 30 秒以内
 - OCR API 1 回あたりのタイムアウト：60 秒
-- process_pending の cron 起動間隔：1〜5 分
-- stuck sweeper のしきい値：30 分（OCR 処理）
+- `process_opencv` の cron 起動間隔：1〜5 分（OpenCV は API 不使用のため高頻度実行可）
+- `process_ocr` の cron 起動間隔：1〜5 分（API レートに応じて調整）
+- stuck sweeper のしきい値：30 分（OpenCV / OCR 共通、`settings.OCR_STUCK_THRESHOLD_MINUTES`）
 - check_duplicates の cron 起動間隔：5 分（推奨）
 - 1 Contact の重複チェック処理時間：数秒以内
 
@@ -2759,7 +3137,6 @@ Django 標準の CSRF 保護を継続。画像アップロードはバリデー�
 - Person の archived 化は Django Admin のみ（一般ユーザー UI は v1.5.0 以降）
 - 物理削除は一般ユーザー UI なし、Django Admin のみ
 - 認証は仮実装、本格認証は v1.5.0 以降
-- Contact 一覧画面は実装しない（Person 一覧と名刺一覧で代替）
 - Person 編集画面は実装しない（Person 自体に編集対象が少ない）
 - KPI レポート、メール通知、due_date による期限管理は v1.5.0 以降
 - マージ画面のスマホ対応は v1.5.0 以降（v1.4.2 では PC 横長 1280px 前提）
@@ -2843,14 +3220,14 @@ Django 標準の CSRF 保護を継続。画像アップロードはバリデー�
 | 10 | duplicates/views.py | DuplicateCandidateGroupListView、DuplicateCandidateGroupDetailView、DuplicateCandidateGroupUpdateView、PersonMergeLogListView、PersonMergeLogDetailView、PersonMergeLogConfirmUndoView |
 | 11 | duplicates/forms.py | MergeForm、MergeUndoForm |
 | 12 | duplicates/services/duplicate_detection.py | find_duplicate_contacts、_calculate_score、_determine_rank、determine_base_person |
-| 13 | duplicates/services/merge_executor.py | Mark_as_Different_Person、Execute_Merge_Only、Execute_Merge_with_Updates、Execute_Merge_Undo、recover_duplicate_candidates、invalidate_pending_candidates |
+| 13 | duplicates/services/merge_executor.py | Mark_as_Different_Person、Execute_Merge_Only、Execute_Merge_Undo、recover_duplicate_candidates、invalidate_pending_candidates（v1.4.2 で Execute_Merge_with_Updates は廃止し Execute_Merge_Only に統合、§9.4.4 参照） |
 | 14 | duplicates/tasks/duplicate_check_runner.py | generate_duplicate_candidates_for_contact、Run_Generate_Duplicate_Candidates |
 | 15 | cards/management/commands/check_duplicates.py | cron 起動。Run_Generate_Duplicate_Candidates 呼び出し |
 | 16 | cards/management/commands/recheck_duplicates.py | 全 Contact の duplicate_checked_at リセット |
 | 17 | cards/management/commands/dev_reset_duplicates.py | 開発用 DuplicateCandidate リセット |
 | 18 | cards/management/commands/dev_reset_ocr.py | 開発用 OCR リセット（旧 dev_for_reset_ocr から改名） |
 | 19 | cards/templatetags/back_tags.py | BackNavigator 用カスタムタグ（append_back_url / back_url / back_all_url / hidden_back_field） |
-| 20 | cards/templatetags/ui_tags.py | UI カスタムタグ（card_image / original_image_thumbnail / json_tree / confidence / contact_confidence） |
+| 20 | cards/templatetags/ui_tags.py | UI カスタムタグ（card_image / original_image_thumbnail / confidence / contact_confidence / confidence_state / ocr_result_badge）。json_tree は v1.4.2 で廃止し andypf-json-viewer に統一（§11.8.1 / §11.8.2 参照） |
 | 21 | static/css/app.css | UI 全体のスタイル（マージ画面用 app-merge-* prefix のクラス追加） |
 | 22 | static/js/app.js | 共通モーダル制御、BackNavigator JS、マージ画面の JS |
 | 23 | templates/contacts/ ほか | 各画面のテンプレート（base.html、各 View 用テンプレート、共通モーダル部品） |
@@ -2915,6 +3292,17 @@ v1.4.2 のマイグレーション適用は以下の順序で行う。
 13. UI カスタムタグ・共通モーダル部品の実装（第11章 11.8 参照）
 14. テンプレート実装
 
+### 21.5.1 v1.4.2 で追加される主なマイグレーション
+
+v1.4.2 のパイプライン分離（§13.4.1）と BusinessCard モデル拡張（§4.3）に伴い、以下のマイグレーションを追加する。マイグレーション番号は A 側（feature/v1.4.2-models）／ B 側（feature/v1.5.0-pipeline-split）の main マージ順序によりずれるため、ここでは論理的な追加内容のみ記す。
+
+| 種別 | 内容 |
+|---|---|
+| スキーマ（自動生成） | BusinessCard に `raw_json_1` / `raw_json_2` / `ocr_status` / `ocr_result` / `claimed_at` / `error_message` を追加（§4.3）、OriginalImage.STATUS_CHOICES に `opencv_processing` / `cards_extracted` を追加（§4.2.1）、Contact.lang に `blank=True` を追加（§4.4.1）、Contact.full_name に `blank=False` を明示（§4.4.1）、DebugMask モデル新規作成（§4.12）、ActionLog アプリ独立に伴う移動、ActionLog から diff 削除・extra → data 改名（§4.10）、DuplicateCandidate から match_reason / matched_fields 削除（§4.7） |
+| データ（手書き） | 旧 OriginalImage.raw_json → BC.raw_json_1 への移行（§4.3 / §4.2 raw_json deprecated に対応）：全 BC をループし、`bc.original_image.raw_json["cards"][bc.card_index]` を取り出し `{"cards": [<card_data>], "api_response": <raw_json.get("api_response", {})>}` の形に組み直して `bc.raw_json_1` に格納。`bc.raw_json_2=None` / `bc.ocr_status='done'` 固定（既存 BC は OCR 完了済み前提）。`bc.ocr_result` は既存値維持。例外時は当該 BC スキップ＋ログ出力、他は続行。reverse は no-op |
+
+【物理残置】 OriginalImage.raw_json フィールドそのものは v1.4.2 では物理残置（既存データ後方互換、§4.2 / §35 参照）。物理削除は v1.4.x 以降の別マイグレーションで対応する。
+
 ## 21.6 開発 DB の confidence='high' 確認
 
 両 PC（自宅 PC、実家 PC）で以下のクエリを実行して確認する。
@@ -2945,8 +3333,8 @@ v1.4.2 のマイグレーション適用は以下の順序で行う。
 - [ ] Contact = スナップショット設計（4.4.0）の理解確認
 - [ ] recover 一本化の設計趣旨（12.8.1）の理解確認
 - [ ] サバイブ側 Contact の previous_* は変更しないという原則（9.4.1）の理解確認
-- [ ] same_card 修正ありの特殊扱い（9.4.5）の理解確認
 - [ ] ContactFieldConfidence の生成・更新タイミング 3 ケース別（10.6.4）の理解確認
+- [ ] マージ画面の値修正廃止と Contact 詳細画面 AJAX 化（11.5.5 / 11.6.2 / D-3 系）の理解確認
 
 ---
 
@@ -2964,6 +3352,7 @@ v1.4.2 のマイグレーション適用は以下の順序で行う。
 | 人物アプリ | persons |
 | コンタクトアプリ | contacts |
 | 重複検出アプリ | duplicates |
+| アクションログアプリ | actionlogs |
 | 共通設定 | config |
 
 ### A.2 モデル
@@ -2972,6 +3361,7 @@ v1.4.2 のマイグレーション適用は以下の順序で行う。
 |---|---|
 | 元画像 | OriginalImage |
 | 名刺 | BusinessCard |
+| デバッグマスク | DebugMask |
 | 人物 | Person |
 | コンタクト | Contact |
 | 信頼度メタ | ContactFieldConfidence |
@@ -3004,6 +3394,12 @@ v1.4.2 のマイグレーション適用は以下の順序で行う。
 | 名刺画像 | card_image |
 | カードインデックス | card_index |
 | 向き | orientation |
+| 1 回目 OCR 生 JSON | raw_json_1 |
+| 2 回目 OCR 生 JSON | raw_json_2 |
+| OCR 処理状態 | ocr_status |
+| OCR 処理結果 | ocr_result |
+| OCR 開始日時 | claimed_at |
+| エラーメッセージ | error_message |
 | 作成日時 | created_at |
 | 更新日時 | updated_at |
 
@@ -3081,8 +3477,6 @@ v1.4.2 のマイグレーション適用は以下の順序で行う。
 | 人物 B | person_b |
 | スコア | score |
 | ランク | rank |
-| 一致理由 | match_reason |
-| 一致フィールド | matched_fields |
 | レビューステータス | review_status |
 | レビュー結果 | review_result |
 | メモ | note |
@@ -3120,12 +3514,22 @@ v1.4.2 のマイグレーション適用は以下の順序で行う。
 | 対象オブジェクト ID | object_id |
 | 対象オブジェクト | content_object |
 | 対象オブジェクト表現 | object_repr |
-| 差分 | diff |
-| 追加情報 | extra |
+| 追加情報 | data |
 | 補足メモ | note |
 | 作成日時 | created_at |
 
-### A.11 主要なプロパティ・属性
+### A.11 DebugMask のフィールド
+
+| 日本語名 | コーディング名 |
+|---|---|
+| プライマリキー | id |
+| 元画像 | original_image |
+| マスク種別 | mask_type |
+| マスク画像 | mask_image |
+| メタデータ | metadata |
+| 作成日時 | created_at |
+
+### A.12 主要なプロパティ・属性
 
 | 日本語名 | コーディング名 |
 |---|---|
@@ -3141,8 +3545,9 @@ v1.4.2 のマイグレーション適用は以下の順序で行う。
 
 | コマンド | オプション | 用途 |
 |---|---|---|
-| process_pending | --limit | cron 起動。OCR 処理 |
-| retry_failed_ocr | --all / --id / --limit / --dry-run | failed を pending に戻す |
+| process_opencv | --limit / --id | cron 起動。OpenCV パイプライン専用（BC 0 件の OriginalImage を pending→opencv_processing→cards_extracted、再実行禁止）|
+| process_ocr | --limit / --id | cron 起動。OCR パイプライン専用（BC.ocr_status=pending を CAS→条件付き 2 回 OCR→Contact/Person 生成→OriginalImage.status 集計遷移）|
+| retry_failed_ocr | --opencv / --ocr (必須) + --limit / --id / --dry-run | 失敗の差し戻し。--opencv は OpenCV 段階、--ocr は OCR 段階。共通ヘルパー cards/tasks/ocr_recovery.py に集約 |
 | reconcile_card_images | --apply | DB ↔ MEDIA_ROOT 整合検査・修復 |
 | dev_reset_ocr | --all / --id / --limit / --dry-run | 開発用 OCR リセット |
 | check_duplicates | --limit（デフォルト 100） | cron 起動。重複チェック実行 |
@@ -3157,11 +3562,13 @@ v1.4.2 のマイグレーション適用は以下の順序で行う。
 
 | コード値 | 表示名 | 意味 |
 |---|---|---|
-| pending | 処理待ち | OCR 未実行 |
-| processing | 処理中 | CAS で processing 遷移済み |
-| extracted | 抽出済み | OCR 成功（部分失敗含む） |
-| garbage | 名刺なし | cards 配列が空、または全 card が is_business_card=false |
-| failed | 失敗 | OCR 全失敗 |
+| pending | 処理待ち | OpenCV / OCR 未実行 |
+| processing | 処理中 | v1.4.2 改訂前の 1 本パイプライン用（後方互換のため物理残置） |
+| opencv_processing | OpenCV 処理中 | OpenCV cron の CAS で claim 後、検出処理中 |
+| cards_extracted | OpenCV 完了・OCR 待ち | OpenCV 検出完了・BC 作成済み・OCR 未実行 |
+| extracted | 完了 | OCR 成功（部分失敗含む） |
+| garbage | 無効画像 | cards 配列が空、または全 card が is_business_card=false |
+| failed | 処理失敗 | OpenCV / OCR の致命的失敗 |
 
 ### C.2 BusinessCard.Orientation
 
@@ -3231,13 +3638,15 @@ DuplicateCandidate.review_result の merged 系（マージ画面専用）。
 
 | コード値 | 表示名 |
 |---|---|
-| same_card | 同一名刺（撮り直し・重複アップロード） |
+| same_card | 同一名刺 |
 | transfer | 異動・部署変更 |
-| promotion | 役職変更・昇進 |
+| promotion | 役職変更・昇進等 |
 | job_change | 転職 |
 | additional_role | 別肩書追加（副業など） |
 | name_change | 結婚等による姓変更 |
 | other_merged | その他（マージ実行） |
+
+【v1.4.2 ラベル微調整】 `same_card` の旧表示名「同一名刺（撮り直し・重複アップロード）」はボタン形式ラジオで長すぎたため「同一名刺」に短縮（ストック #69）。`promotion` の旧表示名「役職変更・昇進」は「役職変更・昇進等」に拡張し、PersonChangeReason 側の同名値とは独立に運用する。
 
 ### C.9 DifferentPersonReason 値一覧（3 値）
 
@@ -3245,9 +3654,11 @@ DuplicateCandidate.review_result の different_person 系。
 
 | コード値 | 表示名 |
 |---|---|
-| same_name | 同姓同名 |
+| same_name | 同姓同名の別人 |
 | ocr_error | OCR 誤認識による誤検出 |
 | other_different | その他（別人確定） |
+
+【v1.4.2 ラベル変更】 `same_name` の表示名を「同姓同名」→「同姓同名の別人」に変更（ストック #68）。「同姓同名」だけでは「同姓同名で同一人物」とも読み取れる曖昧さがあり、別人判定の意図を明確にするため。enum value（`same_name`）は維持。
 
 ### C.10 Contact.Status
 
@@ -3278,6 +3689,43 @@ ActionLog の action フィールドに記録される代表的な値。新た�
 | different_person | 別人判定 |
 | undone | マージ復元実行 |
 | executed | cron 等の実行 |
+
+### C.13 BusinessCard.OcrStatus
+
+BC 単位の OCR 処理状態。v1.4.2 のパイプライン分離（第 8 章参照）で導入。
+
+| コード値 | 表示名 | 意味 |
+|---|---|---|
+| pending | OCR 待ち | OpenCV で BC 作成済み、OCR 未実行 |
+| processing | OCR 中 | OCR cron の CAS で claim 後、処理中 |
+| done | 完了 | OCR 成功（採用 raw_json と ocr_result が確定） |
+| failed | 失敗 | OCR の致命的失敗（1 回目自体が失敗、retry_failed_ocr --ocr で差し戻し可能） |
+
+### C.14 BusinessCard.OcrResult
+
+BC 単位の OCR 処理結果の分類。null 許容（OpenCV cron 完了直後は null、OCR cron 完了時に下記 5 値のいずれかに確定）。
+
+| コード値 | 表示名 | 意味 |
+|---|---|---|
+| business_card | 名刺 | OCR 成功、Contact 生成あり |
+| not_business_card | 名刺ではない | is_business_card=False 判定 |
+| insufficient_info | 情報不足 | has_minimum_info NG |
+| ocr_failed | OCR 失敗 | card 単位の OCR 例外 |
+| others | その他 | 上記いずれにも該当しない予期せぬケース |
+
+`ocr_failed` と `others` は将来用の受け皿として定義のみ。v1.4.2 時点での実装上のセット箇所はステップ 2 以降で確定する。
+
+### C.15 DebugMask.MaskType
+
+OpenCV 検出パイプラインで生成されるデバッグ用マスク画像の種別（5 種）。
+
+| コード値 | 表示名 | 意味 |
+|---|---|---|
+| diff | 差分マスク | 差分検出マスク |
+| edge | エッジマスク | エッジ検出マスク |
+| sat | 彩度マスク | 彩度ベースのマスク |
+| or | OR 合成マスク | 複数マスクの OR 合成結果 |
+| closed | クローズマスク | モルフォロジー処理後のマスク |
 
 ---
 
