@@ -1629,12 +1629,12 @@ v1.4.x で追加・変更するファイルを以下に示す。
 | 12 | `/contacts/<uuid:pk>/update-primary/` | GET / POST | UpdatePrimaryContactView | プライマリーコンタクトの修正画面（fix の場合は既存コンタクトを上書き、transfer / promotion / job_change / name_change の場合は新規コンタクトを追加し既存を inactive 化）。プライマリーコンタクト以外がこのルートに入ってきたらガード |
 | 13 | `/contacts/<uuid:pk>/update-active/` | GET / POST | UpdateActiveContactView | アクティブコンタクトの修正画面。プライマリーのように新規コンタクト生成なし、コンタクト値の修正のみ。change_reason フィールドは置かない（fix 相当の処理に固定）。アクティブコンタクト以外がこのルートに入ってきたらガード |
 | 14 | `/contacts/<uuid:pk>/preview/` | GET | PreviewContactView | コンタクト一覧画面からのモーダルプレビュー用、AJAX 専用 |
-| 15 | `/duplicates/` | GET | DuplicateCandidateGroupListView | 重複候補グループ一覧 |
+| 15 | `/duplicates/` | GET | DuplicateCandidateGroupListView | 重複候補グループ一覧。group_id 単位で集約表示。絞り込みフォーム（rank の複数選択 / 進捗の複数選択 / ユーザー絞り込み）あり。詳細は §11.5.x「DuplicateCandidateGroupListView の絞り込み仕様」参照 |
 | 16 | `/duplicates/groups/<uuid:group_id>/` | GET | DuplicateCandidateGroupDetailView | 同一グループ DuplicateCandidate の詳細表示。マージのレビューの最終結果表示画面（17 番からのリダイレクト直後は Django messages で完了メッセージを表示） |
 | 17 | `/duplicates/groups/<uuid:group_id>/review` | GET / POST | DuplicateCandidateGroupUpdateView | マージレビュー画面。GET で次のペアを表示、POST で処理（Mark_as_Different_Person / Execute_Merge_Only / Execute_Merge_with_Updates のいずれか）→ 同一 URL に GET リダイレクト（PRG パターン）。すべて処理完了したら 16 番にリダイレクト + Django messages で結果メッセージ |
-| 19 | `/merge-logs/` | GET | PersonMergeLogListView | マージログ一覧 |
-| 20 | `/merge-logs/<uuid:pk>/` | GET | PersonMergeLogDetailView | マージログ詳細 |
-| 21 | `/merge-logs/<uuid:pk>/confirm-undo/` | GET / POST | PersonMergeLogConfirmUndoView | マージ復元の確認画面と実行処理。実行完了後は詳細画面へリダイレクト。メッセージで詳細画面に復元実行結果を表示 |
+| 19 | `/merge-logs/` | GET | PersonMergeLogListView | マージログ一覧。LoginRequiredMixin + ListView。絞り込み 3 種（status: undoable / undone / locked の複数選択 / user: 'me' で executed_by=ログインユーザー / searched=1 で絞り込み実行済みフラグ、未指定の初回は status='undoable' のみ）。ソート -executed_at（最新優先）、20 件/ページ。N+1 回避は select_related で surviving_person / merged_person の primary_contact / executed_by / undone_by |
+| 20 | `/merge-logs/<uuid:pk>/` | GET | PersonMergeLogDetailView | マージログ詳細。LoginRequiredMixin + View。1 件取得（select_related 5 段：surviving / merged primary_contact / executed_by / undone_by / duplicate_candidate）。DoesNotExist → Http404。context に `is_undoable()` + `get_undo_preview()` + 復元ボタン関連（21 番への遷移）を含む |
+| 21 | `/merge-logs/<uuid:pk>/confirm-undo/` | GET / POST | PersonMergeLogConfirmUndoView | マージ復元の確認画面と実行処理。LoginRequiredMixin + View。GET：is_undoable=False なら `messages.error` + 20 番リダイレクト、True なら `MergeUndoForm` を空で render。POST：is_undoable 再チェック → MergeUndoForm 検証 → `Execute_Merge_Undo` 呼び出し → ValidationError キャッチで `messages.error` + 20 番リダイレクト → 成功時 `messages.success` + 20 番リダイレクト。競合検出（GET / POST 両方）：他ユーザによる先行復元への防御 |
 | 22 | `/cards/<uuid:pk>/delete/` | POST | CardDeleteView | 名刺ハード削除（POST 専用、GET 等は 405）。認証ガード後 `bc.delete()` を呼ぶだけ。Contact CASCADE → CFC CASCADE → card_image post_delete の連鎖が走る（§4.3.2 参照）。削除後は元画像詳細（6 番）に 302 リダイレクト |
 | 23 | `/contacts/` | GET | ContactListView | コンタクト一覧画面。7 フィールド検索（氏名 / 会社 / 部署 / 役職 / メール / 電話 / 住所）AND 検索、status 3 チェックボックス絞り込み（primary / active / inactive、初回アクセス時は primary のみ ON）、ページネーション 20 件/ページ、BackNavigator 連携。Person.status='active' のみ表示（merged Person 配下は常に除外）、updated_at 降順 → created_at 降順。電話フィールドは phone / mobile / fax の OR 一致 |
 
@@ -1846,6 +1846,33 @@ v1.4.1 では「DUPLICATE_CHECK_FIELDS のみ表示・修正対象」として�
 - postal_code / lang
 
 これらは confidence 関係なし、値違いまたは片方空のフィールドのみ表示・選択対象。
+
+### 11.5.8 DuplicateCandidateGroupListView の絞り込み仕様（15 番）
+
+15 番 DuplicateCandidateGroupListView（重複候補グループ一覧画面）の絞り込みフォームと並び順は以下のとおり。
+
+| 絞り込み | 仕様 |
+|---|---|
+| **rank フィルタ** | 4 値（exact_match / possible_high / possible_mid / possible_low）の複数選択。初回（`searched` 未指定）はデフォルトで全 rank |
+| **progress フィルタ** | 「未レビュー（pending）」「完了（completed）」の複数選択。初回はデフォルトで「未レビュー」のみ |
+| **user フィルタ** | チェックボックス 1 つ（`user=me`）。ON のとき `person_a.primary_contact.created_by` または `person_b.primary_contact.created_by` がログインユーザーに一致するペアの group のみ（OR 条件、自分が読み取った Person を含む候補を抽出） |
+
+【並び順】 未レビュー優先（pending_count > 0 を先）→ rank 順（exact_match → possible_low）→ group_id 順。
+
+【除外】 `group_id IS NULL` のレコードは集約対象外（単発候補は本画面の対象外）。
+
+### 11.5.9 マージログ系 3 画面の実装詳細（19 / 20 / 21 番）
+
+3 画面の責務・処理フローは §11.3 URL 一覧表 No.19 / 20 / 21 を参照。実装上の補足は以下のとおり。
+
+| 観点 | 内容 |
+|---|---|
+| 認証 | 3 画面とも `LoginRequiredMixin` を付与 |
+| select_related | DetailView は 5 段（surviving / merged primary_contact / executed_by / undone_by / duplicate_candidate）、ListView は surviving / merged primary_contact / executed_by / undone_by |
+| ページネーション | ListView は 20 件 / ページ、`-executed_at`（最新優先） |
+| 競合検出 | 21 番 GET / POST 両方で `is_undoable()` を再チェック、他ユーザーによる先行復元時は `messages.error` + 20 番リダイレクト |
+| メッセージング | Django `messages` framework で復元実行の成否を 20 番画面に伝達 |
+| URL ルート | `duplicates/urls.py` に 3 ルートを登録：`merge_log_list` / `merge_log_detail` / `merge_log_confirm_undo`（末尾スラッシュ付き） |
 
 ## 11.6 Form クラス設計
 
@@ -2141,6 +2168,23 @@ Contact 単位の信頼度サマリー表示。Contact 全体で何個の low/mi
 - テンプレートタグは 4 種：`append_back_url` / `back_url` / `back_all_url` / `hidden_back_field`
 
 詳細は別途「BackNavigator 使い方ガイド」を参照。
+
+### 11.8.5 サイドバー構成
+
+共通サイドバー（`templates/cards/_sidebar.html`）の最終構成（v1.4.2、8 項目）：
+
+| 順 | 項目名 | 遷移先 | 備考 |
+|---|---|---|---|
+| 1 | 名刺アップロード | 2 番 OriginalImageUploadView | - |
+| 2 | 名刺一覧 | 3 番 CardListView | - |
+| 3 | 元画像一覧 | 5 番 OriginalListView | - |
+| 4 | 人物一覧 | 7 番 PersonListView | - |
+| 5 | コンタクト一覧 | 23 番 ContactListView | v1.4.2 で新規追加（ストック #29） |
+| 6 | コンタクト新規作成 | 10 番 ContactCreateView | - |
+| 7 | 重複候補一覧 | 15 番 DuplicateCandidateGroupListView | v1.4.2 で明文化（ストック #49） |
+| 8 | マージログ | 19 番 PersonMergeLogListView | v1.4.2 で新規追加（ストック #67） |
+
+各項目には `active_menu` パラメータでハイライト連動。例：`active_menu="duplicates:merge_log_list"` のとき 19 / 20 / 21 番画面で項目 8 に `is-active` クラスを付与する。
 
 ---
 
