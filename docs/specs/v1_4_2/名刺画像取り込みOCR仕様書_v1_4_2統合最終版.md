@@ -1602,6 +1602,10 @@ v1.4.x で追加・変更するファイルを以下に示す。
 | パス | 用途 |
 |---|---|
 | config/constants.py | 共通 TextChoices、定数（DUPLICATE_CHECK_FIELDS、DUPLICATE_GENERIC_EMAIL_LOCALPARTS 等） |
+| cards/views.py | CardListView、CardDetailView、CardDeleteView、OriginalListView、OriginalDetailView、OriginalImageUploadView |
+| cards/urls.py | `/cards/<uuid:pk>/delete/` を含む URL ルーティング（`name='card_delete'` 等） |
+| cards/templatetags/__init__.py | カスタムタグ用パッケージ初期化 |
+| cards/templatetags/ui_tags.py | UI 系カスタムタグ（`ocr_result_badge` 等、§11.8 参照） |
 | persons/models.py | Person モデル |
 | persons/views.py | PersonListView、PersonDetailView、PersonAddAdditionalRoleView |
 | contacts/models.py | Contact モデル、ContactFieldConfidence モデル |
@@ -1631,10 +1635,10 @@ v1.4.x で追加・変更するファイルを以下に示す。
 |---|---|---|---|---|
 | 1 | `/` | GET | HomeView | ホーム画面 |
 | 2 | `/cards/upload/` | GET / POST | OriginalImageUploadView | 名刺画像アップロード |
-| 3 | `/cards/` | GET | CardListView | 名刺一覧 |
-| 4 | `/cards/<uuid:pk>/` | GET | CardDetailView | 名刺詳細 |
+| 3 | `/cards/` | GET | CardListView | 名刺一覧。7 値フィルタ（`ocr_result` 5 値 + `_pending` / `_processing` の仮想値）対応、初回は `business_card` のみ表示。BackNavigator 保持パラメータに `ocr_result` を含む |
+| 4 | `/cards/<uuid:pk>/` | GET | CardDetailView | 名刺詳細。`{% if debug %}` 外に「同じ画像に含まれる他の名刺」セクションを通常表示（sibling_cards 全件、ocr_result_badge 付き） |
 | 5 | `/originals/` | GET | OriginalListView | 元画像一覧 |
-| 6 | `/originals/<uuid:pk>/` | GET | OriginalDetailView | 元画像詳細 |
+| 6 | `/originals/<uuid:pk>/` | GET | OriginalDetailView | 元画像詳細。セクション 7「検出された名刺」テーブルは 8 列構成（操作 / サムネイル / 名刺ID / card_index / 向き / OCR結果 / 切り抜き画像 / 作成日時）、名刺詳細への遷移ボタンを含む |
 | 7 | `/persons/` | GET | PersonListView | 人物一覧 |
 | 8 | `/persons/<uuid:pk>/` | GET | PersonDetailView | 人物詳細 |
 | 9 | `/persons/<uuid:pk>/add-additional-role/` | GET / POST | PersonAddAdditionalRoleView | 別肩書追加。Active コンタクトを追加 |
@@ -1649,8 +1653,9 @@ v1.4.x で追加・変更するファイルを以下に示す。
 | 19 | `/merge-logs/` | GET | PersonMergeLogListView | マージログ一覧 |
 | 20 | `/merge-logs/<uuid:pk>/` | GET | PersonMergeLogDetailView | マージログ詳細 |
 | 21 | `/merge-logs/<uuid:pk>/confirm-undo/` | GET / POST | PersonMergeLogConfirmUndoView | マージ復元の確認画面と実行処理。実行完了後は詳細画面へリダイレクト。メッセージで詳細画面に復元実行結果を表示 |
+| 22 | `/cards/<uuid:pk>/delete/` | POST | CardDeleteView | 名刺ハード削除（POST 専用、GET 等は 405）。認証ガード後 `bc.delete()` を呼ぶだけ。Contact CASCADE → CFC CASCADE → card_image post_delete の連鎖が走る（§4.3.2 参照）。削除後は元画像詳細（6 番）に 302 リダイレクト |
 
-一覧画面なし：`/contacts/`（Contact 一覧）、`/persons/<uuid>/update/`（Person 編集）。
+一覧画面なし：`/persons/<uuid>/update/`（Person 編集）。
 
 命名規則：URL 名は update（edit ではない）、Class 名は XxxUpdateView / XxxCreateView 等。
 
