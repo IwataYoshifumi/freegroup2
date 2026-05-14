@@ -192,9 +192,9 @@ OriginalImage は元画像 1 件に対応するレコード。
 | id | UUIDField (PK) | プライマリキー（uuid.uuid4） |
 | user | FK(User, CASCADE) | アップロードしたユーザー |
 | image_file | ImageField | 元画像ファイル |
-| status | CharField(20) | 処理状態（5 値、4.2.1 参照） |
-| claimed_at | DateTimeField (null) | CAS で processing 遷移時刻を記録 |
-| raw_json | JSONField (null) | OCR 結果 JSON（不変） |
+| status | CharField(20) | 処理状態（7 値、4.2.1 参照） |
+| claimed_at | DateTimeField (null) | CAS で processing / opencv_processing 遷移時刻を記録 |
+| raw_json | JSONField (null) | OCR 結果 JSON（**v1.4.2 で deprecated**：読み出しは BC.raw_json_1 / raw_json_2 経由に統一、フィールド自体は物理残置）|
 | detected_count | IntegerField (default=0) | 検出された名刺数 |
 | error_message | TextField (default='') | 失敗理由・部分失敗ログ |
 | created_at | DateTimeField | auto_now_add |
@@ -202,7 +202,9 @@ OriginalImage は元画像 1 件に対応するレコード。
 
 ### 4.2.1 OriginalImage.status の値
 
-詳細は別表 C.1 参照。pending / processing / extracted / garbage / failed の 5 値。
+詳細は別表 C.1 参照。pending / processing / opencv_processing / cards_extracted / extracted / garbage / failed の 7 値。
+
+旧 v1.4.2 改訂前の 1 本パイプライン用の `processing` は後方互換のため物理残置するが、v1.4.2 以降のパイプライン分離（第 8 章参照）では `opencv_processing` / `cards_extracted` に置き換わる。
 
 ### 4.2.2 OriginalImage のモデルメソッド
 
@@ -217,15 +219,21 @@ OriginalImage は元画像 1 件に対応するレコード。
 
 ## 4.3 BusinessCard（名刺DB）
 
-BusinessCard は切り抜き済み名刺画像に対応するレコード。
+BusinessCard は切り抜き済み名刺画像に対応するレコード。v1.4.2 のパイプライン分離（第 8 章参照）に伴い、BC 単位で OCR 処理状態・OCR 生 JSON・エラーメッセージを保持する。
 
 | フィールド名 | 型 | 説明 |
 |---|---|---|
 | id | UUIDField (PK) | プライマリキー |
 | original_image | FK(OriginalImage, CASCADE) | 元画像への外部キー |
-| card_image | ImageField (null) | 正規化後の名刺画像 |
-| card_index | IntegerField | raw_json["cards"] 配列内インデックス |
-| orientation | CharField(20, choices) | 名刺の向き（5 値、別表 C.2 参照） |
+| card_image | ImageField (null) | 正規化後の名刺画像（補正回転後の画像で上書きされる場合あり、第 15 章参照） |
+| card_index | IntegerField | OpenCV 検出結果の配列内インデックス |
+| orientation | CharField(20, choices) | 検出時の元の orientation（5 値、別表 C.2 参照、補正ログ） |
+| raw_json_1 | JSONField (null=True) | 1 回目 OCR の生 JSON 全体（OcrService.run_ocr の戻り値まるごと） |
+| raw_json_2 | JSONField (null=True) | 2 回目 OCR の生 JSON 全体（orientation=normal なら null、補正再 OCR 時のみ格納） |
+| ocr_status | CharField(20, choices) | OCR 処理状態（4 値、別表 C.13 参照、default=pending） |
+| ocr_result | CharField(20, choices, null=True) | OCR 処理結果の分類（5 値、別表 C.14 参照、default=None。OpenCV cron で BC 作成直後は null、OCR 完了時に確定） |
+| claimed_at | DateTimeField (null=True) | OCR cron の CAS 時刻 |
+| error_message | TextField (blank=True, default='') | OCR 失敗時のエラー集約 |
 | created_at | DateTimeField | auto_now_add |
 | updated_at | DateTimeField | auto_now |
 
@@ -2481,8 +2489,10 @@ DuplicateCandidate.review_result の different_person 系。
 |---|---|
 | Contact.Status | primary / active / inactive |
 | Person.Status | active / merged / archived |
-| OriginalImage.Status | pending / processing / extracted / garbage / failed |
+| OriginalImage.Status | pending / processing / opencv_processing / cards_extracted / extracted / garbage / failed |
 | BusinessCard.Orientation | normal / rotate_90_cw / rotate_90_ccw / rotate_180 / mirror |
+| BusinessCard.OcrStatus | pending / processing / done / failed |
+| BusinessCard.OcrResult | business_card / not_business_card / insufficient_info / ocr_failed / others |
 | ContactFieldConfidence.Confidence | low / medium（high は記録対象外） |
 | DuplicateCandidate.Rank | exact_match / possible_high / possible_mid / possible_low / none |
 | DuplicateCandidate.ReviewStatus | pending / merged / different_person / invalidated |
@@ -3003,6 +3013,12 @@ v1.4.2 のマイグレーション適用は以下の順序で行う。
 | 名刺画像 | card_image |
 | カードインデックス | card_index |
 | 向き | orientation |
+| 1 回目 OCR 生 JSON | raw_json_1 |
+| 2 回目 OCR 生 JSON | raw_json_2 |
+| OCR 処理状態 | ocr_status |
+| OCR 処理結果 | ocr_result |
+| OCR 開始日時 | claimed_at |
+| エラーメッセージ | error_message |
 | 作成日時 | created_at |
 | 更新日時 | updated_at |
 
@@ -3153,11 +3169,13 @@ v1.4.2 のマイグレーション適用は以下の順序で行う。
 
 | コード値 | 表示名 | 意味 |
 |---|---|---|
-| pending | 処理待ち | OCR 未実行 |
-| processing | 処理中 | CAS で processing 遷移済み |
-| extracted | 抽出済み | OCR 成功（部分失敗含む） |
-| garbage | 名刺なし | cards 配列が空、または全 card が is_business_card=false |
-| failed | 失敗 | OCR 全失敗 |
+| pending | 処理待ち | OpenCV / OCR 未実行 |
+| processing | 処理中 | v1.4.2 改訂前の 1 本パイプライン用（後方互換のため物理残置） |
+| opencv_processing | OpenCV 処理中 | OpenCV cron の CAS で claim 後、検出処理中 |
+| cards_extracted | OpenCV 完了・OCR 待ち | OpenCV 検出完了・BC 作成済み・OCR 未実行 |
+| extracted | 完了 | OCR 成功（部分失敗含む） |
+| garbage | 無効画像 | cards 配列が空、または全 card が is_business_card=false |
+| failed | 処理失敗 | OpenCV / OCR の致命的失敗 |
 
 ### C.2 BusinessCard.Orientation
 
@@ -3274,6 +3292,31 @@ ActionLog の action フィールドに記録される代表的な値。新た�
 | different_person | 別人判定 |
 | undone | マージ復元実行 |
 | executed | cron 等の実行 |
+
+### C.13 BusinessCard.OcrStatus
+
+BC 単位の OCR 処理状態。v1.4.2 のパイプライン分離（第 8 章参照）で導入。
+
+| コード値 | 表示名 | 意味 |
+|---|---|---|
+| pending | OCR 待ち | OpenCV で BC 作成済み、OCR 未実行 |
+| processing | OCR 中 | OCR cron の CAS で claim 後、処理中 |
+| done | 完了 | OCR 成功（採用 raw_json と ocr_result が確定） |
+| failed | 失敗 | OCR の致命的失敗（1 回目自体が失敗、retry_failed_ocr --ocr で差し戻し可能） |
+
+### C.14 BusinessCard.OcrResult
+
+BC 単位の OCR 処理結果の分類。null 許容（OpenCV cron 完了直後は null、OCR cron 完了時に下記 5 値のいずれかに確定）。
+
+| コード値 | 表示名 | 意味 |
+|---|---|---|
+| business_card | 名刺 | OCR 成功、Contact 生成あり |
+| not_business_card | 名刺ではない | is_business_card=False 判定 |
+| insufficient_info | 情報不足 | has_minimum_info NG |
+| ocr_failed | OCR 失敗 | card 単位の OCR 例外 |
+| others | その他 | 上記いずれにも該当しない予期せぬケース |
+
+`ocr_failed` と `others` は将来用の受け皿として定義のみ。v1.4.2 時点での実装上のセット箇所はステップ 2 以降で確定する。
 
 ---
 
