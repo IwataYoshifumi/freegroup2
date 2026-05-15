@@ -781,7 +781,7 @@ def section_chapter8(doc) -> None:
     add_table(doc,
         headers=["URL", "namespace:name", "View"],
         rows=[
-            ["/", "home", "home_view（関数 View）"],
+            ["/", "home", "HomeView（クラス View、Phase 4 で home アプリに移行）"],
             ["/cards/upload/", "cards:card_upload", "UploadView"],
             ["/cards/", "cards:card_list", "CardListView"],
             ["/cards/<uuid:pk>/", "cards:card_detail", "CardDetailView"],
@@ -803,7 +803,7 @@ def section_chapter8(doc) -> None:
     add_table(doc,
         headers=["View 名", "継承", "用途"],
         rows=[
-            ["home_view", "関数 View", "ホーム画面表示"],
+            ["HomeView", "TemplateView + LoginRequiredMixin", "ホーム画面表示（Phase 4 で home アプリに移行、紐付けアラート含む）"],
             ["UploadView", "FormView", "名刺画像アップロード受付・OriginalImage 作成（status=pending で保存）"],
             ["CardListView", "ListView", "名刺一覧・7 フィールド AND 検索"],
             ["CardDetailView", "DetailView", "名刺詳細・Contact / ContactFieldConfidence 表示"],
