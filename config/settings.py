@@ -153,3 +153,60 @@ OCR_STUCK_THRESHOLD_MINUTES = 30
 # https://docs.djangoproject.com/en/6.0/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+
+# ============================================================
+# 認証バックエンド + LDAP 連携（v1.5.0 / 仕様書 §5）
+# ============================================================
+
+import ldap
+from django_auth_ldap.config import LDAPSearch
+
+AUTH_BACKEND = os.getenv("AUTH_BACKEND", "local")
+
+if AUTH_BACKEND == "ldap":
+    AUTHENTICATION_BACKENDS = [
+        "django_auth_ldap.backend.LDAPBackend",
+        "django.contrib.auth.backends.ModelBackend",  # 緊急時のローカル管理者用
+    ]
+elif AUTH_BACKEND == "both":
+    AUTHENTICATION_BACKENDS = [
+        "django_auth_ldap.backend.LDAPBackend",
+        "django.contrib.auth.backends.ModelBackend",
+    ]
+else:
+    AUTHENTICATION_BACKENDS = ["django.contrib.auth.backends.ModelBackend"]
+
+# django-auth-ldap 標準設定（AUTH_BACKEND=ldap / both で実認証時に使用、local 時は無害）
+AUTH_LDAP_SERVER_URI = os.getenv("LDAP_SERVER_URI", "")
+AUTH_LDAP_BIND_DN = os.getenv("LDAP_BIND_DN", "")
+AUTH_LDAP_BIND_PASSWORD = os.getenv("LDAP_BIND_PASSWORD", "")
+
+# username 突合属性（AD: sAMAccountName / LDAP: uid）。.env で切替可能。
+LDAP_USER_USERNAME_ATTR = os.getenv("LDAP_USER_USERNAME_ATTR", "sAMAccountName")
+
+AUTH_LDAP_USER_SEARCH = LDAPSearch(
+    os.getenv("LDAP_USER_SEARCH_BASE", ""),
+    ldap.SCOPE_SUBTREE,
+    f"({LDAP_USER_USERNAME_ATTR}=%(user)s)",
+)
+
+# LDAP 属性 → CustomUser フィールド マッピング（仕様書 §5.3）
+AUTH_LDAP_USER_ATTR_MAP = {
+    "username": LDAP_USER_USERNAME_ATTR,
+    "email": "mail",
+    "first_name": "givenName",
+    "last_name": "sn",
+}
+
+# キャッシュ設定（仕様書 §5.2）
+AUTH_LDAP_CACHE_TIMEOUT = (
+    int(os.getenv("LDAP_CACHE_TTL", 3600))
+    if os.getenv("LDAP_CACHE_ENABLED") == "true"
+    else 0
+)
+
+# v1.5.0 では auth.Group / Permission の自動同期は使わない
+# （memberOf は accounts/ldap_sync.py で LdapGroup として独自管理、仕様書 §5.4）
+AUTH_LDAP_MIRROR_GROUPS = False
+AUTH_LDAP_FIND_GROUP_PERMS = False
