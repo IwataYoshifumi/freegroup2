@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+
+{% block title %}{{ object.username }} — ユーザ詳細 — FreeGroup2{% endblock %}
+
+{% block app_content %}
+  <main class="app-main">
+    {% if messages %}
+      {% for message in messages %}
+        <div class="app-alert app-alert--{% if message.tags == 'error' %}danger{% else %}info{% endif %}">
+          {{ message }}
+        </div>
+      {% endfor %}
+    {% endif %}
+
+    <section class="app-card">
+      <div class="app-section__header">
+        <h1>ユーザ詳細</h1>
+        <a href="{% url 'accounts:user_list' %}" class="app-btn app-btn--secondary app-btn--sm">一覧に戻る</a>
+      </div>
+
+      <div class="app-detail-item">
+        <div class="app-detail-label">ユーザ名</div>
+        <div class="app-detail-value">{{ object.username }}</div>
+      </div>
+      <div class="app-detail-item">
+        <div class="app-detail-label">氏名</div>
+        <div class="app-detail-value">{{ object.get_full_name|default:"-" }}</div>
+      </div>
+      <div class="app-detail-item">
+        <div class="app-detail-label">メール</div>
+        <div class="app-detail-value">{{ object.email|default:"-" }}</div>
+      </div>
+      <div class="app-detail-item">
+        <div class="app-detail-label">ロール</div>
+        <div class="app-detail-value">{{ object.role|default:"-" }}</div>
+      </div>
+      <div class="app-detail-item">
+        <div class="app-detail-label">部署</div>
+        <div class="app-detail-value">{{ object.department|default:"-" }}</div>
+      </div>
+      <div class="app-detail-item">
+        <div class="app-detail-label">認証ソース</div>
+        <div class="app-detail-value">{{ object.auth_source }}</div>
+      </div>
+      <div class="app-detail-item">
+        <div class="app-detail-label">状態</div>
+        <div class="app-detail-value">{% if object.is_active %}現職{% else %}退職済{% endif %}</div>
+      </div>
+      <div class="app-detail-item">
+        <div class="app-detail-label">紐付き Person</div>
+        <div class="app-detail-value">
+          {% if object.person %}
+            {{ object.person }}
+          {% else %}
+            -
+          {% endif %}
+        </div>
+      </div>
+    </section>
+
+    {% if object.is_active %}
+      <div class="app-action-area" style="margin-top: var(--app-space-md);">
+        <a href="{% url 'accounts:retire_user' user_id=object.id %}" class="app-btn app-btn--danger">退職処理</a>
+      </div>
+    {% else %}
+      <div class="app-action-area" style="margin-top: var(--app-space-md);">
+        <span class="app-muted">このユーザは退職済みです</span>
+      </div>
+    {% endif %}
+  </main>
+{% endblock %}

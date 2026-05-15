@@ -1,9 +1,10 @@
 from django.contrib import admin
 from django.contrib.auth.admin import GroupAdmin, UserAdmin
 from django.contrib.auth.models import Group
+from django.shortcuts import render
 
 from .models import CustomUser, Department, GroupProfile, LdapGroup, Role
-from .services import apply_role
+from .services import apply_role, retire_user
 
 
 def _ldap_readonly_fields(model):
@@ -66,6 +67,7 @@ class RoleAdmin(admin.ModelAdmin):
 
 @admin.register(CustomUser)
 class CustomUserAdmin(UserAdmin):
+    actions = ["retire_user_action"]
     list_display = (
         "username",
         "email",
@@ -96,6 +98,36 @@ class CustomUserAdmin(UserAdmin):
         form = super().get_form(request, obj, **kwargs)
         form.base_fields.pop("user_permissions", None)
         return form
+
+    def retire_user_action(self, request, queryset):
+        """選択されたユーザを退職処理する Admin アクション（インターメディエイト画面付き）。
+
+        詳細仕様は §12.6 参照。
+        """
+        if "apply" in request.POST:
+            successor_id = request.POST.get("successor")
+            successor = CustomUser.objects.get(pk=successor_id)
+            count = 0
+            for user in queryset:
+                try:
+                    retire_user(user=user, successor=successor)
+                    count += 1
+                except Exception as e:
+                    self.message_user(request, f"{user.username} の退職処理失敗: {e}", level="error")
+            self.message_user(request, f"{count}名の退職処理が完了しました")
+            return None
+
+        successor_choices = CustomUser.objects.filter(is_active=True).exclude(
+            pk__in=queryset.values_list("pk", flat=True)
+        )
+        return render(request, "admin/accounts/retire_user_intermediate.html", {
+            "users": queryset,
+            "successor_choices": successor_choices,
+            "action": "retire_user_action",
+            "select_across": request.POST.get("select_across", "0"),
+        })
+
+    retire_user_action.short_description = "退職処理（後継者選択あり）"
 
     def save_model(self, request, obj, form, change):
         """Role が変わった時のみ apply_role() を呼ぶガード（仕様書 §4.1 / §8）。"""
