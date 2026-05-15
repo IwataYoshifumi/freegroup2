@@ -5,11 +5,12 @@ from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import include, path
 
-from cards.views import home_view
+from home.views import HomeView
 
 urlpatterns = [
     path("admin/", admin.site.urls),
-    path("", home_view, name="home"),
+    path("", HomeView.as_view(), name="home"),
+    path("accounts/", include("accounts.urls")),
     path("cards/", include("cards.urls", namespace="cards")),
     path("originals/", include("cards.originals_urls", namespace="originals")),
     path("contacts/", include("contacts.urls", namespace="contacts")),
