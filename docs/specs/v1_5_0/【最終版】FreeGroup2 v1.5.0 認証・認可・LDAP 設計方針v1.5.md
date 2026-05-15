@@ -626,9 +626,8 @@ DB 書き込みのみで認証フローには関与しない（責務分離）�
 """
 
 import logging
-from django.conf import settings
+
 from django.core.exceptions import ValidationError
-from django.db import transaction
 
 from .constants import AuthSource
 from .models import CustomUser, Department, LdapGroup
