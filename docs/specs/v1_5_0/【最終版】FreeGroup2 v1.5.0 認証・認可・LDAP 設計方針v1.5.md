@@ -1231,7 +1231,7 @@ class HomeView(LoginRequiredMixin, TemplateView):
       <p>あなたの名刺データが見つかりました: <strong>{{ candidate.full_name }}</strong></p>
       <form method="post" action="{% url 'accounts:link_user_person' user_id=request.user.id person_id=candidate.person_id %}">
         {% csrf_token %}
-        <button type="submit" class="app-button app-button--primary">紐付ける</button>
+        <button type="submit" class="app-btn app-btn--primary">紐付ける</button>
       </form>
     </div>
   {% endfor %}
