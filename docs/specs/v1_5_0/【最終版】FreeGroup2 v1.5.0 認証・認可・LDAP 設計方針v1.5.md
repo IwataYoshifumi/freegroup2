@@ -847,7 +847,7 @@ v1.5.0 では**認証時の単発同期のみ**実装。バッチ同期コマン
 ### 7.2 パーミッションチェックの呼び出し口
 
 ✗ NG: テンプレートで直接 `{% if user.is_staff %}`
-✓ OK: `obj.can_be_viewed_by(user)` / `request.user.has_perm('cards.view_card')` 経由
+✓ OK: `obj.can_be_viewed_by(user)` / `request.user.has_perm('cards.view_businesscard')` 経由
 
 **N+1 防止**: リスト表示はサービス層／QuerySet で事前フィルタ、詳細表示でのみオブジェクトメソッド。
 
@@ -1802,7 +1802,7 @@ def Execute_Merge_Only(candidate, surviving_person, merged_person, form, user):
 | `user_admin` | `accounts.link_user_to_person`, `accounts.retire_user` | `admin` |
 | `card_admin` | `cards.create_card`, `cards.edit_card`, `cards.merge_card` | `admin` |
 | `card_editor` | `cards.create_card`, `cards.edit_card` | `sales` |
-| `card_viewer` | `cards.view_card`（Django 標準） | `viewer` |
+| `card_viewer` | `cards.view_businesscard`（Django 標準、モデル名 BusinessCard） | `viewer` |
 
 #### 実装すべき Permission
 
@@ -1836,8 +1836,8 @@ class CustomUser(AbstractUser):
         ]
 
 
-# cards/models.py の Card.Meta に追加（v1.5 で追加）
-class Card(models.Model):
+# cards/models.py の BusinessCard.Meta に追加（v1.5 で追加）
+class BusinessCard(models.Model):
     # ... 既存フィールド ...
 
     class Meta:
@@ -1907,7 +1907,7 @@ def forward(apps, schema_editor):
     add_perm(card_editor, 'cards', 'edit_card')
 
     # card_viewer
-    add_perm(card_viewer, 'cards', 'view_card')  # Django 標準
+    add_perm(card_viewer, 'cards', 'view_businesscard')  # Django 標準（モデル名 BusinessCard）
 
     # ---- 3. Role を作成 ----
     admin_role, _ = Role.objects.get_or_create(
@@ -1963,7 +1963,7 @@ class Migration(migrations.Migration):
 2. persons/migrations/00XX_add_managed_by.py       # Person.managed_by 追加
 3. contacts/migrations/00XX_add_managed_by.py      # Contact.managed_by 追加
 4. persons/migrations/00XX_add_permissions.py      # Person.Meta.permissions
-5. cards/migrations/00XX_add_permissions.py        # Card.Meta.permissions（v1.5 で追加）
+5. cards/migrations/00XX_add_permissions.py        # BusinessCard.Meta.permissions（v1.5 で追加）
 6. accounts/migrations/00XX_add_permissions.py     # CustomUser.Meta.permissions
 7. accounts/migrations/00XX_create_initial_roles_and_groups.py  # ★ 初期データ
 8. accounts/migrations/00XX_assign_admin_role_to_superuser.py   # 既存 superuser に Role 付与
@@ -2019,7 +2019,7 @@ class Migration(migrations.Migration):
 - [ ] `Person.linked_user` プロパティ追加（`ObjectDoesNotExist` で catch、循環依存回避）
 - [ ] `Person.Meta.permissions` に `undo_merge` / `merge_person` / `link_user` 追加（既存 Meta を上書きしないこと）
 - [ ] `CustomUser.Meta.permissions` に `link_user_to_person` / `retire_user` 追加
-- [ ] **`cards.Card.Meta.permissions` に `create_card` / `edit_card` / `merge_card` を追加（既存 Meta を上書きしないこと）**（v1.5 で追加）
+- [ ] **`cards.BusinessCard.Meta.permissions` に `create_card` / `edit_card` / `merge_card` を追加（既存 Meta を上書きしないこと）**（v1.5 で追加）
 
 ### Admin 編集ガード
 
