@@ -60,6 +60,13 @@ class Contact(models.Model):
         blank=True,
         related_name="+",
     )
+    managed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="contacts_managed",
+    )
     lang = models.CharField(max_length=10, default="ja", blank=True)
     postal_code = models.CharField(max_length=20, blank=True, default="")
 

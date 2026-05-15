@@ -202,6 +202,11 @@ class BusinessCard(models.Model):
                 name="unique_original_image_card_index",
             ),
         ]
+        permissions = [
+            ("create_card", "名刺カードを作成できる"),
+            ("edit_card", "名刺カードを編集できる"),
+            ("merge_card", "名刺カードをマージできる"),
+        ]
 
     def __str__(self):
         return f"{self.id} (card_index={self.card_index})"
