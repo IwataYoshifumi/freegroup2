@@ -48,6 +48,7 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "accounts",
     "back_navigator",
     "cards",
     "persons",
@@ -55,6 +56,8 @@ INSTALLED_APPS = [
     "duplicates",
     "actionlogs",
 ]
+
+AUTH_USER_MODEL = "accounts.CustomUser"
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
