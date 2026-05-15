@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+
+{% block title %}ホーム — FreeGroup2{% endblock %}
+{% block app_name %}ホーム{% endblock %}
+
+{% block app_content %}
+  <main class="app-main">
+    {% if person_link_status == 'single_candidate' %}
+      {% for candidate in person_link_candidates %}
+        <div class="app-alert app-alert--info">
+          <p>あなたの名刺データが見つかりました: <strong>{{ candidate.full_name }}</strong></p>
+          <form method="post" action="{% url 'accounts:link_user_person' user_id=request.user.id person_id=candidate.person_id %}">
+            {% csrf_token %}
+            <button type="submit" class="app-btn app-btn--primary">紐付ける</button>
+          </form>
+        </div>
+      {% endfor %}
+
+    {% elif person_link_status == 'multiple_candidates_need_merge' %}
+      <div class="app-alert app-alert--warning">
+        <p>あなたの可能性がある Person が複数見つかりました。</p>
+        <p>先に <a href="{% url 'duplicates:duplicate_group_list' %}">Person のマージ画面</a> で重複を整理してください。</p>
+        <ul>
+          {% for candidate in person_link_candidates %}
+            <li>{{ candidate.full_name }} ({{ candidate.email }})</li>
+          {% endfor %}
+        </ul>
+      </div>
+    {% endif %}
+
+    <section class="app-card">
+      <h1>ようこそ FreeGroup2 へ</h1>
+      <p class="app-muted">名刺をアップロードして OCR で取り込みましょう。</p>
+    </section>
+  </main>
+{% endblock %}

@@ -12,7 +12,7 @@ from django.contrib.auth import get_user_model
 from django.core.files.base import ContentFile
 from django.db.models import Count, Exists, OuterRef, Q
 from django.http import HttpResponse, HttpResponseRedirect
-from django.shortcuts import get_object_or_404, redirect, render
+from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse
 from django.utils.dateparse import parse_date
 from django.views import View
@@ -41,10 +41,6 @@ def get_current_user(request):
     if request.user.is_authenticated:
         return request.user
     return User.objects.filter(is_superuser=True).first()
-
-
-def home_view(request):
-    return render(request, "home.html")
 
 
 def placeholder_view(request):
