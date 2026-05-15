@@ -1,5 +1,7 @@
 import uuid
 
+from django.conf import settings
+from django.core.exceptions import ObjectDoesNotExist
 from django.db import models, transaction
 from django.utils.translation import gettext_lazy as _
 
@@ -40,8 +42,22 @@ class Person(models.Model):
         blank=True,
         related_name="merged_from_set",
     )
+    managed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="persons_managed",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        permissions = [
+            ("undo_merge", "マージ復元を実行できる"),
+            ("merge_person", "Person マージを実行できる"),
+            ("link_user", "User-Person 紐付けを設定できる"),
+        ]
 
     def __str__(self):
         contact = self.contact_set.order_by("-created_at").first()
@@ -255,6 +271,23 @@ class Person(models.Model):
         [出力] QuerySet[Contact]（status='inactive' のもの）
         """
         return self.contact_set.filter(status="inactive")
+
+    @property
+    def linked_user(self):
+        """User との紐付け取得。未紐付け時は None（仕様書 §12.3）。
+
+        [性質] 準関数（DB 読み取り、副作用なし）
+        [入力] なし
+        [出力] CustomUser | None
+
+        循環依存回避のため、CustomUser を直接 import せず ObjectDoesNotExist で catch。
+        accounts.CustomUser に依存しないので persons アプリ単体でテスト可能。
+        コード君は person.user への直接アクセスを避け、本プロパティ経由で参照すること。
+        """
+        try:
+            return self.user
+        except ObjectDoesNotExist:
+            return None
 
     # ------------------------------------------------------------------
     # クラスメソッド（仕様書 §10.4.2）
