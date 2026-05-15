@@ -2,15 +2,29 @@
 
 | 項目 | 内容 |
 | --- | --- |
-| バージョン | **v1.4** |
+| バージョン | **v1.5** |
 | 作成日 | 2026-05-12 |
-| 改訂日 | 2026-05-14 |
+| 改訂日 | 2026-05-15 |
 | 作成者 | クロード君（コード君） |
 | 対象バージョン | FreeGroup2 v1.5.0 |
-| ステータス | **コード君実装着手可能版（論点 A 確定反映）** |
-| 前版 | v0.1 / v0.2 / v0.9 / v1.0 / v1.1 / v1.2 / v1.3 |
+| ステータス | **コード君実装着手可能版（Phase 0 完了反映、3点整合性回復）** |
+| 前版 | v0.1 / v0.2 / v0.9 / v1.0 / v1.1 / v1.2 / v1.3 / v1.4 |
 
 ## 改訂履歴
+
+### v1.5（2026-05-15）
+
+Phase 0 完了後・Phase 1 着手前のレビューで判明した 3 点の整合性問題を解消。Web 版コード君からの修正依頼に基づきオーパス君が反映。
+
+主な変更点（3 件）:
+
+| # | 変更箇所 | 内容 | 種別 |
+| --- | --- | --- | --- |
+| 1 | §13.8 Person.Meta.permissions | `('link_user', ...)` の 2 行重複を削除（タイポ修正） | バグ修正 |
+| 2 | §13.8 / 付録 B / 付録 C | `cards.*` Permission（`create_card` / `edit_card` / `merge_card`）と `card_*` Group（`card_admin` / `card_editor` / `card_viewer`）の定義・初期データ Migration・チェックリストを追記。§7.4・§8 で v1.5.0 実装と宣言されていた整合性を回復 | 整合性回復 |
+| 3 | §12.7 accounts:urls | `user_list` / `user_detail` の URL ルート定義を追記（§12.6 RetireUserView から参照されているため） | 整合性回復 |
+
+仕様書本体の他章（§1〜§12 / §13.1-13.7 / §14 / 付録 A / 付録 D）に変更なし。
 
 ### v1.4（2026-05-14）
 
@@ -1529,6 +1543,14 @@ urlpatterns = [
          views.RetireUserView.as_view(),
          name='retire_user'),
 
+    # ユーザ管理（Phase 6 で UI 実装）
+    path('users/',
+         views.UserListView.as_view(),
+         name='user_list'),
+    path('users/<int:user_id>/',
+         views.UserDetailView.as_view(),
+         name='user_detail'),
+
     # ... 他の URL ...
 ]
 ```
@@ -1778,6 +1800,9 @@ def Execute_Merge_Only(candidate, surviving_person, merged_person, form, user):
 | `person_editor` | `persons.merge_person`, `persons.link_user` | `sales` |
 | `person_viewer` | `persons.view_person`（標準） | `viewer` |
 | `user_admin` | `accounts.link_user_to_person`, `accounts.retire_user` | `admin` |
+| `card_admin` | `cards.create_card`, `cards.edit_card`, `cards.merge_card` | `admin` |
+| `card_editor` | `cards.create_card`, `cards.edit_card` | `sales` |
+| `card_viewer` | `cards.view_card`（Django 標準） | `viewer` |
 
 #### 実装すべき Permission
 
@@ -1797,7 +1822,6 @@ class Person(models.Model):
             ('undo_merge',   'マージ復元を実行できる'),
             ('merge_person', 'Person マージを実行できる'),
             ('link_user',    'User-Person 紐付けを設定できる'),
-            ('link_user',    'User-Person 紐付けを設定できる'),
         ]
 
 
@@ -1809,6 +1833,24 @@ class CustomUser(AbstractUser):
         permissions = [
             ('link_user_to_person', 'User と Person の紐付けを管理できる'),
             ('retire_user',          'ユーザを退職処理できる'),
+        ]
+
+
+# cards/models.py の Card.Meta に追加（v1.5 で追加）
+class Card(models.Model):
+    # ... 既存フィールド ...
+
+    class Meta:
+        # ⚠️ 既存の indexes / ordering 等は維持し、permissions のみ追加
+        # （既存 Meta を上書きしないこと）
+        # 既存:
+        #   indexes = [...]
+        #   ordering = [...]
+        # v1.5.0 で追加:
+        permissions = [
+            ('create_card', '名刺カードを作成できる'),
+            ('edit_card',   '名刺カードを編集できる'),
+            ('merge_card',  '名刺カードをマージできる'),
         ]
 ```
 
@@ -1830,6 +1872,9 @@ def forward(apps, schema_editor):
     person_editor, _ = Group.objects.get_or_create(name='person_editor')
     person_viewer, _ = Group.objects.get_or_create(name='person_viewer')
     user_admin, _ = Group.objects.get_or_create(name='user_admin')
+    card_admin, _ = Group.objects.get_or_create(name='card_admin')
+    card_editor, _ = Group.objects.get_or_create(name='card_editor')
+    card_viewer, _ = Group.objects.get_or_create(name='card_viewer')
 
     # ---- 2. Permission を Group に紐付け ----
     def add_perm(group, app_label, codename):
@@ -1852,6 +1897,18 @@ def forward(apps, schema_editor):
     add_perm(user_admin, 'accounts', 'link_user_to_person')
     add_perm(user_admin, 'accounts', 'retire_user')
 
+    # card_admin
+    add_perm(card_admin, 'cards', 'create_card')
+    add_perm(card_admin, 'cards', 'edit_card')
+    add_perm(card_admin, 'cards', 'merge_card')
+
+    # card_editor
+    add_perm(card_editor, 'cards', 'create_card')
+    add_perm(card_editor, 'cards', 'edit_card')
+
+    # card_viewer
+    add_perm(card_viewer, 'cards', 'view_card')  # Django 標準
+
     # ---- 3. Role を作成 ----
     admin_role, _ = Role.objects.get_or_create(
         code='admin',
@@ -1867,9 +1924,9 @@ def forward(apps, schema_editor):
     )
 
     # ---- 4. Role の default_groups を設定 ----
-    admin_role.default_groups.set([person_admin, user_admin])
-    sales_role.default_groups.set([person_editor])
-    viewer_role.default_groups.set([person_viewer])
+    admin_role.default_groups.set([person_admin, user_admin, card_admin])
+    sales_role.default_groups.set([person_editor, card_editor])
+    viewer_role.default_groups.set([person_viewer, card_viewer])
 
 
 def reverse(apps, schema_editor):
@@ -1879,7 +1936,8 @@ def reverse(apps, schema_editor):
 
     Role.objects.filter(code__in=['admin', 'sales', 'viewer']).delete()
     Group.objects.filter(name__in=[
-        'person_admin', 'person_editor', 'person_viewer', 'user_admin'
+        'person_admin', 'person_editor', 'person_viewer', 'user_admin',
+        'card_admin', 'card_editor', 'card_viewer',
     ]).delete()
 
 
@@ -1887,6 +1945,7 @@ class Migration(migrations.Migration):
     dependencies = [
         ('accounts', '00XX_previous_migration'),  # Role モデル作成の Migration
         ('persons',  '00XX_add_permissions'),     # persons.Meta.permissions 追加 Migration
+        ('cards',    '00XX_add_permissions'),     # cards.Meta.permissions 追加 Migration（v1.5）
     ]
     operations = [
         migrations.RunPython(forward, reverse),
@@ -1904,9 +1963,10 @@ class Migration(migrations.Migration):
 2. persons/migrations/00XX_add_managed_by.py       # Person.managed_by 追加
 3. contacts/migrations/00XX_add_managed_by.py      # Contact.managed_by 追加
 4. persons/migrations/00XX_add_permissions.py      # Person.Meta.permissions
-5. accounts/migrations/00XX_add_permissions.py     # CustomUser.Meta.permissions
-6. accounts/migrations/00XX_create_initial_roles_and_groups.py  # ★ 初期データ
-7. accounts/migrations/00XX_assign_admin_role_to_superuser.py   # 既存 superuser に Role 付与
+5. cards/migrations/00XX_add_permissions.py        # Card.Meta.permissions（v1.5 で追加）
+6. accounts/migrations/00XX_add_permissions.py     # CustomUser.Meta.permissions
+7. accounts/migrations/00XX_create_initial_roles_and_groups.py  # ★ 初期データ
+8. accounts/migrations/00XX_assign_admin_role_to_superuser.py   # 既存 superuser に Role 付与
 ```
 
 ---
@@ -1959,6 +2019,7 @@ class Migration(migrations.Migration):
 - [ ] `Person.linked_user` プロパティ追加（`ObjectDoesNotExist` で catch、循環依存回避）
 - [ ] `Person.Meta.permissions` に `undo_merge` / `merge_person` / `link_user` 追加（既存 Meta を上書きしないこと）
 - [ ] `CustomUser.Meta.permissions` に `link_user_to_person` / `retire_user` 追加
+- [ ] **`cards.Card.Meta.permissions` に `create_card` / `edit_card` / `merge_card` を追加（既存 Meta を上書きしないこと）**（v1.5 で追加）
 
 ### Admin 編集ガード
 
@@ -2058,6 +2119,9 @@ class Migration(migrations.Migration):
 - [ ] `user.role = X; user.save()` 直呼びでは Group が同期されない
 - [ ] `persons.undo_merge` Permission が `persons` アプリの Meta に定義されている
 - [ ] `admin` Role 付与の superuser が `user.has_perm('persons.undo_merge')` で True を返す
+- [ ] **`cards.create_card` Permission が `cards` アプリの Meta に定義されている**（v1.5 で追加）
+- [ ] **初期データ Migration 後、`Group.objects.filter(name='card_admin').exists()` が True**（v1.5 で追加）
+- [ ] **`admin` Role の `default_groups` に `card_admin` が含まれる**（v1.5 で追加）
 
 ### Admin 編集ガード
 
