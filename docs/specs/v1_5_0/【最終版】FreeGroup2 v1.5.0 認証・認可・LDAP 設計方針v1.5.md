@@ -1057,7 +1057,7 @@ class Migration(migrations.Migration):
   - `contacts/models.py`
   - `duplicates/models.py`
   - `duplicates/services/merge_executor.py`（D-4d-1 第 3 弾改訂含む）
-  - `duplicates/services/duplicate_check.py`
+  - `duplicates/services/duplicate_detection.py`
   - `duplicates/services/duplicate_score.py`
   - `actionlogs/models.py`
 
@@ -1680,7 +1680,7 @@ def generate_duplicate_candidates_for_contact(contact):
     前提: contact は呼び出し元 で
     select_for_update(skip_locked=True).prefetch_related('confidences') 済み
     """
-    from duplicates.services.duplicate_check import (
+    from duplicates.services.duplicate_detection import (
         find_duplicate_contacts,
         get_persons_confirmed_as_different,
     )
