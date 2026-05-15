@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+
+{% block title %}ユーザ管理一覧 — FreeGroup2{% endblock %}
+
+{% block app_content %}
+  <main class="app-main">
+    <section class="app-card">
+      <div class="app-section__header">
+        <h1>ユーザ管理一覧</h1>
+        <div>
+          {% if request.GET.show_retired == '1' %}
+            <a href="?" class="app-btn app-btn--secondary app-btn--sm">現職者のみ表示</a>
+          {% else %}
+            <a href="?show_retired=1" class="app-btn app-btn--secondary app-btn--sm">退職者も表示</a>
+          {% endif %}
+        </div>
+      </div>
+
+      {% if messages %}
+        {% for message in messages %}
+          <div class="app-alert app-alert--{% if message.tags == 'error' %}danger{% else %}info{% endif %}">
+            {{ message }}
+          </div>
+        {% endfor %}
+      {% endif %}
+
+      <div class="app-table-wrapper">
+        <table class="app-table app-table--nowrap">
+          <thead>
+            <tr>
+              <th>ユーザ名</th>
+              <th>氏名</th>
+              <th>ロール</th>
+              <th>部署</th>
+              <th>認証</th>
+              <th>状態</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for user in users %}
+              <tr>
+                <td>
+                  <a href="{% url 'accounts:user_detail' user_id=user.id %}">{{ user.username }}</a>
+                </td>
+                <td>{{ user.get_full_name|default:"-" }}</td>
+                <td>{{ user.role|default:"-" }}</td>
+                <td>{{ user.department|default:"-" }}</td>
+                <td>{{ user.auth_source }}</td>
+                <td>{% if user.is_active %}現職{% else %}退職済{% endif %}</td>
+              </tr>
+            {% empty %}
+              <tr><td colspan="6">ユーザが見つかりません</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+{% endblock %}

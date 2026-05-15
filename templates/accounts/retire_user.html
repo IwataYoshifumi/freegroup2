@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+
+{% block title %}退職処理 — {{ target_user.username }} — FreeGroup2{% endblock %}
+
+{% block app_content %}
+  <main class="app-main">
+    <section class="app-card">
+      <div class="app-section__header">
+        <h1>退職処理</h1>
+        <a href="{% url 'accounts:user_detail' user_id=target_user.id %}" class="app-btn app-btn--secondary app-btn--sm">キャンセル</a>
+      </div>
+
+      <div class="app-detail-item">
+        <div class="app-detail-label">退職対象ユーザ</div>
+        <div class="app-detail-value">{{ target_user.username }} （{{ target_user.get_full_name }}）</div>
+      </div>
+      <div class="app-detail-item">
+        <div class="app-detail-label">ロール</div>
+        <div class="app-detail-value">{{ target_user.role|default:"-" }}</div>
+      </div>
+      <div class="app-detail-item">
+        <div class="app-detail-label">部署</div>
+        <div class="app-detail-value">{{ target_user.department|default:"-" }}</div>
+      </div>
+    </section>
+
+    <section class="app-card" style="margin-top: var(--app-space-md);">
+      <h2>後継者を選択</h2>
+      <p class="app-muted">退職者が担当していた Person・Contact は後継者に引き継がれます。この操作は取り消せません。</p>
+
+      <form method="post" action="">
+        {% csrf_token %}
+        <div class="app-form__group">
+          <label class="app-form__label" for="successor">後継者</label>
+          <select name="successor" id="successor" class="app-input" required>
+            <option value="">--- 選択してください ---</option>
+            {% for u in successor_choices %}
+              <option value="{{ u.pk }}">{{ u.username }}（{{ u.get_full_name }}）</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="app-action-area" style="margin-top: var(--app-space-md);">
+          <button type="submit" class="app-btn app-btn--danger">退職処理を実行</button>
+          <a href="{% url 'accounts:user_detail' user_id=target_user.id %}" class="app-btn app-btn--secondary">キャンセル</a>
+        </div>
+      </form>
+    </section>
+  </main>
+{% endblock %}

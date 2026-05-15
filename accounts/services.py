@@ -137,6 +137,40 @@ def can_merge_person(operator, person):
     return False
 
 
+def retire_user(user, successor):
+    """退職処理。managed_by を後継者に一括引き継ぎ（仕様書 §12.6）。
+
+    [性質] 副作用あり（DB 書込：persons_managed / contacts_managed 更新 + user.is_active=False + ActionLog 記録、transaction.atomic 内）
+    [入力] user: 退職させる CustomUser
+           successor: 後継者となる現職の CustomUser
+    [出力] None
+    [例外] ValidationError（退職者と後継者が同じ / 後継者が非アクティブ）
+
+    user.is_active = False にする。User.person 紐付けは維持（履歴として）。
+    apply_role() は呼ばない（Role / Group は触らない）。
+    """
+    if user.pk == successor.pk:
+        raise ValidationError("退職者と後継者が同じです")
+    if not successor.is_active:
+        raise ValidationError("後継者は現職者でなければなりません")
+
+    with transaction.atomic():
+        user.persons_managed.update(managed_by=successor)
+        user.contacts_managed.update(managed_by=successor)
+        user.is_active = False
+        user.save(update_fields=["is_active"])
+
+        from actionlogs.models import ActionLog
+
+        ActionLog.record(
+            user=successor,
+            action=ActionLogAction.RETIRE_USER,
+            content_object=user,
+            object_repr=f"{user.username} → {successor.username}",
+            data={"retired_user_id": str(user.pk), "successor_id": str(successor.pk)},
+        )
+
+
 def get_excluded_persons_for_user_linked(person):
     """User 紐付き Person の場合、他の User 紐付き Person を除外対象として返す（仕様書 §13.5）。
 

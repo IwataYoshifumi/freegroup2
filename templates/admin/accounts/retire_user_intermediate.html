@@ -1,0 +1,27 @@
+{% extends "admin/base_site.html" %}
+
+{% block content %}
+  <h1>退職処理</h1>
+  <form method="post" action="">
+    {% csrf_token %}
+    <p>以下のユーザを退職処理します:</p>
+    <ul>
+      {% for user in users %}
+        <li>{{ user.username }} ({{ user.get_full_name }})</li>
+        <input type="hidden" name="_selected_action" value="{{ user.pk }}">
+      {% endfor %}
+    </ul>
+
+    <p>後継者を選択してください:</p>
+    <select name="successor" required>
+      {% for u in successor_choices %}
+        <option value="{{ u.pk }}">{{ u.username }} ({{ u.get_full_name }})</option>
+      {% endfor %}
+    </select>
+
+    <input type="hidden" name="action" value="{{ action }}">
+    <input type="hidden" name="select_across" value="{{ select_across }}">
+    <button type="submit" name="apply" value="1" class="default">退職処理を実行</button>
+    <a href="{% url 'admin:accounts_customuser_changelist' %}">キャンセル</a>
+  </form>
+{% endblock %}
