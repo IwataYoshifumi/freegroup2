@@ -40,6 +40,7 @@ from django.db import transaction
 from django.db.models import Count, Q
 from django.utils import timezone
 
+from accounts.services import get_excluded_persons_for_user_linked
 from actionlogs.models import ActionLog
 from contacts.models import Contact
 from duplicates.models import DuplicateCandidate
@@ -236,7 +237,12 @@ def generate_duplicate_candidates_for_contact(contact):
     """
     with transaction.atomic():
         # (1) different_person 判定済み相手 Person のリスト
-        excluded_persons = get_persons_confirmed_as_different(contact.person)
+        excluded_persons = list(get_persons_confirmed_as_different(contact.person))
+
+        # (1.5) v1.5.0: User 紐付き Person 同士のマージ候補を除外（仕様書 §13.5）
+        # contact.person が User 紐付きなら、他の User 紐付き active Person をすべて除外。
+        # contact.person が未紐付きなら空リストが返るので no-op。
+        excluded_persons.extend(get_excluded_persons_for_user_linked(contact.person))
 
         # (2) 重複候補のタプル列
         tuples = find_duplicate_contacts(contact, excluded_persons=excluded_persons)

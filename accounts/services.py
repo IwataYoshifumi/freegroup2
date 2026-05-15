@@ -106,3 +106,58 @@ def unlink_user_from_person(operator, user):
             object_repr=f"{user.username} ↮ Person({person.pk})",
             data={"person_id": str(person.pk)},
         )
+
+
+def can_merge_person(operator, person):
+    """Person をマージできる権限があるか判定する（仕様書 §13.1、5' ルール拡張版）。
+
+    [性質] 準関数（DB 読み取り：person.linked_user / managed_by_id の参照のみ、副作用なし）
+    [入力] operator: 操作実行者の CustomUser
+           person: 判定対象の Person
+    [出力] bool
+
+    判定ルール（仕様書 §13.1）：
+      - User 未紐付け Person: 通常権限で判定（True）
+      - 紐付き User 本人が現職: True
+      - 退職者の Person: managed_by の現職者が代行可
+      - その他: False
+
+    呼び出し側で `_check_merge_permission` / `_check_different_person_permission` から
+    両 Person について本関数を呼び、両方 True なら通過。
+    person.linked_user は Phase 1 のプロパティ経由（person.user 直接参照禁止、仕様書 §12.3）。
+    """
+    linked_user = person.linked_user
+
+    if linked_user is None:
+        return True
+    if linked_user.is_active and linked_user == operator:
+        return True
+    if not linked_user.is_active and person.managed_by_id == operator.id:
+        return True
+    return False
+
+
+def get_excluded_persons_for_user_linked(person):
+    """User 紐付き Person の場合、他の User 紐付き Person を除外対象として返す（仕様書 §13.5）。
+
+    [性質] 準関数（DB 読み取り：Person を user__isnull=False で絞り込み、副作用なし）
+    [入力] person: 判定対象の Person
+    [出力] list[Person]（除外対象。person が未紐付きなら空リスト）
+
+    DuplicateCandidate 生成時に excluded_persons へ加えることで、両方 User 紐付き
+    Person のペアが候補に上がらないようにする（多重防衛、仕様書 §13.6）。
+
+    ⚠️ パフォーマンス注意: 全社員数が増えると返り値も増える。1000 件超で
+    find_duplicate_contacts のクエリパフォーマンスが劣化する場合、excluded_persons
+    を ID リストではなく Subquery で渡すよう呼び出し側を変更する検討が必要。
+    """
+    linked_user = person.linked_user
+    if linked_user is None:
+        return []
+    from persons.models import Person
+
+    return list(
+        Person.objects.filter(user__isnull=False)
+        .filter(status=Person.Status.ACTIVE)
+        .exclude(pk=person.pk)
+    )

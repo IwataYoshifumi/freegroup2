@@ -24,7 +24,7 @@
 
 from __future__ import annotations
 
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.utils import timezone
 
@@ -228,6 +228,9 @@ def Mark_as_Different_Person(candidate, form, user):
     review_result = form.cleaned_data["review_result"]
     note = form.cleaned_data.get("note", "")
 
+    # ---- v1.5.0: 別人マーク権限チェック（atomic 外、仕様書 §13.4） ----
+    _check_different_person_permission(user, candidate.person_a, candidate.person_b)
+
     with transaction.atomic():
         candidate.mark_as_different_person(user, review_result, note)
         candidate.record_different_person_action(user)
@@ -279,6 +282,11 @@ def Execute_Merge_Only(candidate, surviving_person, merged_person, form, user):
     note = form.cleaned_data.get("note", "")
     surviving_primary = surviving_person.primary_contact
 
+    # ---- v1.5.0: マージ権限チェック（atomic 外、仕様書 §13.2 順序 2 / §13.6） ----
+    # 両方 User 紐付きは ValidationError、個別権限不足は PermissionDenied で送出。
+    # PermissionDenied 時に無駄な transaction を開かないため atomic より前に置く。
+    _check_merge_permission(user, surviving_person, merged_person)
+
     # ---- atomic を冒頭から包む構造（D-4d-1 第 3 弾 §2 修正項目 4） ----
     # マージ画面の確認 CB 全 ON 検証（MergeForm.clean()）は通過済みだが、CFC の DB 状態
     # は未更新のため、ここで surviving 側 primary の未確認 low/mid CFC を一括 confirmed
@@ -324,6 +332,18 @@ def Execute_Merge_Only(candidate, surviving_person, merged_person, form, user):
 
         # 手順 6: merged_person 配下 Contact を surviving_person に付け替え
         merged_person.transfer_contacts_to(surviving_person, merge_reason)
+
+        # 手順 8 (v1.5.0): User 紐付け引き継ぎ（仕様書 §13.2 手順 8 / §13.6）
+        # merged が User 紐付きで surviving が未紐付きの場合のみ surviving に張り替える。
+        # 両方紐付き / 両方未紐付き / surviving のみ紐付き は no-op。
+        # 両方紐付きケースは _check_merge_permission で ValidationError 済みなのでここに到達しない。
+        merged_linked_user = merged_person.linked_user
+        if (
+            merged_linked_user is not None
+            and surviving_person.linked_user is None
+        ):
+            merged_linked_user.person = surviving_person
+            merged_linked_user.save(update_fields=["person"])
 
         # 手順 7: merged_person のステータス遷移（status='merged' / merged_into セット）
         merged_person.mark_as_merged(surviving_person)
@@ -388,6 +408,11 @@ def Execute_Merge_Undo(merge_log, form, user):
     """
     from contacts.models import Contact  # 循環 import を避けるため遅延 import
 
+    # ---- v1.5.0: 復元権限チェック（atomic 外、仕様書 §13.3） ----
+    # superuser / 実行者本人 / persons.undo_merge Permission 持ちのいずれかで通過。
+    if not _can_undo_merge(user, merge_log):
+        raise PermissionDenied("マージを復元する権限がありません")
+
     # ---- A. バリデーション（atomic 外） ----
     if not merge_log.is_undoable():
         raise ValidationError(
@@ -444,3 +469,58 @@ def Execute_Merge_Undo(merge_log, form, user):
 
         # ActionLog 記録（D-4f-2：form.cleaned_data['note'] を data['note'] に転記）
         merge_log.record_undo_action(user, note)
+
+
+# ---- v1.5.0 で追加: 権限判定ヘルパ（仕様書 §13.1 / §13.3 / §13.4 / §13.7） ----
+
+
+def _check_merge_permission(user, surviving_person, merged_person):
+    """[性質] 副作用あり（例外）／マージ権限の検査（仕様書 §13.2 / §13.7）。
+
+    両方が User 紐付きなら ValidationError（業務的に不可、§13.6 多重防衛）。
+    surviving / merged のどちらかで can_merge_person が False なら PermissionDenied。
+    呼び出しは Execute_Merge_Only の `transaction.atomic()` 開始前。
+    """
+    if (
+        surviving_person.linked_user is not None
+        and merged_person.linked_user is not None
+    ):
+        raise ValidationError(
+            "両方が User に紐付いている Person 同士はマージできません"
+        )
+
+    from accounts.services import can_merge_person
+
+    if not can_merge_person(user, surviving_person):
+        raise PermissionDenied("surviving_person をマージする権限がありません")
+    if not can_merge_person(user, merged_person):
+        raise PermissionDenied("merged_person をマージする権限がありません")
+
+
+def _can_undo_merge(user, merge_log):
+    """[性質] 準関数（DB 読み取り）／マージ復元権限の判定（仕様書 §13.3、Permission ベース）。
+
+    superuser / 実行者本人 / persons.undo_merge Permission 持ちのいずれかで True。
+    """
+    if user.is_superuser:
+        return True
+    if merge_log.executed_by_id == user.id:
+        return True
+    if user.has_perm("persons.undo_merge"):
+        return True
+    return False
+
+
+def _check_different_person_permission(user, person_a, person_b):
+    """[性質] 副作用あり（例外）／別人マーク権限の検査（仕様書 §13.4）。
+
+    person_a / person_b のどちらかで can_merge_person が False なら PermissionDenied。
+    別人マークは「紐付けない」操作なので、両方 User 紐付きの ValidationError は不要
+    （§13.5 のガードで両方紐付きペアは DC に上がらない前提）。
+    """
+    from accounts.services import can_merge_person
+
+    if not can_merge_person(user, person_a):
+        raise PermissionDenied("person_a を別人マークする権限がありません")
+    if not can_merge_person(user, person_b):
+        raise PermissionDenied("person_b を別人マークする権限がありません")
