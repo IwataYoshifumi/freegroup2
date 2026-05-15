@@ -1862,7 +1862,21 @@ from django.db import migrations
 
 
 def forward(apps, schema_editor):
-    """Group / Role / 紐付けを初期データとして作成。"""
+    """Group / Role / 紐付けを初期データとして作成。
+
+    Django の post_migrate より前に走るため、Permission レコードが未作成。
+    先に create_permissions を明示的に呼んで Permission / ContentType を埋める
+    （Django 公式 API による補完）。
+    """
+    # ⚠️ Permission を物理化（同一 migrate 実行内で AlterModelOptions 直後に
+    # RunPython を呼ぶため、post_migrate シグナル待ちでは間に合わない。
+    # Django の create_permissions を明示呼び出して Permission / ContentType を
+    # 先に DB に書き込む。apps=apps で historical model レジストリを渡す）
+    from django.apps import apps as global_apps
+    from django.contrib.auth.management import create_permissions
+    for app_config in global_apps.get_app_configs():
+        create_permissions(app_config, apps=apps, verbosity=0)
+
     Group = apps.get_model('auth', 'Group')
     Permission = apps.get_model('auth', 'Permission')
     Role = apps.get_model('accounts', 'Role')
