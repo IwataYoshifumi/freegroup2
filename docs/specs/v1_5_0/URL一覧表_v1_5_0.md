@@ -1,6 +1,6 @@
 # FreeGroup2 URL 一覧表（v1.4.2 + v1.5.0 統合版）
 
-**最終更新**：2026-05-15
+**最終更新**：2026-05-16
 **正本**：
 - `_最終の最終版_名刺画像取り込みOCR仕様書_v1_4_2統合最終版.md` §11.3（v1.4.2 既存 URL）
 - `_最終版_FreeGroup2_v1_5_0_認証_認可_LDAP_設計方針v1_4.md` §12.6 / §12.7 / §13（v1.5.0 認証・認可・User管理 URL）
@@ -37,10 +37,10 @@
 | 5 | `/originals/` | GET | OriginalListView | `originals:original_list` | 必須 ★2 | `cards.view_card`（Django標準）★2 | 全員 ★2 | v1.4.2 既存 |
 | 6 | `/originals/<uuid:pk>/` | GET | OriginalDetailView | `originals:original_detail` | 必須 ★2 | `cards.view_card`（Django標準）★2 | 全員 ★2 | v1.4.2 既存 |
 | 7 | `/persons/` | GET | PersonListView | `persons:person_list` | 必須 ★2 | `persons.view_person`（Django標準）★1 | 全員 ★1 | v1.4.2 既存。§13.8 初期データ Migration で person_viewer Group に紐付け済 |
-| 8 | `/persons/<uuid:pk>/` | GET | PersonDetailView | `persons:person_detail` | 必須 ★2 | `persons.view_person`（Django標準）★1 | 全員 ★1 | v1.4.2 既存。Person.status 別二系統化（active → ContactDetailView リダイレクト、merged/archived → 専用画面） |
+| 8 | `/persons/<uuid:pk>/` | GET | PersonDetailView | `persons:person_detail` | 必須 ★2 | `persons.view_person`（Django標準）★1 | 全員 ★1 | v1.4.2 既存。Person.status 別二系統化（active → ContactDetailView リダイレクト、merged/archived → 専用画面）。**v1.5.0 Phase 8 #4 で `person_detail_orphan.html` に「ユーザー紐付け」セクション追加**（`accounts:link_user_person_confirm` への導線、状態に応じて「紐付ける／解除する／（他 User 紐付け済み表示）」を出し分け） |
 | 9 | `/persons/<uuid:pk>/add-additional-role/` | GET / POST | PersonAddAdditionalRoleView | `persons:person_add_additional_role` | 必須 ★2 | `persons.change_person`（Django標準）★2 | admin / sales ★2 | v1.4.2 既存。Person への追加役職付与（複数役職対応）。仕様書 §13.8 の `persons.link_user`（User-Person 紐付け権限）とは概念が異なるため、v1.5.0 では Django 標準で済ませる。**論点 F**：業務上の Permission `persons.add_additional_role` を v1.6+ で別途定義するかは要判断 |
 | 10 | `/contacts/create/` | GET / POST | ContactCreateView | `contacts:contact_create` | 必須 ★2 | `contacts.add_contact`（Django標準）★2 | admin / sales ★2 | v1.4.2 既存 |
-| 11 | `/contacts/<uuid:pk>/` | GET | ContactDetailView | `contacts:contact_detail` | 必須 ★2 | `contacts.view_contact`（Django標準）★2 | 全員 ★2 | v1.4.2 既存。業務メイン画面、6 セクション構成 |
+| 11 | `/contacts/<uuid:pk>/` | GET | ContactDetailView | `contacts:contact_detail` | 必須 ★2 | `contacts.view_contact`（Django標準）★2 | 全員 ★2 | v1.4.2 既存。業務メイン画面、6 セクション構成。**v1.5.0 Phase 8 #4 で操作ボタン列に「このユーザーで紐付ける／紐付け済み（解除）」リンク追加**（`accounts:link_user_person_confirm` への導線、`contact.person` が存在する場合のみ表示。`append_back_url` で戻り先を保持） |
 | 12 | `/contacts/<uuid:pk>/update-primary/` | GET / POST | UpdatePrimaryContactView | `contacts:contact_update_primary` | 必須 ★2 | `contacts.change_contact`（Django標準）★2 | admin / sales ★2 | v1.4.2 既存 |
 | 13 | `/contacts/<uuid:pk>/update-active/` | GET / POST | UpdateActiveContactView | `contacts:contact_update_active` | 必須 ★2 | `contacts.change_contact`（Django標準）★2 | admin / sales ★2 | v1.4.2 既存 |
 | 14 | `/contacts/<uuid:pk>/preview/` | GET | PreviewContactView | `contacts:contact_preview` | 必須 ★2 | `contacts.view_contact`（Django標準）★2 | 全員 ★2 | v1.4.2 既存 |
@@ -79,13 +79,16 @@
 | 33 | `/accounts/users/<int:user_id>/` | GET | UserDetailView | `accounts:user_detail` | 必須 ★2 | `accounts.view_customuser`（Django標準）★2 | admin ★2 | **v1.5.0 新規**。最小機能：詳細表示 + 退職処理ボタンへの導線。**仕様書未記載**、業務上必要として追加 |
 | 34 | `/accounts/users/<int:user_id>/link/<uuid:person_id>/` | POST | LinkUserPersonView | `accounts:link_user_person` | 必須 ★1 | 本人 OR `accounts.link_user_to_person` ★1 | 本人 / admin | **v1.5.0 新規**（§12.7）。POST 専用、ホーム画面アラートから遷移想定。成功時は home へリダイレクト |
 | 35 | `/accounts/users/<int:user_id>/unlink/` | POST | UnlinkUserPersonView | `accounts:unlink_user_person` | 必須 ★1 | 本人 OR `accounts.link_user_to_person` ★1 | 本人 / admin | **v1.5.0 新規**（§12.7）。POST 専用。成功時は home へリダイレクト |
-| 36 | `/accounts/users/<int:user_id>/retire/` | GET / POST | RetireUserView | `accounts:retire_user` | 必須 ★1 | `accounts.retire_user` ★1 | admin ★1 | **v1.5.0 新規**（§12.6 案 B）。GET=後継者選択フォーム、POST=`retire_user()` 実行。Admin actions（`/admin/accounts/customuser/`）でも実行可（§4.1） |
+| 36 | `/accounts/users/<int:user_id>/retire/` | GET / POST | RetireUserView | `accounts:retire_user` | 必須 ★1 | `accounts.retire_user` ★1 | admin ★1 | **v1.5.0 新規**（§12.6 案 B）。GET=後継者選択フォーム、POST=`retire_user()` 実行。Admin actions（`/admin/accounts/customuser/`）でも実行可（§4.1）。**Phase 8 でトップバー（`_topbar.html`）に「ユーザ管理」リンク追加**（`perms.accounts.retire_user` ガード）→ user_list 経由で本 View へ |
+| 37 | `/accounts/profile/` | GET | ProfileView | `accounts:profile` | 必須 ★1 | なし | 全員（本人のみ） | **v1.5.0 Phase 8 新規**。ログインユーザ自身のプロフィール画面。User の username / 氏名 / メール / ロール / 部署 / 認証ソース / 紐付き Person を表示。紐付き Person がある場合は「紐付けを解除する」リンク（→ `accounts:link_user_person_confirm` 経由で確認画面へ）、未紐付け時は「Person を探して紐付ける」リンク（→ `accounts:start_link_flow`）を出し分け |
+| 38 | `/accounts/user-person/confirm/<uuid:person_id>/` | GET / POST | LinkUserPersonConfirmView | `accounts:link_user_person_confirm` | 必須 ★1 | なし（`LoginRequiredMixin` のみ） | 全員（本人のみ） | **v1.5.0 Phase 8 #4 新規**。User-Person 紐付け／解除の確認画面。GET：ログイン User と対象 Person を横並び表示（会社名・氏名・メール・部署・役職）。POST：`action=link` で紐付け、`action=unlink` で解除を実行。本フローは常に request.user 自身への操作のため Permission 不要。Person 詳細・Contact 詳細・プロフィール画面からの導線を一本化する確認ハブ。詳細仕様は §12.7 |
+| 39 | `/accounts/user-person/start-link/` | GET | StartLinkFlowView | `accounts:start_link_flow` | 必須 ★1 | なし（`LoginRequiredMixin` のみ） | 全員（本人のみ） | **v1.5.0 Phase 8 #4 新規**。「Person を探して紐付ける」フロー開始 View。`messages.info` で案内を出し、Person 一覧（`persons:person_list`）へ `email=<user.email>&searched=1&status=active` 付きでリダイレクト。プロフィール画面の「Person を探して紐付ける」ボタンから使われる。`status=active` を明示しないと Person 一覧のフィルタが 0 件になる仕様（searched=1 単独だと既定値が外れる）への対処を含む。詳細仕様は §12.7 |
 
 ### Django Admin
 
 | No. | ルート | メソッド | View 名 | URL name | ログイン | Permission | ロール | 備考 |
 |---|---|---|---|---|---|---|---|---|
-| 37 | `/admin/...` | — | （Django 標準 Admin） | （Django 標準） | 必須 ★1 | `is_staff=True` ★1 | admin ★1 | Django Admin。CustomUserAdmin（§4.1）の特殊挙動：①`user_permissions` を fieldsets / form base_fields から除外（URL 直叩き保護）、② Role 変更時のみ `apply_role()` 発火、③ `retire_user_action` Admin アクション（後継者選択インターメディエイト画面付き） |
+| 40 | `/admin/...` | — | （Django 標準 Admin） | （Django 標準） | 必須 ★1 | `is_staff=True` ★1 | admin ★1 | Django Admin。CustomUserAdmin（§4.1）の特殊挙動：①`user_permissions` を fieldsets / form base_fields から除外（URL 直叩き保護）、② Role 変更時のみ `apply_role()` 発火、③ `retire_user_action` Admin アクション（後継者選択インターメディエイト画面付き）。**Phase 8 でトップバー（`_topbar.html`）のユーザメニューに「管理画面」リンク追加**（`user.is_staff` ガード） |
 
 ---
 
@@ -277,7 +280,10 @@ permissions = [
 | 32-33 | `accounts:user_list` / `accounts:user_detail` | **Phase 6**（退職処理 UI） | RetireUserView のリダイレクト先として必須 |
 | 34-35 | `accounts:link_user_person` / `accounts:unlink_user_person` | **Phase 4**（User-Person 紐付け） | §12.7 |
 | 36 | `accounts:retire_user` | **Phase 6**（退職処理） | §12.6 |
-| 37 | Django Admin | **Phase 2-3**（CustomUserAdmin 実装） | §4.1 |
+| 37 | `accounts:profile` | **Phase 8**（UI 統合） | プロフィール画面新設（仕様書未明示・実装で追加） |
+| 38 | `accounts:link_user_person_confirm` | **Phase 8 #4**（紐付け確認画面新設） | 仕様書未明示・実装で追加（§12.7 に追記） |
+| 39 | `accounts:start_link_flow` | **Phase 8 #4**（Person 探索フロー開始） | 仕様書未明示・実装で追加（§12.7 に追記） |
+| 40 | Django Admin | **Phase 2-3**（CustomUserAdmin 実装） | §4.1 |
 
 ---
 
@@ -300,3 +306,4 @@ permissions = [
 | 2026-05-13 | 旧 `URL一覧表_v1_4_2.md` 作成（v1.4.2 既存 URL のみ） |
 | 2026-05-15 | サポート担当クロード君が v1.5.0 認証・認可・LDAP 設計方針 v1.4 を元に、v1.5.0 で追加・変更される URL（No.24〜37）と既存 URL への認証・認可付与方針を統合。★1 / ★2 マークで仕様書記載度合いを明示、★2 項目は別セクションに集約。 |
 | 2026-05-15（2回目） | 別セッションのサポート担当クロード君のレビューに基づき修正：(1) No.9 PersonAddAdditionalRoleView の Permission を `persons.link_user`（概念ズレ）→ `persons.change_person`（Django標準）に変更、論点 F を追加。(2) No.19 / No.20 merge_log 系の Permission を `persons.view_person`（流用）→ `duplicates.view_personmergelog`（正しいアプリ）に変更。(3) ★2-E SMTP 設定の優先度を「Phase 3〜4 で確定で間に合う」と明記。(4) 「仕様書改訂依頼項目」セクションを新設（§13.8 link_user 重複タイポ、§7.4/§8/§13.8 の cards.* 不整合、accounts:user_list の URL 定義省略）。(5) 「工程表との対応」セクションを新設、各 URL を Phase に紐付け。 |
+| 2026-05-16 | **Phase 8 / Phase 8 #4 反映**：(1) 新規 URL を追加：No.37 `accounts:profile`（Phase 8 で新設したプロフィール画面）、No.38 `accounts:link_user_person_confirm`（Phase 8 #4 で新設した紐付け／解除確認画面、`action=link/unlink` 切替で 1 View 兼用）、No.39 `accounts:start_link_flow`（Phase 8 #4 で新設した Person 探索フロー開始 View、`?email=...&searched=1&status=active` 付きで `persons:person_list` へリダイレクト）。(2) 既存 URL の備考更新：No.8 PersonDetailView（`person_detail_orphan.html` に紐付け／解除セクション追加）、No.11 ContactDetailView（操作ボタン列に紐付け導線追加）、No.36 RetireUserView（トップバーに「ユーザ管理」リンク追加）、No.40 Django Admin（旧 No.37 から繰下げ、トップバーユーザメニューに「管理画面」リンク追加）。(3) 工程表に Phase 8 / Phase 8 #4 行を追加。 |
