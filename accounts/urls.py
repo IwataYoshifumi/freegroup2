@@ -9,6 +9,8 @@ urlpatterns = [
     path("login/", auth_views.LoginView.as_view(template_name="accounts/login.html"), name="login"),
     path("logout/", auth_views.LogoutView.as_view(), name="logout"),
     path("profile/", views.ProfileView.as_view(), name="profile"),
+    path("user-person/confirm/<uuid:person_id>/", views.LinkUserPersonConfirmView.as_view(), name="link_user_person_confirm"),
+    path("user-person/start-link/", views.StartLinkFlowView.as_view(), name="start_link_flow"),
     path(
         "users/<int:user_id>/link/<uuid:person_id>/",
         views.LinkUserPersonView.as_view(),

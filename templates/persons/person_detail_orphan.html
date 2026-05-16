@@ -88,6 +88,30 @@
     </section>
   {% endif %}
 
+  {# ---- User-Person 紐付け UI ---- #}
+  {% with linked=person.linked_user %}
+    {% if not linked or linked == user or perms.accounts.link_user_to_person %}
+      <section class="app-card" style="max-width:1100px; margin-top:var(--app-space-md);">
+        <div class="app-section__header"><h2>ユーザー紐付け</h2></div>
+        {% if not linked %}
+          <p class="app-muted">この Person はまだユーザーに紐付けられていません。</p>
+          <div class="app-action-area">
+            {% url 'accounts:link_user_person_confirm' person_id=person.id as confirm_url %}
+            <a href="{% append_back_url confirm_url back %}" class="app-btn app-btn--primary">このユーザーで紐付ける</a>
+          </div>
+        {% elif linked == user %}
+          <p class="app-muted">あなた（{{ user.username }}）と紐付け済みです。</p>
+          <div class="app-action-area">
+            {% url 'accounts:link_user_person_confirm' person_id=person.id as confirm_url %}
+            <a href="{% append_back_url confirm_url back %}" class="app-btn app-btn--danger">紐付けを解除</a>
+          </div>
+        {% else %}
+          <p class="app-muted">ユーザー「{{ linked.username }}」と紐付け済みです。</p>
+        {% endif %}
+      </section>
+    {% endif %}
+  {% endwith %}
+
   <div class="app-action-area" style="margin-top:24px; max-width:1100px;">
     {% if back.back_exist %}
       <a href="{% back_url back %}" class="app-btn app-btn--secondary">戻る</a>

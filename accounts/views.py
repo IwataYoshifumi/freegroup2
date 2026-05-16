@@ -1,10 +1,14 @@
+import urllib.parse
+
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin, PermissionRequiredMixin
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.views import View
 from django.views.generic import DetailView, ListView
 
+from back_navigator.back_navigator import BackNavigator
 from persons.models import Person
 
 from .models import CustomUser
@@ -18,6 +22,58 @@ class ProfileView(LoginRequiredMixin, View):
 
     def get(self, request):
         return render(request, self.template_name)
+
+
+class LinkUserPersonConfirmView(LoginRequiredMixin, View):
+    """User-Person 紐付け確認画面。GET: 確認表示 / POST: 紐付けまたは解除を実行。
+
+    [性質] GET=準関数（DB読み取りのみ）/ POST=副作用あり（DB書込）
+    [権限] LoginRequiredMixin のみ（本フローは常に request.user 自身への操作）
+    """
+
+    template_name = "accounts/link_user_person_confirm.html"
+
+    def get(self, request, person_id):
+        person = get_object_or_404(Person, pk=person_id)
+        return render(request, self.template_name, {
+            "person": person,
+            "back": BackNavigator(request),
+        })
+
+    def post(self, request, person_id):
+        person = get_object_or_404(Person, pk=person_id)
+        action = request.POST.get("action")
+        try:
+            if action == "link":
+                link_user_to_person(operator=request.user, user=request.user, person=person)
+                messages.success(request, "紐付けました")
+            elif action == "unlink":
+                unlink_user_from_person(operator=request.user, user=request.user)
+                messages.success(request, "紐付けを解除しました")
+        except ValidationError as e:
+            messages.error(request, str(e))
+            return redirect("accounts:link_user_person_confirm", person_id=person_id)
+        return redirect("accounts:profile")
+
+
+class StartLinkFlowView(LoginRequiredMixin, View):
+    """「Person を探して紐付ける」フロー開始 View。
+
+    [性質] 副作用なし（messages.info + redirect のみ）
+    [権限] LoginRequiredMixin（本人フロー開始のみ）
+    """
+
+    def get(self, request):
+        messages.info(
+            request,
+            "紐付け対象の Person を表示しています。リストから自分の Person を選んでください。",
+        )
+        params = urllib.parse.urlencode([
+            ("email", request.user.email),
+            ("searched", "1"),
+            ("status", "active"),
+        ])
+        return redirect(f"{reverse('persons:person_list')}?{params}")
 
 
 class LinkUserPersonView(LoginRequiredMixin, View):

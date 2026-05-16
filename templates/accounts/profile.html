@@ -57,12 +57,17 @@
       <section class="app-card" style="margin-top: var(--app-space-md);">
         <h2>紐付け情報</h2>
         <p class="app-muted">あなたは Person「{{ user.person }}」に紐付けられています。</p>
-        <form method="post" action="{% url 'accounts:unlink_user_person' user_id=user.id %}">
-          {% csrf_token %}
-          <div class="app-action-area" style="margin-top: var(--app-space-md);">
-            <button type="submit" class="app-btn app-btn--danger">紐付けを解除する</button>
-          </div>
-        </form>
+        <div class="app-action-area" style="margin-top: var(--app-space-md);">
+          <a href="{% url 'accounts:link_user_person_confirm' person_id=user.person.id %}" class="app-btn app-btn--danger">紐付けを解除する</a>
+        </div>
+      </section>
+    {% else %}
+      <section class="app-card" style="margin-top: var(--app-space-md);">
+        <h2>Person との紐付け</h2>
+        <p class="app-muted">あなたはまだ Person に紐付けられていません。自分の Person を選んで紐付けてください。</p>
+        <div class="app-action-area">
+          <a href="{% url 'accounts:start_link_flow' %}" class="app-btn app-btn--primary">Person を探して紐付ける</a>
+        </div>
       </section>
     {% endif %}
   </main>
