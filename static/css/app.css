@@ -149,6 +149,7 @@ a { color: inherit; text-decoration: none; }
 }
 
 .app-user-dropdown.is-open { display: block; }
+.app-user-menu.is-open .app-user-dropdown { display: block; }
 
 .app-user-dropdown a {
   display: block;

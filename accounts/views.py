@@ -11,6 +11,15 @@ from .models import CustomUser
 from .services import link_user_to_person, retire_user, unlink_user_from_person
 
 
+class ProfileView(LoginRequiredMixin, View):
+    """ログインユーザ自身のプロフィール画面（仕様書 §12.8）。"""
+
+    template_name = "accounts/profile.html"
+
+    def get(self, request):
+        return render(request, self.template_name)
+
+
 class LinkUserPersonView(LoginRequiredMixin, View):
     """User と Person を紐付ける View（仕様書 §12.7）。
 

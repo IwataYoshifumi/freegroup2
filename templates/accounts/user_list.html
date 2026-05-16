@@ -57,3 +57,10 @@
     </section>
   </main>
 {% endblock %}
+
+{% block drawer_content %}
+  <nav>
+    <a href="{% url 'home' %}">ホーム</a>
+    <a href="{% url 'accounts:user_list' %}" class="is-active">ユーザ一覧</a>
+  </nav>
+{% endblock %}
