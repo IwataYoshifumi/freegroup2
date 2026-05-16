@@ -1,0 +1,48 @@
+{% load static %}<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ログイン — FreeGroup2</title>
+  <link rel="stylesheet" href="{% static 'css/app.css' %}">
+</head>
+<body>
+  <div style="min-height: 100vh; display: flex; align-items: center; justify-content: center; background: var(--app-bg);">
+    <div style="width: 100%; max-width: 400px; padding: var(--app-space-md);">
+      <div class="app-card">
+        <h1 class="app-topbar__system-name" style="font-size: 1.5rem; margin-bottom: var(--app-space-md);">FreeGroup2</h1>
+
+        {% if form.errors %}
+          <div class="app-alert app-alert--danger" style="margin-bottom: var(--app-space-md);">
+            ユーザ名またはパスワードが正しくありません。
+          </div>
+        {% endif %}
+
+        {% if messages %}
+          {% for message in messages %}
+            <div class="app-alert app-alert--{% if message.tags == 'error' %}danger{% else %}info{% endif %}" style="margin-bottom: var(--app-space-md);">
+              {{ message }}
+            </div>
+          {% endfor %}
+        {% endif %}
+
+        <form method="post" action="">
+          {% csrf_token %}
+          <input type="hidden" name="next" value="{{ next }}">
+          <div class="app-form__group">
+            <label class="app-form__label" for="id_username">ユーザ名</label>
+            <input type="text" name="username" id="id_username" class="app-input" autofocus required>
+          </div>
+          <div class="app-form__group">
+            <label class="app-form__label" for="id_password">パスワード</label>
+            <input type="password" name="password" id="id_password" class="app-input" required>
+          </div>
+          <div class="app-action-area" style="margin-top: var(--app-space-md);">
+            <button type="submit" class="app-btn app-btn--primary">ログイン</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

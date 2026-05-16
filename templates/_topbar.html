@@ -11,6 +11,9 @@
   <nav class="app-app-switcher" aria-label="アプリ切り替え">
     {% block app_switcher %}
       <a href="{% url 'cards:card_list' %}" class="{% if active_app == 'cards' %}is-active{% endif %}">名刺管理</a>
+      {% if perms.accounts.retire_user %}
+        <a href="{% url 'accounts:user_list' %}" class="{% if active_app == 'user_mgmt' %}is-active{% endif %}">ユーザ管理</a>
+      {% endif %}
     {% endblock %}
   </nav>
 
@@ -19,8 +22,14 @@
       {{ user.username|default:"ゲスト" }}
     </button>
     <div class="app-user-dropdown" role="menu">
-      <a href="#" role="menuitem">プロフィール</a>
-      <a href="#" role="menuitem">ログアウト</a>
+      <a href="{% url 'accounts:profile' %}" role="menuitem">プロフィール</a>
+      {% if user.is_staff %}
+        <a href="{% url 'admin:index' %}" role="menuitem">管理画面</a>
+      {% endif %}
+      <form method="post" action="{% url 'accounts:logout' %}" style="margin: 0;">
+        {% csrf_token %}
+        <button type="submit" role="menuitem" style="display: block; width: 100%; padding: 10px; border: none; background: none; text-align: left; cursor: pointer; border-radius: 8px; font-size: inherit; color: inherit;">ログアウト</button>
+      </form>
     </div>
   </div>
 </header>

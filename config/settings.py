@@ -155,6 +155,10 @@ OCR_STUCK_THRESHOLD_MINUTES = 30
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
+LOGIN_URL = "accounts:login"
+LOGIN_REDIRECT_URL = "home"
+LOGOUT_REDIRECT_URL = "accounts:login"
+
 
 # ============================================================
 # 認証バックエンド + LDAP 連携（v1.5.0 / 仕様書 §5）
