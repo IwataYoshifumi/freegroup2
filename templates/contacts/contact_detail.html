@@ -68,6 +68,22 @@
       {% if not is_editable %}
         <span class="app-muted">表示のみモード（編集不可）</span>
       {% endif %}
+
+      {# ---- User-Person 紐付け UI ---- #}
+      {% if contact.person %}
+        {% with linked=contact.person.linked_user %}
+          {% if not linked or linked == user or perms.accounts.link_user_to_person %}
+            {% url 'accounts:link_user_person_confirm' person_id=contact.person.id as confirm_url %}
+            {% if not linked %}
+              <a href="{% append_back_url confirm_url back %}" class="app-btn app-btn--secondary">このユーザーで紐付ける</a>
+            {% elif linked == user %}
+              <a href="{% append_back_url confirm_url back %}" class="app-btn app-btn--secondary">紐付け済み（解除）</a>
+            {% else %}
+              <span class="app-muted">ユーザー「{{ linked.username }}」と紐付け済み</span>
+            {% endif %}
+          {% endif %}
+        {% endwith %}
+      {% endif %}
     </div>
   </section>
 
