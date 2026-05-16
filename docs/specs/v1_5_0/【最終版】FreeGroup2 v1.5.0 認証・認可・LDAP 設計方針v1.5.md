@@ -2,15 +2,29 @@
 
 | 項目 | 内容 |
 | --- | --- |
-| バージョン | **v1.5** |
+| バージョン | **v1.5.1** |
 | 作成日 | 2026-05-12 |
-| 改訂日 | 2026-05-15 |
+| 改訂日 | 2026-05-16 |
 | 作成者 | クロード君（コード君） |
 | 対象バージョン | FreeGroup2 v1.5.0 |
-| ステータス | **コード君実装着手可能版（Phase 0 完了反映、3点整合性回復）** |
-| 前版 | v0.1 / v0.2 / v0.9 / v1.0 / v1.1 / v1.2 / v1.3 / v1.4 |
+| ステータス | **Phase 8 / Phase 8 #4 完了反映版（実装が Single Source of Truth、仕様書追従）** |
+| 前版 | v0.1 / v0.2 / v0.9 / v1.0 / v1.1 / v1.2 / v1.3 / v1.4 / v1.5 |
 
 ## 改訂履歴
+
+### v1.5.1（2026-05-16）— Phase 8 / Phase 8 #4 反映
+
+v1.5.0 の実装が Phase 8（UI 統合）／Phase 8 #4（紐付け確認画面新設）まで完了し、main マージ済み。仕様書外の追加実装として残っていた以下を仕様書に反映（実装が Single Source of Truth、仕様書は「何を」「なぜ」を記述する役割に専念）。
+
+| # | 変更箇所 | 内容 | 種別 |
+| --- | --- | --- | --- |
+| 1 | §4.1 末尾「Phase 8 で統合された User 周辺 UI（参照）」 | CustomUser を起点とする非 Admin UI（ログイン／プロフィール／トップバー）の Phase 8 統合状況を表で追記 | 整合性回復 |
+| 2 | §12.4「確認画面の有無」 | Phase 8 #4 で「ホーム画面以外のエントリポイント（プロフィール／Person 詳細／Contact 詳細）からは `LinkUserPersonConfirmView` に集約された」旨を追記。本アラート経由のみが従来通りの即時実行であることを明示 | 整合性回復 |
+| 3 | §12.6 末尾に「C. ナビゲーション導線」追加 | Phase 8 で `_topbar.html` に追加された「ユーザ管理」リンク（`perms.accounts.retire_user` ガード）を記述。Admin actions（A）／専用 View（B）／トップバー（C）の 3 経路の棲み分けを明示 | 整合性回復 |
+| 4 | §12.7「URL 設計」 | login / logout / profile / link_user_person_confirm / start_link_flow を urlpatterns に追加（実装に追従）。「`# ... 他の URL ...`」の省略表記を解消 | 整合性回復 |
+| 5 | §12.7.1 新設「紐付け確認画面と Person 探索フロー（★ Phase 8 #4 で追加）」 | `LinkUserPersonConfirmView` / `StartLinkFlowView` の実装と設計意図を追記。「なぜ確認画面を新設したか／なぜ link/unlink を 1 View に兼用したか／なぜ `StartLinkFlowView` を別 View として分けたか／`status=active` を明示する理由／なぜ Person 詳細・Contact 詳細から導線を引いたか」を「なぜ」として明示 | 新規（実装追従） |
+
+仕様書本体の他章（§1〜§11 / §13 / §14 / 付録 A〜D）に変更なし。`cards.*` Permission（A 項）等の v1.5.0 残課題は範囲外。
 
 ### v1.5（2026-05-15）
 
@@ -365,6 +379,18 @@ class CustomUserAdmin(UserAdmin):
         })
     retire_user_action.short_description = '退職処理（後継者選択あり）'
 ```
+
+#### Phase 8 で統合された User 周辺 UI（参照）
+
+CustomUser を起点とする UI は v1.5.0 Phase 8 で以下に統合された。CustomUserAdmin（本節）と並走する非 Admin の入口として位置付ける。
+
+| 機能 | 実装 | 備考 |
+| --- | --- | --- |
+| ログイン／ログアウト | `accounts:login` / `accounts:logout`（Django 標準 LoginView / LogoutView、`templates/accounts/login.html` 独自） | `settings.LOGIN_URL='accounts:login'` / `LOGIN_REDIRECT_URL='home'` / `LOGOUT_REDIRECT_URL='accounts:login'` を Phase 8 で設定 |
+| プロフィール画面 | `accounts:profile`（`ProfileView`、§12.7.1 末尾参照） | `_topbar.html` のユーザメニューから遷移。本人の username / 氏名 / メール / ロール / 部署 / 認証ソース / 紐付き Person を表示し、Person 紐付け／解除の入口を兼ねる |
+| トップバー（全画面共通） | `templates/_topbar.html` | アプリ切替に「ユーザ管理」（`perms.accounts.retire_user` ガード、§12.6 C）、ユーザメニューに「プロフィール／管理画面（`user.is_staff` ガード）／ログアウト（POST フォーム）」を Phase 8 で追加 |
+
+退職処理 UI（§12.6）は Admin actions（§12.6 A）／専用 View（§12.6 B）／トップバーからの導線（§12.6 C、Phase 8 で追加）の 3 経路で運用される。
 
 ### 4.2 Role
 
@@ -1251,9 +1277,10 @@ class HomeView(LoginRequiredMixin, TemplateView):
 
 ##### 確認画面の有無
 
-- **確認画面は挟まない**（紐付けは可逆な操作のため）
-- 直接 POST で `link_user_to_person()` を呼ぶ
-- 紐付けは別画面（§12.7 専用 View）でも実行可能なので、ホーム画面のは「即実行」のショートカット
+- **本アラートでは確認画面は挟まない**（自動検知済みで対象が自明、かつ紐付けは可逆な操作のため）
+- 直接 POST で `link_user_to_person()` を呼ぶ（`accounts:link_user_person`、§12.7 の `LinkUserPersonView`）
+- 紐付けは別画面（§12.7 専用 View および §12.7.1 の確認画面）でも実行可能なので、ホーム画面のは「即実行」のショートカット
+- ★ Phase 8 #4 で、ホーム画面以外のエントリポイント（プロフィール／Person 詳細／Contact 詳細）からは **`LinkUserPersonConfirmView`（§12.7.1）に集約**するようになった。本アラート経由のみが従来通りの即時実行
 
 ##### POST 後の挙動
 
@@ -1392,6 +1419,10 @@ class RetireUserView(LoginRequiredMixin, PermissionRequiredMixin, View):
 
 URL ルート（§12.7 末尾参照）。
 
+##### C. ナビゲーション導線（★ Phase 8 で追加）
+
+Phase 8 の UI 統合で、`templates/_topbar.html`（全画面共通トップバー）のアプリ切替リストに「ユーザ管理」リンクを追加した。`{% if perms.accounts.retire_user %}` ガードで `accounts.retire_user` 権限保持者にのみ表示し、`accounts:user_list` へ遷移する。退職処理 View（B）への通常導線は **トップバー → ユーザ管理一覧 → 各ユーザ詳細 → 退職処理** となる。Admin actions（A）は管理画面（`/admin/`）からのバッチ運用、専用 View（B）は通常 UI 上の個別運用、と棲み分ける。
+
 ### 12.7 紐付け／解除画面の View 設計（★ v1.1 で追加）
 
 #### サービス層（既存 v1.0 と同じ）
@@ -1523,13 +1554,27 @@ class UnlinkUserPersonView(LoginRequiredMixin, View):
 
 ```python
 # apps/accounts/urls.py
+from django.contrib.auth import views as auth_views
 from django.urls import path
 from . import views
 
 app_name = 'accounts'
 
 urlpatterns = [
-    # 紐付け／解除
+    # ログイン／ログアウト／プロフィール（Phase 8 で追加）
+    path('login/', auth_views.LoginView.as_view(template_name='accounts/login.html'), name='login'),
+    path('logout/', auth_views.LogoutView.as_view(), name='logout'),
+    path('profile/', views.ProfileView.as_view(), name='profile'),
+
+    # 紐付け確認画面 + 探索フロー開始（Phase 8 #4 で追加、§12.7.1 参照）
+    path('user-person/confirm/<uuid:person_id>/',
+         views.LinkUserPersonConfirmView.as_view(),
+         name='link_user_person_confirm'),
+    path('user-person/start-link/',
+         views.StartLinkFlowView.as_view(),
+         name='start_link_flow'),
+
+    # 紐付け／解除（ホーム画面アラートからの直接実行用、§12.4）
     path('users/<int:user_id>/link/<uuid:person_id>/',
          views.LinkUserPersonView.as_view(),
          name='link_user_person'),
@@ -1549,10 +1594,121 @@ urlpatterns = [
     path('users/<int:user_id>/',
          views.UserDetailView.as_view(),
          name='user_detail'),
-
-    # ... 他の URL ...
 ]
 ```
+
+### 12.7.1 紐付け確認画面と Person 探索フロー（★ Phase 8 #4 で追加）
+
+§12.4 のホーム画面アラートと §12.7 の `LinkUserPersonView` / `UnlinkUserPersonView` だけでは導線が不足することが Phase 8 の UI 統合作業で判明し、Phase 8 #4 で確認画面と探索フローを新設した。本節は実装に追従するかたちで、その設計意図と View 構成を記述する。
+
+#### 設計意図（なぜ確認画面を新設したか）
+
+- **エントリポイントの多様化**：Phase 8 #4 までに、紐付け／解除を起動できる入口が以下の 4 箇所に増えた。
+    1. ホーム画面アラート（§12.4、自動検知された候補に対し即実行）
+    2. プロフィール画面（§4.1 / §12.6）の「紐付けを解除する」「Person を探して紐付ける」
+    3. Person 詳細画面（`person_detail_orphan.html`）の「ユーザー紐付け」セクション
+    4. Contact 詳細画面（`contact_detail.html`）操作ボタン列の「このユーザーで紐付ける／紐付け済み（解除）」
+- 各入口で「紐付ける／解除する」を即時実行する従来 UI（§12.7 `LinkUserPersonView` / `UnlinkUserPersonView`、ホーム画面アラート専用）では、操作対象（User / Person）の対比情報がない状態でクリックすることになり、誤操作リスクが高い。
+- そこで、エントリポイントから一旦 **`LinkUserPersonConfirmView`（確認画面）に集約**し、「あなた（User）」と「対象 Person」を横並びで表示してから実行する設計に統一した。
+- ホーム画面アラート（§12.4）の `LinkUserPersonView` POST 直接実行は、自動検知済みで対象が自明なケースのため**従来通り確認画面を挟まない**（§12.4「確認画面の有無」参照）。新設した確認画面はそれ以外のエントリポイント（プロフィール／Person 詳細／Contact 詳細）からの導線を統一するためのもの。
+
+#### なぜ link / unlink を 1 View に兼用したか
+
+- 両方の操作が「指定された Person と request.user の紐付け状態を変更する」という同一文脈の操作であり、対象 Person を URL（`<uuid:person_id>`）で指定する点も同じ。
+- テンプレート側で `person.linked_user` の状態を見て「未紐付け／本人紐付け済み／他 User 紐付け済み」の 3 ケースを出し分け、対応するボタン（紐付ける／解除する／操作不可警告）を表示する。
+- POST の `action` パラメータ（`link` / `unlink`）で実行内容を切り替える。これにより URL 数を増やさず、確認画面のテンプレートを 1 枚で完結させた。
+
+#### なぜ `StartLinkFlowView` を別 View として分けたか
+
+- プロフィール画面で「未紐付け User が自分の Person を探す」シナリオでは、確認画面に渡すべき `person_id` がまだ確定していない。先に Person 一覧で候補を絞り込み、選択させる必要がある。
+- そこで、Person 一覧画面（`persons:person_list`）の検索 URL を組み立てる責務を `StartLinkFlowView` に切り出した。`?email=<user.email>&searched=1&status=active` を付与してリダイレクトすることで、本人の email と一致する active Person だけを表示する初期状態を作る。
+- `messages.info` で「リストから自分の Person を選んでください」と案内を出し、Person 一覧 → Person 詳細 → 確認画面 → 紐付け実行というフローを誘導する。
+- この責務分離により、Person 一覧画面側に「探索モード」用の特殊ロジックを追加せず、既存の検索フィルタ（email / status）の組合わせだけでフローを成立させている。
+
+##### `status=active` を明示する理由（実装メモ）
+
+- Person 一覧の `searched=1` パラメータは「明示的に検索した状態」を示し、デフォルトの status フィルタを外して全件を対象にする挙動になる。
+- そのため `searched=1` 単独では `status=archived` / `status=merged` の Person も対象に含まれてしまい、本人の email でヒットしない結果になりやすい（active 以外の Person が候補として無意味）。
+- `StartLinkFlowView` は `status=active` を明示的に付与し、本人候補として意味のある active Person だけを表示する。
+
+#### なぜ Person 詳細・Contact 詳細から導線を引いたか
+
+- 業務シナリオとして、ユーザーが Contact 検索や名刺一覧から自分の名刺を辿り着くケースが多い（プロフィール経由の探索よりも自然な動線）。
+- Contact 詳細画面では、`contact.person` 経由で紐付け対象 Person を一意に特定できる。Person 詳細画面（orphan）では Person そのものが対象として明示されている。どちらも「いま見ている Person を紐付ける」という意図がユーザーの中で確定している状態。
+- このため、両画面に「このユーザーで紐付ける／紐付け済み（解除）」リンクを配置し、確認画面（`accounts:link_user_person_confirm`）へ `append_back_url` で戻り先を保持しつつ遷移させる。
+- 表示条件は **未紐付け／本人紐付け済み／`accounts.link_user_to_person` 権限保持者**。それ以外（他 User 紐付き Person を権限なしユーザが見ている場合）は表示しない、または「ユーザー「○○」と紐付け済み」の静的テキストを表示する。
+
+#### View 実装（実装に追従）
+
+```python
+# apps/accounts/views.py（Phase 8 #4 で追加）
+import urllib.parse
+from django.contrib import messages
+from django.contrib.auth.mixins import LoginRequiredMixin
+from django.core.exceptions import ValidationError
+from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
+from django.views import View
+
+from back_navigator.back_navigator import BackNavigator
+from persons.models import Person
+from .services import link_user_to_person, unlink_user_from_person
+
+
+class LinkUserPersonConfirmView(LoginRequiredMixin, View):
+    """User-Person 紐付け確認画面。
+
+    [性質] GET=準関数（DB 読み取りのみ）／POST=副作用あり（DB 書込）
+    [権限] LoginRequiredMixin のみ（本フローは常に request.user 自身への操作）
+    """
+    template_name = 'accounts/link_user_person_confirm.html'
+
+    def get(self, request, person_id):
+        person = get_object_or_404(Person, pk=person_id)
+        return render(request, self.template_name, {
+            'person': person,
+            'back': BackNavigator(request),
+        })
+
+    def post(self, request, person_id):
+        person = get_object_or_404(Person, pk=person_id)
+        action = request.POST.get('action')
+        try:
+            if action == 'link':
+                link_user_to_person(operator=request.user, user=request.user, person=person)
+                messages.success(request, '紐付けました')
+            elif action == 'unlink':
+                unlink_user_from_person(operator=request.user, user=request.user)
+                messages.success(request, '紐付けを解除しました')
+        except ValidationError as e:
+            messages.error(request, str(e))
+            return redirect('accounts:link_user_person_confirm', person_id=person_id)
+        return redirect('accounts:profile')
+
+
+class StartLinkFlowView(LoginRequiredMixin, View):
+    """「Person を探して紐付ける」フロー開始 View。
+
+    [性質] 副作用なし（messages.info + redirect のみ）
+    [権限] LoginRequiredMixin（本人フロー開始のみ）
+    """
+    def get(self, request):
+        messages.info(
+            request,
+            '紐付け対象の Person を表示しています。リストから自分の Person を選んでください。',
+        )
+        params = urllib.parse.urlencode([
+            ('email', request.user.email),
+            ('searched', '1'),
+            ('status', 'active'),
+        ])
+        return redirect(f"{reverse('persons:person_list')}?{params}")
+```
+
+#### プロフィール画面（§12.6 と関連）の挙動
+
+- **紐付け済み（`user.person` が存在）**：「紐付け情報」セクションに「紐付けを解除する」リンクを表示。リンク先は `accounts:link_user_person_confirm`（`person_id=user.person.id`）。Phase 8 で導入された解除フォーム（POST 直接実行）から、Phase 8 #4 で確認画面経由に切り替えた。
+- **未紐付け（`user.person` が None）**：「Person との紐付け」セクションに「Person を探して紐付ける」リンクを表示。リンク先は `accounts:start_link_flow`。
 
 ### 12.8 業務動機（参考）
 
