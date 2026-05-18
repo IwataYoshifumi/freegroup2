@@ -10,12 +10,12 @@
 
 | Phase | 内容 | 主たる参照章 |
 |---|---|---|
-| **0** | 既存モデル拡張：`CustomUser.signature` / `Person.is_unsubscribed` / `Contact.salutation_name` フィールド定義のみ | §4.14 |
+| **0** | 既存モデル拡張：`CustomUser.signature` / `Person.is_unsubscribed` フィールド定義のみ（`Contact.salutation_name` は仕様書 §4.14.3 によりフィールド定義変更なしのため対象外） | §4.14 |
 | **1** | A-1 核心サービス関数 3 本（`get_same_person_unit()` / `unsubscribe_person()` / `cancel_unsubscribe()`）。実装のみ、配線は後 Phase。**絶対防衛線・本体不可侵** | §9.5 |
 | **2** | タグ機能一式:TagCategory / Tag / TagAssignment モデル + Tag CRUD UI + カテゴリ管理画面 + 検索結果一括タグ付け画面 + **B-1 タグ同期サービス関数**（単純コピー、`get_same_person_unit()` 不使用）+ `Execute_Merge_Only` への配線 | §4.9 / §4.9A / §4.10 / §9.4.5 / §11 / §18.4 |
 | **3** | リスト機能一式:MailingList / MailingListMember モデル + リスト CRUD UI + リスト作成画面（**B-2 段階線引き**：検索条件 AND 合成の受け口骨格まで、`extraction_snapshot` はフィールド定義のみ）+ 凍結保存 | §4.11 / §4.12 / §11.4.2.1 / §11.4.3.1 |
 | **4** | Settings シングルトン CRUD UI + SuppressedEmail CRUD UI（基盤系 2 モデル） | §4.8 / §4.13 |
-| **5** | Campaign モデル + EmailTemplate モデル + **メール本文生成エンジン（`EmailContext.prepare`）**（単体テストまで完結） | §4.2 / §4.3 / §7.4 |
+| **5** | Campaign モデル + EmailTemplate モデル + **メール本文生成エンジン（`EmailContext.prepare`）**（単体テストまで完結）。※前提：`Contact.salutation_name` 自動組み立て改修（仕様書 §18.2、コード君 B 担当）が完了していること | §4.2 / §4.3 / §7.4 / §18.2 |
 | **6** | Campaign CRUD UI + プレビュー UI（Ajax モーダル、Phase 5 の `prepare` を呼んで実動作）+ `salutation_name` 未設定の宛先 UI 表示 | §6.2.1 / §7.7.1 |
 | **7** | 送信処理本体:SMTP 抽象化レイヤー + テスト配信 + 予約配信 cron + 実送信 | §7.2 / §7.7 |
 | **8** | テンプレート CRUD UI（Phase 5 で作った EmailTemplate モデルに対する CRUD 画面） | §5.1（No.41〜45） |
