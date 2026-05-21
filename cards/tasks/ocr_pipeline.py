@@ -25,7 +25,7 @@ from PIL import Image, ImageOps
 
 from cards.models import BusinessCard, OriginalImage
 from cards.services.has_minimum_info import has_minimum_info
-from cards.services.json_normalizer import (
+from contacts.services.json_parser import (
     calc_orientation_adjusted_confidence_map,
     normalize_to_contact_dict,
 )
