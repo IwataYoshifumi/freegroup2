@@ -43,7 +43,7 @@ FreeGroup2 グループウェア
 - OCR パイプラインの堅牢性管理機能（多重起動対策・stuck 検出・整合性検査）
 - ActionLog による業務履歴管理機能
 
-OCR 関連の詳細仕様（OCR プロンプト・OCR 出力 JSON 構造・OpenCV パイプライン・json_parser・条件付き 2 回 OCR）は v1.6.0 系 3 本（OpenCV・OCR仕様書v1.6.0（Claude.API）統合版 / OCRプロンプト / JSON構造・コンタクトフィールド対応表）を参照。本書は Contact 編集・正規化基盤・Form・View・URL・マージ・重複検出・認証・運用の永続仕様を担う。
+OCR 関連の詳細仕様（OCR プロンプト・OCR 出力 JSON 構造・OpenCV パイプライン・json_parser・条件付き 2 回 OCR）は v1.6.0 系 3 本（OpenCV_OCR仕様書v1_6_0_Claude_API_統合版 / OCRプロンプト / JSON構造・コンタクトフィールド対応表）を参照。本書は Contact 編集・正規化基盤・Form・View・URL・マージ・重複検出・認証・運用の永続仕様を担う。
 
 ## 1.3 用語定義
 
@@ -491,9 +491,9 @@ ActionLog は DB 上のモデルであるため、DB 自体が障害時には Ac
 
 本書から OCR/OpenCV 関連仕様を引き剥がし、以下の v1.6.0 系 3 本に移行した。
 
-- OpenCV・OCR 統合仕様：`OpenCV・OCR仕様書v1.6.0（Claude.API）統合版.md`
-- OCR バックエンド指示書：`OpenCV・OCR仕様書v1.6.0（Claude.API）OCRプロンプト.md`
-- JSON 構造・Contact フィールド対応表：`OpenCV・OCR仕様書v1.6.0（Claude.API）JSON構造・コンタクトフィールド対応表.md`
+- OpenCV・OCR 統合仕様：`OpenCV_OCR仕様書v1_6_0_Claude_API_統合版.md`
+- OCR バックエンド指示書：`OpenCV_OCR仕様書v1_6_0_Claude_API_OCRプロンプト.md`
+- JSON 構造・Contact フィールド対応表：`OpenCV_OCR仕様書v1_6_0_Claude_API_JSON構造_コンタクトフィールド対応表.md`
 
 旧章節と移行先の対応：
 
@@ -1652,7 +1652,7 @@ JS なしで動的 UI が実現できるため、CLAUDE.md §7 の「新規 JS �
 
 ## 11.9 Contact 正規化基盤
 
-本節は Contact フィールドの 3 経路共有正規化基盤の本体仕様である。OCR 経路・手動入力 Form 経路・AJAX 経路の 3 経路がこの基盤を共有する。OCR 経路での純関数の呼び出しタイミング・順序・OCR 経路特有の前後処理は OpenCV・OCR仕様書v1.6.0（Claude.API）統合版 §3.3.1 / §5.3 / §2.4.1 / §2.4 を参照（同じ仕様を 2 箇所に書かない方針）。
+本節は Contact フィールドの 3 経路共有正規化基盤の本体仕様である。OCR 経路・手動入力 Form 経路・AJAX 経路の 3 経路がこの基盤を共有する。OCR 経路での純関数の呼び出しタイミング・順序・OCR 経路特有の前後処理は OpenCV_OCR仕様書v1_6_0_Claude_API_統合版 §3.3.1 / §5.3 / §2.4.1 / §2.4 を参照（同じ仕様を 2 箇所に書かない方針）。
 
 ### 11.9.1 配置
 
@@ -1670,7 +1670,7 @@ JS なしで動的 UI が実現できるため、CLAUDE.md §7 の「新規 JS �
 - `compose_full_address(postal_code, region, city, rest_of_address, country, lang)`：full_address 組み立て（4 要素から組み立て、Contact.address に格納）
 - `derive_org_core_name(org_name_full, legal_entity_type)`：org_core_name 導出
 - `derive_org_domain_name(email)`：org_domain_name 導出
-- `check_name_consistency(name_block: dict) -> dict[str, str]`：name ブロック整合性チェック（純関数）。**呼び出しタイミング・補正ルール（confidence を下げる方向のみ・サーバーログのみ・OCR プロンプトに匂わせない）は OpenCV・OCR仕様書v1.6.0（Claude.API）統合版 §2.4.1 を参照**。本基盤には純関数として配置する
+- `check_name_consistency(name_block: dict) -> dict[str, str]`：name ブロック整合性チェック（純関数）。**呼び出しタイミング・補正ルール（confidence を下げる方向のみ・サーバーログのみ・OCR プロンプトに匂わせない）は OpenCV_OCR仕様書v1_6_0_Claude_API_統合版 §2.4.1 を参照**。本基盤には純関数として配置する
 
 OCR 経路では json_parser が上記純関数を呼ぶ（呼び出しタイミング・順序は v1.6.0 統合版 §3.3.1 等を参照）。original_script → full_name コピー時の最小限正規化（全角空白→半角・連続空白 1 つ・前後空白除去・大文字小文字は変えない）も本基盤の純関数として実装する。
 
@@ -1737,7 +1737,7 @@ original_script は Contact に持たない（raw_json 内のみ）ため本カ�
 
 ### 11.9.7 salutation_name の再計算と手動入力フラグ
 
-`compute_salutation_name(contact)` は contact の primary_lang（lang）と姓名から salutation_name を組み立てる純関数（文化別ルールの本体は OpenCV・OCR仕様書v1.6.0（Claude.API）統合版 §1.5 を参照。本編は再計算の所属と発火条件を定める）。
+`compute_salutation_name(contact)` は contact の primary_lang（lang）と姓名から salutation_name を組み立てる純関数（文化別ルールの本体は OpenCV_OCR仕様書v1_6_0_Claude_API_統合版 §1.5 を参照。本編は再計算の所属と発火条件を定める）。
 
 - **Contact.save() オーバーライドで、`salutation_name_is_manual=False` のときのみ `compute_salutation_name(self)` を呼び出して salutation_name を再計算する**（v1.6 メール配信仕様書 §18.2 のマイグレーション・処理の所属は本編 §11.9 が正本）
 - `salutation_name_is_manual=True` のときは再計算せず、ユーザーが手動入力した値を保持する
@@ -2303,7 +2303,7 @@ Django 標準の CSRF 保護を継続。画像アップロードはバリデー�
 | 処理開始日時 | claimed_at | CAS 遷移時刻 |
 | OCR 結果 JSON | raw_json | v1.4.3 で完全 deprecated（書き込み・読み出しなし。将来削除予定として残置） |
 | デバッグ JSON | debug_json | v1.4.3 で正式記載。OpenCV 検出の中間データ |
-| EXIF 情報 JSON | exif_json | v1.6.0 で追加。JSONField(null=True, blank=True)。アップロード受信直後の生バイト列から GPS 含む全 EXIF を JSON 化して保存。既存処理（exif_transpose 等）は変更せず読み出しステップを 1 つ追加。既存レコードは復元不可・新規分のみ。詳細は OpenCV・OCR仕様書v1.6.0（Claude.API）統合版 §7.2 |
+| EXIF 情報 JSON | exif_json | v1.6.0 で追加。JSONField(null=True, blank=True)。アップロード受信直後の生バイト列から GPS 含む全 EXIF を JSON 化して保存。既存処理（exif_transpose 等）は変更せず読み出しステップを 1 つ追加。既存レコードは復元不可・新規分のみ。詳細は OpenCV_OCR仕様書v1_6_0_Claude_API_統合版 §7.2 |
 | 検出された名刺数 | detected_count |  |
 | エラーメッセージ | error_message |  |
 | 作成日時 | created_at |  |
@@ -2329,7 +2329,7 @@ Django 標準の CSRF 保護を継続。画像アップロードはバリデー�
 
 ### A.5 Contact のフィールド
 
-v1.6.0 で 19 件新規・4 件リネーム（うち 2 件は型変更）。正本は OpenCV・OCR仕様書v1.6.0（Claude.API）JSON構造・コンタクトフィールド対応表 §3。`original_script` は Contact フィールドに持たない（raw_json 内のみ。json_parser が full_name にコピー）。
+v1.6.0 で 19 件新規・4 件リネーム（うち 2 件は型変更）。正本は OpenCV_OCR仕様書v1_6_0_Claude_API_JSON構造_コンタクトフィールド対応表 §3。`original_script` は Contact フィールドに持たない（raw_json 内のみ。json_parser が full_name にコピー）。
 
 | 日本語名 | コーディング名 | 変更種別・備考 |
 |---|---|---|
@@ -2631,7 +2631,7 @@ BC 単位の OCR 処理結果の分類。null 許容（OpenCV cron 完了直後�
 | ocr_failed | OCR 失敗 | card 単位の OCR 例外 | 画像なし / 画像読み込み失敗 / OCR API 例外 |
 | others | その他 | 将来用の受け皿 | 現フェーズでは設定経路を持たないのが設計どおり |
 
-`others` は **将来用の受け皿**として TextChoices に定義のみ存在する。v1.6.0 時点では設定経路を持たないのが設計どおり（OCR バックエンド追加等で現判定ロジックに分類しきれない結果が出たとき、新値マイグレーションなしで採用できる予備枠）。値の廃止・新値追加はしない。詳細は OpenCV・OCR仕様書v1.6.0（Claude.API）統合版 §7.3。
+`others` は **将来用の受け皿**として TextChoices に定義のみ存在する。v1.6.0 時点では設定経路を持たないのが設計どおり（OCR バックエンド追加等で現判定ロジックに分類しきれない結果が出たとき、新値マイグレーションなしで採用できる予備枠）。値の廃止・新値追加はしない。詳細は OpenCV_OCR仕様書v1_6_0_Claude_API_統合版 §7.3。
 ### C.15（欠番）
 
 旧 C.15（DebugMask.MaskType）は §4.12 とともに削除（欠番）。OpenCV デバッグ仕様は v1.6.0 系 3 本へ。
@@ -2662,4 +2662,4 @@ BC 単位の OCR 処理結果の分類。null 許容（OpenCV cron 完了直後�
 
 # 巻末別表E・F（欠番）
 
-旧 別表E（v1.4.2 → v1.4.3 差分一覧）・別表F（v1.4.3 時点の不明点）は v1.6.0 で削除（欠番）。OCR 関連の不明点は OpenCV・OCR仕様書v1.6.0（Claude.API）統合版 第 8 部に統合済み。
+旧 別表E（v1.4.2 → v1.4.3 差分一覧）・別表F（v1.4.3 時点の不明点）は v1.6.0 で削除（欠番）。OCR 関連の不明点は OpenCV_OCR仕様書v1_6_0_Claude_API_統合版 第 8 部に統合済み。
