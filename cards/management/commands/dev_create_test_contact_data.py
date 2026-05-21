@@ -1,6 +1,7 @@
 """dev_create_test_contact_data 管理コマンド（開発ツール）。
 
-v1.4.2 系統X / 系統Y / C ブロックの動作確認用テストデータを生成する。
+v1.4.2 系統X / 系統Y / C ブロックの動作確認用テストデータを生成する
+（v1.6.0 で Contact フィールドのリネーム / personal_phone・personal_fax の JSONField 化に追従）。
 Contact + Person + ContactFieldConfidence のみ生成し、BusinessCard / OriginalImage は
 作らない（OCR 経路は再現しない方針）。
 
@@ -8,7 +9,7 @@ Contact + Person + ContactFieldConfidence のみ生成し、BusinessCard / Origi
 - 生成は 5 グループ：① 完全同一名刺 / ② 異動・転職 / ③ 改姓・部署変更 /
   ④ 同姓同名 / ⑤ ノイズ
 - 各 Contact に 1:1 で新規 Person を作る（cron 実行前のシード状態を再現）
-- ContactFieldConfidence は §4.6.1 / §10.6.4 に従い low / medium のみ DB レコード化、
+- ContactFieldConfidence は §4.6.1 / §10.6.4 に従い low / mid のみ DB レコード化、
   high はレコード作らない（CheckConstraint で物理禁止）
 - プール値は §15.5.3 の正規化ルールで予め整形済み（電話=数字のみ、メール=小文字、
   住所=空白なし／丁目・番地・号→ハイフン、会社=前株/後株別扱い）
@@ -44,20 +45,20 @@ DEFAULT_SEED = 42
 FREE_EMAIL_DOMAINS = ["gmail.com", "yahoo.co.jp", "outlook.com"]
 
 # random モードの confidence 分布（仕様書 §10.6.4 / OCR の現実的な分布の再現）。
-# 値は (high, medium, low) の確率（合計 1.0）。
-# fax は DUPLICATE_CHECK_FIELDS には含まれないが、タスク仕様で分布が指定されているため
+# 値は (high, mid, low) の確率（合計 1.0）。
+# personal_fax は DUPLICATE_CHECK_FIELDS には含まれないが、タスク仕様で分布が指定されているため
 # confidence レコード生成対象に含める（DB 制約上は field_name 自由）。
 CONFIDENCE_DISTRIBUTION = {
-    "full_name":  (0.80, 0.20, 0.00),
-    "email":      (0.70, 0.25, 0.05),
-    "mobile":     (0.70, 0.25, 0.05),
-    "phone":      (0.70, 0.25, 0.05),
-    "fax":        (0.70, 0.25, 0.05),
-    "company":    (0.75, 0.20, 0.05),
-    "department": (0.65, 0.25, 0.10),
-    "title":      (0.65, 0.25, 0.10),
-    "branch":     (0.65, 0.25, 0.10),
-    "address":    (0.60, 0.30, 0.10),
+    "full_name":      (0.80, 0.20, 0.00),
+    "email":          (0.70, 0.25, 0.05),
+    "mobile_phone":   (0.70, 0.25, 0.05),
+    "personal_phone": (0.70, 0.25, 0.05),
+    "personal_fax":   (0.70, 0.25, 0.05),
+    "organization":   (0.75, 0.20, 0.05),
+    "department":     (0.65, 0.25, 0.10),
+    "title":          (0.65, 0.25, 0.10),
+    "branch":         (0.65, 0.25, 0.10),
+    "address":        (0.60, 0.30, 0.10),
 }
 
 # confidence を割り当てる対象フィールド一覧。
@@ -403,7 +404,7 @@ def _resolve_confidence(
     mode: str,
     custom_high_fields: List[str],
 ) -> str:
-    """フィールドの confidence を決定する（'low' / 'medium' / 'high'）。
+    """フィールドの confidence を決定する（'low' / 'mid' / 'high'）。
 
     [性質] 純関数（rng は外部状態）
     """
@@ -420,7 +421,7 @@ def _resolve_confidence(
     if r < high_p:
         return "high"
     if r < high_p + mid_p:
-        return "medium"
+        return "mid"
     return "low"
 
 
@@ -503,17 +504,17 @@ class ContactSnapshot:
 
     group_label: str
     full_name_obj: FullName
-    company: Company
+    company: Company  # Company dataclass インスタンス（Contact.organization の入力源）
     branch: Optional[Branch]
     department: str
     title: str
     email: str
-    phone: str  # 会社代表 or 拠点電話
-    mobile: str
-    fax: str
+    personal_phone: str  # Contact.personal_phone（JSONField）への書込時に [value] でラップ
+    mobile_phone: str
+    personal_fax: str    # Contact.personal_fax（JSONField）への書込時に [value] でラップ
     address: str
     postal_code: str
-    confidence_map: dict  # field_name -> 'high'/'medium'/'low'
+    confidence_map: dict  # field_name -> 'high'/'mid'/'low'
 
     @property
     def company_name(self) -> str:
@@ -527,7 +528,7 @@ class ContactSnapshot:
 def _build_confidence_map(
     rng: random.Random, mode: str, custom_high_fields: List[str]
 ) -> dict:
-    """confidence_map（field_name -> 'high'/'medium'/'low'）を生成。"""
+    """confidence_map（field_name -> 'high'/'mid'/'low'）を生成。"""
     return {
         fn: _resolve_confidence(rng, fn, mode, custom_high_fields)
         for fn in TRACKED_CONFIDENCE_FIELDS
@@ -539,7 +540,7 @@ def _maybe_apply_irregular(
 ) -> None:
     """イレギュラーパターンを混入（実値の差分注入）。
 
-    確率 irregular_rate で snap の (phone / address / postal_code) のいずれかを
+    確率 irregular_rate で snap の (personal_phone / address / postal_code) のいずれかを
     別値に差し替える。グループ① には適用しない（呼び出し側で除外）。
     """
     if rng.random() >= irregular_rate:
@@ -547,10 +548,11 @@ def _maybe_apply_irregular(
     target = rng.choice(["phone", "address_postal", "email_domain"])
     if target == "phone":
         # 別の拠点の電話番号と入れ替える（あれば）
+        # 注：Branch/Company 側の hq_phone / phone はそのまま（会社側の概念）。
         candidates = [snap.company.hq_phone] + [b.phone for b in snap.company.branches]
-        choices = [p for p in candidates if p != snap.phone]
+        choices = [p for p in candidates if p != snap.personal_phone]
         if choices:
-            snap.phone = rng.choice(choices)
+            snap.personal_phone = rng.choice(choices)
     elif target == "address_postal":
         # 「郵便番号と住所が古い情報のまま」想定：同じ会社内で別の拠点 / 本社へ住所を差し替え
         # （例：本社→大阪支店、大阪支店→本社）。別会社の住所は混ぜない。
@@ -577,7 +579,7 @@ def _make_personal_contact_snap(
     title: str,
     *,
     branch: Optional[Branch] = None,
-    mobile: Optional[str] = None,
+    mobile_phone: Optional[str] = None,
     use_generic_email: bool = False,
     confidence_mode: str = "random",
     custom_high_fields: Optional[List[str]] = None,
@@ -586,18 +588,21 @@ def _make_personal_contact_snap(
 
     branch=None は「本社」を意味する（branch をランダムに選びたい場合は呼び出し側で
     `rng.choice(company.branches)` を渡すこと）。
+
+    v1.6.0 リネーム対応：snap の personal_phone / personal_fax には拠点 or 本社の番号を
+    そのまま割り当てる（Phase 1B 以降に org_phone / org_fax が追加されたら役割を整理予定）。
     """
-    if mobile is None:
-        mobile = _gen_mobile(rng)
+    if mobile_phone is None:
+        mobile_phone = _gen_mobile(rng)
 
     if branch:
-        phone = branch.phone
-        fax = branch.fax
+        personal_phone = branch.phone
+        personal_fax = branch.fax
         postal_code = branch.postal_code
         address = branch.address
     else:
-        phone = company.hq_phone
-        fax = company.hq_fax
+        personal_phone = company.hq_phone
+        personal_fax = company.hq_fax
         postal_code = company.hq_postal_code
         address = company.hq_address
 
@@ -620,9 +625,9 @@ def _make_personal_contact_snap(
         department=department,
         title=title,
         email=email,
-        phone=phone,
-        mobile=mobile,
-        fax=fax,
+        personal_phone=personal_phone,
+        mobile_phone=mobile_phone,
+        personal_fax=personal_fax,
         address=address,
         postal_code=postal_code,
         confidence_map=confidence_map,
@@ -650,7 +655,7 @@ def _generate_clone_group(
     branch = None  # 本社固定
     department = "営業部"
     title = "課長"
-    mobile = "09011112222"
+    mobile_phone = "09011112222"
     # メール local も固定（個人メール）
     email_local = _romaji_join([full_name.first_romaji, full_name.last_romaji], ".")
     base_email = f"{email_local}@{company.domain}".lower()
@@ -671,9 +676,9 @@ def _generate_clone_group(
                 department=department,
                 title=title,
                 email=base_email,
-                phone=base_phone,
-                mobile=mobile,
-                fax=base_fax,
+                personal_phone=base_phone,
+                mobile_phone=mobile_phone,
+                personal_fax=base_fax,
                 address=base_address,
                 postal_code=base_postal,
                 confidence_map=confidence_map,
@@ -713,7 +718,7 @@ def _generate_career_group(
                     rng, "career_A", full_name, company_a,
                     department="営業部", title="主任",
                     branch=None,  # 本社
-                    mobile=mobile_persist,
+                    mobile_phone=mobile_persist,
                     confidence_mode=confidence_mode,
                     custom_high_fields=custom_high_fields,
                 )
@@ -725,7 +730,7 @@ def _generate_career_group(
                     rng, "career_B", full_name, company_a,
                     department="営業部", title="課長",
                     branch=None,
-                    mobile=mobile_persist,
+                    mobile_phone=mobile_persist,
                     confidence_mode=confidence_mode,
                     custom_high_fields=custom_high_fields,
                 )
@@ -737,7 +742,7 @@ def _generate_career_group(
                     rng, "career_C", full_name, company_c,
                     department="技術部", title="課長",
                     branch=None,
-                    mobile=mobile_persist,
+                    mobile_phone=mobile_persist,
                     confidence_mode=confidence_mode,
                     custom_high_fields=custom_high_fields,
                 )
@@ -749,7 +754,7 @@ def _generate_career_group(
                     rng, "career_D", full_name, company_d,
                     department="物流部", title="部長",
                     branch=None,
-                    mobile=mobile_after_d,
+                    mobile_phone=mobile_after_d,
                     confidence_mode=confidence_mode,
                     custom_high_fields=custom_high_fields,
                 )
@@ -791,7 +796,7 @@ def _generate_namechange_group(
                     company_old,
                     department="技術部", title="主任",
                     branch=None,
-                    mobile=mobile_persist,
+                    mobile_phone=mobile_persist,
                     confidence_mode=confidence_mode,
                     custom_high_fields=custom_high_fields,
                 )
@@ -803,7 +808,7 @@ def _generate_namechange_group(
                     rng, "namechange_S2", name_new, company_old,
                     department="開発部", title="課長",
                     branch=None,
-                    mobile=mobile_persist,
+                    mobile_phone=mobile_persist,
                     confidence_mode=confidence_mode,
                     custom_high_fields=custom_high_fields,
                 )
@@ -815,7 +820,7 @@ def _generate_namechange_group(
                     rng, "namechange_S3", name_new, company_new,
                     department="マーケティング部", title="課長",
                     branch=None,
-                    mobile=mobile_persist,
+                    mobile_phone=mobile_persist,
                     confidence_mode=confidence_mode,
                     custom_high_fields=custom_high_fields,
                 )
@@ -850,7 +855,7 @@ def _generate_namesake_group(
                 department=departments[idx],
                 title=titles[idx],
                 branch=None,
-                mobile=mobiles[idx],
+                mobile_phone=mobiles[idx],
                 confidence_mode=confidence_mode,
                 custom_high_fields=custom_high_fields,
             )
@@ -889,7 +894,7 @@ def _generate_noise_group(
                 department=department,
                 title=title,
                 branch=rng.choice(company.branches) if (company.branches and rng.random() < 0.5) else None,
-                mobile=_gen_mobile(rng),
+                mobile_phone=_gen_mobile(rng),
                 use_generic_email=use_generic,
                 confidence_mode=confidence_mode,
                 custom_high_fields=custom_high_fields,
@@ -917,6 +922,11 @@ def _create_contact_from_snapshot(
     """
     person = Person.objects.create(status=Person.Status.ACTIVE)
 
+    # v1.6.0：personal_phone / personal_fax は JSONField(default=list)。
+    # 値があれば 1 要素リストに、空文字なら空リストにラップする。
+    personal_phone_list = [snap.personal_phone] if snap.personal_phone else []
+    personal_fax_list = [snap.personal_fax] if snap.personal_fax else []
+
     contact = Contact.objects.create(
         business_card=None,
         person=person,
@@ -926,14 +936,14 @@ def _create_contact_from_snapshot(
         full_name=snap.full_name_obj.full,
         last_name=snap.full_name_obj.last,
         first_name=snap.full_name_obj.first,
-        company=snap.company_name,
+        organization=snap.company_name,
         branch=snap.branch_name,
         department=snap.department,
         title=snap.title,
         email=snap.email,
-        phone=snap.phone,
-        mobile=snap.mobile,
-        fax=snap.fax,
+        personal_phone=personal_phone_list,
+        mobile_phone=snap.mobile_phone,
+        personal_fax=personal_fax_list,
         address=snap.address,
         postal_code=snap.postal_code,
     )
@@ -942,7 +952,7 @@ def _create_contact_from_snapshot(
     person.primary_contact = contact
     person.save(update_fields=["primary_contact", "updated_at"])
 
-    # ContactFieldConfidence：low / medium のみ DB レコード化（§4.6.1 / §10.6.4）
+    # ContactFieldConfidence：low / mid のみ DB レコード化（§4.6.1 / §10.6.4）
     ContactFieldConfidence.create_for_contact(contact, snap.confidence_map)
 
     return person, contact
@@ -996,19 +1006,19 @@ def _reset_test_data(user, stdout) -> dict:
 def _format_snap_line(idx: int, snap: ContactSnapshot, verbose: bool) -> str:
     """1 件分の Contact を表示用文字列に。"""
     confidence_low_mid = sorted(
-        f"{k}={v}" for k, v in snap.confidence_map.items() if v in ("low", "medium")
+        f"{k}={v}" for k, v in snap.confidence_map.items() if v in ("low", "mid")
     )
     short = (
         f"  [{idx:03d}][{snap.group_label:>14s}] "
         f"{snap.full_name_obj.full:<10s} | {snap.company_name} / {snap.department} "
-        f"/ {snap.title or '(平)'} | mobile={snap.mobile} email={snap.email}"
+        f"/ {snap.title or '(平)'} | mobile_phone={snap.mobile_phone} email={snap.email}"
     )
     if not verbose:
         return short
     detail = (
-        f"\n         branch={snap.branch_name or '-'} phone={snap.phone} "
-        f"fax={snap.fax} postal={snap.postal_code} address={snap.address}"
-        f"\n         confidence(low/medium)={','.join(confidence_low_mid) or '-'}"
+        f"\n         branch={snap.branch_name or '-'} personal_phone={snap.personal_phone} "
+        f"personal_fax={snap.personal_fax} postal={snap.postal_code} address={snap.address}"
+        f"\n         confidence(low/mid)={','.join(confidence_low_mid) or '-'}"
     )
     return short + detail
 

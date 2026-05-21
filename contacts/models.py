@@ -12,7 +12,7 @@ from persons.models import Person
 
 
 class Contact(models.Model):
-    """連絡先DB（仕様書 v1.4.2 §4.4）。1 名刺 = 1 Contact のスナップショット設計（§4.4.0）。"""
+    """連絡先DB（仕様書 v1.6.0 §4.4 / 別表 A.5）。1 名刺 = 1 Contact のスナップショット設計（§4.4.0）。"""
 
     class Status(models.TextChoices):
         """Contact のステータス（仕様書 §4.4.2 / 別表 C.10）。"""
@@ -75,7 +75,7 @@ class Contact(models.Model):
     first_name = models.CharField(max_length=255, blank=True, default="")
     salutation_name = models.CharField(max_length=255, blank=True, default="")
 
-    company = models.CharField(max_length=255, blank=True, default="")
+    organization = models.CharField(max_length=255, blank=True, default="")
     department = models.CharField(max_length=255, blank=True, default="")
     title = models.CharField(max_length=255, blank=True, default="")
     qualification = models.CharField(max_length=500, blank=True, default="")
@@ -84,9 +84,9 @@ class Contact(models.Model):
     address = models.CharField(max_length=500, blank=True, default="")
 
     email = models.CharField(max_length=255, blank=True, default="")
-    phone = models.CharField(max_length=50, blank=True, default="")
-    mobile = models.CharField(max_length=50, blank=True, default="")
-    fax = models.CharField(max_length=50, blank=True, default="")
+    personal_phone = models.JSONField(default=list, blank=True)
+    mobile_phone = models.CharField(max_length=50, blank=True, default="")
+    personal_fax = models.JSONField(default=list, blank=True)
     website = models.CharField(max_length=500, blank=True, default="")
 
     twitter = models.CharField(max_length=255, blank=True, default="")
@@ -123,7 +123,7 @@ class Contact(models.Model):
         "first_name",
         "salutation_name",
         # 会社系
-        "company",
+        "organization",
         "department",
         "title",
         "qualification",
@@ -133,9 +133,9 @@ class Contact(models.Model):
         "postal_code",
         "address",
         "email",
-        "phone",
-        "mobile",
-        "fax",
+        "personal_phone",
+        "mobile_phone",
+        "personal_fax",
         "website",
         # SNS
         "twitter",
@@ -188,7 +188,7 @@ class Contact(models.Model):
             if changed_fields:
                 self.save(update_fields=changed_fields + ["updated_at"])
 
-            # 全 ContactFieldConfidence（DB 上の low/medium レコード）を confirmed 化
+            # 全 ContactFieldConfidence（DB 上の low/mid レコード）を confirmed 化
             low_mid_field_names = list(
                 ContactFieldConfidence.objects.filter(contact=self).values_list(
                     "field_name", flat=True
@@ -205,6 +205,9 @@ class Contact(models.Model):
 
         [性質] 副作用あり（DB 書込：自身のフィールド + ContactFieldConfidence の確認済み化
                + DUPLICATE_CHECK_FIELDS のときは pending DC の invalidated 化）
+
+        UPDATABLE_FIELDS 内の personal_phone / personal_fax / org_phone / org_fax は
+        JSONField(default=list) のため、new_value は list を想定する（呼び出し側責務）。
         [入力] field_name: str（UPDATABLE_FIELDS のいずれか）
                new_value: 任意（field_name の値型）
                user: 確認者（updated_by および ContactFieldConfidence.confirmed_by に記録）
@@ -220,7 +223,7 @@ class Contact(models.Model):
              （updated_by = user / updated_at は auto_now で更新）
           2. 当該 1 フィールドの ContactFieldConfidence を confirmed 化
              （low/mid CFC レコードがあれば。high 扱い（CFC レコードなし）なら no-op、
-             §10.6.1 既存挙動）
+             §10.6.1 既存挙動）。confidence の値域は v1.6.0 で medium → mid に統一済み。
           3. field_name が DUPLICATE_CHECK_FIELDS に含まれる場合のみ
              invalidate_pending_candidates(self) を呼ぶ（§12.7）
 
@@ -275,7 +278,7 @@ class Contact(models.Model):
         [出力] dict[field_name -> ContactFieldConfidence インスタンス]
 
         DUPLICATE_CHECK_FIELDS 全 9 フィールドのキーを含む（§6.3 / §9.1）。
-        DB に存在する low/medium はそのまま、それ以外は confidence='high' / pk=None の疑似インスタンス。
+        DB に存在する low/mid はそのまま、それ以外は confidence='high' / pk=None の疑似インスタンス。
         実装は ContactFieldConfidence.get_for_contact(self) に委譲（§10.5.3 の責務分離）。
         """
         return ContactFieldConfidence.get_for_contact(self)
@@ -287,7 +290,7 @@ class Contact(models.Model):
         [入力] なし
         [出力] set[field_name]
 
-        判定：confidence='high'（疑似 high）または confirmed_at != None（確認済み low/medium）
+        判定：confidence='high'（疑似 high）または confirmed_at != None（確認済み low/mid）
         """
         confidences = self.get_field_confidences()
         high = set()
@@ -312,17 +315,17 @@ class Contact(models.Model):
 
 
 class ContactFieldConfidence(models.Model):
-    """信頼度メタDB（仕様書 v1.4.2 §4.6）。
+    """信頼度メタDB（仕様書 v1.6.0 §4.6 / 別表 C.3）。
 
-    OCR で取り込まれた Contact のフィールドのうち、low / medium のものだけレコード化する。
+    OCR で取り込まれた Contact のフィールドのうち、low / mid のものだけレコード化する。
     high は記録対象外（疑似インスタンスとしてのみ生成、DB 保存しない、§4.6.1）。
     """
 
     class Confidence(models.TextChoices):
-        """信頼度（仕様書 §4.6 / 別表 C.3）。high は記録対象外。"""
+        """信頼度（仕様書 §4.6 / 別表 C.3）。high は記録対象外。v1.6.0 で medium → mid 統一。"""
 
         LOW = "low", _("低")
-        MEDIUM = "medium", _("中")
+        MID = "mid", _("中")
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     contact = models.ForeignKey(
@@ -349,8 +352,8 @@ class ContactFieldConfidence(models.Model):
                 name="unique_contact_field_name",
             ),
             CheckConstraint(
-                condition=Q(confidence__in=["low", "medium"]),
-                name="confidence_low_or_medium",
+                condition=Q(confidence__in=["low", "mid"]),
+                name="confidence_low_or_mid",
             ),
         ]
 
@@ -378,7 +381,7 @@ class ContactFieldConfidence(models.Model):
         [出力] dict[field_name -> ContactFieldConfidence インスタンス]
 
         DUPLICATE_CHECK_FIELDS 全 9 フィールドのキーを含む（§6.3 / §9.1）。
-        DB に存在する low/medium はそのまま返し、存在しないフィールドは confidence='high' /
+        DB に存在する low/mid はそのまま返し、存在しないフィールドは confidence='high' /
         pk=None の疑似インスタンスを生成する（保存しないこと、§4.6.1 / §10.6.2）。
         N+1 を避けるため DB クエリは 1 回のみ。
         """
@@ -402,14 +405,14 @@ class ContactFieldConfidence(models.Model):
 
     @classmethod
     def create_for_contact(cls, contact, confidence_map):
-        """OCR 結果の medium/low フィールドについて一括作成（§10.6.1 / §10.6.4 ケース 1）。
+        """OCR 結果の mid/low フィールドについて一括作成（§10.6.1 / §10.6.4 ケース 1）。
 
         [性質] 副作用あり（DB書込）
         [入力] contact: Contact（保存済み）
-               confidence_map: dict[field_name -> 'low' / 'medium' / 'high']
+               confidence_map: dict[field_name -> 'low' / 'mid' / 'high']
         [出力] None
 
-        confidence_map のうち 'low' / 'medium' のみ DB レコードを作成する。
+        confidence_map のうち 'low' / 'mid' のみ DB レコードを作成する。
         'high' は記録対象外（§4.6.1）、それ以外の値もスキップ。
         bulk_create を使うため save() オーバーライドはバイパスされるが、事前に high を除外して
         いるため CheckConstraint 違反は発生しない。
@@ -421,7 +424,7 @@ class ContactFieldConfidence(models.Model):
                 confidence=confidence,
             )
             for field_name, confidence in confidence_map.items()
-            if confidence in ("low", "medium")
+            if confidence in ("low", "mid")
         ]
         if targets:
             cls.objects.bulk_create(targets)
@@ -436,7 +439,7 @@ class ContactFieldConfidence(models.Model):
                user: 確認者
         [出力] None
 
-        confidence の値は変更しない（low / medium のまま、§6.2 / §8.5.4）。
+        confidence の値は変更しない（low / mid のまま、§6.2 / §8.5.4）。
         既に confirmed 済みのレコードも上書き更新する。auto_now が QuerySet.update() で
         効かないため updated_at を明示更新する。
         """

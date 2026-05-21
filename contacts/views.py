@@ -61,7 +61,7 @@ class ContactListView(ListView):
     GET 専用。デフォルトは active Person 配下の primary / active のみ表示。
     検索フォームの「inactive を含める」チェックで inactive も表示できる
     （merged / archived Person 配下は常に除外）。検索仕様は CardListView と
-    同形（7 フィールド AND、tel は phone / mobile / fax の OR）。
+    同形（7 フィールド AND、tel は personal_phone / mobile_phone / personal_fax の OR）。
     """
 
     model = Contact
@@ -71,7 +71,7 @@ class ContactListView(ListView):
 
     _SEARCH_PARAMS = (
         "name",
-        "company",
+        "organization",
         "department",
         "title",
         "email",
@@ -103,8 +103,8 @@ class ContactListView(ListView):
         p = self.request.GET
         if p.get("name", "").strip():
             qs = qs.filter(full_name__icontains=p["name"].strip())
-        if p.get("company", "").strip():
-            qs = qs.filter(company__icontains=p["company"].strip())
+        if p.get("organization", "").strip():
+            qs = qs.filter(organization__icontains=p["organization"].strip())
         if p.get("department", "").strip():
             qs = qs.filter(department__icontains=p["department"].strip())
         if p.get("title", "").strip():
@@ -114,9 +114,9 @@ class ContactListView(ListView):
         if p.get("tel", "").strip():
             tel = p["tel"].strip()
             qs = qs.filter(
-                Q(phone__icontains=tel)
-                | Q(mobile__icontains=tel)
-                | Q(fax__icontains=tel)
+                Q(personal_phone__icontains=tel)
+                | Q(mobile_phone__icontains=tel)
+                | Q(personal_fax__icontains=tel)
             )
         if p.get("address", "").strip():
             qs = qs.filter(address__icontains=p["address"].strip())
@@ -131,7 +131,7 @@ class ContactListView(ListView):
             "コンタクト一覧",
             [
                 "name",
-                "company",
+                "organization",
                 "department",
                 "title",
                 "email",

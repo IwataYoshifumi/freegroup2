@@ -44,10 +44,10 @@
           {% for candidate, score, rank in top5 %}
             <tr>
               <td>{{ candidate.full_name|default:"(氏名なし)" }}</td>
-              <td>{{ candidate.company }}</td>
+              <td>{{ candidate.organization }}</td>
               <td>{{ candidate.department }}</td>
               <td>{{ candidate.email }}</td>
-              <td>{{ candidate.mobile }}</td>
+              <td>{{ candidate.mobile_phone }}</td>
               <td>
                 {% if rank == "exact_match" %}
                   <span class="app-status-badge app-status-badge--error">完全一致</span>

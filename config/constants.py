@@ -1,4 +1,4 @@
-"""共通 TextChoices と定数（仕様書 v1.4.2 §14.3）。
+"""共通 TextChoices と定数（仕様書 v1.6.0 §14.3）。
 
 複数アプリで共通利用する TextChoices と定数をここに集約する。
 モデル固有の選択肢は各モデルの内部クラスとして定義する（仕様書 §14.4）。
@@ -50,15 +50,18 @@ class DifferentPersonReason(models.TextChoices):
 
 
 # 重複検出のスコア計算と Contact 編集の発火判定で共通利用するフィールド一覧（仕様書 §14.3.5）。
+# v1.6.0 で company → organization / phone → personal_phone / mobile → mobile_phone を機械的リネーム反映。
+# フィールド数 9 件・スコア・ランク閾値・判定ロジックは不変。
+# org_phone / org_fax は含めない（会社代表電話は同一会社の複数人で同値、別人誤マージ防止）。
 DUPLICATE_CHECK_FIELDS = [
     "full_name",
-    "company",
+    "organization",
     "department",
     "title",
     "branch",
     "email",
-    "phone",
-    "mobile",
+    "personal_phone",
+    "mobile_phone",
     "address",
 ]
 
@@ -86,12 +89,12 @@ DUPLICATE_GENERIC_EMAIL_LOCALPARTS = [
 # branch（支店・営業所）は配点なし（所属5フィールド判定にのみ参加）。
 DUPLICATE_FIELD_SCORES = {
     "full_name": 40,
-    "company": 10,
+    "organization": 10,
     "department": 10,
     "title": 5,
     "address": 10,
-    "phone": 5,
-    "mobile": 80,
+    "personal_phone": 5,
+    "mobile_phone": 80,
 }
 DUPLICATE_SCORE_EMAIL_PERSONAL = 80
 DUPLICATE_SCORE_EMAIL_GENERIC = 5
@@ -102,10 +105,10 @@ POSSIBLE_MID_MIN_SCORE = 120
 POSSIBLE_HIGH_MIN_SCORE = 200
 
 # 所属5フィールド（仕様書 §8.4 exact_match の「両方一致 or 両方空」判定用）。
-# DUPLICATE_CHECK_FIELDS 9 項目から個人系（full_name / email / phone / mobile）を
+# DUPLICATE_CHECK_FIELDS 9 項目から個人系（full_name / email / personal_phone / mobile_phone）を
 # 除いた 5 項目。
 DUPLICATE_LOCATION_FIELDS = [
-    "company",
+    "organization",
     "department",
     "title",
     "branch",

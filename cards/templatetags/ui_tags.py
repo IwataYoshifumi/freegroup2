@@ -38,7 +38,6 @@ register = Library()
 
 _CONFIDENCE_BADGE_VARIANT = {
     "low": ("error", "低"),
-    "medium": ("warning", "中"),
     "mid": ("warning", "中"),
 }
 
@@ -54,7 +53,7 @@ def confidence(confidences, field_name, format="badge"):
            format: str（'badge' のみサポート、D-3b）
     [出力] SafeString
         - confidence='high'（疑似インスタンス）: 空文字（バッジを描画しない）
-        - low/medium AND confirmed_at IS NULL: 低 / 中 バッジ
+        - low/mid AND confirmed_at IS NULL: 低 / 中 バッジ
         - confirmed_at IS NOT NULL: 「確認済み」バッジ
 
     判定ロジック：
@@ -158,7 +157,7 @@ def confidence_state(confidences, field_name):
     判定ロジック：
       - 疑似 high インスタンス（CFC レコードなし）→ 'high'
       - confirmed_at IS NOT NULL → 'confirmed'
-      - confidence='medium' AND 未確認 → 'mid'（短縮形、JS フック用）
+      - confidence='mid' AND 未確認 → 'mid'
       - confidence='low' AND 未確認 → 'low'
 
     JS 側はこの値で「修正 UI を出すかどうか」「未確認バッジを出すかどうか」を判定する。
@@ -173,7 +172,7 @@ def confidence_state(confidences, field_name):
     if cfc.confirmed_at is not None:
         return "confirmed"
 
-    if cfc.confidence == "medium":
+    if cfc.confidence == "mid":
         return "mid"
     if cfc.confidence == "low":
         return "low"

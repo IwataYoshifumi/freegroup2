@@ -768,9 +768,11 @@ a { color: inherit; text-decoration: none; }
 
 .app-table__col--action { width: 78px; text-align: center; }
 .app-table__col--name { width: 120px; }
-.app-table__col--company { width: 220px; }
+.app-table__col--organization { width: 220px; }
 .app-table__col--dept { width: 190px; }
 .app-table__col--phone { width: 130px; }
+/* phone カラムは個人直通電話/携帯/FAX を横並びで表示する umbrella カラム（tel 検索と対）。
+   v1.6.0 リネームの対象外。 */
 .app-table__col--email { width: 230px; }
 .app-table__col--status { width: 62px; text-align: center; }
 .app-table__col--date { width: 106px; }

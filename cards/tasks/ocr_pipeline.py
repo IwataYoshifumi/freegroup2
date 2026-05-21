@@ -285,7 +285,7 @@ def process_cardimage_with_ocr(business_card, ocr_service):
             for field_name, conf in (confidence_map or {}).items():
                 if conf in (
                     ContactFieldConfidence.Confidence.LOW,
-                    ContactFieldConfidence.Confidence.MEDIUM,
+                    ContactFieldConfidence.Confidence.MID,
                 ):
                     ContactFieldConfidence.objects.create(
                         contact=contact,

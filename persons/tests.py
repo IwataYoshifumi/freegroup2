@@ -32,11 +32,11 @@ class PersonListViewTests(TestCase):
             person=self.person_a,
             status=Contact.Status.PRIMARY,
             full_name="Alice Smith",
-            company="Acme Corp",
+            organization="Acme Corp",
             department="Sales",
             title="Manager",
             email="alice@acme.example",
-            phone="03-1234-5678",
+            personal_phone=["03-1234-5678"],
             address="Tokyo",
         )
         self.person_a.primary_contact = self.contact_a
@@ -97,13 +97,13 @@ class PersonListViewTests(TestCase):
         self.assertIn(self.person_a.id, ids)
         self.assertNotIn(p_other.id, ids)
 
-    def test_search_tel_or_phone_mobile_fax(self):
-        """tel は primary_contact の phone / mobile / fax の OR 一致。"""
+    def test_search_tel_or_personal_phone_mobile_phone_personal_fax(self):
+        """tel は primary_contact の personal_phone / mobile_phone / personal_fax の OR 一致。"""
         p_mobile, _ = self._make_active_with_primary(
-            full_name="MobOnly", mobile="090-1111-2222"
+            full_name="MobOnly", mobile_phone="090-1111-2222"
         )
         p_fax, _ = self._make_active_with_primary(
-            full_name="FaxOnly", fax="06-9999-8888"
+            full_name="FaxOnly", personal_fax=["06-9999-8888"]
         )
 
         resp = self.client.get(self.url, {"tel": "1234"})
@@ -122,19 +122,19 @@ class PersonListViewTests(TestCase):
         self.assertIn(p_fax.id, ids)
         self.assertNotIn(self.person_a.id, ids)
 
-    def test_search_and_name_company(self):
-        """name と company の AND 検索。"""
+    def test_search_and_name_organization(self):
+        """name と organization の AND 検索。"""
         self._make_active_with_primary(
-            full_name="Alice Tanaka", company="Wonder Corp"
+            full_name="Alice Tanaka", organization="Wonder Corp"
         )
         self._make_active_with_primary(
-            full_name="Bob Smith", company="Acme Industries"
+            full_name="Bob Smith", organization="Acme Industries"
         )
         p_both, _ = self._make_active_with_primary(
-            full_name="Alice Brown", company="Acme Group"
+            full_name="Alice Brown", organization="Acme Group"
         )
 
-        resp = self.client.get(self.url, {"name": "Alice", "company": "Acme"})
+        resp = self.client.get(self.url, {"name": "Alice", "organization": "Acme"})
         ids = [p.id for p in resp.context["persons"]]
         self.assertIn(self.person_a.id, ids)
         self.assertIn(p_both.id, ids)
@@ -278,7 +278,7 @@ class PersonAddAdditionalRoleViewTests(TestCase):
             person=self.person,
             status=Contact.Status.PRIMARY,
             full_name="P-name",
-            company="P-co",
+            organization="P-co",
         )
         self.person.primary_contact = self.primary
         self.person.save(update_fields=["primary_contact", "updated_at"])
@@ -348,7 +348,7 @@ class PersonAddAdditionalRoleViewTests(TestCase):
         """有効データ → 新規 active Contact 作成、Contact 詳細画面にリダイレクト。"""
         data = self._base_post_data()
         data["full_name"] = "別肩書 太郎"
-        data["company"] = "別会社"
+        data["organization"] = "別会社"
 
         resp = self.client.post(self._url(), data=data)
 
@@ -358,7 +358,7 @@ class PersonAddAdditionalRoleViewTests(TestCase):
         ).first()
         self.assertIsNotNone(new_contact)
         self.assertEqual(new_contact.status, Contact.Status.ACTIVE)
-        self.assertEqual(new_contact.company, "別会社")
+        self.assertEqual(new_contact.organization, "別会社")
         self.assertEqual(
             resp.url,
             reverse(

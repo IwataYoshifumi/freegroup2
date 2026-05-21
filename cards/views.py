@@ -527,8 +527,8 @@ class CardListView(ListView):
     """名刺一覧画面（仕様書 v1.2.2 / Phase 4）。
 
     BusinessCard を Contact 情報とともに一覧表示する。
-    7フィールドの AND 検索（name / company / department / title / email / tel / address）。
-    tel は phone / mobile / fax の OR 一致。
+    7フィールドの AND 検索（name / organization / department / title / email / tel / address）。
+    tel は personal_phone / mobile_phone / personal_fax の OR 一致（v1.6.0 リネーム反映、tel は umbrella 名のまま継続）。
     """
 
     model = BusinessCard
@@ -536,7 +536,7 @@ class CardListView(ListView):
     context_object_name = "cards"
     paginate_by = 20
 
-    _SEARCH_PARAMS = ("name", "company", "department", "title", "email", "tel", "address")
+    _SEARCH_PARAMS = ("name", "organization", "department", "title", "email", "tel", "address")
 
     # v1.5.0: フィルタは ocr_status 由来 2 値 + ocr_result 5 値 の 7 値。
     # 仮想値 "_pending" / "_processing" は実フィールドにないため、queryset 構築時に
@@ -602,11 +602,11 @@ class CardListView(ListView):
                         confirmed_at__isnull=True,
                     )
                 ),
-                has_unconfirmed_medium=Exists(
+                has_unconfirmed_mid=Exists(
                     ContactFieldConfidence.objects.filter(
                         contact__business_card=OuterRef("pk"),
                         field_name__in=DUPLICATE_CHECK_FIELDS,
-                        confidence=ContactFieldConfidence.Confidence.MEDIUM,
+                        confidence=ContactFieldConfidence.Confidence.MID,
                         confirmed_at__isnull=True,
                     )
                 ),
@@ -623,8 +623,8 @@ class CardListView(ListView):
         p = self.request.GET
         if p.get("name", "").strip():
             qs = qs.filter(contact__full_name__icontains=p["name"].strip())
-        if p.get("company", "").strip():
-            qs = qs.filter(contact__company__icontains=p["company"].strip())
+        if p.get("organization", "").strip():
+            qs = qs.filter(contact__organization__icontains=p["organization"].strip())
         if p.get("department", "").strip():
             qs = qs.filter(contact__department__icontains=p["department"].strip())
         if p.get("title", "").strip():
@@ -634,9 +634,9 @@ class CardListView(ListView):
         if p.get("tel", "").strip():
             tel = p["tel"].strip()
             qs = qs.filter(
-                Q(contact__phone__icontains=tel)
-                | Q(contact__mobile__icontains=tel)
-                | Q(contact__fax__icontains=tel)
+                Q(contact__personal_phone__icontains=tel)
+                | Q(contact__mobile_phone__icontains=tel)
+                | Q(contact__personal_fax__icontains=tel)
             )
         if p.get("address", "").strip():
             qs = qs.filter(contact__address__icontains=p["address"].strip())
@@ -649,7 +649,7 @@ class CardListView(ListView):
         back = BackNavigator(self.request)
         back.push_current(
             "名刺一覧",
-            ["name", "company", "department", "title", "email", "tel", "address", "ocr_result", "page"],
+            ["name", "organization", "department", "title", "email", "tel", "address", "ocr_result", "page"],
         )
         context["back"] = back
 

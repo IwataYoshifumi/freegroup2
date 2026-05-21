@@ -117,8 +117,8 @@ def find_duplicate_contacts(contact, excluded_persons=None):
     if contact.email:
         or_q |= Q(email=contact.email)
         has_filter = True
-    if contact.mobile:
-        or_q |= Q(mobile=contact.mobile)
+    if contact.mobile_phone:
+        or_q |= Q(mobile_phone=contact.mobile_phone)
         has_filter = True
 
     # フルネーム / メール / 携帯がすべて空なら、絞り込みヒットはあり得ないので空リストを返す。

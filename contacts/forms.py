@@ -152,7 +152,7 @@ class ContactUpdateForm(ContactBaseForm):
         # high 扱い（CFC レコードなしの疑似 high）と confirmed 済みは追加しない。
         confidences = self.target_contact.get_field_confidences()
         for field_name, conf in confidences.items():
-            if conf.confidence in ("low", "medium") and conf.confirmed_at is None:
+            if conf.confidence in ("low", "mid") and conf.confirmed_at is None:
                 self.fields[f"confirmed_{field_name}"] = forms.BooleanField(
                     required=False,
                     label=f"『{field_name}』フィールドを確認しました",
@@ -165,7 +165,7 @@ class ContactUpdateForm(ContactBaseForm):
         # 動的追加した confirmed_<field> がすべて ON か検証（§11.7.1）。
         confidences = self.target_contact.get_field_confidences()
         for field_name, conf in confidences.items():
-            if conf.confidence in ("low", "medium") and conf.confirmed_at is None:
+            if conf.confidence in ("low", "mid") and conf.confirmed_at is None:
                 chk_name = f"confirmed_{field_name}"
                 if not cleaned.get(chk_name):
                     self.add_error(

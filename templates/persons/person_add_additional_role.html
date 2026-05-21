@@ -62,9 +62,9 @@
       <div class="app-section__header" style="margin-top:var(--app-space-md);"><h2>所属</h2></div>
       <div class="app-form-grid">
         <div class="app-form__group">
-          <label for="{{ form.company.id_for_label }}">会社</label>
-          {{ form.company }}
-          {{ form.company.errors }}
+          <label for="{{ form.organization.id_for_label }}">会社</label>
+          {{ form.organization }}
+          {{ form.organization.errors }}
         </div>
         <div class="app-form__group">
           <label for="{{ form.branch.id_for_label }}">支店・店舗</label>
@@ -102,19 +102,19 @@
           {{ form.email.errors }}
         </div>
         <div class="app-form__group">
-          <label for="{{ form.mobile.id_for_label }}">携帯</label>
-          {{ form.mobile }}
-          {{ form.mobile.errors }}
+          <label for="{{ form.mobile_phone.id_for_label }}">携帯</label>
+          {{ form.mobile_phone }}
+          {{ form.mobile_phone.errors }}
         </div>
         <div class="app-form__group">
-          <label for="{{ form.phone.id_for_label }}">電話</label>
-          {{ form.phone }}
-          {{ form.phone.errors }}
+          <label for="{{ form.personal_phone.id_for_label }}">電話</label>
+          {{ form.personal_phone }}
+          {{ form.personal_phone.errors }}
         </div>
         <div class="app-form__group">
-          <label for="{{ form.fax.id_for_label }}">FAX</label>
-          {{ form.fax }}
-          {{ form.fax.errors }}
+          <label for="{{ form.personal_fax.id_for_label }}">FAX</label>
+          {{ form.personal_fax }}
+          {{ form.personal_fax.errors }}
         </div>
         <div class="app-form__group">
           <label for="{{ form.website.id_for_label }}">ウェブサイト</label>

@@ -6,6 +6,14 @@ DB 操作は一切行わない。重複チェックや Person マッチングは
 - 例外を raise するのは card_index が cards 配列の範囲外の場合のみ（ValueError）
 - 構造想定外、value=null、サポート外 SNS type は confidence=low / 無視 で処理続行
 - 仕様書に明記された「ベストエフォートで処理」を優先し、データを最大限取り出す
+
+【Phase 1A 中間状態の注意（v1.6.0 OCR 改善ライン）】
+本ファイルは Phase 3 で contacts/services/json_parser.py へ移動・8ブロック構造対応に
+全面改修される（OpenCV_OCR仕様書v1_6_0_Claude_API_統合版 §3.1 / §3.4）。Phase 1A 段階では
+Contact フィールド名のリネーム反映と confidence 値域の mid 統一のみ行う。
+OCR プロンプト本体（cards/prompts/extract_combined.txt）は Phase 1A では更新しないため、
+OCR が "medium" を出力した場合 _VALID_CONFIDENCES に含まれず fallback "low" 扱いになる。
+これは Phase 3 で OCR プロンプト v1.6.0 化と同時に解消される中間状態の副作用。
 """
 
 # fields の単独値フィールド（JSON Schema の Fields）
@@ -14,7 +22,7 @@ _SCALAR_FIELDS = (
     "last_name",
     "first_name",
     "salutation_name",
-    "company",
+    "organization",
     "department",
     "title",
     "qualification",
@@ -25,11 +33,15 @@ _SCALAR_FIELDS = (
 )
 
 # fields_array の type なし配列 → Contact の単独フィールドへの対応
+# v1.6.0 で Contact 側のフィールド名を新名称に揃える（OCR キー側は Phase 3 までそのまま）。
+# personal_phone / personal_fax は Contact 側で JSONField(default=list) のため value のリストラップは
+# Phase 1A 中間状態としてここでは行わず、現挙動どおり「最初の 1 要素を文字列で入れる」を継続する。
+# Phase 3 の json_parser 全面改修で配列対応に切り替える。
 _TYPELESS_ARRAY_TO_FIELD = {
     "emails": "email",
-    "phones": "phone",
-    "mobiles": "mobile",
-    "fax": "fax",
+    "phones": "personal_phone",
+    "mobiles": "mobile_phone",
+    "fax": "personal_fax",
     "websites": "website",
 }
 
@@ -38,11 +50,11 @@ _SOCIAL_MEDIA_TYPES = ("twitter", "linkedin", "facebook", "github", "instagram")
 
 # 防御的処理の既定 confidence
 _FALLBACK_CONFIDENCE = "low"
-_VALID_CONFIDENCES = ("high", "medium", "low")
+_VALID_CONFIDENCES = ("high", "mid", "low")
 
 
-_CONFIDENCE_DOWNGRADE_90 = {"high": "medium", "medium": "medium", "low": "low"}
-_CONFIDENCE_DOWNGRADE_180 = {"high": "low",    "medium": "low",    "low": "low"}
+_CONFIDENCE_DOWNGRADE_90 = {"high": "mid", "mid": "mid", "low": "low"}
+_CONFIDENCE_DOWNGRADE_180 = {"high": "low", "mid": "low", "low": "low"}
 
 
 def calc_orientation_adjusted_confidence_map(contact_dict, confidence_map, orientation):
@@ -50,7 +62,7 @@ def calc_orientation_adjusted_confidence_map(contact_dict, confidence_map, orien
 
     [性質] 純関数（DB操作なし・副作用なし）
     [入力] contact_dict: Contact フィールド辞書（normalize_to_contact_dict の出力）
-           confidence_map: フィールド名 → 'high'/'medium'/'low'（normalize_to_contact_dict の出力）
+           confidence_map: フィールド名 → 'high'/'mid'/'low'（normalize_to_contact_dict の出力）
            orientation: OCR の orientation 文字列
     [出力] 補正後の confidence_map（ContactFieldConfidence に保存する値のみ含む）
     [備考] normal 以外の orientation では OCR の high 判定を下方補正する。
@@ -68,7 +80,7 @@ def calc_orientation_adjusted_confidence_map(contact_dict, confidence_map, orien
         if not value:
             continue
         adjusted = downgrade[confidence_map.get(field, "high")]
-        if adjusted in ("low", "medium"):
+        if adjusted in ("low", "mid"):
             result[field] = adjusted
     return result
 
@@ -80,7 +92,7 @@ def normalize_to_contact_dict(raw_json, card_index):
     [入力] raw_json: dict（OriginalImage.raw_json）、card_index: int（cards 配列のインデックス）
     [出力] tuple (contact_dict, confidence_map)
            - contact_dict: Contact のフィールド辞書（key: Contact のフィールド名、value: 文字列）
-           - confidence_map: フィールド名 → 'high'/'medium'/'low' の辞書
+           - confidence_map: フィールド名 → 'high'/'mid'/'low' の辞書
     [例外] ValueError: card_index が cards 配列の範囲外の場合のみ
     [方針] raw_json の構造想定外でも例外を投げず、ベストエフォートで処理（confidence=low に倒す）
     """

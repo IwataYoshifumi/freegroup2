@@ -5,14 +5,14 @@ from .models import Contact, ContactFieldConfidence
 
 @admin.register(Contact)
 class ContactAdmin(admin.ModelAdmin):
-    list_display = ("id", "full_name", "company", "department", "title", "created_at")
+    list_display = ("id", "full_name", "organization", "department", "title", "created_at")
     list_filter = ("created_at",)
     search_fields = (
         "id",
         "full_name",
         "last_name",
         "first_name",
-        "company",
+        "organization",
         "department",
         "title",
         "email",

@@ -61,35 +61,35 @@ class CardListViewConfidenceAnnotateTests(TestCase):
         return view.get_queryset().get(pk=self.bc.pk)
 
     def test_no_cfc_records_all_false(self):
-        """CFC レコードなし → has_unconfirmed_low / has_unconfirmed_medium /
+        """CFC レコードなし → has_unconfirmed_low / has_unconfirmed_mid /
         has_confirmed すべて False。"""
         card = self._get_card()
         self.assertFalse(card.has_unconfirmed_low)
-        self.assertFalse(card.has_unconfirmed_medium)
+        self.assertFalse(card.has_unconfirmed_mid)
         self.assertFalse(card.has_confirmed)
 
     def test_unconfirmed_low_in_dup_check_fields(self):
         """DUPLICATE_CHECK_FIELDS に含まれる未確認 low CFC → has_unconfirmed_low True。"""
         ContactFieldConfidence.objects.create(
             contact=self.contact,
-            field_name="company",
+            field_name="organization",
             confidence=ContactFieldConfidence.Confidence.LOW,
         )
         card = self._get_card()
         self.assertTrue(card.has_unconfirmed_low)
-        self.assertFalse(card.has_unconfirmed_medium)
+        self.assertFalse(card.has_unconfirmed_mid)
         self.assertFalse(card.has_confirmed)
 
-    def test_unconfirmed_medium_in_dup_check_fields(self):
-        """未確認 medium CFC → has_unconfirmed_medium True、low は False。"""
+    def test_unconfirmed_mid_in_dup_check_fields(self):
+        """未確認 mid CFC → has_unconfirmed_mid True、low は False。"""
         ContactFieldConfidence.objects.create(
             contact=self.contact,
-            field_name="phone",
-            confidence=ContactFieldConfidence.Confidence.MEDIUM,
+            field_name="personal_phone",
+            confidence=ContactFieldConfidence.Confidence.MID,
         )
         card = self._get_card()
         self.assertFalse(card.has_unconfirmed_low)
-        self.assertTrue(card.has_unconfirmed_medium)
+        self.assertTrue(card.has_unconfirmed_mid)
         self.assertFalse(card.has_confirmed)
 
     def test_confirmed_cfc(self):
@@ -103,7 +103,7 @@ class CardListViewConfidenceAnnotateTests(TestCase):
         )
         card = self._get_card()
         self.assertFalse(card.has_unconfirmed_low)
-        self.assertFalse(card.has_unconfirmed_medium)
+        self.assertFalse(card.has_unconfirmed_mid)
         self.assertTrue(card.has_confirmed)
 
     def test_field_outside_dup_check_fields_excluded(self):
@@ -116,30 +116,30 @@ class CardListViewConfidenceAnnotateTests(TestCase):
         ContactFieldConfidence.objects.create(
             contact=self.contact,
             field_name="qualification",
-            confidence=ContactFieldConfidence.Confidence.MEDIUM,
+            confidence=ContactFieldConfidence.Confidence.MID,
         )
         card = self._get_card()
         self.assertFalse(card.has_unconfirmed_low)
-        self.assertFalse(card.has_unconfirmed_medium)
+        self.assertFalse(card.has_unconfirmed_mid)
         self.assertFalse(card.has_confirmed)
 
     def test_mixed_states(self):
         """未確認 low + confirmed が混在 → 両方 True。優先順はテンプレート側で判定。"""
         ContactFieldConfidence.objects.create(
             contact=self.contact,
-            field_name="company",
+            field_name="organization",
             confidence=ContactFieldConfidence.Confidence.LOW,
         )
         ContactFieldConfidence.objects.create(
             contact=self.contact,
             field_name="email",
-            confidence=ContactFieldConfidence.Confidence.MEDIUM,
+            confidence=ContactFieldConfidence.Confidence.MID,
             confirmed_at=timezone.now(),
             confirmed_by=self.user,
         )
         card = self._get_card()
         self.assertTrue(card.has_unconfirmed_low)
-        self.assertFalse(card.has_unconfirmed_medium)
+        self.assertFalse(card.has_unconfirmed_mid)
         self.assertTrue(card.has_confirmed)
 
 
@@ -178,12 +178,12 @@ class CardDetailViewFieldConfidencesTests(TestCase):
         """CFC レコード（mid/low/confirmed）が field_confidences に CFC インスタンスで載る。"""
         ContactFieldConfidence.objects.create(
             contact=self.contact,
-            field_name="company",
-            confidence=ContactFieldConfidence.Confidence.MEDIUM,
+            field_name="organization",
+            confidence=ContactFieldConfidence.Confidence.MID,
         )
         ContactFieldConfidence.objects.create(
             contact=self.contact,
-            field_name="phone",
+            field_name="personal_phone",
             confidence=ContactFieldConfidence.Confidence.LOW,
         )
         ContactFieldConfidence.objects.create(
@@ -199,13 +199,13 @@ class CardDetailViewFieldConfidencesTests(TestCase):
         fc = resp.context["field_confidences"]
 
         self.assertEqual(
-            fc["company"].confidence, ContactFieldConfidence.Confidence.MEDIUM
+            fc["organization"].confidence, ContactFieldConfidence.Confidence.MID
         )
-        self.assertIsNone(fc["company"].confirmed_at)
+        self.assertIsNone(fc["organization"].confirmed_at)
         self.assertEqual(
-            fc["phone"].confidence, ContactFieldConfidence.Confidence.LOW
+            fc["personal_phone"].confidence, ContactFieldConfidence.Confidence.LOW
         )
-        self.assertIsNone(fc["phone"].confirmed_at)
+        self.assertIsNone(fc["personal_phone"].confirmed_at)
         self.assertEqual(
             fc["email"].confidence, ContactFieldConfidence.Confidence.LOW
         )
@@ -251,7 +251,7 @@ class CardDetailViewEditableModeTests(TestCase):
             status=Contact.Status.PRIMARY,
             business_card=self.bc,
             full_name="T",
-            company="C",
+            organization="C",
         )
         self.person.primary_contact = self.contact
         self.person.save(update_fields=["primary_contact", "updated_at"])
@@ -260,8 +260,8 @@ class CardDetailViewEditableModeTests(TestCase):
         # 編集 UI の表示有無を検証するために 1 件作る
         ContactFieldConfidence.objects.create(
             contact=self.contact,
-            field_name="company",
-            confidence=ContactFieldConfidence.Confidence.MEDIUM,
+            field_name="organization",
+            confidence=ContactFieldConfidence.Confidence.MID,
         )
 
         self.client.force_login(self.user)

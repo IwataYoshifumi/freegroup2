@@ -58,7 +58,7 @@
             {% for c in undo_preview.contacts_to_restore %}
               <div class="app-detail-item">
                 <dt class="app-detail-label">{{ c.full_name|default:"(氏名なし)" }}</dt>
-                <dd class="app-detail-value">{{ c.company|default:"-" }}</dd>
+                <dd class="app-detail-value">{{ c.organization|default:"-" }}</dd>
               </div>
             {% endfor %}
           </dl>
@@ -73,7 +73,7 @@
             {% for c in undo_preview.contacts_remaining_in_surviving %}
               <div class="app-detail-item">
                 <dt class="app-detail-label">{{ c.full_name|default:"(氏名なし)" }}</dt>
-                <dd class="app-detail-value">{{ c.company|default:"-" }}</dd>
+                <dd class="app-detail-value">{{ c.organization|default:"-" }}</dd>
               </div>
             {% endfor %}
           </dl>

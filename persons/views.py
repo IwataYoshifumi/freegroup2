@@ -47,7 +47,7 @@ class PersonListView(ListView):
 
     _SEARCH_PARAMS = (
         "name",
-        "company",
+        "organization",
         "department",
         "title",
         "email",
@@ -88,9 +88,9 @@ class PersonListView(ListView):
             qs = qs.filter(
                 primary_contact__full_name__icontains=p["name"].strip()
             )
-        if p.get("company", "").strip():
+        if p.get("organization", "").strip():
             qs = qs.filter(
-                primary_contact__company__icontains=p["company"].strip()
+                primary_contact__organization__icontains=p["organization"].strip()
             )
         if p.get("department", "").strip():
             qs = qs.filter(
@@ -107,9 +107,9 @@ class PersonListView(ListView):
         if p.get("tel", "").strip():
             tel = p["tel"].strip()
             qs = qs.filter(
-                Q(primary_contact__phone__icontains=tel)
-                | Q(primary_contact__mobile__icontains=tel)
-                | Q(primary_contact__fax__icontains=tel)
+                Q(primary_contact__personal_phone__icontains=tel)
+                | Q(primary_contact__mobile_phone__icontains=tel)
+                | Q(primary_contact__personal_fax__icontains=tel)
             )
         if p.get("address", "").strip():
             qs = qs.filter(
@@ -126,7 +126,7 @@ class PersonListView(ListView):
             "人物一覧",
             [
                 "name",
-                "company",
+                "organization",
                 "department",
                 "title",
                 "email",

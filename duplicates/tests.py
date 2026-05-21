@@ -442,23 +442,23 @@ class MergeFormInitTests(_MergeFormTestBase):
 
     def test_initial_filled_with_surviving_values(self):
         """initial が surviving 側 primary_contact の UPDATABLE_FIELDS 値で埋まる。"""
-        self.surviving_primary.company = "サバイブ社"
+        self.surviving_primary.organization = "サバイブ社"
         self.surviving_primary.email = "alive@example.com"
         self.surviving_primary.save()
 
         form = self._make_form()
         self.assertEqual(form.initial["full_name"], "生存太郎")
-        self.assertEqual(form.initial["company"], "サバイブ社")
+        self.assertEqual(form.initial["organization"], "サバイブ社")
         self.assertEqual(form.initial["email"], "alive@example.com")
 
     def test_dynamic_confirm_checkboxes_added_for_low_mid_unconfirmed(self):
         """surviving 側 low/mid 未確認の DUPLICATE_CHECK_FIELDS に CB が動的追加される。"""
         self._set_cfc(self.surviving_primary, "full_name", confidence="low")
-        self._set_cfc(self.surviving_primary, "email", confidence="medium")
+        self._set_cfc(self.surviving_primary, "email", confidence="mid")
         # confirmed 済みは追加対象外
         self._set_cfc(
             self.surviving_primary,
-            "phone",
+            "personal_phone",
             confidence="low",
             confirmed=True,
         )
@@ -466,17 +466,17 @@ class MergeFormInitTests(_MergeFormTestBase):
         form = self._make_form()
         self.assertIn("confirmed_full_name", form.fields)
         self.assertIn("confirmed_email", form.fields)
-        self.assertNotIn("confirmed_phone", form.fields)
+        self.assertNotIn("confirmed_personal_phone", form.fields)
         # CFC レコードなし（疑似 high）にも追加されない
-        self.assertNotIn("confirmed_company", form.fields)
+        self.assertNotIn("confirmed_organization", form.fields)
 
     def test_value_diff_and_match_classification(self):
         """DUPLICATE_CHECK_FIELDS で値違い / 値一致が正しく分類される。"""
-        self.surviving_primary.company = "A社"
+        self.surviving_primary.organization = "A社"
         self.surviving_primary.email = "a@example.com"
         self.surviving_primary.save()
 
-        self.merged_primary.company = "A社"  # 一致
+        self.merged_primary.organization = "A社"  # 一致
         self.merged_primary.email = "b@example.com"  # 不一致
         self.merged_primary.save()
 
@@ -484,10 +484,10 @@ class MergeFormInitTests(_MergeFormTestBase):
         # setUp で full_name は surviving/merged で異なる
         self.assertIn("full_name", form.value_diff_fields())
         self.assertIn("email", form.value_diff_fields())
-        self.assertIn("company", form.value_match_fields())
+        self.assertIn("organization", form.value_match_fields())
         # 値違いと値一致は排他
         self.assertNotIn("email", form.value_match_fields())
-        self.assertNotIn("company", form.value_diff_fields())
+        self.assertNotIn("organization", form.value_diff_fields())
 
 
 class MergeFormCleanTests(_MergeFormTestBase):
@@ -725,11 +725,11 @@ class MergeFormHelpersTests(_MergeFormTestBase):
 
     def test_confirmed_field_names_includes_checked(self):
         """編集なしでも CB ON のフィールドは confirmed_field_names に含まれる。"""
-        self._set_cfc(self.surviving_primary, "company", confidence="low")
-        data = self._valid_data(confirmed_company=True)
+        self._set_cfc(self.surviving_primary, "organization", confidence="low")
+        data = self._valid_data(confirmed_organization=True)
         form = self._make_form(data)
         self.assertTrue(form.is_valid(), form.errors)
-        self.assertIn("company", form.confirmed_field_names())
+        self.assertIn("organization", form.confirmed_field_names())
 
     def test_confirmed_field_names_empty_when_no_changes(self):
         """編集なし・CB なしのとき confirmed_field_names は空リスト。"""
@@ -756,15 +756,15 @@ class MergeFormHelpersTests(_MergeFormTestBase):
         form = self._make_form()
         diff = form.value_diff_fields()
         self.assertIn("full_name", diff)
-        # company は空文字同士で一致
-        self.assertNotIn("company", diff)
+        # organization は空文字同士で一致
+        self.assertNotIn("organization", diff)
 
     def test_value_match_fields_returns_match_only(self):
         """value_match_fields() は DUPLICATE_CHECK_FIELDS の値一致のみ返す。"""
         form = self._make_form()
         match = form.value_match_fields()
-        # company / email / phone 等は空文字同士で一致
-        self.assertIn("company", match)
+        # organization / email / personal_phone 等は空文字同士で一致
+        self.assertIn("organization", match)
         self.assertIn("email", match)
         # full_name は不一致
         self.assertNotIn("full_name", match)
@@ -1600,15 +1600,15 @@ class DuplicateCandidateGroupUpdateViewContextTests(
         ]
         # email は両側に値あり → 出る
         self.assertIn("email", surviving_field_names)
-        # company は両側空 → 出ない
-        self.assertNotIn("company", surviving_field_names)
+        # organization は両側空 → 出ない
+        self.assertNotIn("organization", surviving_field_names)
         # twitter / instagram などの SNS も両側空 → 出ない
         self.assertNotIn("twitter", surviving_field_names)
 
     def test_field_groups_keeps_when_only_one_side_filled(self):
         """片側だけ値がある場合、自側が空でも当該フィールドは表示される。"""
         merged_primary = self.candidate.person_b.primary_contact
-        merged_primary.company = "B社"
+        merged_primary.organization = "B社"
         merged_primary.save()
 
         resp = self.client.get(self._url())
@@ -1623,8 +1623,8 @@ class DuplicateCandidateGroupUpdateViewContextTests(
             for f in g["fields"]
         ]
         # 片側に値があれば両側の表示に含まれる
-        self.assertIn("company", surviving_field_names)
-        self.assertIn("company", merged_field_names)
+        self.assertIn("organization", surviving_field_names)
+        self.assertIn("organization", merged_field_names)
 
     def test_field_groups_excludes_empty_group(self):
         """グループ内の全フィールドが両側空のときグループ自体が除外される。"""
