@@ -47,50 +47,74 @@ from .services.merge_executor import (
 # contact_update_primary.html のラベルと一致させる。Contact.UPDATABLE_FIELDS（24 個）
 # のすべてに対応するエントリを持つ。
 FIELD_LABEL_JA = {
+    # 名前系
     "full_name": "氏名",
     "last_name": "姓",
     "first_name": "名",
     "salutation_name": "敬称付き氏名",
+    "name_order": "名前並び順",                  # v1.6.0 新規
+    "other_name_parts": "他の名前部分",          # v1.6.0 新規
+    "display_name": "表示用完成形",              # v1.6.0 新規
+    "phonetic_name": "読み（カタカナ）",         # v1.6.0 新規
+    "alias_name": "通称・別名",                  # v1.6.0 新規
+    # 会社系
     "organization": "会社",
+    "legal_entity_type": "法人格",               # v1.6.0 新規
+    "legal_entity_type_position": "法人格位置",  # v1.6.0 新規
     "branch": "支店・店舗",
     "department": "部署",
     "title": "役職",
     "qualification": "資格",
     "catchphrase": "キャッチコピー",
+    # 住所系
+    "postal_code": "郵便番号",
+    "address": "住所",
+    "country": "国",                             # v1.6.0 新規
+    "region": "中間行政区画",                    # v1.6.0 新規
+    "city": "市区町村",                          # v1.6.0 新規
+    "rest_of_address": "残り住所",               # v1.6.0 新規
+    # 連絡先
     "email": "メール",
     "mobile_phone": "携帯",
     "personal_phone": "電話",
     "personal_fax": "FAX",
+    "org_phone": "会社代表・部署電話",           # v1.6.0 新規
+    "org_fax": "会社・部署FAX",                  # v1.6.0 新規
     "website": "ウェブサイト",
-    "postal_code": "郵便番号",
-    "address": "住所",
+    # SNS
     "twitter": "Twitter",
     "linkedin": "LinkedIn",
     "facebook": "Facebook",
     "github": "GitHub",
     "instagram": "Instagram",
+    # その他
     "notes": "メモ",
     "lang": "言語",
 }
 
 
 # 17 番マージレビュー画面のフィールドグルーピング（仕様書 §11.5.5、D-4d）。
-# contact_update_primary.html のグループ構成と一致：6 グループ、合計 24 フィールド。
+# contact_update_primary.html のグループ構成と一致：6 グループ。
+# v1.6.0 で 13 件追加（UPDATABLE_FIELDS と件数・集合が一致する invariant、
+# duplicates.tests.test_field_groups_total_fields_match_updatable_fields で検証）。
 FIELD_GROUPS = (
-    ("氏名", ("full_name", "last_name", "first_name", "salutation_name")),
-    (
-        "所属",
-        (
-            "organization",
-            "branch",
-            "department",
-            "title",
-            "qualification",
-            "catchphrase",
-        ),
-    ),
-    ("連絡先", ("email", "mobile_phone", "personal_phone", "personal_fax", "website")),
-    ("住所", ("postal_code", "address")),
+    ("氏名", (
+        "full_name", "last_name", "first_name", "salutation_name",
+        "name_order", "other_name_parts", "display_name",
+        "phonetic_name", "alias_name",
+    )),
+    ("所属", (
+        "organization", "legal_entity_type", "legal_entity_type_position",
+        "branch", "department", "title", "qualification", "catchphrase",
+    )),
+    ("住所", (
+        "postal_code", "address",
+        "country", "region", "city", "rest_of_address",
+    )),
+    ("連絡先", (
+        "email", "mobile_phone", "personal_phone", "personal_fax",
+        "org_phone", "org_fax", "website",
+    )),
     ("SNS", ("twitter", "linkedin", "facebook", "github", "instagram")),
     ("その他", ("notes", "lang")),
 )

@@ -21,6 +21,44 @@ class Contact(models.Model):
         ACTIVE = "active", _("副コンタクト")
         INACTIVE = "inactive", _("非アクティブ")
 
+    class NameOrder(models.TextChoices):
+        """姓名の並び順（仕様書 v1.6.0 別表 A.5 / OCR 統合版 §3.2 #1）。"""
+
+        LAST_FIRST = "last_first", _("姓・名")
+        FIRST_LAST = "first_last", _("名・姓")
+        SINGLE = "single", _("単一名")
+        OTHER = "other", _("その他")
+
+    class LegalEntityTypeCode(models.TextChoices):
+        """法人格コード（仕様書 v1.6.0 別表 A.5 / OCR 統合版 §3.2 #8）。
+        legal_entity_type（自由文字列）から導出される分類コード。"""
+
+        CP = "CP", _("一般企業")
+        LLP = "LLP", _("有限責任事業組合等")
+        GOV = "GOV", _("政府機関・自治体")
+        NPO = "NPO", _("NPO・NGO")
+        REL = "REL", _("宗教法人")
+        EDU = "EDU", _("学校・教育機関")
+        MED = "MED", _("医療法人・病院")
+        PRO = "PRO", _("士業法人")
+        IND = "IND", _("個人事業主")
+        OTH = "OTH", _("その他")
+
+    class LegalEntityTypePosition(models.TextChoices):
+        """法人格の表記位置（仕様書 v1.6.0 別表 A.5 / OCR 統合版 §3.2 #9）。"""
+
+        PRE = "Pre", _("前")
+        POST = "Post", _("後")
+        MID = "Mid", _("中間")
+
+    class LanguageComposition(models.TextChoices):
+        """名刺の言語構成（仕様書 v1.6.0 別表 A.5 / OCR 統合版 §3.2 #15）。"""
+
+        LOCAL_ONLY = "local_only", _("現地語のみ")
+        ENGLISH_ONLY = "english_only", _("英語のみ")
+        MIX_BILINGUAL = "mix_bilingual", _("2言語併記")
+        OTHER = "other", _("その他")
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     business_card = models.OneToOneField(
         BusinessCard,
@@ -70,32 +108,82 @@ class Contact(models.Model):
     lang = models.CharField(max_length=10, default="ja", blank=True)
     postal_code = models.CharField(max_length=20, blank=True, default="")
 
+    # ---- 名前系 ----
     full_name = models.CharField(max_length=255, blank=True, default="")
     last_name = models.CharField(max_length=255, blank=True, default="")
     first_name = models.CharField(max_length=255, blank=True, default="")
     salutation_name = models.CharField(max_length=255, blank=True, default="")
+    # v1.6.0 新規（仕様書 別表 A.5 / OCR 統合版 §3.2）
+    name_order = models.CharField(
+        max_length=20, choices=NameOrder.choices, blank=True, default=""
+    )
+    other_name_parts = models.CharField(max_length=255, blank=True, default="")
+    display_name = models.CharField(max_length=255, blank=True, default="")
+    phonetic_name = models.CharField(max_length=255, blank=True, default="")
+    alias_name = models.CharField(max_length=255, blank=True, default="")
+    # salutation_name 手動入力フラグ。OCR 経路では False のまま。
+    # True のとき Contact.save() の自動再計算で salutation_name を上書きしない
+    # （仕様書 §11.9.7、Phase 2 で save() オーバーライド時に活用）。
+    salutation_name_is_manual = models.BooleanField(default=False)
 
+    # ---- 会社系 ----
     organization = models.CharField(max_length=255, blank=True, default="")
+    # v1.6.0 新規（仕様書 別表 A.5 / OCR 統合版 §3.2）
+    # 法人格関連は org_core_name / legal_entity_type / *_code / *_position が連動して
+    # organization を表す（Phase 2 の derive_org_core_name 等で整合維持）。
+    org_core_name = models.CharField(max_length=255, blank=True, default="")
+    legal_entity_type = models.CharField(max_length=50, blank=True, default="")
+    legal_entity_type_code = models.CharField(
+        max_length=10, choices=LegalEntityTypeCode.choices, blank=True, default=""
+    )
+    legal_entity_type_position = models.CharField(
+        max_length=10, choices=LegalEntityTypePosition.choices, blank=True, default=""
+    )
+    org_domain_name = models.CharField(max_length=255, blank=True, default="")
     department = models.CharField(max_length=255, blank=True, default="")
     title = models.CharField(max_length=255, blank=True, default="")
     qualification = models.CharField(max_length=500, blank=True, default="")
     catchphrase = models.CharField(max_length=500, blank=True, default="")
     branch = models.CharField(max_length=255, blank=True, default="")
-    address = models.CharField(max_length=500, blank=True, default="")
 
+    # ---- 住所系 ----
+    address = models.CharField(max_length=500, blank=True, default="")
+    # v1.6.0 新規（仕様書 別表 A.5 / OCR 統合版 §3.2）
+    # address は 4 要素（country / region / city / rest_of_address）から
+    # Phase 2 の compose_full_address が組み立てた結果を格納する設計。
+    country = models.CharField(max_length=2, blank=True, default="")  # ISO 3166-1 alpha-2
+    region = models.CharField(max_length=100, blank=True, default="")
+    city = models.CharField(max_length=100, blank=True, default="")
+    rest_of_address = models.CharField(max_length=500, blank=True, default="")
+
+    # ---- 連絡先系 ----
     email = models.CharField(max_length=255, blank=True, default="")
     personal_phone = models.JSONField(default=list, blank=True)
     mobile_phone = models.CharField(max_length=50, blank=True, default="")
     personal_fax = models.JSONField(default=list, blank=True)
+    # v1.6.0 新規（仕様書 別表 A.5 / OCR 統合版 §3.2）：会社代表・部署電話 / FAX の E.164 配列。
+    # DUPLICATE_CHECK_FIELDS には含めない（同一会社内の複数人で同値、別人誤マージ防止、§7.1）。
+    org_phone = models.JSONField(default=list, blank=True)
+    org_fax = models.JSONField(default=list, blank=True)
     website = models.CharField(max_length=500, blank=True, default="")
 
+    # ---- SNS ----
     twitter = models.CharField(max_length=255, blank=True, default="")
     linkedin = models.CharField(max_length=500, blank=True, default="")
     facebook = models.CharField(max_length=500, blank=True, default="")
     github = models.CharField(max_length=255, blank=True, default="")
     instagram = models.CharField(max_length=255, blank=True, default="")
 
+    # ---- メモ・分類（事実保存系含む） ----
     notes = models.TextField(blank=True, default="")
+    # v1.6.0 新規（仕様書 別表 A.5 / OCR 統合版 §3.2）
+    # OCR が判定する名刺の言語構成（事実）。
+    language_composition = models.CharField(
+        max_length=20, choices=LanguageComposition.choices, blank=True, default=""
+    )
+    # 名刺上の手書きメモ / catchphrase 以外の印字漏れテキスト。事実保存用、UI 編集対象外。
+    handwritten_text = models.CharField(max_length=500, blank=True, default="")
+    other_printed_text = models.TextField(blank=True, default="")
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -109,33 +197,60 @@ class Contact(models.Model):
             ),
         ]
 
-    # Contact のユーザー入力対象フィールドのマスター定義（仕様書 §11.6.2）。
+    # Contact のユーザー入力対象フィールドのマスター定義（仕様書 §11.6.2 / v1.6.0 OCR 統合版 §3.5）。
     # ContactBaseForm.Meta.fields はこの集合を参照する。Contact 側がマスター、
     # Form 側が参照という方向で確定（D ブロック Form 実装時に決定）。
     # AJAX 経由（Contact 詳細画面、§10.6.4 ケース 4）の update_field() / Form 経由の
     # fix() の双方で、修正可能フィールドの集合として共通利用する。システム管理
     # フィールド（status / previous_* / created_* / updated_* / person / business_card
     # / duplicate_checked_at）は含めない。
+    #
+    # v1.6.0 判断軸（仕様書 OCR 統合版 §3.5）：
+    # 「他フィールドから生成される導出物は入れない（原文・構成要素を直せば追従）」
+    # 入れない（導出・派生・事実保存・フラグ）：
+    #   - org_core_name（org_name_full から導出、Phase 2 で derive_org_core_name が更新）
+    #   - org_domain_name（email から導出、Phase 2 で derive_org_domain_name が更新）
+    #   - legal_entity_type_code（legal_entity_type + position から導出）
+    #   - language_composition（OCR 判定の事実）
+    #   - handwritten_text / other_printed_text（事実保存用）
+    #   - salutation_name_is_manual（View 層が経路に応じて自動セット、画面から直接編集させない）
+    # ※ address は v1.6.0 仕様 §3.5 では「入れない」リストにあるが、Phase 1A 時点で
+    #   既存 UPDATABLE に残っており、外すと Form/View 経由の編集 UI が壊れる。
+    #   Phase 4（Form/View の JSONField 整合）と一緒に外す論点として持ち越し。
     UPDATABLE_FIELDS = (
         # 名前系
         "full_name",
         "last_name",
         "first_name",
         "salutation_name",
+        "name_order",          # v1.6.0 新規
+        "other_name_parts",    # v1.6.0 新規
+        "display_name",        # v1.6.0 新規
+        "phonetic_name",       # v1.6.0 新規
+        "alias_name",          # v1.6.0 新規
         # 会社系
         "organization",
+        "legal_entity_type",              # v1.6.0 新規
+        "legal_entity_type_position",     # v1.6.0 新規
         "department",
         "title",
         "qualification",
         "catchphrase",
         "branch",
-        # 連絡先系
+        # 住所系（address は導出物扱いだが Phase 1A 時点の挙動継続、Phase 4 で再検討）
         "postal_code",
         "address",
+        "country",             # v1.6.0 新規
+        "region",              # v1.6.0 新規
+        "city",                # v1.6.0 新規
+        "rest_of_address",     # v1.6.0 新規
+        # 連絡先系
         "email",
         "personal_phone",
         "mobile_phone",
         "personal_fax",
+        "org_phone",           # v1.6.0 新規
+        "org_fax",             # v1.6.0 新規
         "website",
         # SNS
         "twitter",
@@ -164,8 +279,8 @@ class Contact(models.Model):
         [出力] None
         [例外] ValueError（self.pk が None の場合）
 
-        対象フィールドは ``self.UPDATABLE_FIELDS`` (24 フィールド、仕様書 §11.6.2 の
-        Meta.fields と整合）。fix は Contact のユーザー入力対象フィールドすべてを上書き
+        対象フィールドは ``self.UPDATABLE_FIELDS`` （v1.6.0 で新規 13 件追加、計 37 フィールド、
+        仕様書 §11.6.2 の Meta.fields と整合）。fix は Contact のユーザー入力対象フィールドすべてを上書き
         対象とする（仕様書 §10.5.2）。
         """
         if self.pk is None:

@@ -48,6 +48,15 @@ class OriginalImage(models.Model):
         blank=True,
         help_text="OpenCV 検出のデバッグ情報（中間データ）。None なら次回 GET 時に再計算される",
     )
+    # v1.6.0 新規（仕様書 OCR 統合版 §7.2 / 別表 A.3）
+    # 撮影 EXIF（GPS含む全EXIF：DateTimeOriginal / GPSInfo / Make/Model / 撮影設定等）を
+    # JSON 化可能な形で保存。アップロード受信直後の生バイト列の時点で取得する想定
+    # （Pillow exif_transpose で再エンコードする前。再エンコード後は EXIF が失われる）。
+    # 既存レコードは EXIF 復元不可（NULL 維持）、新規アップロード分のみ値が入る。
+    # EXIF 保存処理本体は Phase 3 で実装（本フェーズはフィールド追加のみ）。
+    # EXIF Orientation（撮影時の物理回転）と BusinessCard.orientation（OCR が返す名刺の向き）
+    # は別物。混同しない。
+    exif_json = models.JSONField(null=True, blank=True)
     error_message = models.TextField(blank=True, default="")
     detected_count = models.IntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
