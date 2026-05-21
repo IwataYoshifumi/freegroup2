@@ -1,0 +1,36 @@
+site_name: FreeGroup2 ドキュメント
+site_url: https://docs.freegroup.work/
+site_description: FreeGroup2の公式ドキュメント - インストール・使い方・管理者向けガイド
+site_author: 株式会社ネットワーク東海
+
+theme:
+  name: material
+  language: ja
+  palette:
+    primary: blue
+    accent: blue
+  font:
+    text: Noto Sans JP
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - search.highlight
+    - search.suggest
+
+nav:
+  - ホーム: index.md
+  - インストール: install.md
+  - ユーザガイド:
+    - 名刺の取り込み: usage/import.md
+    - コンタクト管理: usage/contacts.md
+    - ユーザー管理: usage/users.md
+  - 管理者ガイド:
+    - バックアップ: admin/backup.md
+    - アップデート: admin/update.md
+  - ライセンス: license.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/IwataYoshifumi/freegroup2
