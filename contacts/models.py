@@ -263,6 +263,67 @@ class Contact(models.Model):
         "lang",
     )
 
+    # compute_salutation_name の自動再計算トリガーとなる姓系フィールド集合
+    # （仕様書 v1.6.0 OCR 統合版 §1.5.3「姓修正への追従」/ 本編 §11.9.7）。
+    # save() 時に __init__ で記録した初期値と現在値を比較し、差分があれば
+    # is_manual=False の場合に compute_salutation_name を強制再計算する。
+    _SALUTATION_TRIGGER_FIELDS = ("last_name", "full_name", "lang", "name_order")
+
+    def __init__(self, *args, **kwargs):
+        """[性質] 副作用あり（インスタンス初期化）
+
+        Contact.save() オーバーライドで「姓系フィールドが変更されたか」を判定するために、
+        ロード時の初期値を `_initial_salutation_trigger_values` に保持する。
+        Django の通常パターン（モデルインスタンスの初期値スナップショット）。
+        """
+        super().__init__(*args, **kwargs)
+        self._initial_salutation_trigger_values = {
+            f: getattr(self, f, None) for f in self._SALUTATION_TRIGGER_FIELDS
+        }
+
+    def save(self, *args, **kwargs):
+        """[性質] 副作用あり（DB書込）
+
+        v1.6.0 オーバーライド（仕様書 §1.5.3 / §11.9.7）。
+        salutation_name_is_manual と姓系フィールド変更状況に応じて、
+        compute_salutation_name で salutation_name を補完・再計算する。
+
+        分岐：
+          1) is_manual=True：何もしない（手動入力を尊重）
+          2) is_manual=False かつ salutation_name が空：compute で生成
+          3) is_manual=False かつ salutation_name が値あり：
+             - 姓系フィールド（_SALUTATION_TRIGGER_FIELDS）に変更あり → compute で再計算
+             - 姓系フィールド変更なし → 何もしない（前回 compute の結果を尊重）
+
+        ContactFieldConfidence への記録ロジックは本メソッドに組み込まない。
+        OCR 経路（Phase 3）の json_parser、Form/AJAX 経路（Phase 4）の View 層で
+        各経路側が記録する責務分担とする。
+        """
+        # 循環 import 回避：関数内で遅延 import
+        from contacts.services.normalization import compute_salutation_name
+
+        if not self.salutation_name_is_manual:
+            current_salutation = (self.salutation_name or "").strip()
+            if not current_salutation:
+                # ケース 2：空なら生成（compute が空文字を返した場合はそのまま空のまま）
+                self.salutation_name = compute_salutation_name(self)
+            else:
+                # ケース 3：値ありなら姓系フィールド変更を検知
+                trigger_changed = any(
+                    getattr(self, f, None)
+                    != self._initial_salutation_trigger_values.get(f)
+                    for f in self._SALUTATION_TRIGGER_FIELDS
+                )
+                if trigger_changed:
+                    self.salutation_name = compute_salutation_name(self)
+
+        super().save(*args, **kwargs)
+
+        # 保存後に初期値スナップショットを更新（次回 save() に備える）。
+        self._initial_salutation_trigger_values = {
+            f: getattr(self, f, None) for f in self._SALUTATION_TRIGGER_FIELDS
+        }
+
     def __str__(self):
         return self.full_name or f"Contact {self.id}"
 
