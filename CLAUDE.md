@@ -1,6 +1,6 @@
-# FreeGroup2 — Claude 向けガイド（v1.4.2対応）
+# FreeGroup2 — Claude 向けガイド（v1.6.0対応）
 
-**最終更新**：2026-05-11  
+**最終更新**：2026-05-22  
 **オーナー**：たんたん（株式会社ネットワーク東海、愛知県豊田市）
 
 ---
@@ -23,11 +23,12 @@
 
 | 役割 | 担当 | 内容 |
 |---|---|---|
-| **サポート担当** | Claude Code・このセッション | 設計壁打ち・論点整理・指示書作成 |
+| **サポート担当** | Claude（このセッション）／通常はソネット、仕様書議論時はオーパス | 設計壁打ち・論点整理・指示書作成 |
 | レビュー担当 | Opus系・別チャット | 仕様・コードレビュー |
 | ドキュメント作成担当 | Opus系・別チャット | 仕様書作成・改訂 |
-| コード君A | Claude Code・別セッション | v1.4.2本流実装 |
-| コード君B | Claude Code・別セッション | OpenCV改善 |
+| コード君A | Claude Code・別セッション・ローカル | 本流実装担当 |
+| コード君B | Claude Code・別セッション・ローカル | OpenCV/OCR改善担当 |
+| Web版コード君 | claude.ai/code・Opus・1Mコンテキスト | コード君A/Bとたんたんの仲介役・ドキュメント整理。GitHub MCP経由でPush可能 |
 | GPT君 | ChatGPT | サブレビュー |
 
 ### 論点の出し方
@@ -48,7 +49,7 @@
 
 ### 悩んだら原点回帰
 
-AIは目の前の指示・仕様書を最優先しがちで、業界共通・プロジェクト共通の自明な前提を見落とす癖がある。比較対象を立てる前に「そのフィールド・概念の本来の意味は何か」を1行確認する。
+AIは目の前の指示・仕様書を最優先しがちで、業界共通・プロジェクト共通の自明な前提を見落とす癖がある。さらにDBの表層構造（テーブル・FK・制約）だけを見て、業務仕様（モデルが業務上何を意味するか）を見落とす癖もある。比較対象を立てる前に「そのフィールド・概念・モデルの本来の意味は何か」を1行確認する。
 
 ### コンテキスト枯渇サイン
 
@@ -96,10 +97,13 @@ FreeGroup2 は名刺管理システム。ユーザーがアップロードした
 
 - **技術スタック**：Python / Django 6.0.2 / OpenCV / Claude Sonnet 4.6（OCR）
 - **GitHubユーザー名**：IwataYoshifumi
-- **アプリ構成**：cards / persons / contacts / duplicates / actionlogs（5アプリ）
+- **アプリ構成**：cards / persons / contacts / duplicates / actionlogs / accounts（6アプリ）
+- **リリース状況**：
+  - v1.4.2（名刺OCR・コンタクト管理・人物統合）：2026-05-15 main マージ済み
+  - v1.5.0（認証・認可・LDAP）：2026-05-16 main マージ済み
 - **現在の開発ブランチ**：
-  - 本流：`feature/v1.4.2-models`
-  - OpenCV改善：`feature/opencv-improvement`
+  - v1.6 メール配信本流：`feature/v1.6.0-ocr-improvement`（Contact正規化基盤・OCR改善）
+  - OpenCV/OCR worktree：`freegroup2-opencv\`（次フェーズOCR改善で再活用予定）
 
 ---
 
@@ -109,12 +113,18 @@ FreeGroup2 は名刺管理システム。ユーザーがアップロードした
 
 | 優先順位 | ドキュメント | 役割 |
 |---|---|---|
-| 1 | `docs/specs/名刺画像取り込みOCR仕様書_v1_4_2統合最終版.md` | 仕様の正本（Single Source of Truth） |
-| 2 | `docs/マージ前後のコンタクトのステータス等まとめ.pdf` | マージ前後のstatus遷移の正本 |
-| 3 | `docs/URL一覧表_v1_4_2.pdf` | URL・View名・備考の正本 |
-| 4 | `docs/Run_Generate_Duplicate_Candidates_詳細仕様書_v0_1_5.md` | 重複チェック処理詳細の一次情報源 |
+| 1 | `FreeGroup2本編仕様書_v1_6_0.md` | **仕様の正本（Single Source of Truth）**。Contact編集・正規化・Form・View・URL・マージ・重複検出・認証・運用 |
+| 2 | `OpenCV_OCR仕様書v1_6_0_Claude_API_統合版.md` | OCR系統合本体 |
+| 3 | `OpenCV_OCR仕様書v1_6_0_Claude_API_OCRプロンプト.md` | Claude API OCRプロンプト詳細 |
+| 4 | `OpenCV_OCR仕様書v1_6_0_Claude_API_JSON構造_コンタクトフィールド対応表.md` | OCR JSON構造・Contactフィールド対応 |
+| 5 | `_最終版_FreeGroup2_v1_5_0_認証_認可_LDAP_設計方針v1_5_1.md` | 認証・認可・LDAP（v1.5.0実装の正本、§13.8 に認可モデル命名規則） |
+| 6 | `仕様書_v1_6_メール配信_クリックトラッキング_ドラフト_rev12_3.md` | v1.6 メール配信・クリックトラッキング |
+| 7 | `URL一覧表_v1_6.md` | URL・View名・備考 |
+| 8 | `マージ前後のコンタクトのステータス等まとめ.pdf` | マージ前後のstatus遷移の図解（補助資料） |
 
-**例外**：`Run_Generate_Duplicate_Candidates` および関連4関数の処理詳細については4番が一次情報源。それ以外は1番が常に優先する。
+**廃止扱い**：
+- `名刺画像取り込みOCR仕様書_v1_4_4統合最終版.md`（v1.6.0で本編＋OCR3本に再編されたため役割終了。リポジトリに残っていても参照しない）
+- `Run_Generate_Duplicate_Candidates_詳細仕様書_v0_1_5.md`（本編 v1.6.0 §11 に統合済み）
 
 矛盾が出たら勝手に判断せず、たんたんに必ず確認すること。
 
@@ -127,17 +137,17 @@ FreeGroup2 は名刺管理システム。ユーザーがアップロードした
 - VS CodeはAnaconda Navigator / Anaconda Prompt経由で起動（通常ショートカット不可）
 - デフォルトターミナル：Command Prompt（PowerShellはcondaと相性悪いため回避）
 - プロジェクトパス：`C:\Users\iwata\projects\freegroup2\freegroup2\`（2階層構造）
-- worktree：`C:\Users\iwata\projects\freegroup2\freegroup2-opencv\`（OpenCV改善）
+- worktree：`C:\Users\iwata\projects\freegroup2\freegroup2-opencv\`（OpenCV/OCR改善用、次フェーズ作業で再活用）
 
 ### 実家PC
-- Windows、公式Python（venv・`.venv`）、PowerShell運用
+- Windows、公式Python 3.14.4、venv（プロジェクト直下に `.venv`）、PowerShell運用
 - プロジェクトパス：`C:\Users\iwata\projects\freegroup2`（1階層構造）
 
 ### 共通
 - runserverは常に `python manage.py runserver 0.0.0.0:8000`
 - **開発DBは削除してOK**（マイグレーション時に既存DB全削除可能）
 - Git設定：user.name="IwataYoshifumi" / user.email="63712474+IwataYoshifumi@users.noreply.github.com"
-- requirements.txt はGit管理（Django==6.0.2 / django-crispy-forms / crispy-bootstrap5 / django-debug-toolbar / icecream / Pillow / python-dotenv / anthropic）
+- requirements.txt はGit管理（Django==6.0.2 / django-crispy-forms / crispy-bootstrap5 / django-debug-toolbar / icecream / Pillow / python-dotenv / anthropic / django-auth-ldap）
 - `.env` は各PCで個別管理（`.gitignore`登録）、`.env.example` をGit管理
 
 ---
@@ -148,6 +158,7 @@ FreeGroup2 は名刺管理システム。ユーザーがアップロードした
 - **作業終了・離席前**：`git add . && git commit && git push`
 - **未完成でもWIPコミットしてpush**（同期を最優先）
 - **コミット&プッシュは必ずたんたんの確認後**（§1-Aの確認フロー参照）
+- フィーチャーブランチを main へマージする際は `git merge --squash` パターン。マージ後フィーチャーブランチ削除
 
 ---
 
@@ -164,7 +175,7 @@ FreeGroup2 は名刺管理システム。ユーザーがアップロードした
 
 - **CSS / JS は `static/css/app.css` / `static/js/app.js` の既存クラス・関数のみ使用**
 - 新規CSSファイル・JSファイルを追加しない
-- **命名規則（BEM風）**：`app-* / __ / -- / is-* / js-*`
+- **命名規則（BEM風)**：`app-* / __ / -- / is-* / js-*`
   - 例：`app-card`, `app-card__header`, `app-card--compact`, `is-active`, `js-toggle-menu`
 - **ボタン**：`app-btn--primary` / `app-btn--secondary` / `app-btn--danger` / `app-btn--sm` / `app-btn--icon`
 - **フォーム**：`app-form-grid` / `app-input` / `app-form__group`
@@ -191,12 +202,14 @@ FreeGroup2 は名刺管理システム。ユーザーがアップロードした
 | `DJANGO_SECRET_KEY` | Django SECRET_KEY（必須） |
 | `DEBUG` | デバッグモード（既定：True） |
 | `ANTHROPIC_API_KEY` | Claude APIキー（必須） |
+| `AUTH_BACKEND` | 認証バックエンド（`local` または `ldap`） |
+| LDAP関連 | `AUTH_BACKEND=ldap` のとき必要（詳細は認証仕様書 §13 参照） |
 
 ---
 
 ## 10. 関数命名規則と性質明記
 
-仕様書（統合最終版 §13.2）が正本。以下は要約。
+本編仕様書 v1.6.0 第13章が正本。以下は要約。
 
 ### 関数の3分類
 
@@ -228,22 +241,20 @@ FreeGroup2 は名刺管理システム。ユーザーがアップロードした
 ### docstringの書き方
 
 レベル1（最小）：
-```
-"""
-[性質] 副作用あり（ValidationError を raise）
-"""
-```
+
+    """
+    [性質] 副作用あり（ValidationError を raise）
+    """
 
 レベル2（標準）：
-```
-"""
-raw_json を Contact フィールド辞書に変換する。
 
-[性質] 純関数（DB操作なし・副作用なし）
-[入力] raw_json: dict（Claude API の Tool Use 結果）
-[出力] dict（Contact のフィールド辞書）
-"""
-```
+    """
+    raw_json を Contact フィールド辞書に変換する。
+
+    [性質] 純関数（DB操作なし・副作用なし）
+    [入力] raw_json: dict（Claude API の Tool Use 結果）
+    [出力] dict（Contact のフィールド辞書）
+    """
 
 ### 迷ったときのルール
 
@@ -256,9 +267,50 @@ raw_json を Contact フィールド辞書に変換する。
 ## 11. ドキュメント出力ルール
 
 - 仕様書等はマークダウン（.md）で出力する
-- Word変換時は `docs/specs/build_scripts/build_spec.py` を使用
+- Word変換時はプロジェクトナレッジの `md_to_docx.js` を使う
 - Word書式（視力配慮：近視・老眼・乱視あり）：
   - A4縦・文字やや太め・黒色
   - 章・表がページをまたがない（KeepTogether/KeepNext）
   - 空白・改行を極限まで削って用紙枚数を超超超極力減らす
   - 行間固定・段落前後間隔0pt
+
+---
+
+## 12. docs-site 編集の運用ルール
+
+FreeGroup2 ドキュメントサイト（`https://docs.freegroup.work/`）の運用ルール。
+
+### 場所
+
+- 編集場所：`C:\Users\iwata\projects\freegroup2\freegroup2\docs-site\`（freegroup2リポジトリ内）
+- **リポジトリ外のコピーは作らない**（過去に3箇所に分散して事故が起きたため禁止）
+
+### 公開トリガー
+
+- main の `docs-site/**` への push で GitHub Actions が自動デプロイ
+- ワークフロー定義：`.github/workflows/deploy-docs.yml`
+
+### 編集パターン
+
+**ケースA：docs だけの修正（誤字修正・FAQ追加など）**
+
+1. main から `docs/xxx` ブランチを切る（例：`docs/faq-update`、`docs/license-fix`）
+2. `docs-site/` を編集
+3. ローカルで `mkdocs serve` で動作確認
+4. main に PR → マージ → 自動公開
+
+**ケースB：Django開発と同時に docs を触る場合**
+
+- feature ブランチで `docs-site/` も編集してOK
+- ただし feature が main にマージされるまで docs は公開されない
+
+### 注意
+
+- `docs-site/site/` はビルド成果物（`.gitignore` で除外済み）。コミット対象に含めない
+- `mkdocs serve` を起動したまま `docs-site/` フォルダを削除すると Device busy エラーになる
+- ローカル動作確認手順：
+
+      cd C:\Users\iwata\projects\freegroup2\freegroup2\docs-site
+      mkdocs serve
+
+  → ブラウザで `http://127.0.0.1:8000/`
