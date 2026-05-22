@@ -1,5 +1,11 @@
 """BC 1 枚単位の OCR 実行パイプライン（v1.5.0 / cron B から呼ばれる）。
 
+Run_Process_CardImages_With_OCR(limit=10, target_id=None):
+    OCR パイプラインの公開サービス層上位関数（仕様書 v1.6.0 本編 §13.4.1）。
+    process_ocr cron 管理コマンドから呼ばれる。stuck sweeper・対象 BC の収集・
+    OcrService 生成・各 BC の CAS claim・process_cardimage_with_ocr 呼び出しまでを
+    完結させる。Run_Generate_Duplicate_Candidates と同じく戻り値 None・logger 出力のみ。
+
 extract_carddata_via_ocr(card_image, ocr_service):
     1 枚の card_image を受け取り、1 回目 OCR → orientation 判定 →
     normal 以外なら回転補正して 2 回目 OCR、まで完結させて結果辞書を返す。
@@ -8,23 +14,29 @@ extract_carddata_via_ocr(card_image, ocr_service):
 process_cardimage_with_ocr(business_card, ocr_service):
     1 つの BusinessCard を引数に取り、OCR 実行から BC 更新・Contact / Person 生成・
     OriginalImage.status 集計遷移までを完結させる。
-    process_ocr（cron B）の本体ループから 1 BC ごとに呼ばれる想定。
+    Run_Process_CardImages_With_OCR の本体ループから 1 BC ごとに呼ばれる。
 
 【プロンプトキャッシュ】
-    OcrService は引数で受け取り、内部で作らない。cron 1 起動につき 1 インスタンスを
-    使い回すことで _prompt_cache / _tool_input_schema_cache のファイル I/O を節約する。
+    OcrService は Run_Process_CardImages_With_OCR が 1 起動につき 1 インスタンス
+    生成し、各 BC ループに渡す（cron 1 起動 = 1 インスタンス使い回しで
+    _prompt_cache / _tool_input_schema_cache のファイル I/O を節約する）。
 """
 
 import json
 import logging
+import uuid
+from datetime import timedelta
 
 import jsonschema
 from django.conf import settings
 from django.db import transaction
+from django.utils import timezone
 from PIL import Image, ImageOps
 
 from cards.models import BusinessCard, OriginalImage
 from cards.services.has_minimum_info import has_minimum_info
+from cards.tasks.ocr_recovery import reset_bc_to_pending
+from cards.tasks.ocr_service import OcrService
 from contacts.services.json_parser import (
     calc_orientation_adjusted_confidence_map,
     normalize_to_contact_dict,
@@ -439,7 +451,7 @@ def _get_card_item_schema():
             settings.BASE_DIR
             / "docs"
             / "json_schema"
-            / "v1.3.0"
+            / "v1.6.0"
             / "combined_response.json"
         )
         with open(schema_path, encoding="utf-8") as f:
@@ -450,3 +462,183 @@ def _get_card_item_schema():
             **full["properties"]["cards"]["items"],
         }
     return _card_item_schema_cache
+
+
+# ======================================================================
+# Run_Process_CardImages_With_OCR（公開サービス層上位関数、仕様書 §13.4.1）
+# ======================================================================
+
+def Run_Process_CardImages_With_OCR(limit: int = 10, target_id=None) -> None:
+    """OCR パイプラインの公開サービス層上位関数（仕様書 v1.6.0 本編 §13.4.1）。
+
+    [性質] 副作用あり（複合処理：DB 読み書き + OCR API 呼び出し + ファイル書込
+            + logger 出力）
+    [入力] limit: int（1 起動で処理する最大件数、デフォルト 10。target_id 指定時は無視）
+           target_id: str | uuid.UUID | None（特定 BC を 1 件だけ処理する場合に指定。
+             ocr_status='pending' の条件は維持される）
+    [出力] None（結果は logger 出力のみ、ActionLog 書き込みなし、§13.4.1 注記通り）
+    [例外] ValueError: target_id が UUID 形式でない場合（呼び出し元の管理コマンドが
+            CommandError に変換する想定）
+
+    [処理フロー]
+      1. stuck sweeper（BC 単位、settings.OCR_STUCK_THRESHOLD_MINUTES 分以上 processing
+         のままの BC を pending に戻す）
+      2. 対象 BC ID リスト収集（target_id があれば 1 件、なければ pending を limit 件）
+      3. 対象なしなら早期 return
+      4. OcrService インスタンスを 1 起動 1 個生成（プロンプト / スキーマキャッシュ共有）
+      5. ループ：各 BC を CAS で claim → process_cardimage_with_ocr 呼び出し
+      6. 結果集計 logger 出力（targets / processed / skipped 件数）
+
+    [責務範囲]
+      本関数の責務は cron 実行の上位ループ（stuck sweeper + 対象収集 + OcrService 生成
+      + claim ループ）。1 BC 内の OCR 実行・BC 更新・Contact / Person 生成・
+      OriginalImage status 集計遷移は process_cardimage_with_ocr に委譲する。
+    """
+    logger.info(
+        "Run_Process_CardImages_With_OCR: started (limit=%s, target_id=%s)",
+        limit, target_id,
+    )
+
+    # (1) stuck sweeper
+    _run_stuck_sweeper()
+
+    # (2) 対象 BC ID リスト収集
+    target_ids = _collect_target_bc_ids(limit, target_id)
+    if not target_ids:
+        logger.info("Run_Process_CardImages_With_OCR: no targets")
+        return
+
+    logger.info("Run_Process_CardImages_With_OCR: %d targets", len(target_ids))
+
+    # (3) OcrService インスタンスを 1 起動 1 個生成
+    ocr_service = OcrService()
+
+    # (4) ループ
+    processed = 0
+    skipped = 0
+    for bc_id in target_ids:
+        if not _claim_lock(bc_id):
+            skipped += 1
+            logger.info(
+                "Run_Process_CardImages_With_OCR: skip BC %s "
+                "(他 worker が取得済み / status drift)",
+                bc_id,
+            )
+            continue
+
+        try:
+            bc = BusinessCard.objects.get(id=bc_id)
+        except BusinessCard.DoesNotExist:
+            logger.warning(
+                "Run_Process_CardImages_With_OCR: BC %s disappeared after claim",
+                bc_id,
+            )
+            continue
+
+        try:
+            process_cardimage_with_ocr(bc, ocr_service)
+        except Exception as exc:
+            # process_cardimage_with_ocr は基本的に例外を漏らさない設計だが防御的に
+            logger.exception(
+                "Run_Process_CardImages_With_OCR: pipeline exception for BC %s: "
+                "%s: %s",
+                bc_id, type(exc).__name__, exc,
+            )
+            processed += 1
+            continue
+
+        bc.refresh_from_db()
+        logger.info(
+            "Run_Process_CardImages_With_OCR: done BC %s (ocr_status=%s)",
+            bc_id, bc.ocr_status,
+        )
+        processed += 1
+
+    logger.info(
+        "Run_Process_CardImages_With_OCR: finished "
+        "(targets=%d, processed=%d, skipped=%d)",
+        len(target_ids), processed, skipped,
+    )
+
+
+def _run_stuck_sweeper():
+    """[性質] 副作用あり（DB 読み書き + logger 出力）
+
+    OCR_STUCK_THRESHOLD_MINUTES 分以上 processing のままの BC を pending に戻す。
+    既存 process_ocr.handle() の冒頭ロジックを関数化（reset_bc_to_pending を呼ぶ）。
+    """
+    threshold_minutes = getattr(settings, "OCR_STUCK_THRESHOLD_MINUTES", 30)
+    cutoff = timezone.now() - timedelta(minutes=threshold_minutes)
+    stuck_bcs = list(
+        BusinessCard.objects.filter(
+            ocr_status=BusinessCard.OcrStatus.PROCESSING,
+            claimed_at__lt=cutoff,
+        )
+    )
+    if not stuck_bcs:
+        return
+    cleaned = 0
+    for bc in stuck_bcs:
+        if reset_bc_to_pending(
+            bc, expected_statuses=(BusinessCard.OcrStatus.PROCESSING,)
+        ):
+            cleaned += 1
+    logger.warning(
+        "Run_Process_CardImages_With_OCR: stuck sweeper cleaned %d BC "
+        "(threshold=%d minutes, detected=%d)",
+        cleaned, threshold_minutes, len(stuck_bcs),
+    )
+
+
+def _collect_target_bc_ids(limit, target_id):
+    """[性質] 準関数（DB 読み取り）
+
+    対象 BC.id のリストを返す。target_id 指定時は status=pending 維持の 1 件のみ
+    （limit 無視）。並び順は original_image__created_at 昇順 → card_index 昇順。
+    """
+    if target_id is not None:
+        if isinstance(target_id, uuid.UUID):
+            parsed_id = target_id
+        else:
+            try:
+                parsed_id = uuid.UUID(str(target_id))
+            except (ValueError, TypeError) as exc:
+                raise ValueError(
+                    f"target_id の値が UUID 形式ではありません: {target_id}"
+                ) from exc
+        exists = BusinessCard.objects.filter(
+            id=parsed_id, ocr_status=BusinessCard.OcrStatus.PENDING
+        ).exists()
+        if not exists:
+            logger.warning(
+                "Run_Process_CardImages_With_OCR: target_id %s is not pending / "
+                "does not exist",
+                parsed_id,
+            )
+            return []
+        return [parsed_id]
+
+    effective_limit = max(1, limit)
+    return list(
+        BusinessCard.objects.filter(ocr_status=BusinessCard.OcrStatus.PENDING)
+        .order_by("original_image__created_at", "card_index")
+        .values_list("id", flat=True)[:effective_limit]
+    )
+
+
+def _claim_lock(business_card_id):
+    """[性質] 副作用あり（DB 書込）
+
+    CAS で BC を processing に遷移させ排他を取得する。
+    pending 状態の BC を 1 件 → processing に CAS で書き換え、成功なら True。
+    既存 process_ocr.py から移管。
+    """
+    updated = BusinessCard.objects.filter(
+        id=business_card_id,
+        ocr_status=BusinessCard.OcrStatus.PENDING,
+    ).update(
+        ocr_status=BusinessCard.OcrStatus.PROCESSING,
+        claimed_at=timezone.now(),
+        updated_at=timezone.now(),
+    )
+    return updated == 1

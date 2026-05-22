@@ -1,0 +1,294 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CombinedResponse",
+  "description": "raw_json 保存フォーマット v1.6.0（schema_version / ocr_meta / api_response / cards）。v1.3.0 から 8 ブロック構造に再編、confidence は high/mid/low に統一、配列フィールドは value: array 形式。仕様書 OpenCV・OCR v1.6.0（Claude.API）統合版 §1.2 / §1.3 と整合。",
+  "type": "object",
+  "required": ["schema_version", "ocr_meta", "api_response", "cards"],
+  "properties": {
+    "schema_version": {
+      "const": "1.6.0"
+    },
+    "ocr_meta": {
+      "type": "object",
+      "required": ["timestamp"],
+      "properties": {
+        "timestamp": { "type": "string" }
+      }
+    },
+    "api_response": {
+      "type": "object",
+      "required": ["model", "stop_reason", "usage"],
+      "properties": {
+        "model":       { "type": "string" },
+        "stop_reason": { "type": "string" },
+        "usage": {
+          "type": "object",
+          "properties": {
+            "input_tokens":                { "type": "integer" },
+            "output_tokens":               { "type": "integer" },
+            "cache_read_input_tokens":     { "type": "integer" },
+            "cache_creation_input_tokens": { "type": "integer" }
+          }
+        }
+      }
+    },
+    "cards": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "card_meta",
+          "name",
+          "job",
+          "organization",
+          "address",
+          "contact",
+          "uncategorized_card_content",
+          "metadata"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "card_meta": {
+            "type": "object",
+            "required": ["is_business_card", "orientation"],
+            "additionalProperties": false,
+            "properties": {
+              "is_business_card": { "type": "boolean" },
+              "orientation": {
+                "type": "string",
+                "enum": ["normal", "rotate_180", "rotate_90_cw", "rotate_90_ccw", "mirror"]
+              }
+            }
+          },
+          "name": {
+            "type": "object",
+            "required": [
+              "original_script",
+              "last_name",
+              "first_name",
+              "other_name_parts",
+              "name_order",
+              "salutation_name",
+              "display_name",
+              "phonetic_name",
+              "alias_name"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "original_script":  { "$ref": "#/$defs/StringValue" },
+              "last_name":        { "$ref": "#/$defs/StringValue" },
+              "first_name":       { "$ref": "#/$defs/StringValue" },
+              "other_name_parts": { "$ref": "#/$defs/StringValue" },
+              "name_order":       { "$ref": "#/$defs/NameOrderValue" },
+              "salutation_name":  { "$ref": "#/$defs/StringValue" },
+              "display_name":     { "$ref": "#/$defs/StringValue" },
+              "phonetic_name":    { "$ref": "#/$defs/StringValue" },
+              "alias_name":       { "$ref": "#/$defs/StringValue" }
+            }
+          },
+          "job": {
+            "type": "object",
+            "required": ["title", "qualification", "department", "catchphrase"],
+            "additionalProperties": false,
+            "properties": {
+              "title":         { "$ref": "#/$defs/StringValue" },
+              "qualification": { "$ref": "#/$defs/StringValue" },
+              "department":    { "$ref": "#/$defs/StringValue" },
+              "catchphrase":   { "$ref": "#/$defs/StringValue" }
+            }
+          },
+          "organization": {
+            "type": "object",
+            "required": [
+              "org_name_full",
+              "org_core_name",
+              "legal_entity_type",
+              "legal_entity_type_code",
+              "legal_entity_type_position",
+              "org_domain_name",
+              "branch"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "org_name_full":              { "$ref": "#/$defs/StringValue" },
+              "org_core_name":              { "$ref": "#/$defs/StringValue" },
+              "legal_entity_type":          { "$ref": "#/$defs/StringValue" },
+              "legal_entity_type_code":     { "$ref": "#/$defs/LegalEntityTypeCodeValue" },
+              "legal_entity_type_position": { "$ref": "#/$defs/LegalEntityTypePositionValue" },
+              "org_domain_name":            { "$ref": "#/$defs/StringValue" },
+              "branch":                     { "$ref": "#/$defs/StringValue" }
+            }
+          },
+          "address": {
+            "type": "object",
+            "required": [
+              "full_address",
+              "postal_code",
+              "country",
+              "region",
+              "city",
+              "rest_of_address"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "full_address":    { "$ref": "#/$defs/StringValue" },
+              "postal_code":     { "$ref": "#/$defs/StringValue" },
+              "country":         { "$ref": "#/$defs/StringValue" },
+              "region":          { "$ref": "#/$defs/StringValue" },
+              "city":            { "$ref": "#/$defs/StringValue" },
+              "rest_of_address": { "$ref": "#/$defs/StringValue" }
+            }
+          },
+          "contact": {
+            "type": "object",
+            "required": [
+              "email",
+              "mobile_phone",
+              "personal_phone",
+              "personal_fax",
+              "org_phone",
+              "org_fax",
+              "sns"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "email":          { "$ref": "#/$defs/StringValue" },
+              "mobile_phone":   { "$ref": "#/$defs/StringValue" },
+              "personal_phone": { "$ref": "#/$defs/StringArrayValue" },
+              "personal_fax":   { "$ref": "#/$defs/StringArrayValue" },
+              "org_phone":      { "$ref": "#/$defs/StringArrayValue" },
+              "org_fax":        { "$ref": "#/$defs/StringArrayValue" },
+              "sns":            { "$ref": "#/$defs/SnsArrayValue" }
+            }
+          },
+          "uncategorized_card_content": {
+            "type": "object",
+            "required": ["handwritten_text", "other_printed_text"],
+            "additionalProperties": false,
+            "properties": {
+              "handwritten_text":   { "$ref": "#/$defs/StringValue" },
+              "other_printed_text": { "$ref": "#/$defs/StringValue" }
+            }
+          },
+          "metadata": {
+            "type": "object",
+            "required": ["primary_lang", "language_composition", "ai_analysis_notes"],
+            "additionalProperties": false,
+            "properties": {
+              "primary_lang":         { "$ref": "#/$defs/PrimaryLangValue" },
+              "language_composition": { "$ref": "#/$defs/LanguageCompositionValue" },
+              "ai_analysis_notes":    { "$ref": "#/$defs/StringValue" }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "Confidence": {
+      "type": "string",
+      "enum": ["high", "mid", "low"]
+    },
+    "StringValue": {
+      "type": "object",
+      "required": ["value", "confidence"],
+      "additionalProperties": false,
+      "properties": {
+        "value":      { "type": ["string", "null"] },
+        "confidence": { "$ref": "#/$defs/Confidence" }
+      }
+    },
+    "StringArrayValue": {
+      "type": "object",
+      "required": ["value", "confidence"],
+      "additionalProperties": false,
+      "properties": {
+        "value": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "confidence": { "$ref": "#/$defs/Confidence" }
+      }
+    },
+    "SnsArrayValue": {
+      "type": "object",
+      "required": ["value", "confidence"],
+      "additionalProperties": false,
+      "properties": {
+        "value": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["type", "id"],
+            "additionalProperties": false,
+            "properties": {
+              "type": { "type": "string" },
+              "id":   { "type": "string" }
+            }
+          }
+        },
+        "confidence": { "$ref": "#/$defs/Confidence" }
+      }
+    },
+    "NameOrderValue": {
+      "type": "object",
+      "required": ["value", "confidence"],
+      "additionalProperties": false,
+      "properties": {
+        "value": {
+          "type": ["string", "null"],
+          "enum": ["last_first", "first_last", "single", "other", null]
+        },
+        "confidence": { "$ref": "#/$defs/Confidence" }
+      }
+    },
+    "LegalEntityTypeCodeValue": {
+      "type": "object",
+      "required": ["value", "confidence"],
+      "additionalProperties": false,
+      "properties": {
+        "value": {
+          "type": ["string", "null"],
+          "enum": ["CP", "LLP", "GOV", "NPO", "REL", "EDU", "MED", "PRO", "IND", "OTH", null]
+        },
+        "confidence": { "$ref": "#/$defs/Confidence" }
+      }
+    },
+    "LegalEntityTypePositionValue": {
+      "type": "object",
+      "required": ["value", "confidence"],
+      "additionalProperties": false,
+      "properties": {
+        "value": {
+          "type": ["string", "null"],
+          "enum": ["Pre", "Post", "Mid", null]
+        },
+        "confidence": { "$ref": "#/$defs/Confidence" }
+      }
+    },
+    "PrimaryLangValue": {
+      "type": "object",
+      "required": ["value", "confidence"],
+      "additionalProperties": false,
+      "properties": {
+        "value": {
+          "type": ["string", "null"],
+          "enum": ["ja", "en", "zh", "und", null]
+        },
+        "confidence": { "$ref": "#/$defs/Confidence" }
+      }
+    },
+    "LanguageCompositionValue": {
+      "type": "object",
+      "required": ["value", "confidence"],
+      "additionalProperties": false,
+      "properties": {
+        "value": {
+          "type": ["string", "null"],
+          "enum": ["local_only", "english_only", "mix_bilingual", "other", null]
+        },
+        "confidence": { "$ref": "#/$defs/Confidence" }
+      }
+    }
+  }
+}
