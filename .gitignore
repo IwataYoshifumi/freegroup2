@@ -8,3 +8,10 @@ media/
 .claude/
 _scratch/
 logs/
+
+# OCR エクスポートデータ（個人情報含有のため Git 管理対象外）
+# 仮名化版（_redacted.md）のみ Git 管理する
+docs/ocr_analysis/*.json
+docs/ocr_analysis/*_baseline_*.md
+docs/ocr_analysis/*_full.md
+!docs/ocr_analysis/*_redacted.md
