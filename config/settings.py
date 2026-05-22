@@ -163,55 +163,59 @@ LOGOUT_REDIRECT_URL = "accounts:login"
 # ============================================================
 # 認証バックエンド + LDAP 連携（v1.5.0 / 仕様書 §5）
 # ============================================================
-
-import ldap
-from django_auth_ldap.config import LDAPSearch
+# v1.5.1: AUTH_BACKEND=local 環境で python-ldap / django-auth-ldap がインストール
+# されていなくても manage.py runserver が起動できるよう、LDAP 関連 import と
+# グローバル評価を AUTH_BACKEND in ("ldap", "both") 条件下に集約した。
+# OSS 配布時、LDAP を使わない利用者にまで python-ldap のインストールを強制しない。
 
 AUTH_BACKEND = os.getenv("AUTH_BACKEND", "local")
 
-if AUTH_BACKEND == "ldap":
-    AUTHENTICATION_BACKENDS = [
-        "django_auth_ldap.backend.LDAPBackend",
-        "django.contrib.auth.backends.ModelBackend",  # 緊急時のローカル管理者用
-    ]
-elif AUTH_BACKEND == "both":
+if AUTH_BACKEND in ("ldap", "both"):
+    # python-ldap / django-auth-ldap は AUTH_BACKEND が ldap/both のときのみ要求する。
+    # local では未インストールでも起動できるよう、import 自体を条件分岐内に置く。
+    import ldap
+    from django_auth_ldap.config import LDAPSearch
+
+    # ldap / both いずれも LDAP を試した後に local フォールバック（緊急時のローカル
+    # 管理者用）するため AUTHENTICATION_BACKENDS は同一。
     AUTHENTICATION_BACKENDS = [
         "django_auth_ldap.backend.LDAPBackend",
         "django.contrib.auth.backends.ModelBackend",
     ]
+
+    # django-auth-ldap 標準設定（実認証時に使用）
+    AUTH_LDAP_SERVER_URI = os.getenv("LDAP_SERVER_URI", "")
+    AUTH_LDAP_BIND_DN = os.getenv("LDAP_BIND_DN", "")
+    AUTH_LDAP_BIND_PASSWORD = os.getenv("LDAP_BIND_PASSWORD", "")
+
+    # username 突合属性（AD: sAMAccountName / LDAP: uid）。.env で切替可能。
+    LDAP_USER_USERNAME_ATTR = os.getenv("LDAP_USER_USERNAME_ATTR", "sAMAccountName")
+
+    AUTH_LDAP_USER_SEARCH = LDAPSearch(
+        os.getenv("LDAP_USER_SEARCH_BASE", ""),
+        ldap.SCOPE_SUBTREE,
+        f"({LDAP_USER_USERNAME_ATTR}=%(user)s)",
+    )
+
+    # LDAP 属性 → CustomUser フィールド マッピング（仕様書 §5.3）
+    AUTH_LDAP_USER_ATTR_MAP = {
+        "username": LDAP_USER_USERNAME_ATTR,
+        "email": "mail",
+        "first_name": "givenName",
+        "last_name": "sn",
+    }
+
+    # キャッシュ設定（仕様書 §5.2）
+    AUTH_LDAP_CACHE_TIMEOUT = (
+        int(os.getenv("LDAP_CACHE_TTL", 3600))
+        if os.getenv("LDAP_CACHE_ENABLED") == "true"
+        else 0
+    )
+
+    # v1.5.0 では auth.Group / Permission の自動同期は使わない
+    # （memberOf は accounts/ldap_sync.py で LdapGroup として独自管理、仕様書 §5.4）
+    AUTH_LDAP_MIRROR_GROUPS = False
+    AUTH_LDAP_FIND_GROUP_PERMS = False
 else:
+    # AUTH_BACKEND=local（および未知値の fallback）：LDAP モジュールは一切ロードしない。
     AUTHENTICATION_BACKENDS = ["django.contrib.auth.backends.ModelBackend"]
-
-# django-auth-ldap 標準設定（AUTH_BACKEND=ldap / both で実認証時に使用、local 時は無害）
-AUTH_LDAP_SERVER_URI = os.getenv("LDAP_SERVER_URI", "")
-AUTH_LDAP_BIND_DN = os.getenv("LDAP_BIND_DN", "")
-AUTH_LDAP_BIND_PASSWORD = os.getenv("LDAP_BIND_PASSWORD", "")
-
-# username 突合属性（AD: sAMAccountName / LDAP: uid）。.env で切替可能。
-LDAP_USER_USERNAME_ATTR = os.getenv("LDAP_USER_USERNAME_ATTR", "sAMAccountName")
-
-AUTH_LDAP_USER_SEARCH = LDAPSearch(
-    os.getenv("LDAP_USER_SEARCH_BASE", ""),
-    ldap.SCOPE_SUBTREE,
-    f"({LDAP_USER_USERNAME_ATTR}=%(user)s)",
-)
-
-# LDAP 属性 → CustomUser フィールド マッピング（仕様書 §5.3）
-AUTH_LDAP_USER_ATTR_MAP = {
-    "username": LDAP_USER_USERNAME_ATTR,
-    "email": "mail",
-    "first_name": "givenName",
-    "last_name": "sn",
-}
-
-# キャッシュ設定（仕様書 §5.2）
-AUTH_LDAP_CACHE_TIMEOUT = (
-    int(os.getenv("LDAP_CACHE_TTL", 3600))
-    if os.getenv("LDAP_CACHE_ENABLED") == "true"
-    else 0
-)
-
-# v1.5.0 では auth.Group / Permission の自動同期は使わない
-# （memberOf は accounts/ldap_sync.py で LdapGroup として独自管理、仕様書 §5.4）
-AUTH_LDAP_MIRROR_GROUPS = False
-AUTH_LDAP_FIND_GROUP_PERMS = False
