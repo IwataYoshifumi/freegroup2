@@ -178,9 +178,17 @@
 **Licensor**: Network Tokai Co., Ltd. (Representative: Yoshifumi Iwata)  
 **Software**: FreeGroup2  
 **Governing Law**: Laws of Japan / **Exclusive Jurisdiction**: Nagoya District Court  
+**Revision Date**: May 24, 2026 (v1.0 Draft, Revised)
 
 > This document is a draft prepared prior to final review by legal professionals (attorney / administrative scrivener). The legally binding final version will be confirmed after such review.  
 > The Japanese version is the authoritative text. This English version is a reference translation. In the event of any discrepancy, the Japanese version shall prevail.
+
+### Revision History
+
+| Version | Date | Summary |
+|---|---|---|
+| v1.0 Draft | May 23, 2026 | Initial draft. |
+| v1.0 Draft (Revised May 24, 2026) | May 24, 2026 | Revisions reflecting AI review feedback from the Legal Review Request v1.1 rev5: new Article 5.4 (positioning of operational rules), new Articles 6.5 and 6.6 (representation and warranty of rights ownership, and fallback for cases without ownership), and reorganization of Article 7 with strengthened non-exercise of moral rights (damages indemnification and obligation to obtain consent from affiliated persons). |
 
 ---
 
@@ -225,6 +233,10 @@ The Corporation may at any time add or remove the GitHub accounts it declares by
 
 The effect of this Agreement with respect to Contributions made from a removed GitHub account on or before the date of removal is not affected in any way by such removal. The same applies to persons who cease to be affiliated persons due to resignation or any other reason.
 
+### 5.4 Positioning of Operational Rules
+
+The operational rules concerning the management of Declared Accounts form part of this Agreement. In the event of any discrepancy between this Agreement and the operational rules, this Agreement shall prevail. When the Licensor revises the operational rules, the Licensor shall notify the Corporation with reasonable prior notice (30 days as a guideline).
+
 ## Article 6 Assignment of Copyright
 
 ### 6.1 Subject of Assignment
@@ -251,9 +263,23 @@ The effect of the copyright assignment arises at the moment the Licensor merges 
 
 The copyright assigned by the Corporation to the Licensor under the preceding paragraphs includes the rights set out in Articles 27 and 28 of the Copyright Act of Japan.
 
+### 6.5 Representation and Warranty of Rights Ownership
+
+For each Contribution made from a Declared Account, the Corporation represents and warrants that it has lawfully obtained the copyright in such Contribution from the affiliated person, or that it originally owns such copyright by reason of work made for hire or other grounds.
+
+### 6.6 Fallback in Case of Non-Ownership
+
+In the unlikely event that the Corporation does not own such copyright, the Corporation shall be obligated either to cause the affiliated person to assign such copyright directly to the Licensor, or to first acquire such copyright itself and then assign it to the Licensor.
+
 ## Article 7 Non-Exercise of Moral Rights
 
+### 7.1 Non-Exercise
+
 The Corporation shall cause its affiliated persons not to exercise any moral rights in the Contributed Work against the Licensor or any party that succeeds to or is licensed the rights from the Licensor.
+
+### 7.2 Damages Indemnification and Obtaining Consent from Affiliated Persons
+
+The Corporation shall indemnify the Licensor for any and all damages incurred by the Licensor as a result of an affiliated person exercising moral rights in breach of the preceding paragraph. The Corporation shall obtain the consent of the affiliated persons of its Declared Accounts to the non-exercise of moral rights set out in this Article, and shall explain the status of such consent at the Licensor's request.
 
 ## Article 8 Representations and Warranties
 
