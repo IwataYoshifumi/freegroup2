@@ -112,6 +112,46 @@ python manage.py runserver 0.0.0.0:8000
 
 `config/wsgi.py` を WSGI エントリポイントに指定し、`.htaccess` で Python アプリケーションとして公開します。エックスサーバーは Python のバージョンが古い場合があるため、SSH でログインして自分の `.venv` の Python を使う構成が無難です。
 
+## 9. 定期処理（cron）の設定
+
+FreeGroup2 の名刺取り込みは、Web サーバーとは別に **cron で動く 3 本の定期処理** が支えています。**この 3 本を設定しないと、画像をアップロードしても名刺データが一切生成されません。** 必須の設定として、本番運用を始める前に必ず登録してください。
+
+| コマンド | 起動間隔 | 役割 |
+| --- | --- | --- |
+| `process_opencv` | 5 分 | アップロードされた画像から名刺領域を切り抜き、DB に保存する |
+| `process_ocr` | 5 分 | 切り抜き済みの名刺を Claude API で OCR 処理し、Contact / Person を生成する |
+| `check_duplicates` | 5 分 | 主コンタクト同士の重複候補を検出し、DuplicateCandidate を生成する |
+
+処理は「アップロード → `process_opencv`（切り抜き）→ `process_ocr`（OCR）→ `check_duplicates`（重複チェック）」の順に、それぞれの cron が pending 状態のレコードを拾って進めていきます。
+
+### crontab の記載例
+
+仮想環境（`.venv`）を使う構成での例です。`crontab -e` で以下を登録します。`/path/to/project` は実際のプロジェクトのパスに置き換えてください。
+
+```text
+*/5 * * * * cd /path/to/project && .venv/bin/python manage.py process_opencv
+*/5 * * * * cd /path/to/project && .venv/bin/python manage.py process_ocr
+*/5 * * * * cd /path/to/project && .venv/bin/python manage.py check_duplicates
+```
+
+1 回の起動で処理する件数は各コマンドの `--limit` オプションで調整できます（既定値あり）。取り込み量が多い環境では起動間隔を 1 分に短縮することもできます。
+
+### 信頼性について
+
+これらの cron は、多少のトラブルがあっても自動で復旧するように作られています。
+
+- **多重起動対策が実装済み**のため、前回の処理が終わらないうちに次の cron が起動しても、同じレコードが二重に処理されることはありません。
+- **OCR 処理が 30 分以上止まったレコードは自動で救済**され、次回起動時に処理待ちへ差し戻されます。
+- **重複チェックは途中で中断された主コンタクト**を、次回起動時に自動で再処理します。
+
+### 障害時のメンテナンス
+
+OCR が失敗したレコードの差し戻しや、DB とメディアファイルの整合性検査には、別途メンテナンス用のコマンド（`retry_failed_ocr` / `reconcile_card_images`）を用意しています。詳細は [メンテナンスコマンド](admin/maintenance.md) を参照してください。
+
+### Windows の場合
+
+Windows サーバーで運用する場合は、cron の代わりに **タスクスケジューラ** で同じ 3 コマンドを 5 分間隔で実行するように登録すれば同等の運用ができます。
+
 ## 初期設定（管理画面でやっておくこと）
 
 ログイン後、Django 管理画面（`/admin/`）から以下を設定しておきます。

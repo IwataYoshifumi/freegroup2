@@ -28,6 +28,7 @@ nav:
   - 管理者ガイド:
     - バックアップ: admin/backup.md
     - アップデート: admin/update.md
+    - メンテナンスコマンド: admin/maintenance.md
   - FAQ: faq.md
   - ライセンス: license.md
 
