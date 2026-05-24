@@ -50,7 +50,7 @@ FreeGroup2 は、**FreeGroup2 License v1.0** のもとで提供されるソー�
 
 FreeGroup2 本体リポジトリへの貢献には、以下の条件があります。
 
-- 貢献者は、**登録事業者またはその所属者**に限られます。
+- 貢献者は、**登録事業者（ディストリビュータ）またはその所属者**に限られます。
 - プルリクエストの提出に先立ち、該当するコントリビュータライセンス契約（CLA）への同意が必須です。
     - 個人の貢献者：個人版 ICLA（[CLA-individual.md](https://github.com/IwataYoshifumi/freegroup2/blob/main/CLA-individual.md)）
     - 法人の貢献者：法人版 CCLA（[CLA-corporate.md](https://github.com/IwataYoshifumi/freegroup2/blob/main/CLA-corporate.md)）
