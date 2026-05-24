@@ -1,4 +1,4 @@
-# FreeGroup2 法人コントリビュータライセンス契約（CCLA）v1.0（草案）
+# FreeGroup2 法人コントリビュータライセンス契約（CCLA）v1.0
 
 **Corporate Contributor License Agreement**
 
@@ -6,17 +6,17 @@
 **ライセンサー**：株式会社ネットワーク東海（代表者：岩田好史）  
 **対象ソフトウェア**：FreeGroup2  
 **準拠法**：日本法／**専属管轄**：名古屋地方裁判所  
-**改訂日**：2026年5月24日（v1.0 草案・改訂）  
+**改訂日**：2026年5月24日  
 
-> 本書は士業（弁護士・行政書士）による最終チェック前の草案である。法的拘束力を持つ正式版は、士業のレビューを経て確定する。  
 > 本契約は日本語版を正本とし、末尾に併記する英文版（English Version）は参考訳とする。両者に齟齬がある場合は日本語版が優先する。
 
 ### 改訂履歴
 
 | 版 | 日付 | 主な内容 |
 |---|---|---|
-| v1.0 草案 | 2026年5月23日 | 初版作成 |
-| v1.0 草案（2026-05-24改訂） | 2026年5月24日 | リーガルチェック依頼書 v1.1 rev5 のAIレビュー指摘を踏まえた条文修正：第5.4条新設（運用ルールの位置づけ）、第6.5条・第6.6条新設（権利保有の表明保証＋フォールバック）、第7条の項分け・人格権不行使の強化（損害担保＋本人同意取得義務）。 |
+| v1.0 | 2026年5月23日 | 初版作成 |
+| v1.0（2026-05-24改訂） | 2026年5月24日 | リーガルチェック依頼書 v1.1 rev5 のAIレビュー指摘を踏まえた条文修正：第5.4条新設（運用ルールの位置づけ）、第6.5条・第6.6条新設（権利保有の表明保証＋フォールバック）、第7条の項分け・人格権不行使の強化（損害担保＋本人同意取得義務）。 |
+| v1.0 | 2026年5月24日 | 「草案」表記を削除し、v1.0 確定版とした。 |
 
 ---
 
@@ -172,23 +172,23 @@
 ---
 ---
 
-# FreeGroup2 Corporate Contributor License Agreement (CCLA) v1.0 (Draft)
+# FreeGroup2 Corporate Contributor License Agreement (CCLA) v1.0
 
 **Version**: 1.0  
 **Licensor**: Network Tokai Co., Ltd. (Representative: Yoshifumi Iwata)  
 **Software**: FreeGroup2  
 **Governing Law**: Laws of Japan / **Exclusive Jurisdiction**: Nagoya District Court  
-**Revision Date**: May 24, 2026 (v1.0 Draft, Revised)
+**Revision Date**: May 24, 2026
 
-> This document is a draft prepared prior to final review by legal professionals (attorney / administrative scrivener). The legally binding final version will be confirmed after such review.  
 > The Japanese version is the authoritative text. This English version is a reference translation. In the event of any discrepancy, the Japanese version shall prevail.
 
 ### Revision History
 
 | Version | Date | Summary |
 |---|---|---|
-| v1.0 Draft | May 23, 2026 | Initial draft. |
-| v1.0 Draft (Revised May 24, 2026) | May 24, 2026 | Revisions reflecting AI review feedback from the Legal Review Request v1.1 rev5: new Article 5.4 (positioning of operational rules), new Articles 6.5 and 6.6 (representation and warranty of rights ownership, and fallback for cases without ownership), and reorganization of Article 7 with strengthened non-exercise of moral rights (damages indemnification and obligation to obtain consent from affiliated persons). |
+| v1.0 | May 23, 2026 | Initial version. |
+| v1.0 (Revised May 24, 2026) | May 24, 2026 | Revisions reflecting AI review feedback from the Legal Review Request v1.1 rev5: new Article 5.4 (positioning of operational rules), new Articles 6.5 and 6.6 (representation and warranty of rights ownership, and fallback for cases without ownership), and reorganization of Article 7 with strengthened non-exercise of moral rights (damages indemnification and obligation to obtain consent from affiliated persons). |
+| v1.0 | 2026-05-24 | Removed "Draft" designation; finalized as v1.0. |
 
 ---
 

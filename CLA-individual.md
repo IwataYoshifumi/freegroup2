@@ -1,4 +1,4 @@
-# FreeGroup2 個人コントリビュータライセンス契約（ICLA）v1.0（草案）
+# FreeGroup2 個人コントリビュータライセンス契約（ICLA）v1.0
 
 **Individual Contributor License Agreement**
 
@@ -7,7 +7,6 @@
 **対象ソフトウェア**：FreeGroup2  
 **準拠法**：日本法／**専属管轄**：名古屋地方裁判所  
 
-> 本書は士業（弁護士・行政書士）による最終チェック前の草案である。法的拘束力を持つ正式版は、士業のレビューを経て確定する。  
 > 本契約は日本語版を正本とし、末尾に併記する英文版（English Version）は参考訳とする。両者に齟齬がある場合は日本語版が優先する。
 
 ---
@@ -127,14 +126,13 @@
 ---
 ---
 
-# FreeGroup2 Individual Contributor License Agreement (ICLA) v1.0 (Draft)
+# FreeGroup2 Individual Contributor License Agreement (ICLA) v1.0
 
 **Version**: 1.0  
 **Licensor**: Network Tokai Co., Ltd. (Representative: Yoshifumi Iwata)  
 **Software**: FreeGroup2  
 **Governing Law**: Laws of Japan / **Exclusive Jurisdiction**: Nagoya District Court  
 
-> This document is a draft prepared prior to final review by legal professionals (attorney / administrative scrivener). The legally binding final version will be confirmed after such review.  
 > The Japanese version is the authoritative text. This English version is a reference translation. In the event of any discrepancy, the Japanese version shall prevail.
 
 ---
