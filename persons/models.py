@@ -49,6 +49,14 @@ class Person(models.Model):
         on_delete=models.SET_NULL,
         related_name="persons_managed",
     )
+    is_unsubscribed = models.BooleanField(
+        default=False,
+        help_text=(
+            "メール配信停止フラグ（Unsubscribe レコードの派生情報、高速フィルタ用キャッシュ）。"
+            "通常は Phase 3 で実装する unsubscribe_person() / cancel_unsubscribe() 経由で更新する。"
+            "仕様書 §4.14.2 / §4.14.2.1"
+        ),
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

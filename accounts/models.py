@@ -52,6 +52,14 @@ class CustomUser(AbstractUser):
         unique=True,
         help_text="LDAP 同期時の突合キー（LDAP 由来ユーザのみ）",
     )
+    signature = models.TextField(
+        blank=True,
+        default="",
+        help_text=(
+            "メール送信時の署名（プレーンテキスト、HTML タグ不可）。"
+            "v1.6 メール配信機能で末尾に挿入。仕様書 §4.14.1"
+        ),
+    )
 
     class Meta:
         permissions = [
