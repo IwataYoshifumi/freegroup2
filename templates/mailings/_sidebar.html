@@ -13,15 +13,11 @@
      {% if active_menu == 'tags:bulk_tagging' %}class="is-active"{% endif %}>
     検索結果一括タグ付け
   </a>
-  {% comment %}
-    以下 2 項目は 1b-γ で配線予定。url タグを使うと NoReverseMatch でテンプレ全体が
-    落ちるため、配線完了まではハードコード（クリック時 404 はたんたん判断で許容）。
-  {% endcomment %}
-  <a href="/mailings/lists/"
+  <a href="{% url 'mailings:mailing_list_list' %}"
      {% if active_menu == 'mailings:mailing_list_list' %}class="is-active"{% endif %}>
     配信リスト管理
   </a>
-  <a href="/mailings/config/"
+  <a href="{% url 'mailings:config_edit' %}"
      {% if active_menu == 'mailings:config_edit' %}class="is-active"{% endif %}>
     配信設定
   </a>

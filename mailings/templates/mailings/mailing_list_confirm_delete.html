@@ -1,0 +1,34 @@
+{% extends "mailings/app_base.html" %}
+{% load back_tags %}
+
+{% block title %}リスト削除確認 — FreeGroup2{% endblock %}
+
+{% block content %}
+  <div class="app-page-header">
+    <div>
+      <div class="app-breadcrumb">メール配信 / 配信リスト管理 / 削除</div>
+      <h1>配信リスト削除確認</h1>
+    </div>
+  </div>
+
+  <section class="app-card">
+    <p>以下のリストを論理削除します。削除後はリスト一覧に表示されなくなります（物理削除はしません、Campaign 履歴保護のため）。</p>
+    <ul>
+      <li><strong>リスト名：</strong>{{ mailing_list.name }}</li>
+      <li><strong>メンバー数：</strong>{{ mailing_list.members.count }} 件</li>
+      <li><strong>凍結状態：</strong>
+        {% if mailing_list.members_frozen_at %}凍結済（{{ mailing_list.members_frozen_at|date:"Y/m/d H:i" }}）
+        {% else %}未凍結{% endif %}
+      </li>
+    </ul>
+
+    <form method="post">
+      {% csrf_token %}
+      <div class="app-action-area">
+        <button type="submit" class="app-btn app-btn--danger">削除する</button>
+        {% url 'mailings:mailing_list_list' as cancel_url %}
+        <a href="{% append_back_url cancel_url back %}" class="app-btn app-btn--secondary">戻る</a>
+      </div>
+    </form>
+  </section>
+{% endblock %}

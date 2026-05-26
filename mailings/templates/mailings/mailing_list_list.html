@@ -1,0 +1,77 @@
+{% extends "mailings/app_base.html" %}
+{% load back_tags %}
+
+{% block title %}配信リスト管理 — FreeGroup2{% endblock %}
+
+{% block content %}
+  <div class="app-page-header">
+    <div>
+      <div class="app-breadcrumb">メール配信 / 配信リスト管理</div>
+      <h1>配信リスト管理</h1>
+    </div>
+    <div class="app-action-area">
+      {% url 'mailings:mailing_list_create' as create_url %}
+      <a href="{% append_back_url create_url back %}" class="app-btn app-btn--primary">＋ 新規リスト作成</a>
+    </div>
+  </div>
+
+  {% if mailing_lists %}
+    <section class="app-card">
+      <div class="app-table-wrapper">
+        <table class="app-table app-table--nowrap">
+          <thead>
+            <tr>
+              <th class="app-table__col--action">操作</th>
+              <th>リスト名</th>
+              <th>説明</th>
+              <th>メンバー数</th>
+              <th>凍結状態</th>
+              <th>凍結日時</th>
+              <th>作成者</th>
+              <th class="app-table__col--date">更新日時</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for ml in mailing_lists %}
+              {% url 'mailings:mailing_list_detail' pk=ml.id as detail_url %}
+              {% url 'mailings:mailing_list_update' pk=ml.id as update_url %}
+              {% url 'mailings:mailing_list_delete' pk=ml.id as delete_url %}
+              <tr>
+                <td class="app-table__col--action">
+                  <a href="{% append_back_url detail_url back %}" class="app-btn app-btn--secondary app-btn--sm">詳細</a>
+                  <a href="{% append_back_url update_url back %}" class="app-btn app-btn--secondary app-btn--sm">編集</a>
+                  <a href="{% append_back_url delete_url back %}" class="app-btn app-btn--danger app-btn--sm">削除</a>
+                </td>
+                <td>{{ ml.name }}</td>
+                <td>
+                  {% if ml.description %}
+                    <span class="app-ellipsis" data-tooltip="{{ ml.description }}" style="display:inline-block; max-width:280px; overflow:hidden; text-overflow:ellipsis; vertical-align:bottom;">{{ ml.description|truncatechars:40 }}</span>
+                  {% else %}-{% endif %}
+                </td>
+                <td>{{ ml.member_count }}</td>
+                <td>
+                  {% if ml.members_frozen_at %}
+                    <span class="app-status-badge app-status-badge--success">凍結済</span>
+                  {% else %}
+                    <span class="app-status-badge app-status-badge--muted">未凍結</span>
+                  {% endif %}
+                </td>
+                <td>{{ ml.members_frozen_at|date:"Y/m/d H:i"|default:"-" }}</td>
+                <td>{{ ml.created_by.username|default:"-" }}</td>
+                <td>{{ ml.updated_at|date:"Y/m/d H:i" }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      {% if is_paginated %}
+        {% include "persons/_pagination.html" %}
+      {% endif %}
+    </section>
+  {% else %}
+    <section class="app-card">
+      <p class="app-muted">配信リストがまだありません。「＋ 新規リスト作成」から作成してください。</p>
+    </section>
+  {% endif %}
+{% endblock %}

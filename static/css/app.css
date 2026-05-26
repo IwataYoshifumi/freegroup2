@@ -804,14 +804,14 @@ a { color: inherit; text-decoration: none; }
 .app-icon--search::before { content: "⌕"; font-size: 17px; }
 .app-icon--back::before { content: "‹"; font-size: 22px; font-weight: 800; }
 
-.app-table__col--action { width: 78px; text-align: center; }
+.app-table__col--action { width: 200px; text-align: center; white-space: nowrap; }
 .app-table__col--name { width: 120px; }
 .app-table__col--organization { width: 220px; }
 .app-table__col--dept { width: 190px; }
 .app-table__col--personal_phone { width: 130px; }
 .app-table__col--email { width: 230px; }
 .app-table__col--status { width: 62px; text-align: center; }
-.app-table__col--date { width: 106px; }
+.app-table__col--date { width: 128px; }
 
 /* JSでbody直下に出すため、テーブルのoverflowに邪魔されない */
 .app-floating-tooltip {

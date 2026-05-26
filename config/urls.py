@@ -17,6 +17,7 @@ urlpatterns = [
     path("persons/", include("persons.urls", namespace="persons")),
     path("duplicates/", include("duplicates.urls", namespace="duplicates")),
     path("tags/", include("tags.urls", namespace="tags")),
+    path("mailings/", include("mailings.urls", namespace="mailings")),
 ]
 
 if settings.DEBUG:

@@ -1,0 +1,233 @@
+{% extends "mailings/app_base.html" %}
+{% load back_tags %}
+
+{% block title %}{% if is_create %}リスト作成{% else %}リスト編集：{{ object.name }}{% endif %} — FreeGroup2{% endblock %}
+
+{% block content %}
+  <div class="app-page-header">
+    <div>
+      <div class="app-breadcrumb">メール配信 / 配信リスト管理 / {% if is_create %}新規作成{% else %}編集{% endif %}</div>
+      <h1>{% if is_create %}リスト作成{% else %}リスト編集：{{ object.name }}{% endif %}</h1>
+    </div>
+    <div class="app-action-area">
+      {% if back.back_exist %}
+        <a href="{% back_url back %}" class="app-btn app-btn--secondary">戻る</a>
+      {% else %}
+        {% url 'mailings:mailing_list_list' as list_url %}
+        <a href="{{ list_url }}" class="app-btn app-btn--secondary">リスト一覧へ</a>
+      {% endif %}
+    </div>
+  </div>
+
+  {# Step 1: リスト本体（name / description）の編集 #}
+  <section class="app-card">
+    <h2 style="margin-bottom:12px;">Step 1：リスト本体</h2>
+    <form method="post" class="app-form-grid-edit">
+      {% csrf_token %}
+      <div class="app-form-grid" style="grid-template-columns: 1fr;">
+        {% for field in form %}
+          <div class="app-form__group">
+            <label class="app-form__label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+            {{ field }}
+            {% if field.errors %}{{ field.errors }}{% endif %}
+          </div>
+        {% endfor %}
+      </div>
+      <div class="app-action-area">
+        <button type="submit" class="app-btn app-btn--primary">
+          {% if is_create %}作成して次へ（メンバー組成）{% else %}本体を保存{% endif %}
+        </button>
+      </div>
+    </form>
+  </section>
+
+  {% if not is_create %}
+    {% if not is_frozen %}
+      {# Step 2: タグ選択 + プレビュー + 凍結（未凍結のときのみ） #}
+      <section class="app-card">
+        <h2 style="margin-bottom:12px;">Step 2：タグ選択でメンバー組成</h2>
+        <p class="app-muted" style="margin-bottom:12px;">
+          同一カテゴリ内 OR、カテゴリ間 AND で抽出します。条件を変更すると下のプレビュー件数が更新されます。
+        </p>
+
+        {% if tags_by_category %}
+          <form id="js-mailing-list-freeze" data-mailing-list-id="{{ mailing_list.id|default:object.id }}">
+            {% csrf_token %}
+            <div class="app-form-grid" style="grid-template-columns: repeat(3, 1fr);">
+              {% for cat, tags_in_cat in tags_by_category %}
+                <div class="app-form__group">
+                  <label class="app-form__label">{{ cat.name }}</label>
+                  <div style="display:flex; flex-direction:column; gap:4px;">
+                    {% for tag in tags_in_cat %}
+                      <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+                        <input type="checkbox" name="tag_ids" value="{{ tag.id }}" class="js-tag-cb">
+                        {{ tag.name }}
+                      </label>
+                    {% empty %}
+                      <span class="app-muted">（このカテゴリにタグなし）</span>
+                    {% endfor %}
+                  </div>
+                </div>
+              {% endfor %}
+            </div>
+
+            <div class="app-card" style="margin-top:16px; padding:16px;">
+              <h3 style="margin-bottom:8px;">プレビュー</h3>
+              <div>対象 Person 件数：<strong id="js-preview-count">-</strong></div>
+              <div style="margin-top:8px;">
+                <small class="app-muted">サンプル（先頭 10 件）：</small>
+                <ul id="js-preview-samples" style="margin-top:4px;"></ul>
+              </div>
+            </div>
+
+            <div class="app-action-area">
+              <button type="button" id="js-freeze-btn" class="app-btn app-btn--primary"
+                      onclick="return confirm('現在の条件でメンバーを凍結保存します。よろしいですか？\\n（既存メンバーがあれば全削除して再保存します）');">
+                この内容で凍結保存
+              </button>
+            </div>
+          </form>
+
+          <script>
+            (function () {
+              var form = document.getElementById('js-mailing-list-freeze');
+              if (!form) return;
+              var listId = form.dataset.mailingListId;
+              var countEl = document.getElementById('js-preview-count');
+              var samplesEl = document.getElementById('js-preview-samples');
+              var freezeBtn = document.getElementById('js-freeze-btn');
+
+              function getCsrf() {
+                var input = form.querySelector('[name=csrfmiddlewaretoken]');
+                return input ? input.value : '';
+              }
+              function selectedTags() {
+                return Array.prototype.map.call(
+                  form.querySelectorAll('.js-tag-cb:checked'),
+                  function (cb) { return cb.value; }
+                );
+              }
+              function postJson(url, data) {
+                return fetch(url, {
+                  method: 'POST',
+                  credentials: 'same-origin',
+                  headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrf() },
+                  body: JSON.stringify(data),
+                }).then(function (r) {
+                  if (!r.ok) throw new Error('HTTP ' + r.status);
+                  return r.json();
+                });
+              }
+              function refreshPreview() {
+                postJson("{% url 'mailings:mailing_list_preview' %}", { tag_ids: selectedTags() })
+                  .then(function (data) {
+                    if (!data.ok) return;
+                    countEl.textContent = data.count;
+                    samplesEl.innerHTML = '';
+                    (data.samples || []).forEach(function (s) {
+                      var li = document.createElement('li');
+                      li.textContent = s.name + (s.org ? ' / ' + s.org : '');
+                      samplesEl.appendChild(li);
+                    });
+                  })
+                  .catch(function () { countEl.textContent = '(エラー)'; });
+              }
+              form.querySelectorAll('.js-tag-cb').forEach(function (cb) {
+                cb.addEventListener('change', refreshPreview);
+              });
+              refreshPreview();
+
+              freezeBtn.addEventListener('click', function () {
+                postJson("{% url 'mailings:mailing_list_freeze' %}", {
+                  mailing_list_id: listId,
+                  tag_ids: selectedTags(),
+                }).then(function (data) {
+                  if (!data.ok) { alert('凍結に失敗しました'); return; }
+                  alert(data.member_count + ' 件を凍結保存しました。');
+                  location.reload();
+                }).catch(function () { alert('凍結に失敗しました'); });
+              });
+            })();
+          </script>
+        {% else %}
+          <p class="app-muted">タグがまだ作成されていません。
+            <a href="{% url 'tags:tag_category_list' %}">タグカテゴリ管理</a>でカテゴリとタグを作成してください。
+          </p>
+        {% endif %}
+      </section>
+    {% else %}
+      {# 凍結後：メンバー一覧 + 対象外 AJAX #}
+      <section class="app-card">
+        <h2 style="margin-bottom:12px;">凍結メンバー一覧（{{ members|length }} 件）</h2>
+        <p class="app-muted" style="margin-bottom:12px;">
+          凍結時刻：{{ mailing_list.members_frozen_at|date:"Y/m/d H:i:s" }}。
+          凍結後はメンバーを増やすことはできません。「対象外」で個別に減らすことのみ可能（物理削除）。
+        </p>
+        <form style="display:none;">{% csrf_token %}</form>
+        {% if members %}
+          <div class="app-table-wrapper">
+            <table class="app-table app-table--nowrap js-member-table">
+              <thead>
+                <tr>
+                  <th class="app-table__col--action">操作</th>
+                  <th>氏名</th>
+                  <th>会社</th>
+                  <th>役職</th>
+                  <th>メール</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for m in members %}
+                  <tr data-member-id="{{ m.id }}">
+                    <td class="app-table__col--action">
+                      <button type="button" class="app-btn app-btn--danger app-btn--sm js-member-remove">対象外</button>
+                    </td>
+                    <td>
+                      {% if m.person.primary_contact %}{{ m.person.primary_contact.full_name|default:"(氏名なし)" }}
+                      {% else %}<span class="app-muted">(primary_contact 未設定)</span>{% endif %}
+                    </td>
+                    <td>{{ m.person.primary_contact.organization|default:"-" }}</td>
+                    <td>{{ m.person.primary_contact.title|default:"-" }}</td>
+                    <td>{{ m.person.primary_contact.email|default:"-" }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+
+          <script>
+            (function () {
+              var table = document.querySelector('.js-member-table');
+              if (!table) return;
+              function getCsrf() {
+                var input = document.querySelector('[name=csrfmiddlewaretoken]');
+                return input ? input.value : '';
+              }
+              table.addEventListener('click', function (event) {
+                var btn = event.target.closest('.js-member-remove');
+                if (!btn) return;
+                var row = btn.closest('tr');
+                var memberId = row.dataset.memberId;
+                if (!confirm('このメンバーを対象外にします（物理削除）。よろしいですか？')) return;
+                fetch("{% url 'mailings:mailing_list_member_remove' %}", {
+                  method: 'POST',
+                  credentials: 'same-origin',
+                  headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrf() },
+                  body: JSON.stringify({ member_id: memberId }),
+                }).then(function (r) {
+                  if (!r.ok) throw new Error('HTTP ' + r.status);
+                  return r.json();
+                }).then(function (data) {
+                  if (!data.ok) { alert('削除に失敗しました'); return; }
+                  row.remove();
+                }).catch(function () { alert('削除に失敗しました'); });
+              });
+            })();
+          </script>
+        {% else %}
+          <p class="app-muted">凍結メンバーが 0 件です（全員「対象外」にしたか、抽出条件が 0 件でした）。</p>
+        {% endif %}
+      </section>
+    {% endif %}
+  {% endif %}
+{% endblock %}

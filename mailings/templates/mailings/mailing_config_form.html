@@ -1,0 +1,49 @@
+{% extends "mailings/app_base.html" %}
+{% load back_tags %}
+
+{% block title %}配信設定 — FreeGroup2{% endblock %}
+
+{% block content %}
+  <div class="app-page-header">
+    <div>
+      <div class="app-breadcrumb">メール配信 / 配信設定</div>
+      <h1>配信設定（MailingConfig シングルトン）</h1>
+    </div>
+  </div>
+
+  {% if messages %}
+    {% for message in messages %}
+      <section class="app-card">
+        <div class="app-message app-message--success">{{ message }}</div>
+      </section>
+    {% endfor %}
+  {% endif %}
+
+  <section class="app-card">
+    <p class="app-muted" style="margin-bottom:12px;">
+      特電法フッターで使用するシステム会社情報と DKIM 設定。シングルトン
+      （id=1 のみ）。DKIM 系・メルマガ系は Phase 8 で本格運用、本フェーズでは空でも可。
+    </p>
+
+    <form method="post" class="app-form-grid-edit">
+      {% csrf_token %}
+
+      <div class="app-form-grid" style="grid-template-columns: 1fr;">
+        {% for field in form %}
+          <div class="app-form__group">
+            <label class="app-form__label" for="{{ field.id_for_label }}">
+              {{ field.label }}
+            </label>
+            {{ field }}
+            {% if field.errors %}{{ field.errors }}{% endif %}
+            {% if field.help_text %}<small class="app-muted">{{ field.help_text }}</small>{% endif %}
+          </div>
+        {% endfor %}
+      </div>
+
+      <div class="app-action-area">
+        <button type="submit" class="app-btn app-btn--primary">保存</button>
+      </div>
+    </form>
+  </section>
+{% endblock %}

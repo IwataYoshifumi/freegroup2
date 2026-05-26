@@ -1,0 +1,97 @@
+{% extends "mailings/app_base.html" %}
+{% load back_tags %}
+
+{% block title %}{{ mailing_list.name }} — 配信リスト詳細 — FreeGroup2{% endblock %}
+
+{% block content %}
+  <div class="app-page-header">
+    <div>
+      <div class="app-breadcrumb">メール配信 / 配信リスト管理 / 詳細</div>
+      <h1>{{ mailing_list.name }}</h1>
+    </div>
+    <div class="app-action-area">
+      {% url 'mailings:mailing_list_update' pk=mailing_list.id as update_url %}
+      {% url 'mailings:mailing_list_delete' pk=mailing_list.id as delete_url %}
+      <a href="{% append_back_url update_url back %}" class="app-btn app-btn--secondary">編集</a>
+      <a href="{% append_back_url delete_url back %}" class="app-btn app-btn--danger">削除</a>
+      {% if back.back_exist %}
+        <a href="{% back_url back %}" class="app-btn app-btn--secondary">戻る</a>
+      {% else %}
+        {% url 'mailings:mailing_list_list' as list_url %}
+        <a href="{{ list_url }}" class="app-btn app-btn--secondary">リスト一覧へ</a>
+      {% endif %}
+    </div>
+  </div>
+
+  <section class="app-card">
+    <div class="app-detail-item">
+      <div class="app-detail-label">リスト名</div>
+      <div class="app-detail-value">{{ mailing_list.name }}</div>
+    </div>
+    <div class="app-detail-item">
+      <div class="app-detail-label">説明</div>
+      <div class="app-detail-value">{{ mailing_list.description|default:"-"|linebreaksbr }}</div>
+    </div>
+    <div class="app-detail-item">
+      <div class="app-detail-label">凍結状態</div>
+      <div class="app-detail-value">
+        {% if is_frozen %}
+          <span class="app-status-badge app-status-badge--success">凍結済</span>
+          {{ mailing_list.members_frozen_at|date:"Y/m/d H:i:s" }}
+        {% else %}
+          <span class="app-status-badge app-status-badge--muted">未凍結</span>
+          編集画面でタグ選択 → 凍結保存してください。
+        {% endif %}
+      </div>
+    </div>
+    <div class="app-detail-item">
+      <div class="app-detail-label">作成者</div>
+      <div class="app-detail-value">{{ mailing_list.created_by.username|default:"-" }}</div>
+    </div>
+    <div class="app-detail-item">
+      <div class="app-detail-label">作成日時</div>
+      <div class="app-detail-value">{{ mailing_list.created_at|date:"Y/m/d H:i:s" }}</div>
+    </div>
+    <div class="app-detail-item">
+      <div class="app-detail-label">更新日時</div>
+      <div class="app-detail-value">{{ mailing_list.updated_at|date:"Y/m/d H:i:s" }}</div>
+    </div>
+  </section>
+
+  <section class="app-card">
+    <div class="app-section__header"><h2>凍結メンバー一覧（{{ members|length }} 件）</h2></div>
+    {% if members %}
+      <div class="app-table-wrapper">
+        <table class="app-table app-table--nowrap">
+          <thead>
+            <tr>
+              <th>氏名</th>
+              <th>会社</th>
+              <th>役職</th>
+              <th>メール</th>
+              <th>追加者</th>
+              <th class="app-table__col--date">追加日時</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for m in members %}
+              <tr>
+                <td>
+                  {% if m.person.primary_contact %}{{ m.person.primary_contact.full_name|default:"(氏名なし)" }}
+                  {% else %}<span class="app-muted">(primary_contact 未設定)</span>{% endif %}
+                </td>
+                <td>{{ m.person.primary_contact.organization|default:"-" }}</td>
+                <td>{{ m.person.primary_contact.title|default:"-" }}</td>
+                <td>{{ m.person.primary_contact.email|default:"-" }}</td>
+                <td>{{ m.added_by.username|default:"-" }}</td>
+                <td>{{ m.created_at|date:"Y/m/d H:i" }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="app-muted">メンバーがまだ凍結されていません。</p>
+    {% endif %}
+  </section>
+{% endblock %}
