@@ -55,7 +55,7 @@ class TagCategoryListView(LoginRequiredMixin, ListView):
         context.update(
             {
                 "back": back,
-                "active_app": "tags",
+                "active_app": "mailings",
                 "active_menu": "tags:tag_category_list",
             }
         )
@@ -73,7 +73,7 @@ class TagCategoryCreateView(LoginRequiredMixin, CreateView):
         context.update(
             {
                 "back": BackNavigator(self.request),
-                "active_app": "tags",
+                "active_app": "mailings",
                 "active_menu": "tags:tag_category_list",
                 "is_create": True,
             }
@@ -92,7 +92,7 @@ class TagCategoryUpdateView(LoginRequiredMixin, UpdateView):
         context.update(
             {
                 "back": BackNavigator(self.request),
-                "active_app": "tags",
+                "active_app": "mailings",
                 "active_menu": "tags:tag_category_list",
                 "is_create": False,
             }
@@ -157,7 +157,7 @@ class TagListView(LoginRequiredMixin, ListView):
         context.update(
             {
                 "back": back,
-                "active_app": "tags",
+                "active_app": "mailings",
                 "active_menu": "tags:tag_list",
                 "categories": TagCategory.objects.filter(is_archived=False).order_by(
                     "sort_order", "name"
@@ -190,7 +190,7 @@ class TagCreateView(LoginRequiredMixin, CreateView):
         context.update(
             {
                 "back": BackNavigator(self.request),
-                "active_app": "tags",
+                "active_app": "mailings",
                 "active_menu": "tags:tag_list",
                 "is_create": True,
             }
@@ -209,7 +209,7 @@ class TagUpdateView(LoginRequiredMixin, UpdateView):
         context.update(
             {
                 "back": BackNavigator(self.request),
-                "active_app": "tags",
+                "active_app": "mailings",
                 "active_menu": "tags:tag_list",
                 "is_create": False,
             }
@@ -327,11 +327,12 @@ class BulkTaggingView(LoginRequiredMixin, TemplateView):
         context.update(
             {
                 "back": back,
-                "active_app": "tags",
+                "active_app": "mailings",
                 "active_menu": "tags:bulk_tagging",
                 "tags_by_category": _tags_grouped_by_category(),
                 "reset_url": reverse_lazy("tags:bulk_tagging"),
                 "submit_label": "検索",
+                "bulk_tagging_max_persons": BULK_TAGGING_MAX_PERSONS,
             }
         )
         # _search_form.html partial が参照するコンテキスト

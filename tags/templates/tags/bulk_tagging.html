@@ -1,4 +1,4 @@
-{% extends "cards/app_base.html" %}
+{% extends "mailings/app_base.html" %}
 {% load back_tags %}
 
 {% block title %}検索結果一括タグ付け — FreeGroup2{% endblock %}
@@ -41,7 +41,7 @@
 
       {# Step 2: 検索結果（選択チェックボックス付き） #}
       <section class="app-card">
-        <h2 style="margin-bottom:12px;">Step 2：タグ付与対象を選択（{{ result_persons|length }} 件中、一度に最大 500 件まで）</h2>
+        <h2 style="margin-bottom:12px;">Step 2：タグ付与対象を選択（{{ result_persons|length }} 件中、一度に最大 {{ bulk_tagging_max_persons }} 件まで）</h2>
         <div class="app-table-wrapper">
           <table class="app-table app-table--nowrap">
             <thead>
