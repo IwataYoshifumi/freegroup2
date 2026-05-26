@@ -17,7 +17,6 @@ PersonAddAdditionalRoleView：別肩書追加画面（URL 9 番、D-Form ステ�
 
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.db import transaction
-from django.db.models import Count, Q
 from django.http import Http404, HttpResponseRedirect
 from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
@@ -31,6 +30,7 @@ from contacts.views import _create_sns_from_formset
 from duplicates.models import PersonMergeLog
 
 from .models import Person
+from .services.person_search import SEARCH_PARAMS, search_persons
 
 
 class PersonListView(ListView):
@@ -47,78 +47,9 @@ class PersonListView(ListView):
     context_object_name = "persons"
     paginate_by = 20
 
-    _SEARCH_PARAMS = (
-        "name",
-        "organization",
-        "department",
-        "title",
-        "email",
-        "tel",
-        "address",
-    )
-    _VALID_STATUSES = ("active", "merged", "archived")
-
-    def _get_selected_statuses(self):
-        """status チェック状態の解決。初回（searched なし）は active のみ、
-        検索後はチェックされた値そのまま（不正値は捨てる、空も許容で 0 件）。"""
-        if self.request.GET.get("searched") != "1":
-            return ["active"]
-        return [
-            s
-            for s in self.request.GET.getlist("status")
-            if s in self._VALID_STATUSES
-        ]
-
     def get_queryset(self):
-        selected = self._get_selected_statuses()
-        if not selected:
-            return Person.objects.none()
-
-        qs = (
-            Person.objects.filter(status__in=selected)
-            .select_related("primary_contact")
-            .annotate(
-                active_count=Count(
-                    "contact",
-                    filter=Q(contact__status__in=["primary", "active"]),
-                )
-            )
-        )
-
-        p = self.request.GET
-        if p.get("name", "").strip():
-            qs = qs.filter(
-                primary_contact__full_name__icontains=p["name"].strip()
-            )
-        if p.get("organization", "").strip():
-            qs = qs.filter(
-                primary_contact__organization__icontains=p["organization"].strip()
-            )
-        if p.get("department", "").strip():
-            qs = qs.filter(
-                primary_contact__department__icontains=p["department"].strip()
-            )
-        if p.get("title", "").strip():
-            qs = qs.filter(
-                primary_contact__title__icontains=p["title"].strip()
-            )
-        if p.get("email", "").strip():
-            qs = qs.filter(
-                primary_contact__email__icontains=p["email"].strip()
-            )
-        if p.get("tel", "").strip():
-            tel = p["tel"].strip()
-            qs = qs.filter(
-                Q(primary_contact__personal_phone__icontains=tel)
-                | Q(primary_contact__mobile_phone__icontains=tel)
-                | Q(primary_contact__personal_fax__icontains=tel)
-            )
-        if p.get("address", "").strip():
-            qs = qs.filter(
-                primary_contact__address__icontains=p["address"].strip()
-            )
-
-        return qs.order_by("-updated_at", "-created_at")
+        # v1.6 Phase 1b: 検索ロジックを persons.services.person_search に切り出し（論点 A-1）。
+        return search_persons(self.request.GET)
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -143,9 +74,17 @@ class PersonListView(ListView):
 
         context["active_app"] = "persons"
         context["active_menu"] = "persons:person_list"
-        for key in self._SEARCH_PARAMS:
+        for key in SEARCH_PARAMS:
             context[key] = self.request.GET.get(key, "")
-        context["selected_statuses"] = self._get_selected_statuses()
+        # _search_form.html partial と既存テンプレ両方で利用するチェック状態。
+        if self.request.GET.get("searched") != "1":
+            context["selected_statuses"] = ["active"]
+        else:
+            context["selected_statuses"] = [
+                s
+                for s in self.request.GET.getlist("status")
+                if s in ("active", "merged", "archived")
+            ]
         context["searched"] = self.request.GET.get("searched") == "1"
         return context
 

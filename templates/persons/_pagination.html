@@ -1,0 +1,30 @@
+{% comment %}
+ページネーション partial（v1.6 Phase 1b 論点 C-3）。
+Django 標準の {{ request.GET.urlencode }} で現在のクエリ文字列を保持し
+（page だけ差し替える形）、検索条件・status 等をすべて引き継ぐ。
+
+期待 context:
+  paginator / page_obj / is_paginated: Django ListView の標準提供
+  request: Django RequestContext で自動提供
+{% endcomment %}
+<nav class="app-pagination" aria-label="ページネーション">
+  {% if page_obj.has_previous %}
+    <a href="?{{ request.GET.urlencode }}&page={{ page_obj.previous_page_number }}" class="app-pagination__button">‹</a>
+  {% else %}
+    <button type="button" class="app-pagination__button" disabled>‹</button>
+  {% endif %}
+
+  {% for num in paginator.page_range %}
+    {% if num == page_obj.number %}
+      <button type="button" class="app-pagination__button is-active">{{ num }}</button>
+    {% else %}
+      <a href="?{{ request.GET.urlencode }}&page={{ num }}" class="app-pagination__button">{{ num }}</a>
+    {% endif %}
+  {% endfor %}
+
+  {% if page_obj.has_next %}
+    <a href="?{{ request.GET.urlencode }}&page={{ page_obj.next_page_number }}" class="app-pagination__button">›</a>
+  {% else %}
+    <button type="button" class="app-pagination__button" disabled>›</button>
+  {% endif %}
+</nav>

@@ -12,66 +12,8 @@
   </div>
 
   <section class="app-card">
-    <form method="get" class="app-form-grid-edit">
-      <input type="hidden" name="searched" value="1">
-      <div class="app-form-grid" style="grid-template-columns: repeat(4, 1fr);">
-        <div class="app-form__group">
-          <label class="app-form__label" for="id_name">氏名</label>
-          <input type="text" id="id_name" name="name" value="{{ name }}" class="app-input">
-        </div>
-        <div class="app-form__group">
-          <label class="app-form__label" for="id_organization">会社名</label>
-          <input type="text" id="id_organization" name="organization" value="{{ organization }}" class="app-input">
-        </div>
-        <div class="app-form__group">
-          <label class="app-form__label" for="id_department">部署名</label>
-          <input type="text" id="id_department" name="department" value="{{ department }}" class="app-input">
-        </div>
-        <div class="app-form__group">
-          <label class="app-form__label" for="id_title">役職</label>
-          <input type="text" id="id_title" name="title" value="{{ title }}" class="app-input">
-        </div>
-
-        <div class="app-form__group">
-          <label class="app-form__label" for="id_email">メール</label>
-          <input type="text" id="id_email" name="email" value="{{ email }}" class="app-input">
-        </div>
-        <div class="app-form__group">
-          <label class="app-form__label" for="id_tel">電話</label>
-          <input type="text" id="id_tel" name="tel" value="{{ tel }}" class="app-input">
-        </div>
-        <div class="app-form__group" style="grid-column: span 2;">
-          <label class="app-form__label" for="id_address">住所</label>
-          <input type="text" id="id_address" name="address" value="{{ address }}" class="app-input">
-        </div>
-
-        <div class="app-form__group" style="grid-column: span 4;">
-          <label class="app-form__label">ステータス</label>
-          <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:center;">
-            <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
-              <input type="checkbox" name="status" value="active"
-                     {% if "active" in selected_statuses %}checked{% endif %}>
-              active
-            </label>
-            <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
-              <input type="checkbox" name="status" value="merged"
-                     {% if "merged" in selected_statuses %}checked{% endif %}>
-              merged
-            </label>
-            <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
-              <input type="checkbox" name="status" value="archived"
-                     {% if "archived" in selected_statuses %}checked{% endif %}>
-              archived
-            </label>
-          </div>
-        </div>
-      </div>
-
-      <div class="app-action-area app-action-area--search">
-        <button type="submit" class="app-btn app-btn--primary">検索</button>
-        <a href="{% url 'persons:person_list' %}" class="app-btn app-btn--secondary">リセット</a>
-      </div>
-    </form>
+    {% url 'persons:person_list' as reset_url %}
+    {% include "persons/_search_form.html" %}
   </section>
 
   <section class="app-card">
@@ -170,27 +112,7 @@
     </div>
 
     {% if is_paginated %}
-      <nav class="app-pagination" aria-label="ページネーション">
-        {% if page_obj.has_previous %}
-          <a href="?name={{ name }}&organization={{ organization }}&department={{ department }}&title={{ title }}&email={{ email }}&tel={{ tel }}&address={{ address }}{% for s in selected_statuses %}&status={{ s }}{% endfor %}&searched=1&page={{ page_obj.previous_page_number }}" class="app-pagination__button">‹</a>
-        {% else %}
-          <button type="button" class="app-pagination__button" disabled>‹</button>
-        {% endif %}
-
-        {% for num in paginator.page_range %}
-          {% if num == page_obj.number %}
-            <button type="button" class="app-pagination__button is-active">{{ num }}</button>
-          {% else %}
-            <a href="?name={{ name }}&organization={{ organization }}&department={{ department }}&title={{ title }}&email={{ email }}&tel={{ tel }}&address={{ address }}{% for s in selected_statuses %}&status={{ s }}{% endfor %}&searched=1&page={{ num }}" class="app-pagination__button">{{ num }}</a>
-          {% endif %}
-        {% endfor %}
-
-        {% if page_obj.has_next %}
-          <a href="?name={{ name }}&organization={{ organization }}&department={{ department }}&title={{ title }}&email={{ email }}&tel={{ tel }}&address={{ address }}{% for s in selected_statuses %}&status={{ s }}{% endfor %}&searched=1&page={{ page_obj.next_page_number }}" class="app-pagination__button">›</a>
-        {% else %}
-          <button type="button" class="app-pagination__button" disabled>›</button>
-        {% endif %}
-      </nav>
+      {% include "persons/_pagination.html" %}
     {% endif %}
   </section>
 {% endblock %}
