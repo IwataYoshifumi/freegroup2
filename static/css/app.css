@@ -273,7 +273,7 @@ a { color: inherit; text-decoration: none; }
 }
 
 .app-input:focus {
-  outline: 2px solid #bfdbfe;
+  outline: 2px solid #1d4ed8;
   border-color: var(--app-color-primary);
 }
 
@@ -287,6 +287,44 @@ a { color: inherit; text-decoration: none; }
 
 .app-action-area--search {
   margin-top: var(--app-space-md);
+}
+
+/* ===== ContactSns InlineFormSet（Phase F1, 仕様書 §11.6.7） ===== */
+
+.app-sns-formset__rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--app-space-sm);
+  margin-bottom: var(--app-space-sm);
+}
+
+.app-sns-formset__row {
+  display: flex;
+  gap: var(--app-space-sm);
+  align-items: flex-start;
+}
+
+/* 既存行を「×」で削除した行（JS が hidden 属性をセット）を画面から隠す。
+   .app-sns-formset__row の display:flex が HTML hidden 属性を上書きするため、
+   [hidden] を明示的に display:none で勝たせる（Phase F1 follow-up 不具合①）。 */
+.app-sns-formset__row[hidden] { display: none !important; }
+
+.app-sns-formset__cell--type { flex: 0 0 160px; }
+.app-sns-formset__cell--id { flex: 1 1 auto; }
+
+.app-sns-formset__delete {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+}
+
+/* DELETE チェックボックスは「×」ボタン経由（JS）で操作するため画面上は隠す */
+.app-sns-formset__delete input[type="checkbox"] { display: none; }
+
+@media (max-width: 640px) {
+  .app-sns-formset__row { flex-wrap: wrap; }
+  .app-sns-formset__cell--type,
+  .app-sns-formset__cell--id { flex: 1 1 100%; }
 }
 
 /* ========== Components / Button ========== */
@@ -768,9 +806,9 @@ a { color: inherit; text-decoration: none; }
 
 .app-table__col--action { width: 78px; text-align: center; }
 .app-table__col--name { width: 120px; }
-.app-table__col--company { width: 220px; }
+.app-table__col--organization { width: 220px; }
 .app-table__col--dept { width: 190px; }
-.app-table__col--phone { width: 130px; }
+.app-table__col--personal_phone { width: 130px; }
 .app-table__col--email { width: 230px; }
 .app-table__col--status { width: 62px; text-align: center; }
 .app-table__col--date { width: 106px; }
@@ -1357,6 +1395,33 @@ select.app-input {
   padding-left: var(--app-space-sm);
 }
 
+/* マージレビュー画面 ContactSns 比較表示（Phase F2, 仕様書 §11.5.7） */
+.app-sns-compare__list {
+  list-style: none;
+  margin: 0 0 var(--app-space-sm);
+  padding: 0;
+}
+
+.app-sns-compare__item {
+  padding: var(--app-space-xs) var(--app-space-sm);
+  border-bottom: 1px dotted var(--app-border);
+  word-break: break-word;
+  line-height: 1.5;
+  font-size: 14px;
+}
+
+.app-sns-compare__item--diff {
+  background: rgba(217, 119, 6, 0.08);
+  box-shadow: inset 4px 0 0 var(--app-color-warning);
+}
+
+.app-sns-compare__empty {
+  padding: var(--app-space-xs) var(--app-space-sm);
+  color: var(--app-muted);
+  font-size: 13px;
+  font-style: italic;
+}
+
 /* マージレビュー画面 第 1 段階判定（D-4d-1 第 8 弾 §2-1 で app-merge-survivor は
    独立ラッパーを廃止し、フィールド比較テーブル内の各 app-form__group 末尾に
    直配置する構造に変更したため、本セレクタは app-merge-decision のみに整理）。 */
@@ -1696,4 +1761,16 @@ form:has(.js-decision-additional_role:checked) .app-merge-survivor__label--prima
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;
   white-space: nowrap;
+}
+
+/* Phase G: EXIF JSON 等幅表示（OriginalDetailView セクション 10、仕様書 §7.2） */
+.app-exif-json {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  background: #f8fafc;
+  padding: var(--app-space-sm) var(--app-space-md);
+  border-radius: 4px;
+  max-height: 600px;
+  overflow: auto;
+  margin-top: var(--app-space-sm);
 }

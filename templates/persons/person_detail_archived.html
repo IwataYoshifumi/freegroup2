@@ -74,7 +74,7 @@
                   <a href="{% append_back_url detail_url back %}" class="app-btn app-btn--secondary app-btn--sm">詳細</a>
                 </td>
                 <td>{{ c.full_name|default:"-" }}</td>
-                <td>{{ c.company|default:"-" }}</td>
+                <td>{{ c.organization|default:"-" }}</td>
                 <td>{{ c.title|default:"-" }}</td>
                 <td>{{ c.updated_at|date:"Y/m/d H:i" }}</td>
               </tr>

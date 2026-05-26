@@ -522,4 +522,117 @@
       if (row) onCancelClick(row);
     }
   });
+
+  // ----- full_name 補助組み立て（Phase D §3.7、仕様書 §6.5 / §11.9.5）-----
+  // last_name / first_name / other_name_parts / name_order の変更に追従して full_name を
+  // 補助組み立てする。ユーザーが full_name を直接編集したら以後の自動組み立てを停止する
+  // （手入力尊重）。ブラウザストレージは使わずメモリ内フラグのみで管理する。
+  let nameComposeManual = false;
+
+  function composeFullNameField() {
+    if (nameComposeManual) return;
+    const full = document.querySelector('.js-name-full');
+    if (!full) return;
+    const valueOf = function (selector) {
+      const el = document.querySelector(selector);
+      return el ? el.value.trim() : '';
+    };
+    const last = valueOf('.js-name-last');
+    const first = valueOf('.js-name-first');
+    const other = valueOf('.js-name-other');
+    const orderEl = document.querySelector('.js-name-order');
+    const order = orderEl ? orderEl.value : '';
+    let result;
+    if (order === 'last_first') {
+      result = [last, first].filter(Boolean).join(' ');
+    } else if (order === 'first_last') {
+      result = [first, other, last].filter(Boolean).join(' ');
+    } else if (order === 'single') {
+      result = last || first;
+    } else {
+      return; // other / 未選択 は自動組み立てしない（手入力のみ、仕様書 §6.5）
+    }
+    full.value = result;
+  }
+
+  document.addEventListener('input', function (event) {
+    const target = event.target;
+    if (!target || !target.classList) return;
+    if (target.classList.contains('js-name-full')) {
+      nameComposeManual = true; // ユーザーが直接編集 → 以後は補助しない
+      return;
+    }
+    if (
+      target.classList.contains('js-name-last') ||
+      target.classList.contains('js-name-first') ||
+      target.classList.contains('js-name-other')
+    ) {
+      composeFullNameField();
+    }
+  });
+
+  document.addEventListener('change', function (event) {
+    const target = event.target;
+    if (target && target.classList && target.classList.contains('js-name-order')) {
+      composeFullNameField();
+    }
+  });
+})();
+
+/* ============================================================
+ * Phase F1: ContactSns InlineFormSet の動的追加・削除（仕様書 §11.6.7）
+ *
+ * partial: templates/contacts/_contact_sns_formset.html。
+ * 「＋追加」: <template> から空行を複製し __prefix__ を TOTAL_FORMS の現在値で
+ *            置換して挿入、TOTAL_FORMS をインクリメント。
+ * 「×削除」: 既存行（hidden id に値あり = DB 由来）なら DELETE チェックを ON にして
+ *            行を隠す（POST で削除反映）。新規行（id 空）なら DOM ごと除去する
+ *            （TOTAL_FORMS は据え置き。欠番のインデックスは Django 側で空フォーム扱い
+ *            となり empty_permitted で無視されるため、再採番は不要）。
+ * ============================================================ */
+(function () {
+  function mgmtInput(prefix, key) {
+    return document.querySelector('[name="' + prefix + '-' + key + '"]');
+  }
+
+  function onAdd(btn) {
+    const block = btn.closest('.js-sns-formset');
+    if (!block) return;
+    const prefix = block.getAttribute('data-prefix');
+    const container = block.querySelector('.js-sns-formset-container');
+    const template = block.querySelector('.js-sns-empty-form-template');
+    const total = mgmtInput(prefix, 'TOTAL_FORMS');
+    if (!container || !template || !total) return;
+    let index = parseInt(total.value, 10);
+    if (isNaN(index)) index = 0;
+    const html = template.innerHTML.replace(/__prefix__/g, index);
+    const temp = document.createElement('div');
+    temp.innerHTML = html.trim();
+    const row = temp.firstElementChild;
+    if (!row) return;
+    container.appendChild(row);
+    total.value = index + 1;
+  }
+
+  function onRemove(btn) {
+    const row = btn.closest('.js-sns-formset-row');
+    if (!row) return;
+    /* sns_id のフィールド名は "...-sns_id"（末尾 _id）なので "-id"（PK）にはマッチしない。 */
+    const idInput = row.querySelector('input[name$="-id"]');
+    const isExisting = idInput && idInput.value;
+    if (isExisting) {
+      const del = row.querySelector('input[type="checkbox"][name$="-DELETE"]');
+      if (del) del.checked = true;
+      row.hidden = true;
+    } else {
+      row.remove();
+    }
+  }
+
+  document.addEventListener('click', function (event) {
+    const addBtn = event.target.closest('.js-sns-add-btn');
+    if (addBtn) { onAdd(addBtn); return; }
+    const removeBtn = event.target.closest('.js-sns-remove-btn');
+    if (removeBtn) { onRemove(removeBtn); return; }
+  });
 })();

@@ -7,12 +7,32 @@ from django.urls import reverse
 from django.utils import timezone
 
 from config.constants import DuplicateMergeReason
-from contacts.models import Contact
+from contacts.models import Contact, ContactSns
 from duplicates.models import PersonMergeLog
 from persons.models import Person
 
 
 User = get_user_model()
+
+
+def _empty_sns_management_form(prefix="sns"):
+    """ContactSns InlineFormSet の空 management_form（POST テスト用、Phase F1 §11.6.7）。"""
+    return {
+        f"{prefix}-TOTAL_FORMS": "0",
+        f"{prefix}-INITIAL_FORMS": "0",
+        f"{prefix}-MIN_NUM_FORMS": "0",
+        f"{prefix}-MAX_NUM_FORMS": "1000",
+    }
+
+
+def _sns_management_form(total, initial=0, prefix="sns"):
+    """ContactSns InlineFormSet の management_form（行ありテスト用、Phase F1 §11.6.7）。"""
+    return {
+        f"{prefix}-TOTAL_FORMS": str(total),
+        f"{prefix}-INITIAL_FORMS": str(initial),
+        f"{prefix}-MIN_NUM_FORMS": "0",
+        f"{prefix}-MAX_NUM_FORMS": "1000",
+    }
 
 
 class PersonListViewTests(TestCase):
@@ -32,11 +52,11 @@ class PersonListViewTests(TestCase):
             person=self.person_a,
             status=Contact.Status.PRIMARY,
             full_name="Alice Smith",
-            company="Acme Corp",
+            organization="Acme Corp",
             department="Sales",
             title="Manager",
             email="alice@acme.example",
-            phone="03-1234-5678",
+            personal_phone="03-1234-5678",
             address="Tokyo",
         )
         self.person_a.primary_contact = self.contact_a
@@ -97,44 +117,44 @@ class PersonListViewTests(TestCase):
         self.assertIn(self.person_a.id, ids)
         self.assertNotIn(p_other.id, ids)
 
-    def test_search_tel_or_phone_mobile_fax(self):
-        """tel は primary_contact の phone / mobile / fax の OR 一致。"""
-        p_mobile, _ = self._make_active_with_primary(
-            full_name="MobOnly", mobile="090-1111-2222"
+    def test_search_tel_or_personal_phone_mobile_phone_personal_fax(self):
+        """tel は primary_contact の personal_phone / mobile_phone / personal_fax の OR 一致。"""
+        p_mobile_phone, _ = self._make_active_with_primary(
+            full_name="MobOnly", mobile_phone="090-1111-2222"
         )
-        p_fax, _ = self._make_active_with_primary(
-            full_name="FaxOnly", fax="06-9999-8888"
+        p_personal_fax, _ = self._make_active_with_primary(
+            full_name="FaxOnly", personal_fax="06-9999-8888"
         )
 
         resp = self.client.get(self.url, {"tel": "1234"})
         ids = [p.id for p in resp.context["persons"]]
         self.assertIn(self.person_a.id, ids)
-        self.assertNotIn(p_mobile.id, ids)
-        self.assertNotIn(p_fax.id, ids)
+        self.assertNotIn(p_mobile_phone.id, ids)
+        self.assertNotIn(p_personal_fax.id, ids)
 
         resp = self.client.get(self.url, {"tel": "090-1111"})
         ids = [p.id for p in resp.context["persons"]]
-        self.assertIn(p_mobile.id, ids)
+        self.assertIn(p_mobile_phone.id, ids)
         self.assertNotIn(self.person_a.id, ids)
 
         resp = self.client.get(self.url, {"tel": "06-9999"})
         ids = [p.id for p in resp.context["persons"]]
-        self.assertIn(p_fax.id, ids)
+        self.assertIn(p_personal_fax.id, ids)
         self.assertNotIn(self.person_a.id, ids)
 
-    def test_search_and_name_company(self):
-        """name と company の AND 検索。"""
+    def test_search_and_name_organization(self):
+        """name と organization の AND 検索。"""
         self._make_active_with_primary(
-            full_name="Alice Tanaka", company="Wonder Corp"
+            full_name="Alice Tanaka", organization="Wonder Corp"
         )
         self._make_active_with_primary(
-            full_name="Bob Smith", company="Acme Industries"
+            full_name="Bob Smith", organization="Acme Industries"
         )
         p_both, _ = self._make_active_with_primary(
-            full_name="Alice Brown", company="Acme Group"
+            full_name="Alice Brown", organization="Acme Group"
         )
 
-        resp = self.client.get(self.url, {"name": "Alice", "company": "Acme"})
+        resp = self.client.get(self.url, {"name": "Alice", "organization": "Acme"})
         ids = [p.id for p in resp.context["persons"]]
         self.assertIn(self.person_a.id, ids)
         self.assertIn(p_both.id, ids)
@@ -278,7 +298,11 @@ class PersonAddAdditionalRoleViewTests(TestCase):
             person=self.person,
             status=Contact.Status.PRIMARY,
             full_name="P-name",
-            company="P-co",
+            organization="P-co",
+            # salutation_name を埋め is_manual=True とし、Contact.save() の自動補完を抑止する
+            # （補完されると salutation_name の CFC が増えてカウントがずれるため）。
+            salutation_name="テスト 様",
+            salutation_name_is_manual=True,
         )
         self.person.primary_contact = self.primary
         self.person.save(update_fields=["primary_contact", "updated_at"])
@@ -295,7 +319,12 @@ class PersonAddAdditionalRoleViewTests(TestCase):
     def _base_post_data(self):
         from contacts.models import Contact as _Contact
 
-        return {f: "" for f in _Contact.UPDATABLE_FIELDS}
+        data = {f: "" for f in _Contact.UPDATABLE_FIELDS}
+        # Phase F1 で 9 番も salutation_name 必須化。既定で有効値を入れておく
+        # （空必須エラーを検証する test では明示的に空へ上書きする）。
+        data["salutation_name"] = "別肩書 様"
+        data.update(_empty_sns_management_form())
+        return data
 
     # ---- GET ----
 
@@ -348,17 +377,18 @@ class PersonAddAdditionalRoleViewTests(TestCase):
         """有効データ → 新規 active Contact 作成、Contact 詳細画面にリダイレクト。"""
         data = self._base_post_data()
         data["full_name"] = "別肩書 太郎"
-        data["company"] = "別会社"
+        data["organization"] = "別会社"
 
         resp = self.client.post(self._url(), data=data)
 
         self.assertEqual(resp.status_code, 302)
+        # full_name は §3.4 正規化で空白除去される（"別肩書 太郎" → "別肩書太郎"）
         new_contact = Contact.objects.filter(
-            person=self.person, full_name="別肩書 太郎"
+            person=self.person, full_name="別肩書太郎"
         ).first()
         self.assertIsNotNone(new_contact)
         self.assertEqual(new_contact.status, Contact.Status.ACTIVE)
-        self.assertEqual(new_contact.company, "別会社")
+        self.assertEqual(new_contact.organization, "別会社")
         self.assertEqual(
             resp.url,
             reverse(
@@ -373,6 +403,9 @@ class PersonAddAdditionalRoleViewTests(TestCase):
         cfc_before = ContactFieldConfidence.objects.count()
         data = self._base_post_data()
         data["full_name"] = "新規 CFC 不要"
+        # salutation_name を埋めて Contact.save() の自動補完を回避する（補完されると
+        # salutation_name の CFC が 1 件作られる）。Phase D で Form が必須化 + is_manual セット。
+        data["salutation_name"] = "テスト 様"
         resp = self.client.post(self._url(), data=data)
         self.assertEqual(resp.status_code, 302)
         cfc_after = ContactFieldConfidence.objects.count()
@@ -399,6 +432,17 @@ class PersonAddAdditionalRoleViewTests(TestCase):
         self.assertFalse(
             Contact.objects.filter(full_name="x" * 300).exists()
         )
+
+    def test_post_blank_salutation_invalid(self):
+        """salutation_name 空 → 200 でフォーム再表示、Contact 未作成（Phase F1 必須化）。"""
+        data = self._base_post_data()
+        data["full_name"] = "宛名なし太郎"
+        data["salutation_name"] = ""  # 必須化により空はエラー
+        contact_count_before = Contact.objects.count()
+        resp = self.client.post(self._url(), data=data)
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("salutation_name", resp.context["form"].errors)
+        self.assertEqual(Contact.objects.count(), contact_count_before)
 
     def test_post_to_archived_returns_404(self):
         """archived Person への POST も 404（dispatch ガードが POST にも効く）。"""
@@ -528,3 +572,99 @@ class PersonDetailDebugUidOffTests(TestCase):
         )
         self.assertNotContains(resp, "Person UID:")
         self.assertNotContains(resp, "app-debug-uid")
+
+
+# ======================================================================
+# Phase F1：9 番別肩書追加の ContactSns 連携 + テンプレ D/D2/E 改修（§11.6.7 / §1.4）
+# ======================================================================
+
+
+class PersonAddAdditionalRoleSnsTests(TestCase):
+    """9 番 PersonAddAdditionalRoleView の ContactSns 引き継ぎ（§11.6.7 / §1.8.2）。"""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="add_sns_user", password="x")
+        self.person = Person.objects.create()
+        self.primary = Contact.objects.create(
+            person=self.person,
+            status=Contact.Status.PRIMARY,
+            full_name="P",
+            salutation_name="P 様",
+            salutation_name_is_manual=True,
+        )
+        self.person.primary_contact = self.primary
+        self.person.save(update_fields=["primary_contact", "updated_at"])
+        ContactSns.objects.create(
+            contact=self.primary, sns_type="twitter", sns_id="@p"
+        )
+        self.client = Client()
+        self.client.force_login(self.user)
+
+    def _url(self):
+        return reverse(
+            "persons:person_add_additional_role", kwargs={"pk": self.person.pk}
+        )
+
+    def test_get_prefills_primary_sns(self):
+        """GET 時に primary の SNS が初期表示行として引き継がれる。"""
+        resp = self.client.get(self._url())
+        self.assertEqual(resp.status_code, 200)
+        formset = resp.context["sns_formset"]
+        self.assertEqual(formset.total_form_count(), 1)
+        self.assertContains(resp, "@p")
+
+    def test_post_creates_sns_on_new_contact(self):
+        data = {f: "" for f in Contact.UPDATABLE_FIELDS}
+        data["full_name"] = "別肩書"
+        data["salutation_name"] = "別肩書 様"
+        # 引き継いだ 1 行 + 追加 1 行を submit（id なし＝新規 Contact に作成）
+        data.update(_sns_management_form(2, initial=0))
+        data["sns-0-sns_type"] = "twitter"
+        data["sns-0-sns_id"] = "@p"
+        data["sns-1-sns_type"] = "github"
+        data["sns-1-sns_id"] = "newgh"
+        resp = self.client.post(self._url(), data=data)
+        self.assertEqual(resp.status_code, 302)
+        new_contact = Contact.objects.get(
+            person=self.person, full_name="別肩書"
+        )
+        self.assertEqual(new_contact.sns_accounts.count(), 2)
+        # primary 側は変更されない
+        self.assertEqual(self.primary.sns_accounts.count(), 1)
+
+
+class PersonAddAdditionalRoleRenderTests(TestCase):
+    """9 番テンプレの D/D2/E 相当改修の回帰（§1.4 / §1.8.3）。"""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="add_render_user", password="x")
+        self.person = Person.objects.create()
+        self.primary = Contact.objects.create(
+            person=self.person, status=Contact.Status.PRIMARY, full_name="P"
+        )
+        self.person.primary_contact = self.primary
+        self.person.save(update_fields=["primary_contact", "updated_at"])
+        self.client = Client()
+        self.client.force_login(self.user)
+
+    def _url(self):
+        return reverse(
+            "persons:person_add_additional_role", kwargs={"pk": self.person.pk}
+        )
+
+    def test_renders_all_updatable_fields(self):
+        """UPDATABLE_FIELDS 全 31 フィールドの input/select id が描画される。"""
+        resp = self.client.get(self._url())
+        self.assertEqual(resp.status_code, 200)
+        for field_name in Contact.UPDATABLE_FIELDS:
+            self.assertContains(resp, f'id="id_{field_name}"')
+
+    def test_does_not_render_address_field(self):
+        """address は UPDATABLE_FIELDS 外（Phase E）。フォームフィールドとして描画しない。"""
+        resp = self.client.get(self._url())
+        self.assertNotContains(resp, 'id="id_address"')
+
+    def test_has_app_form_label_and_sns_container(self):
+        resp = self.client.get(self._url())
+        self.assertContains(resp, "app-form__label")
+        self.assertContains(resp, "js-sns-formset-container")

@@ -50,6 +50,9 @@ class OriginalImage(models.Model):
     )
     error_message = models.TextField(blank=True, default="")
     detected_count = models.IntegerField(default=0)
+    # v1.6.0 新規（仕様書 別表 A.3）。アップロード時に PIL/exifread で抽出した EXIF を保存。
+    # 書き込み実装は Phase G スコープ。本フェーズはフィールド定義のみ。
+    exif_json = models.JSONField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

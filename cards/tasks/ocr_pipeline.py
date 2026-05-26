@@ -25,12 +25,24 @@ from PIL import Image, ImageOps
 
 from cards.models import BusinessCard, OriginalImage
 from cards.services.has_minimum_info import has_minimum_info
-from cards.services.json_normalizer import (
+from contacts.services.json_parser import (
     calc_orientation_adjusted_confidence_map,
+    create_sns_records_for_contact,
+    extract_sns_entries,
     normalize_to_contact_dict,
 )
+from contacts.services.normalization import validate_phone_against_country
 from contacts.models import Contact, ContactFieldConfidence
 from persons.models import Person
+
+# 二重検算（仕様書 §2.4）対象の電話系 5 フィールド（v1.6.1 で全て CharField 単一値）。
+_PHONE_FIELDS = (
+    "mobile_phone",
+    "personal_phone",
+    "personal_fax",
+    "org_phone",
+    "org_fax",
+)
 
 logger = logging.getLogger(__name__)
 
@@ -282,16 +294,20 @@ def process_cardimage_with_ocr(business_card, ocr_service):
             # G-5: Person.primary_contact を A 側メソッド経由で確定
             # （Contact.status='primary' との二重管理を整合させる責務はこのメソッド）
             person.set_primary_contact(contact)
-            for field_name, conf in (confidence_map or {}).items():
-                if conf in (
-                    ContactFieldConfidence.Confidence.LOW,
-                    ContactFieldConfidence.Confidence.MEDIUM,
-                ):
-                    ContactFieldConfidence.objects.create(
-                        contact=contact,
-                        field_name=field_name,
-                        confidence=conf,
-                    )
+            # CFC 作成は create_for_contact に一本化（bulk_create、§1.7）。
+            # salutation_name は Contact.save() が補完時に CFC を作る責務のため除外する
+            # （二重作成回避、§1.9）。create_for_contact は low/mid のみ INSERT する。
+            cfc_map = {
+                field_name: conf
+                for field_name, conf in (confidence_map or {}).items()
+                if field_name != "salutation_name"
+            }
+            ContactFieldConfidence.create_for_contact(contact, cfc_map)
+
+            # SNS は別テーブル（ContactSns）へ分配（純関数で抽出 → 副作用関数で作成）。
+            # adopted_raw_json は採用 raw_json（raw_json_2 優先）、card_index=0。
+            sns_entries = extract_sns_entries(adopted_raw_json, 0)
+            create_sns_records_for_contact(contact, sns_entries)
 
     # ⑩ OriginalImage 集計遷移（別 atomic + select_for_update）
     _update_original_image_status(original_image_id)
@@ -384,6 +400,24 @@ def _determine_ocr_result(adopted_raw_json, orientation_for_field_value):
         contact_dict, confidence_map, orientation_for_confidence
     )
 
+    # 二重検算（仕様書 §2.4）：電話系 5 フィールドの E.164 国番号と country の不一致を検出し、
+    # 不一致なら当該フィールドの confidence を low に補正する（フィールド別判定、値は変えない）。
+    # 補正理由はサーバーログのみ（check_name_consistency と同方針、DB に理由フィールドは作らない）。
+    country = contact_dict.get("country", "")
+    for phone_field in _PHONE_FIELDS:
+        phone_value = contact_dict.get(phone_field, "")
+        if not validate_phone_against_country(phone_value, country):
+            before = confidence_map.get(phone_field, "high")
+            confidence_map[phone_field] = "low"
+            logger.warning(
+                "validate_phone_against_country: '%s' を %s→low に補正"
+                "（理由: country=%s と電話 '%s' の国番号が不一致）",
+                phone_field,
+                before,
+                country,
+                phone_value,
+            )
+
     if not has_minimum_info(contact_dict):
         return (
             BusinessCard.OcrResult.INSUFFICIENT_INFO, None, None, errors,
@@ -439,7 +473,7 @@ def _get_card_item_schema():
             settings.BASE_DIR
             / "docs"
             / "json_schema"
-            / "v1.3.0"
+            / "v1.6.1"
             / "combined_response.json"
         )
         with open(schema_path, encoding="utf-8") as f:

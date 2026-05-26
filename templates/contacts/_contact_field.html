@@ -1,4 +1,4 @@
-{% load ui_tags %}
+{% load ui_tags postal_tags %}
 {% comment %}
 Contact 詳細画面のフィールド 1 行を表示するパーツ（D-3b / D-3d 準備）。
 
@@ -24,6 +24,9 @@ dict[field_name -> ContactFieldConfidence]）と is_editable（編集可能モ�
   - 値とバッジのみ表示、JS フックなし、修正 UI なし
 {% endcomment %}
 
+{# postal_code は画面表示のみ国別整形（Phase D2 話2）。編集 input は DB 生値のまま。 #}
+{% if field_name == "postal_code" %}{% format_postal value contact.country as field_display %}{% endif %}
+
 {% if is_editable %}
   {% confidence_state field_confidences field_name as cfc_state %}
   <div class="app-detail-item js-contact-field-row"
@@ -32,7 +35,7 @@ dict[field_name -> ContactFieldConfidence]）と is_editable（編集可能モ�
        data-confidence-state="{{ cfc_state }}">
     <div class="app-detail-label">{{ label }}</div>
     <div class="app-detail-value">
-      <span class="js-contact-field-value">{{ value }}</span>
+      <span class="js-contact-field-value">{% if field_name == "postal_code" %}{{ field_display }}{% else %}{{ value }}{% endif %}</span>
       <span class="js-contact-field-badge-slot">{% confidence field_confidences field_name 'badge' %}</span>
     </div>
 
@@ -79,7 +82,7 @@ dict[field_name -> ContactFieldConfidence]）と is_editable（編集可能モ�
   <div class="app-detail-item">
     <div class="app-detail-label">{{ label }}</div>
     <div class="app-detail-value">
-      {{ value }}
+      {% if field_name == "postal_code" %}{{ field_display }}{% else %}{{ value }}{% endif %}
       {% confidence field_confidences field_name 'badge' %}
     </div>
   </div>

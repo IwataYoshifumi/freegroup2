@@ -24,7 +24,7 @@
 - 部長、課長などの役職の他、電気通信主任技術者・司法書士・公認会計士・土地建物取引士などの資格情報、その他キャッチコピー（「あなたの暮らしのパートナー」など）が含まれます。役職は可能な限りこれらと分離して正確に抽出してください
 - 画像の回転・傾きの補正：入力画像が横向き（90度回転）、逆さま（180度回転）、または傾いている場合があります。文字を読み取る前に、まず画像の向き（上下左右）を視覚的に補正し、正位置（人間が読める向き）を特定してください。特定した回転状態を、必ず `card_meta.orientation` に正しく反映させてください
 - 言語の自動判別：日本語、英語、中国語などの言語を自動判別し、`metadata.primary_lang` に反映させてください
-- **派生・組み立てフィールドの null 取り扱い**：salutation_name / display_name / org_core_name / legal_entity_type / legal_entity_type_code / legal_entity_type_position / country / region / city / rest_of_address / language_composition / name_order などは、他のフィールドの情報から組み立てる派生フィールドです。これらは以下のルールで判断してください：
+- **派生・組み立てフィールドの null 取り扱い**：salutation_name / display_name / org_core_name / legal_entity_type / legal_entity_type_code / legal_entity_type_position / region / city / rest_of_address / language_composition / name_order などは、他のフィールドの情報から組み立てる派生フィールドです。これらは以下のルールで判断してください：
   - **材料となるフィールドが完全に null（読み取れない）の場合**：派生フィールドも `value: null` + `confidence: "high"`（「材料がないから組み立てられないことを確定した」という意味）
   - **材料はあるが組み立てが不能・不確実な場合**：最善の組み立てを行い、`confidence` を `mid` または `low` に下げる。null にはしない
   - **判断に迷ったら null にしないこと**：少しでも組み立てられる場合は最善を尽くす。後段の正規化基盤が補完するため、無理に null にする必要はない
@@ -113,8 +113,8 @@
 
 - `full_address`：名刺に記載されている住所の全文をそのまま抽出
 - `postal_code`：郵便番号。**文字列（string）として抽出し、先頭ゼロや国別書式（ハイフン等)を維持すること（数値型に変換しない）**
-- `country`：国コード。ISO 3166-1 alpha-2（例：`JP`・`US`・`GB`・`CN`）の2文字大文字で格納
-  - **判定不能時**：full_address が null、または住所から国を判定できない場合は `value: null` + `confidence: "high"`
+- `country`：国コード。ISO 3166-1 alpha-2（例：`JP`・`US`・`GB`・`CN`）の2文字大文字で格納。**判定不能時は `"ZZ"`**（規格内の予約コード。null は使わない）
+  - **判定不能時**：full_address が null、または住所から国を判定できない場合は `value: "ZZ"` + `confidence: "high"`
 - `region`：都道府県や州など中間行政区画を1つ格納（「prefecture」とは呼ばない。該当層がない国は `null`）
   - **判定不能時**：該当する行政層がない国（モナコ等）、または住所が読み取れない場合は `value: null` + `confidence: "high"`
 - `city`：市区町村相当。東京23区・政令指定都市は市まで格納
@@ -207,7 +207,7 @@
   "address": {
     "full_address":    {"value": null, "confidence": "high"},
     "postal_code":     {"value": null, "confidence": "high"},
-    "country":         {"value": null, "confidence": "high"},
+    "country":         {"value": "ZZ", "confidence": "high"},
     "region":          {"value": null, "confidence": "high"},
     "city":            {"value": null, "confidence": "high"},
     "rest_of_address": {"value": null, "confidence": "high"}
@@ -226,7 +226,7 @@
     "other_printed_text": {"value": null, "confidence": "high"}
   },
   "metadata": {
-    "primary_lang":         {"value": null, "confidence": "high"},
+    "primary_lang":         {"value": "und", "confidence": "high"},
     "language_composition": {"value": null, "confidence": "high"},
     "ai_analysis_notes":    {"value": null, "confidence": "high"}
   }

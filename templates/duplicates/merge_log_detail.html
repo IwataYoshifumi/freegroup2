@@ -104,7 +104,7 @@
                 <dt class="app-detail-label">{{ c.full_name|default:"(氏名なし)" }}</dt>
                 <dd class="app-detail-value">
                   <a href="{% append_back_url c_url back %}">
-                    {{ c.company|default:"-" }}
+                    {{ c.organization|default:"-" }}
                   </a>
                 </dd>
               </div>
@@ -124,7 +124,7 @@
                 <dt class="app-detail-label">{{ c.full_name|default:"(氏名なし)" }}</dt>
                 <dd class="app-detail-value">
                   <a href="{% append_back_url c_url back %}">
-                    {{ c.company|default:"-" }}
+                    {{ c.organization|default:"-" }}
                   </a>
                 </dd>
               </div>

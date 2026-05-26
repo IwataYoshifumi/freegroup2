@@ -16,13 +16,34 @@ from contacts.forms import (
     ContactBaseForm,
     ContactUpdateActiveForm,
     ContactUpdateForm,
+    build_contact_sns_formset,
 )
-from contacts.models import Contact, ContactFieldConfidence
+from contacts.models import Contact, ContactFieldConfidence, ContactSns
 from duplicates.models import DuplicateCandidate
 from persons.models import Person
 
 
 User = get_user_model()
+
+
+def _empty_sns_management_form(prefix="sns"):
+    """ContactSns InlineFormSet の空 management_form（POST テスト用、Phase F1 §11.6.7）。"""
+    return {
+        f"{prefix}-TOTAL_FORMS": "0",
+        f"{prefix}-INITIAL_FORMS": "0",
+        f"{prefix}-MIN_NUM_FORMS": "0",
+        f"{prefix}-MAX_NUM_FORMS": "1000",
+    }
+
+
+def _sns_management_form(total, initial=0, prefix="sns"):
+    """ContactSns InlineFormSet の management_form（行ありテスト用、Phase F1 §11.6.7）。"""
+    return {
+        f"{prefix}-TOTAL_FORMS": str(total),
+        f"{prefix}-INITIAL_FORMS": str(initial),
+        f"{prefix}-MIN_NUM_FORMS": "0",
+        f"{prefix}-MAX_NUM_FORMS": "1000",
+    }
 
 
 class ContactUpdateFieldTests(TestCase):
@@ -38,7 +59,7 @@ class ContactUpdateFieldTests(TestCase):
             person=self.person_a,
             status=Contact.Status.PRIMARY,
             full_name="A-name",
-            company="A-company",
+            organization="A-organization",
             notes="A-notes",
         )
         self.person_a.primary_contact = self.contact_a
@@ -50,7 +71,7 @@ class ContactUpdateFieldTests(TestCase):
             person=self.person_b,
             status=Contact.Status.PRIMARY,
             full_name="B-name",
-            company="B-company",
+            organization="B-organization",
         )
         self.person_b.primary_contact = self.contact_b
         self.person_b.save(update_fields=["primary_contact", "updated_at"])
@@ -68,11 +89,11 @@ class ContactUpdateFieldTests(TestCase):
             review_result=[],
         )
 
-        # contact_a の company に medium CFC を作成（after-confirmed 検証用）
-        self.cfc_company = ContactFieldConfidence.objects.create(
+        # contact_a の organization に mid CFC を作成（after-confirmed 検証用）
+        self.cfc_organization = ContactFieldConfidence.objects.create(
             contact=self.contact_a,
-            field_name="company",
-            confidence=ContactFieldConfidence.Confidence.MEDIUM,
+            field_name="organization",
+            confidence=ContactFieldConfidence.Confidence.MID,
         )
         # contact_a の notes に low CFC を作成（DUPLICATE_CHECK_FIELDS 外の confirmed 化検証用）
         self.cfc_notes = ContactFieldConfidence.objects.create(
@@ -91,16 +112,16 @@ class ContactUpdateFieldTests(TestCase):
     # ------------------------------------------------------------------
 
     def test_updates_duplicate_check_field(self):
-        """N1: DUPLICATE_CHECK_FIELDS のフィールド（company）を修正。"""
-        self.contact_a.update_field("company", "A-company-new", self.user)
+        """N1: DUPLICATE_CHECK_FIELDS のフィールド（organization）を修正。"""
+        self.contact_a.update_field("organization", "A-organization-new", self.user)
 
         self.contact_a.refresh_from_db()
-        self.assertEqual(self.contact_a.company, "A-company-new")
+        self.assertEqual(self.contact_a.organization, "A-organization-new")
 
         # CFC が confirmed 化されている
-        self.cfc_company.refresh_from_db()
-        self.assertIsNotNone(self.cfc_company.confirmed_at)
-        self.assertEqual(self.cfc_company.confirmed_by_id, self.user.id)
+        self.cfc_organization.refresh_from_db()
+        self.assertIsNotNone(self.cfc_organization.confirmed_at)
+        self.assertEqual(self.cfc_organization.confirmed_by_id, self.user.id)
 
         # pending DC が invalidated 化されている
         self.candidate.refresh_from_db()
@@ -172,15 +193,15 @@ class ContactUpdateFieldTests(TestCase):
         invalidate_pending_candidates が contact.duplicate_checked_at=None で save する
         ため updated_at は更新される（仕様）。self.save() は値差分がないので呼ばれない。
         """
-        # 同じ値を渡す（company は DUPLICATE_CHECK_FIELDS 内）
-        self.contact_a.update_field("company", "A-company", self.user)
+        # 同じ値を渡す（organization は DUPLICATE_CHECK_FIELDS 内）
+        self.contact_a.update_field("organization", "A-organization", self.user)
 
         self.contact_a.refresh_from_db()
-        self.assertEqual(self.contact_a.company, "A-company")
+        self.assertEqual(self.contact_a.organization, "A-organization")
 
         # CFC は confirmed 化される
-        self.cfc_company.refresh_from_db()
-        self.assertIsNotNone(self.cfc_company.confirmed_at)
+        self.cfc_organization.refresh_from_db()
+        self.assertIsNotNone(self.cfc_organization.confirmed_at)
 
         # DUPLICATE_CHECK_FIELDS なので invalidate が実行される
         self.candidate.refresh_from_db()
@@ -239,7 +260,7 @@ class ContactUpdateFieldTests(TestCase):
         )
         self.assertTrue(unsaved._state.adding)
         with self.assertRaises(ValueError) as ctx:
-            unsaved.update_field("company", "x", self.user)
+            unsaved.update_field("organization", "x", self.user)
         self.assertIn("saved Contact", str(ctx.exception))
 
     def test_transaction_rollback_on_exception(self):
@@ -252,12 +273,12 @@ class ContactUpdateFieldTests(TestCase):
         ):
             with self.assertRaises(RuntimeError):
                 self.contact_a.update_field(
-                    "company", "A-company-new", self.user
+                    "organization", "A-organization-new", self.user
                 )
 
         # 値の更新がロールバックされている
         self.contact_a.refresh_from_db()
-        self.assertEqual(self.contact_a.company, "A-company")
+        self.assertEqual(self.contact_a.organization, "A-organization")
 
     # ------------------------------------------------------------------
     # 境界
@@ -267,7 +288,7 @@ class ContactUpdateFieldTests(TestCase):
         """B1: updated_at と updated_by が user / 現在時刻で更新される。"""
         original_updated_at = self.contact_a.updated_at
 
-        self.contact_a.update_field("company", "A-company-new", self.user)
+        self.contact_a.update_field("organization", "A-organization-new", self.user)
 
         self.contact_a.refresh_from_db()
         self.assertGreater(self.contact_a.updated_at, original_updated_at)
@@ -275,11 +296,11 @@ class ContactUpdateFieldTests(TestCase):
 
     def test_other_fields_cfc_unchanged(self):
         """B2: 操作対象以外のフィールドの CFC は触られない。"""
-        # company を編集 → notes の CFC は不変
+        # organization を編集 → notes の CFC は不変
         original_notes_confirmed_at = self.cfc_notes.confirmed_at
         original_notes_updated_at = self.cfc_notes.updated_at
 
-        self.contact_a.update_field("company", "A-company-new", self.user)
+        self.contact_a.update_field("organization", "A-organization-new", self.user)
 
         self.cfc_notes.refresh_from_db()
         self.assertEqual(self.cfc_notes.confirmed_at, original_notes_confirmed_at)
@@ -310,26 +331,30 @@ class _ContactAjaxTestBase(TestCase):
             person=self.person_a,
             status=Contact.Status.PRIMARY,
             full_name="A-name",
-            company="A-company",
+            organization="A-organization",
             notes="A-notes",
+            # salutation_name を埋め is_manual=True とし、Contact.save() の自動補完を抑止する
+            # （補完されると salutation_name の CFC が増えてカウントがずれるため）。
+            salutation_name="テスト 様",
+            salutation_name_is_manual=True,
         )
         self.person_a.primary_contact = self.contact_a
         self.person_a.save(update_fields=["primary_contact", "updated_at"])
 
-        # CFC: company medium、notes low、phone low（unconfirmed_count 検証用）
-        self.cfc_company = ContactFieldConfidence.objects.create(
+        # CFC: organization mid、notes low、personal_phone low（unconfirmed_count 検証用）
+        self.cfc_organization = ContactFieldConfidence.objects.create(
             contact=self.contact_a,
-            field_name="company",
-            confidence=ContactFieldConfidence.Confidence.MEDIUM,
+            field_name="organization",
+            confidence=ContactFieldConfidence.Confidence.MID,
         )
         self.cfc_notes = ContactFieldConfidence.objects.create(
             contact=self.contact_a,
             field_name="notes",
             confidence=ContactFieldConfidence.Confidence.LOW,
         )
-        self.cfc_phone = ContactFieldConfidence.objects.create(
+        self.cfc_personal_phone = ContactFieldConfidence.objects.create(
             contact=self.contact_a,
-            field_name="phone",
+            field_name="personal_phone",
             confidence=ContactFieldConfidence.Confidence.LOW,
         )
 
@@ -339,6 +364,8 @@ class _ContactAjaxTestBase(TestCase):
             person=self.person_b,
             status=Contact.Status.PRIMARY,
             full_name="B-name",
+            salutation_name="テスト 様",
+            salutation_name_is_manual=True,
         )
         if self.person_a.id < self.person_b.id:
             pa, pb = self.person_a, self.person_b
@@ -378,23 +405,23 @@ class ContactAjaxUpdateFieldViewTests(_ContactAjaxTestBase):
     # ---- 正常系 ----
 
     def test_n1_updates_duplicate_check_field(self):
-        """N1: DUPLICATE_CHECK_FIELDS（company）修正 → 200 / 値更新 / CFC confirmed / DC invalidated。"""
+        """N1: DUPLICATE_CHECK_FIELDS（organization）修正 → 200 / 値更新 / CFC confirmed / DC invalidated。"""
         resp = self._post_json(
             self._url(),
-            {"field_name": "company", "new_value": "A-company-new"},
+            {"field_name": "organization", "new_value": "A-organization-new"},
         )
         self.assertEqual(resp.status_code, 200)
         body = resp.json()
         self.assertTrue(body["success"])
-        self.assertEqual(body["field_name"], "company")
-        self.assertEqual(body["updated_value"], "A-company-new")
+        self.assertEqual(body["field_name"], "organization")
+        self.assertEqual(body["updated_value"], "A-organization-new")
         self.assertEqual(body["confidence_state"], "confirmed")
 
         self.contact_a.refresh_from_db()
-        self.assertEqual(self.contact_a.company, "A-company-new")
+        self.assertEqual(self.contact_a.organization, "A-organization-new")
 
-        self.cfc_company.refresh_from_db()
-        self.assertIsNotNone(self.cfc_company.confirmed_at)
+        self.cfc_organization.refresh_from_db()
+        self.assertIsNotNone(self.cfc_organization.confirmed_at)
 
         self.candidate.refresh_from_db()
         self.assertEqual(
@@ -446,7 +473,7 @@ class ContactAjaxUpdateFieldViewTests(_ContactAjaxTestBase):
             "contacts:ajax_update_field", kwargs={"pk": _uuid.uuid4()}
         )
         resp = self._post_json(
-            url, {"field_name": "company", "new_value": "x"}
+            url, {"field_name": "organization", "new_value": "x"}
         )
         self.assertEqual(resp.status_code, 404)
         self.assertFalse(resp.json()["success"])
@@ -457,7 +484,7 @@ class ContactAjaxUpdateFieldViewTests(_ContactAjaxTestBase):
         self.contact_a.save(update_fields=["status", "updated_at"])
         resp = self._post_json(
             self._url(),
-            {"field_name": "company", "new_value": "x"},
+            {"field_name": "organization", "new_value": "x"},
         )
         self.assertEqual(resp.status_code, 403)
 
@@ -467,7 +494,7 @@ class ContactAjaxUpdateFieldViewTests(_ContactAjaxTestBase):
         self.person_a.save(update_fields=["status", "updated_at"])
         resp = self._post_json(
             self._url(),
-            {"field_name": "company", "new_value": "x"},
+            {"field_name": "organization", "new_value": "x"},
         )
         self.assertEqual(resp.status_code, 403)
 
@@ -478,7 +505,7 @@ class ContactAjaxUpdateFieldViewTests(_ContactAjaxTestBase):
         self.person_a.save(update_fields=["status", "updated_at"])
         resp = self._post_json(
             self._url(),
-            {"field_name": "company", "new_value": "x"},
+            {"field_name": "organization", "new_value": "x"},
         )
         self.assertEqual(resp.status_code, 403)
 
@@ -487,7 +514,7 @@ class ContactAjaxUpdateFieldViewTests(_ContactAjaxTestBase):
         c = Client()  # 未ログインクライアント
         resp = self._post_json(
             self._url(),
-            {"field_name": "company", "new_value": "x"},
+            {"field_name": "organization", "new_value": "x"},
             client=c,
         )
         self.assertEqual(resp.status_code, 403)
@@ -518,7 +545,7 @@ class ContactAjaxUpdateFieldViewTests(_ContactAjaxTestBase):
         c.force_login(self.user)
         resp = c.post(
             self._url(),
-            data=json.dumps({"field_name": "company", "new_value": "x"}),
+            data=json.dumps({"field_name": "organization", "new_value": "x"}),
             content_type="application/json",
         )
         self.assertEqual(resp.status_code, 403)
@@ -538,12 +565,12 @@ class ContactAjaxUpdateFieldViewTests(_ContactAjaxTestBase):
 
     def test_r2_unconfirmed_count_in_response(self):
         """R2: unconfirmed_count が正しく計算される。"""
-        # 初期：company / notes / phone の 3 件 unconfirmed
+        # 初期：organization / notes / personal_phone の 3 件 unconfirmed
         resp = self._post_json(
             self._url(),
-            {"field_name": "company", "new_value": "A-company-new"},
+            {"field_name": "organization", "new_value": "A-organization-new"},
         )
-        # company が confirmed 化されたので残り 2 件
+        # organization が confirmed 化されたので残り 2 件
         self.assertEqual(resp.json()["unconfirmed_count"], 2)
 
 
@@ -561,49 +588,49 @@ class ContactAjaxConfirmFieldsViewTests(_ContactAjaxTestBase):
     def test_n1_single_field(self):
         """N1: 単数フィールドの確認 → 200 / CFC confirmed。"""
         resp = self._post_json(
-            self._url(), {"field_names": ["company"]}
+            self._url(), {"field_names": ["organization"]}
         )
         self.assertEqual(resp.status_code, 200)
         body = resp.json()
         self.assertTrue(body["success"])
-        self.assertEqual(body["confirmed_field_names"], ["company"])
-        self.assertEqual(body["unconfirmed_count"], 2)  # notes / phone 残り
+        self.assertEqual(body["confirmed_field_names"], ["organization"])
+        self.assertEqual(body["unconfirmed_count"], 2)  # notes / personal_phone 残り
 
-        self.cfc_company.refresh_from_db()
-        self.assertIsNotNone(self.cfc_company.confirmed_at)
+        self.cfc_organization.refresh_from_db()
+        self.assertIsNotNone(self.cfc_organization.confirmed_at)
 
     def test_n2_multiple_fields_bulk(self):
         """N2: 複数フィールドの確認（一括確定）→ 200 / 全 CFC confirmed。"""
         resp = self._post_json(
             self._url(),
-            {"field_names": ["company", "notes", "phone"]},
+            {"field_names": ["organization", "notes", "personal_phone"]},
         )
         self.assertEqual(resp.status_code, 200)
         body = resp.json()
         self.assertEqual(
             sorted(body["confirmed_field_names"]),
-            ["company", "notes", "phone"],
+            ["notes", "organization", "personal_phone"],
         )
         self.assertEqual(body["unconfirmed_count"], 0)
 
-        for cfc in (self.cfc_company, self.cfc_notes, self.cfc_phone):
+        for cfc in (self.cfc_organization, self.cfc_notes, self.cfc_personal_phone):
             cfc.refresh_from_db()
             self.assertIsNotNone(cfc.confirmed_at)
 
     def test_n3_already_confirmed_idempotent(self):
         """N3: 既に confirmed 済みのフィールド再指定 → 冪等動作。"""
         # 1 回目
-        self._post_json(self._url(), {"field_names": ["company"]})
-        self.cfc_company.refresh_from_db()
-        first_confirmed_at = self.cfc_company.confirmed_at
+        self._post_json(self._url(), {"field_names": ["organization"]})
+        self.cfc_organization.refresh_from_db()
+        first_confirmed_at = self.cfc_organization.confirmed_at
         self.assertIsNotNone(first_confirmed_at)
 
         # 2 回目（同じフィールド）
-        resp = self._post_json(self._url(), {"field_names": ["company"]})
+        resp = self._post_json(self._url(), {"field_names": ["organization"]})
         self.assertEqual(resp.status_code, 200)
-        self.cfc_company.refresh_from_db()
+        self.cfc_organization.refresh_from_db()
         # confirmed_at は更新される（mark_fields_as_confirmed の挙動）
-        self.assertIsNotNone(self.cfc_company.confirmed_at)
+        self.assertIsNotNone(self.cfc_organization.confirmed_at)
 
     def test_n4_high_field_no_cfc_record(self):
         """N4: 疑似 high フィールド（CFC レコードなし）→ 200 / no-op、エラーなし。"""
@@ -629,7 +656,7 @@ class ContactAjaxConfirmFieldsViewTests(_ContactAjaxTestBase):
         url = reverse(
             "contacts:ajax_confirm_fields", kwargs={"pk": _uuid.uuid4()}
         )
-        resp = self._post_json(url, {"field_names": ["company"]})
+        resp = self._post_json(url, {"field_names": ["organization"]})
         self.assertEqual(resp.status_code, 404)
 
     def test_e2_inactive_contact_forbidden(self):
@@ -637,7 +664,7 @@ class ContactAjaxConfirmFieldsViewTests(_ContactAjaxTestBase):
         self.contact_a.status = Contact.Status.INACTIVE
         self.contact_a.save(update_fields=["status", "updated_at"])
         resp = self._post_json(
-            self._url(), {"field_names": ["company"]}
+            self._url(), {"field_names": ["organization"]}
         )
         self.assertEqual(resp.status_code, 403)
 
@@ -646,7 +673,7 @@ class ContactAjaxConfirmFieldsViewTests(_ContactAjaxTestBase):
         self.person_a.status = Person.Status.ARCHIVED
         self.person_a.save(update_fields=["status", "updated_at"])
         resp = self._post_json(
-            self._url(), {"field_names": ["company"]}
+            self._url(), {"field_names": ["organization"]}
         )
         self.assertEqual(resp.status_code, 403)
 
@@ -669,7 +696,7 @@ class ContactAjaxConfirmFieldsViewTests(_ContactAjaxTestBase):
         self.assertEqual(body["unconfirmed_count"], 3)
 
         # CFC は触られない
-        for cfc in (self.cfc_company, self.cfc_notes, self.cfc_phone):
+        for cfc in (self.cfc_organization, self.cfc_notes, self.cfc_personal_phone):
             cfc.refresh_from_db()
             self.assertIsNone(cfc.confirmed_at)
 
@@ -688,7 +715,7 @@ class ContactAjaxConfirmFieldsViewTests(_ContactAjaxTestBase):
         c.force_login(self.user)
         resp = c.post(
             self._url(),
-            data=json.dumps({"field_names": ["company"]}),
+            data=json.dumps({"field_names": ["organization"]}),
             content_type="application/json",
         )
         self.assertEqual(resp.status_code, 403)
@@ -697,7 +724,7 @@ class ContactAjaxConfirmFieldsViewTests(_ContactAjaxTestBase):
         """E: 未ログイン → 403（論点 1）。"""
         c = Client()
         resp = self._post_json(
-            self._url(), {"field_names": ["company"]}, client=c
+            self._url(), {"field_names": ["organization"]}, client=c
         )
         self.assertEqual(resp.status_code, 403)
 
@@ -706,19 +733,19 @@ class ContactAjaxConfirmFieldsViewTests(_ContactAjaxTestBase):
     def test_r1_confirmed_field_names_in_response(self):
         """R1: confirmed_field_names がリクエストの field_names を反映。"""
         resp = self._post_json(
-            self._url(), {"field_names": ["company", "phone"]}
+            self._url(), {"field_names": ["organization", "personal_phone"]}
         )
         self.assertEqual(
             sorted(resp.json()["confirmed_field_names"]),
-            ["company", "phone"],
+            ["organization", "personal_phone"],
         )
 
     def test_r2_unconfirmed_count_in_response(self):
         """R2: unconfirmed_count が処理後の値で正しく返る。"""
-        # company / notes / phone の 3 件 unconfirmed が初期状態
-        # company を確認 → 残り 2 件
+        # organization / notes / personal_phone の 3 件 unconfirmed が初期状態
+        # organization を確認 → 残り 2 件
         resp = self._post_json(
-            self._url(), {"field_names": ["company"]}
+            self._url(), {"field_names": ["organization"]}
         )
         self.assertEqual(resp.json()["unconfirmed_count"], 2)
 
@@ -736,16 +763,16 @@ class ContactDetailViewTests(TestCase):
             person=self.person_a,
             status=Contact.Status.PRIMARY,
             full_name="A-name",
-            company="A-company",
+            organization="A-organization",
         )
         self.person_a.primary_contact = self.contact_a
         self.person_a.save(update_fields=["primary_contact", "updated_at"])
 
         # CFC（mid/low）
-        self.cfc_company = ContactFieldConfidence.objects.create(
+        self.cfc_organization = ContactFieldConfidence.objects.create(
             contact=self.contact_a,
-            field_name="company",
-            confidence=ContactFieldConfidence.Confidence.MEDIUM,
+            field_name="organization",
+            confidence=ContactFieldConfidence.Confidence.MID,
         )
 
         self.client = Client()
@@ -965,7 +992,7 @@ class ContactDetailViewTests(TestCase):
         self.assertIn("js-contact-field-cancel-btn", body)
         # confidence バッジ slot（D-3d-1 で追加、JS が innerHTML を差し替えるフック）
         self.assertIn("js-contact-field-badge-slot", body)
-        # data-confidence-state（company は medium CFC → "mid"）
+        # data-confidence-state（organization は mid CFC → "mid"）
         self.assertIn('data-confidence-state="mid"', body)
         # 共通 toast 要素（base.html）
         self.assertIn('class="app-toast"', body)
@@ -1040,22 +1067,22 @@ class ContactDetailViewTests(TestCase):
 
     def test_r7_mid_low_field_has_edit_ui(self):
         """R7: mid / low フィールドには修正 UI が出力される（既存 R3 の補強）。"""
-        # company は medium CFC（setUp で作成済み）
-        rendered_mid = self._render_field("company", "A-company")
+        # organization は mid CFC（setUp で作成済み）
+        rendered_mid = self._render_field("organization", "A-organization")
         self.assertIn('data-confidence-state="mid"', rendered_mid)
         self.assertIn("js-contact-field-action", rendered_mid)
         self.assertIn("js-contact-field-confirm-btn", rendered_mid)
         self.assertIn("js-contact-field-edit-form", rendered_mid)
 
-        # phone に low CFC を作成
+        # personal_phone に low CFC を作成
         ContactFieldConfidence.objects.create(
             contact=self.contact_a,
-            field_name="phone",
+            field_name="personal_phone",
             confidence=ContactFieldConfidence.Confidence.LOW,
         )
         # field_confidences は再取得
         self.contact_a.refresh_from_db()
-        rendered_low = self._render_field("phone", "03-1234")
+        rendered_low = self._render_field("personal_phone", "03-1234")
         self.assertIn('data-confidence-state="low"', rendered_low)
         self.assertIn("js-contact-field-action", rendered_low)
 
@@ -1170,14 +1197,14 @@ class ConfidenceTagTests(TestCase):
         rendered = self._render(self.contact, "full_name")
         self.assertEqual(rendered.strip(), "")
 
-    def test_c2_medium_unconfirmed_shows_badge(self):
-        """C2: medium AND confirmed_at IS NULL → 中バッジ表示。"""
+    def test_c2_mid_unconfirmed_shows_badge(self):
+        """C2: mid AND confirmed_at IS NULL → 中バッジ表示。"""
         ContactFieldConfidence.objects.create(
             contact=self.contact,
-            field_name="company",
-            confidence=ContactFieldConfidence.Confidence.MEDIUM,
+            field_name="organization",
+            confidence=ContactFieldConfidence.Confidence.MID,
         )
-        rendered = self._render(self.contact, "company")
+        rendered = self._render(self.contact, "organization")
         self.assertIn("app-status-badge--warning", rendered)
         self.assertIn("中", rendered)
 
@@ -1185,10 +1212,10 @@ class ConfidenceTagTests(TestCase):
         """C3: low AND confirmed_at IS NULL → 低バッジ表示。"""
         ContactFieldConfidence.objects.create(
             contact=self.contact,
-            field_name="phone",
+            field_name="personal_phone",
             confidence=ContactFieldConfidence.Confidence.LOW,
         )
-        rendered = self._render(self.contact, "phone")
+        rendered = self._render(self.contact, "personal_phone")
         self.assertIn("app-status-badge--error", rendered)
         self.assertIn("低", rendered)
 
@@ -1218,6 +1245,10 @@ class ContactConfidenceTagTests(TestCase):
             person=self.person,
             status=Contact.Status.PRIMARY,
             full_name="T",
+            # salutation_name を埋め is_manual=True とし、Contact.save() の自動補完を抑止する
+            # （補完されると salutation_name の CFC が増えて表示件数がずれるため）。
+            salutation_name="テスト 様",
+            salutation_name_is_manual=True,
         )
 
     def _render(self, contact, fmt="summary"):
@@ -1231,12 +1262,12 @@ class ContactConfidenceTagTests(TestCase):
         """CC1: 未確認あり → 「未確認 N 件 / 全 M 件中」表示。"""
         ContactFieldConfidence.objects.create(
             contact=self.contact,
-            field_name="company",
-            confidence=ContactFieldConfidence.Confidence.MEDIUM,
+            field_name="organization",
+            confidence=ContactFieldConfidence.Confidence.MID,
         )
         ContactFieldConfidence.objects.create(
             contact=self.contact,
-            field_name="phone",
+            field_name="personal_phone",
             confidence=ContactFieldConfidence.Confidence.LOW,
             confirmed_at=timezone.now(),
             confirmed_by=self.user,
@@ -1250,8 +1281,8 @@ class ContactConfidenceTagTests(TestCase):
         """CC2: 全確認済み → 「全 M 件確認済み」表示。"""
         ContactFieldConfidence.objects.create(
             contact=self.contact,
-            field_name="company",
-            confidence=ContactFieldConfidence.Confidence.MEDIUM,
+            field_name="organization",
+            confidence=ContactFieldConfidence.Confidence.MID,
             confirmed_at=timezone.now(),
             confirmed_by=self.user,
         )
@@ -1267,7 +1298,7 @@ class ContactConfidenceTagTests(TestCase):
 class ContactListViewTests(TestCase):
     """ContactListView の単体テスト（v1.4.2 仕様変更追加）。
 
-    7 フィールド検索（tel は phone/mobile/fax の OR）、include_inactive、
+    7 フィールド検索（tel は personal_phone/mobile_phone/personal_fax の OR）、include_inactive、
     person.status="active" 絞り込み、updated_at 降順、ページネーション、
     未認証 200 を検証する。
     """
@@ -1281,11 +1312,11 @@ class ContactListViewTests(TestCase):
             person=self.person_a,
             status=Contact.Status.PRIMARY,
             full_name="Alice Smith",
-            company="Acme Corp",
+            organization="Acme Corp",
             department="Sales",
             title="Manager",
             email="alice@acme.example",
-            phone="03-1234-5678",
+            personal_phone="03-1234-5678",
             address="Tokyo",
         )
         self.person_a.primary_contact = self.contact_a
@@ -1418,50 +1449,50 @@ class ContactListViewTests(TestCase):
         self.assertNotIn(merged_primary.id, ids)
         self.assertNotIn(merged_inactive.id, ids)
 
-    def test_search_and_name_company(self):
-        """name と company を同時指定で AND 検索（初回 primary フィルタ下）。"""
+    def test_search_and_name_organization(self):
+        """name と organization を同時指定で AND 検索（初回 primary フィルタ下）。"""
         c1 = self._make_primary(
-            full_name="Alice Tanaka", company="Wonder Corp"
+            full_name="Alice Tanaka", organization="Wonder Corp"
         )
         c2 = self._make_primary(
-            full_name="Bob Smith", company="Acme Industries"
+            full_name="Bob Smith", organization="Acme Industries"
         )
         c3 = self._make_primary(
-            full_name="Alice Brown", company="Acme Group"
+            full_name="Alice Brown", organization="Acme Group"
         )
 
-        resp = self.client.get(self.url, {"name": "Alice", "company": "Acme"})
+        resp = self.client.get(self.url, {"name": "Alice", "organization": "Acme"})
         ids = [c.id for c in resp.context["contacts"]]
         self.assertIn(self.contact_a.id, ids)
         self.assertIn(c3.id, ids)
         self.assertNotIn(c1.id, ids)
         self.assertNotIn(c2.id, ids)
 
-    def test_search_tel_or_phone_mobile_fax(self):
-        """tel は phone / mobile / fax の OR 一致。"""
-        c_mobile = self._make_primary(
-            full_name="MobOnly", mobile="090-1111-2222"
+    def test_search_tel_or_personal_phone_mobile_phone_personal_fax(self):
+        """tel は personal_phone / mobile_phone / personal_fax の OR 一致。"""
+        c_mobile_phone = self._make_primary(
+            full_name="MobOnly", mobile_phone="090-1111-2222"
         )
-        c_fax = self._make_primary(full_name="FaxOnly", fax="06-9999-8888")
-        # setUp の contact_a は phone="03-1234-5678"
+        c_personal_fax = self._make_primary(full_name="FaxOnly", personal_fax="06-9999-8888")
+        # setUp の contact_a は personal_phone="03-1234-5678"
 
         resp = self.client.get(self.url, {"tel": "1234"})
         ids = [c.id for c in resp.context["contacts"]]
         self.assertIn(self.contact_a.id, ids)
-        self.assertNotIn(c_mobile.id, ids)
-        self.assertNotIn(c_fax.id, ids)
+        self.assertNotIn(c_mobile_phone.id, ids)
+        self.assertNotIn(c_personal_fax.id, ids)
 
         resp = self.client.get(self.url, {"tel": "090-1111"})
         ids = [c.id for c in resp.context["contacts"]]
-        self.assertIn(c_mobile.id, ids)
+        self.assertIn(c_mobile_phone.id, ids)
         self.assertNotIn(self.contact_a.id, ids)
-        self.assertNotIn(c_fax.id, ids)
+        self.assertNotIn(c_personal_fax.id, ids)
 
         resp = self.client.get(self.url, {"tel": "06-9999"})
         ids = [c.id for c in resp.context["contacts"]]
-        self.assertIn(c_fax.id, ids)
+        self.assertIn(c_personal_fax.id, ids)
         self.assertNotIn(self.contact_a.id, ids)
-        self.assertNotIn(c_mobile.id, ids)
+        self.assertNotIn(c_mobile_phone.id, ids)
 
     def test_order_by_updated_at_desc(self):
         """並び順は updated_at 降順。timing fragility を避けるため update() で明示設定。"""
@@ -1569,14 +1600,14 @@ class _ContactUpdateFormTestBase(TestCase):
             person=self.person,
             status=Contact.Status.PRIMARY,
             full_name="A-name",
-            company="A-company",
+            organization="A-organization",
             email="a@example.com",
         )
-        # company: medium / email: low / phone: low + confirmed 済み
-        self.cfc_company = ContactFieldConfidence.objects.create(
+        # organization: mid / email: low / personal_phone: low + confirmed 済み
+        self.cfc_organization = ContactFieldConfidence.objects.create(
             contact=self.contact,
-            field_name="company",
-            confidence=ContactFieldConfidence.Confidence.MEDIUM,
+            field_name="organization",
+            confidence=ContactFieldConfidence.Confidence.MID,
         )
         self.cfc_email = ContactFieldConfidence.objects.create(
             contact=self.contact,
@@ -1585,7 +1616,7 @@ class _ContactUpdateFormTestBase(TestCase):
         )
         ContactFieldConfidence.objects.create(
             contact=self.contact,
-            field_name="phone",
+            field_name="personal_phone",
             confidence=ContactFieldConfidence.Confidence.LOW,
             confirmed_at=timezone.now(),
             confirmed_by=self.user,
@@ -1611,10 +1642,10 @@ class ContactUpdateFormTests(_ContactUpdateFormTestBase):
     def test_adds_confirmed_checkbox_for_low_mid_unconfirmed(self):
         """low/mid かつ未確認のフィールドに対応する確認チェックボックスが追加される。"""
         form = ContactUpdateForm(target_contact=self.contact)
-        self.assertIn("confirmed_company", form.fields)  # medium
+        self.assertIn("confirmed_organization", form.fields)  # mid
         self.assertIn("confirmed_email", form.fields)    # low
-        # phone は confirmed 済み → 追加されない
-        self.assertNotIn("confirmed_phone", form.fields)
+        # personal_phone は confirmed 済み → 追加されない
+        self.assertNotIn("confirmed_personal_phone", form.fields)
         # full_name は CFC なし（高信頼度）→ 追加されない
         self.assertNotIn("confirmed_full_name", form.fields)
 
@@ -1628,7 +1659,7 @@ class ContactUpdateFormTests(_ContactUpdateFormTestBase):
     def test_clean_passes_with_all_checkboxes_on(self):
         """確認チェックがすべて ON → is_valid() True。"""
         data = self._base_data()
-        data["confirmed_company"] = "on"
+        data["confirmed_organization"] = "on"
         data["confirmed_email"] = "on"
         form = ContactUpdateForm(data=data, target_contact=self.contact)
         self.assertTrue(form.is_valid(), msg=form.errors)
@@ -1636,17 +1667,17 @@ class ContactUpdateFormTests(_ContactUpdateFormTestBase):
     def test_clean_fails_when_checkbox_off(self):
         """確認チェックが 1 つでも OFF → is_valid() False、当該フィールドにエラー。"""
         data = self._base_data()
-        # confirmed_company は OFF（キー自体を入れない）
+        # confirmed_organization は OFF（キー自体を入れない）
         data["confirmed_email"] = "on"
         form = ContactUpdateForm(data=data, target_contact=self.contact)
         self.assertFalse(form.is_valid())
-        self.assertIn("confirmed_company", form.errors)
+        self.assertIn("confirmed_organization", form.errors)
         self.assertNotIn("confirmed_email", form.errors)
 
     def test_change_reason_is_required(self):
         """change_reason 必須 → 未指定で is_valid() False。"""
         data = self._base_data(include_change_reason=False)
-        data["confirmed_company"] = "on"
+        data["confirmed_organization"] = "on"
         data["confirmed_email"] = "on"
         form = ContactUpdateForm(data=data, target_contact=self.contact)
         self.assertFalse(form.is_valid())
@@ -1660,7 +1691,7 @@ class ContactUpdateFormTests(_ContactUpdateFormTestBase):
         """
         data = self._base_data()
         data["full_name"] = "新しい名前"
-        data["confirmed_company"] = "on"
+        data["confirmed_organization"] = "on"
         data["confirmed_email"] = "on"
         form = ContactUpdateForm(data=data, target_contact=self.contact)
         self.assertTrue(form.is_valid(), msg=form.errors)
@@ -1676,12 +1707,12 @@ class ContactUpdateFormTests(_ContactUpdateFormTestBase):
     def test_confirmed_field_names_with_checkboxes_on(self):
         """confirmed_field_names() に確認チェック ON のフィールドが含まれる。"""
         data = self._base_data()
-        data["confirmed_company"] = "on"
+        data["confirmed_organization"] = "on"
         data["confirmed_email"] = "on"
         form = ContactUpdateForm(data=data, target_contact=self.contact)
         self.assertTrue(form.is_valid(), msg=form.errors)
         names = form.confirmed_field_names()
-        self.assertIn("company", names)
+        self.assertIn("organization", names)
         self.assertIn("email", names)
 
     def test_confirmed_field_names_with_edited_field(self):
@@ -1689,7 +1720,7 @@ class ContactUpdateFormTests(_ContactUpdateFormTestBase):
         data = self._base_data()
         # full_name を編集（CFC なし＝high なので、編集だけで confirmed 扱い）
         data["full_name"] = "違う名前"
-        data["confirmed_company"] = "on"
+        data["confirmed_organization"] = "on"
         data["confirmed_email"] = "on"
         form = ContactUpdateForm(data=data, target_contact=self.contact)
         self.assertTrue(form.is_valid(), msg=form.errors)
@@ -1708,13 +1739,13 @@ class ContactUpdateActiveFormTests(_ContactUpdateFormTestBase):
     def test_confirmed_checkboxes_added_like_parent(self):
         """親と同様、low/mid 未確認フィールドにチェックボックスが追加される。"""
         form = ContactUpdateActiveForm(target_contact=self.contact)
-        self.assertIn("confirmed_company", form.fields)
+        self.assertIn("confirmed_organization", form.fields)
         self.assertIn("confirmed_email", form.fields)
 
     def test_clean_passes_without_change_reason(self):
         """change_reason 不要、確認チェック ON で is_valid() True。"""
         data = self._base_data(include_change_reason=False)
-        data["confirmed_company"] = "on"
+        data["confirmed_organization"] = "on"
         data["confirmed_email"] = "on"
         form = ContactUpdateActiveForm(data=data, target_contact=self.contact)
         self.assertTrue(form.is_valid(), msg=form.errors)
@@ -1725,7 +1756,7 @@ class ContactUpdateActiveFormTests(_ContactUpdateFormTestBase):
         data["confirmed_email"] = "on"
         form = ContactUpdateActiveForm(data=data, target_contact=self.contact)
         self.assertFalse(form.is_valid())
-        self.assertIn("confirmed_company", form.errors)
+        self.assertIn("confirmed_organization", form.errors)
 
 
 class UpdateActiveContactViewTests(TestCase):
@@ -1747,13 +1778,13 @@ class UpdateActiveContactViewTests(TestCase):
             person=self.person,
             status=Contact.Status.ACTIVE,
             full_name="A-active",
-            company="A-active-co",
+            organization="A-active-co",
             email="active@example.com",
         )
-        self.cfc_company = ContactFieldConfidence.objects.create(
+        self.cfc_organization = ContactFieldConfidence.objects.create(
             contact=self.active,
-            field_name="company",
-            confidence=ContactFieldConfidence.Confidence.MEDIUM,
+            field_name="organization",
+            confidence=ContactFieldConfidence.Confidence.MID,
         )
 
         self.client = Client()
@@ -1768,17 +1799,18 @@ class UpdateActiveContactViewTests(TestCase):
     def _base_post_data(self, contact):
         data = {f: getattr(contact, f) or "" for f in Contact.UPDATABLE_FIELDS}
         data["note"] = ""
+        data.update(_empty_sns_management_form())
         return data
 
     # ---- GET ----
 
     def test_get_active_returns_200(self):
-        """active Contact → 200、change_reason フィールド非搭載・confirmed_company 搭載。"""
+        """active Contact → 200、change_reason フィールド非搭載・confirmed_organization 搭載。"""
         resp = self.client.get(self._url())
         self.assertEqual(resp.status_code, 200)
         form = resp.context["form"]
         self.assertNotIn("change_reason", form.fields)
-        self.assertIn("confirmed_company", form.fields)
+        self.assertIn("confirmed_organization", form.fields)
 
     def test_get_primary_returns_404(self):
         """primary Contact → 404（このViewはactive専用）。"""
@@ -1826,8 +1858,8 @@ class UpdateActiveContactViewTests(TestCase):
     def test_post_valid_calls_fix_and_redirects(self):
         """有効な POST → Contact.fix() が呼ばれ、Contact 詳細画面へリダイレクト。"""
         data = self._base_post_data(self.active)
-        data["company"] = "A-active-co-new"
-        data["confirmed_company"] = "on"
+        data["organization"] = "A-active-co-new"
+        data["confirmed_organization"] = "on"
 
         resp = self.client.post(self._url(), data=data)
 
@@ -1840,28 +1872,28 @@ class UpdateActiveContactViewTests(TestCase):
         )
 
         self.active.refresh_from_db()
-        self.assertEqual(self.active.company, "A-active-co-new")
+        self.assertEqual(self.active.organization, "A-active-co-new")
 
-        self.cfc_company.refresh_from_db()
-        self.assertIsNotNone(self.cfc_company.confirmed_at)
-        self.assertEqual(self.cfc_company.confirmed_by_id, self.user.id)
+        self.cfc_organization.refresh_from_db()
+        self.assertIsNotNone(self.cfc_organization.confirmed_at)
+        self.assertEqual(self.cfc_organization.confirmed_by_id, self.user.id)
 
     def test_post_with_checkbox_off_shows_form_error(self):
         """確認チェック OFF → フォーム再表示、エラー含む、fix() は呼ばれない。"""
         data = self._base_post_data(self.active)
-        data["company"] = "A-active-co-changed"
-        # confirmed_company は OFF
+        data["organization"] = "A-active-co-changed"
+        # confirmed_organization は OFF
 
         resp = self.client.post(self._url(), data=data)
 
         self.assertEqual(resp.status_code, 200)
-        self.assertIn("confirmed_company", resp.context["form"].errors)
+        self.assertIn("confirmed_organization", resp.context["form"].errors)
 
         # fix() は呼ばれていない → 値もCFCも変更なし
         self.active.refresh_from_db()
-        self.assertEqual(self.active.company, "A-active-co")
-        self.cfc_company.refresh_from_db()
-        self.assertIsNone(self.cfc_company.confirmed_at)
+        self.assertEqual(self.active.organization, "A-active-co")
+        self.cfc_organization.refresh_from_db()
+        self.assertIsNone(self.cfc_organization.confirmed_at)
 
 
 # ======================================================================
@@ -1881,18 +1913,18 @@ class UpdatePrimaryContactViewTests(TestCase):
             person=self.person,
             status=Contact.Status.PRIMARY,
             full_name="P-name",
-            company="P-co",
+            organization="P-co",
             email="p@example.com",
         )
         self.person.primary_contact = self.primary
         self.person.save(update_fields=["primary_contact", "updated_at"])
 
-        # company に medium CFC（fix で confirmed 化される検証用、
+        # organization に mid CFC（fix で confirmed 化される検証用、
         # 同時に確認 CB バリデーションの対象）
-        self.cfc_company = ContactFieldConfidence.objects.create(
+        self.cfc_organization = ContactFieldConfidence.objects.create(
             contact=self.primary,
-            field_name="company",
-            confidence=ContactFieldConfidence.Confidence.MEDIUM,
+            field_name="organization",
+            confidence=ContactFieldConfidence.Confidence.MID,
         )
 
         self.client = Client()
@@ -1908,6 +1940,7 @@ class UpdatePrimaryContactViewTests(TestCase):
         data = {f: getattr(contact, f) or "" for f in Contact.UPDATABLE_FIELDS}
         data["change_reason"] = change_reason
         data["note"] = ""
+        data.update(_empty_sns_management_form())
         return data
 
     # ---- GET ----
@@ -1919,8 +1952,8 @@ class UpdatePrimaryContactViewTests(TestCase):
         form = resp.context["form"]
         self.assertIn("change_reason", form.fields)
         self.assertIn("note", form.fields)
-        # low/mid CFC（company）の確認 CB が動的追加されている
-        self.assertIn("confirmed_company", form.fields)
+        # low/mid CFC（organization）の確認 CB が動的追加されている
+        self.assertIn("confirmed_organization", form.fields)
 
     def test_get_active_returns_404(self):
         """active Contact → 404（このViewはprimary専用）。"""
@@ -1985,8 +2018,8 @@ class UpdatePrimaryContactViewTests(TestCase):
         """fix で Contact フィールドが上書き、Person.primary_contact 変わらず、
         CFC が confirmed 化、Person 詳細画面へリダイレクト（仕様書 §10.5.2）。"""
         data = self._base_post_data(self.primary, change_reason="fix")
-        data["company"] = "P-co-new"
-        data["confirmed_company"] = "on"
+        data["organization"] = "P-co-new"
+        data["confirmed_organization"] = "on"
 
         resp = self.client.post(self._url(), data=data)
 
@@ -1998,16 +2031,16 @@ class UpdatePrimaryContactViewTests(TestCase):
 
         # Contact フィールドが更新されている
         self.primary.refresh_from_db()
-        self.assertEqual(self.primary.company, "P-co-new")
+        self.assertEqual(self.primary.organization, "P-co-new")
 
         # Person.primary_contact は同じ Contact のまま
         self.person.refresh_from_db()
         self.assertEqual(self.person.primary_contact_id, self.primary.pk)
 
         # CFC が confirmed 化されている
-        self.cfc_company.refresh_from_db()
-        self.assertIsNotNone(self.cfc_company.confirmed_at)
-        self.assertEqual(self.cfc_company.confirmed_by_id, self.user.id)
+        self.cfc_organization.refresh_from_db()
+        self.assertIsNotNone(self.cfc_organization.confirmed_at)
+        self.assertEqual(self.cfc_organization.confirmed_by_id, self.user.id)
 
     # ---- POST transfer 系（4 値）----
 
@@ -2023,17 +2056,17 @@ class UpdatePrimaryContactViewTests(TestCase):
                     person=person,
                     status=Contact.Status.PRIMARY,
                     full_name=f"old-{reason}",
-                    company=f"old-co-{reason}",
+                    organization=f"old-co-{reason}",
                 )
                 person.primary_contact = old_primary
                 person.save(
                     update_fields=["primary_contact", "updated_at"]
                 )
-                # 旧 primary に medium CFC（後で保持されているかを検証）
+                # 旧 primary に mid CFC（後で保持されているかを検証）
                 old_cfc = ContactFieldConfidence.objects.create(
                     contact=old_primary,
-                    field_name="company",
-                    confidence=ContactFieldConfidence.Confidence.MEDIUM,
+                    field_name="organization",
+                    confidence=ContactFieldConfidence.Confidence.MID,
                 )
 
                 url = reverse(
@@ -2042,9 +2075,9 @@ class UpdatePrimaryContactViewTests(TestCase):
                 )
                 data = self._base_post_data(old_primary, change_reason=reason)
                 data["full_name"] = f"new-{reason}"
-                data["company"] = f"new-co-{reason}"
+                data["organization"] = f"new-co-{reason}"
                 # ContactUpdateForm の clean は low/mid CFC の確認 CB を要求するので ON
-                data["confirmed_company"] = "on"
+                data["confirmed_organization"] = "on"
 
                 resp = self.client.post(url, data=data)
 
@@ -2062,7 +2095,7 @@ class UpdatePrimaryContactViewTests(TestCase):
                 self.assertNotEqual(new_primary.pk, old_primary.pk)
                 self.assertEqual(new_primary.status, Contact.Status.PRIMARY)
                 self.assertEqual(new_primary.full_name, f"new-{reason}")
-                self.assertEqual(new_primary.company, f"new-co-{reason}")
+                self.assertEqual(new_primary.organization, f"new-co-{reason}")
 
                 # 旧 primary が inactive 化されている
                 old_primary.refresh_from_db()
@@ -2088,18 +2121,18 @@ class UpdatePrimaryContactViewTests(TestCase):
     def test_post_with_unconfirmed_low_mid_field_returns_error(self):
         """low/mid CFC のフィールドの確認 CB 未 ON → フォーム検証エラー、Contact 不変。"""
         data = self._base_post_data(self.primary, change_reason="fix")
-        data["company"] = "P-co-attempted-change"
-        # confirmed_company を意図的に含めない（OFF）
+        data["organization"] = "P-co-attempted-change"
+        # confirmed_organization を意図的に含めない（OFF）
 
         resp = self.client.post(self._url(), data=data)
         self.assertEqual(resp.status_code, 200)
-        self.assertIn("confirmed_company", resp.context["form"].errors)
+        self.assertIn("confirmed_organization", resp.context["form"].errors)
 
         # Contact フィールド・CFC ともに変わっていない
         self.primary.refresh_from_db()
-        self.assertEqual(self.primary.company, "P-co")
-        self.cfc_company.refresh_from_db()
-        self.assertIsNone(self.cfc_company.confirmed_at)
+        self.assertEqual(self.primary.organization, "P-co")
+        self.cfc_organization.refresh_from_db()
+        self.assertIsNone(self.cfc_organization.confirmed_at)
 
 
 # ======================================================================
@@ -2148,15 +2181,16 @@ class ContactAddAdditionalRoleFormTests(TestCase):
         """get_update_contact() は status / person 未設定の未保存 Contact を返す。"""
         data = self._base_data()
         data["full_name"] = "別肩書 太郎"
-        data["company"] = "別会社"
+        data["organization"] = "別会社"
+        data["salutation_name"] = "別肩書 様"  # Phase F1 で 9 番も salutation 必須化
         form = ContactAddAdditionalRoleForm(data=data, person=self.person)
         self.assertTrue(form.is_valid(), msg=form.errors)
         new_contact = form.get_update_contact()
         # 未保存（DB に存在しない）
         self.assertTrue(new_contact._state.adding)
-        # 値は反映
-        self.assertEqual(new_contact.full_name, "別肩書 太郎")
-        self.assertEqual(new_contact.company, "別会社")
+        # 値は反映（full_name は §3.4 正規化で空白除去："別肩書 太郎" → "別肩書太郎"）
+        self.assertEqual(new_contact.full_name, "別肩書太郎")
+        self.assertEqual(new_contact.organization, "別会社")
         # status / person は未設定（View 側責務、§10.12）
         self.assertEqual(new_contact.status, "")
         self.assertIsNone(new_contact.person_id)
@@ -2179,7 +2213,9 @@ class ContactCreateViewTests(TestCase):
         self.url = reverse("contacts:contact_create")
 
     def _base_post_data(self):
-        return {f: "" for f in Contact.UPDATABLE_FIELDS}
+        data = {f: "" for f in Contact.UPDATABLE_FIELDS}
+        data.update(_empty_sns_management_form())
+        return data
 
     # ---- GET ----
 
@@ -2218,13 +2254,15 @@ class ContactCreateViewTests(TestCase):
         """重複候補なし → Person + primary Contact 作成、Contact 詳細画面リダイレクト。"""
         data = self._base_post_data()
         data["full_name"] = "新規 太郎"
-        data["company"] = "新会社"
+        data["organization"] = "新会社"
+        data["salutation_name"] = "新規 様"  # Phase D §3.5 で必須化
 
         resp = self.client.post(self.url, data=data)
 
         self.assertEqual(resp.status_code, 302)
 
-        new_contact = Contact.objects.filter(full_name="新規 太郎").first()
+        # full_name は §3.4 正規化で空白除去される（"新規 太郎" → "新規太郎"）
+        new_contact = Contact.objects.filter(full_name="新規太郎").first()
         self.assertIsNotNone(new_contact)
         self.assertEqual(new_contact.status, Contact.Status.PRIMARY)
         self.assertEqual(new_contact.created_by_id, self.user.id)
@@ -2246,6 +2284,9 @@ class ContactCreateViewTests(TestCase):
         cfc_before = ContactFieldConfidence.objects.count()
         data = self._base_post_data()
         data["full_name"] = "CFC 不要"
+        # salutation_name を埋めて Contact.save() の自動補完を回避する（補完されると
+        # salutation_name の CFC が 1 件作られる）。Phase D で Form が必須化 + is_manual セット。
+        data["salutation_name"] = "テスト 様"
         resp = self.client.post(self.url, data=data)
         self.assertEqual(resp.status_code, 302)
         self.assertEqual(ContactFieldConfidence.objects.count(), cfc_before)
@@ -2254,14 +2295,16 @@ class ContactCreateViewTests(TestCase):
 
     def test_post_with_duplicate_shows_duplicates_screen(self):
         """possible_high 以上の候補あり → 確認画面表示、Person / Contact 未作成。"""
-        # full_name(40) + email(80) + mobile(80) = 200 → POSSIBLE_HIGH 以上を狙う
+        # full_name(40) + email(80) + mobile_phone(80) = 200 → POSSIBLE_HIGH 以上を狙う
+        # 既存側は ORM 直作成で正規化を経ないため、POST 側の正規化後の値（full_name="既存太郎" /
+        # mobile_phone="09012345678"）に揃えて重複判定が成立するようにする（§3.4 正規化との整合）。
         existing_person = Person.objects.create()
         existing = Contact.objects.create(
             person=existing_person,
             status=Contact.Status.PRIMARY,
-            full_name="既存 太郎",
+            full_name="既存太郎",
             email="taro@example.com",
-            mobile="090-1234-5678",
+            mobile_phone="09012345678",
         )
         existing_person.primary_contact = existing
         existing_person.save(update_fields=["primary_contact", "updated_at"])
@@ -2272,7 +2315,8 @@ class ContactCreateViewTests(TestCase):
         data = self._base_post_data()
         data["full_name"] = "既存 太郎"
         data["email"] = "taro@example.com"
-        data["mobile"] = "090-1234-5678"
+        data["mobile_phone"] = "090-1234-5678"
+        data["salutation_name"] = "既存 様"  # Phase D §3.5 で必須化
 
         resp = self.client.post(self.url, data=data)
 
@@ -2294,14 +2338,15 @@ class ContactCreateViewTests(TestCase):
 
     def test_post_force_create_skips_duplicate_check_and_creates(self):
         """強制作成 POST → 重複候補があっても検出スキップ、Person + Contact 作成、詳細画面リダイレクト。"""
-        # 既存 Contact（重複候補になる、full_name + email + mobile 一致で possible_high 以上）
+        # 既存 Contact（重複候補になる、full_name + email + mobile_phone 一致で possible_high 以上）
+        # 既存側は ORM 直作成で正規化を経ないため、POST 側の正規化後 full_name（"既存太郎"）に揃える。
         existing_person = Person.objects.create()
         existing = Contact.objects.create(
             person=existing_person,
             status=Contact.Status.PRIMARY,
-            full_name="既存 太郎",
+            full_name="既存太郎",
             email="taro@example.com",
-            mobile="090-1234-5678",
+            mobile_phone="090-1234-5678",
         )
         existing_person.primary_contact = existing
         existing_person.save(update_fields=["primary_contact", "updated_at"])
@@ -2313,7 +2358,8 @@ class ContactCreateViewTests(TestCase):
         data = self._base_post_data()
         data["full_name"] = "既存 太郎"
         data["email"] = "taro@example.com"
-        data["mobile"] = "090-1234-5678"
+        data["mobile_phone"] = "090-1234-5678"
+        data["salutation_name"] = "既存 様"  # Phase D §3.5 で必須化
         data["force_create"] = "1"
 
         resp = self.client.post(self.url, data=data)
@@ -2323,8 +2369,9 @@ class ContactCreateViewTests(TestCase):
         self.assertEqual(Person.objects.count(), person_count_before + 1)
         self.assertEqual(Contact.objects.count(), contact_count_before + 1)
 
+        # full_name は §3.4 正規化で空白除去される（"既存 太郎" → "既存太郎"）
         new_contact = (
-            Contact.objects.filter(full_name="既存 太郎")
+            Contact.objects.filter(full_name="既存太郎")
             .exclude(pk=existing.pk)
             .first()
         )
@@ -2365,7 +2412,7 @@ class PreviewContactViewTests(TestCase):
             person=self.person,
             status=Contact.Status.PRIMARY,
             full_name="P-name",
-            company="P-co",
+            organization="P-co",
         )
         self.person.primary_contact = self.contact
         self.person.save(update_fields=["primary_contact", "updated_at"])
@@ -2471,4 +2518,642 @@ class ContactDetailDebugUidTests(TestCase):
         resp = self.client.get(self._url())
         self.assertNotContains(resp, "app-debug-uid")
         self.assertNotContains(resp, "Contact UID:")
+
+
+# ======================================================================
+# Phase E：AJAX 経路の正規化通し / salutation / 例外 / セキュリティ（§9.1-9.6）
+# ======================================================================
+
+
+class ContactAjaxNormalizationTests(_ContactAjaxTestBase):
+    """Phase E §9.1/§9.2/§9.4-9.6：AJAX 経路の正規化・salutation・例外・address 弾き。"""
+
+    def _url(self):
+        return reverse(
+            "contacts:ajax_update_field", kwargs={"pk": self.contact_a.pk}
+        )
+
+    def _update(self, field_name, new_value):
+        return self._post_json(
+            self._url(), {"field_name": field_name, "new_value": new_value}
+        )
+
+    def _set_country(self, country):
+        self.contact_a.country = country
+        self.contact_a.save(update_fields=["country", "updated_at"])
+
+    # ---- §9.1 正規化通し ----
+
+    def test_ajax_normalize_full_name(self):
+        resp = self._update("full_name", "山田　太郎")  # 全角スペース
+        self.assertEqual(resp.status_code, 200)
+        self.contact_a.refresh_from_db()
+        self.assertEqual(self.contact_a.full_name, "山田太郎")
+
+    def test_ajax_normalize_organization(self):
+        resp = self._update("organization", "㈱テスト")
+        self.assertEqual(resp.status_code, 200)
+        self.contact_a.refresh_from_db()
+        self.assertEqual(self.contact_a.organization, "株式会社テスト")
+
+    def test_ajax_normalize_phone(self):
+        resp = self._update("mobile_phone", "０９０-1234-5678")
+        self.assertEqual(resp.status_code, 200)
+        self.contact_a.refresh_from_db()
+        self.assertEqual(self.contact_a.mobile_phone, "09012345678")
+
+    def test_ajax_normalize_email(self):
+        resp = self._update("email", "  TARO@Example.COM ")
+        self.assertEqual(resp.status_code, 200)
+        self.contact_a.refresh_from_db()
+        self.assertEqual(self.contact_a.email, "taro@example.com")
+
+    def test_ajax_normalize_postal_code_jp(self):
+        self._set_country("JP")
+        resp = self._update("postal_code", "471-0001")
+        self.assertEqual(resp.status_code, 200)
+        self.contact_a.refresh_from_db()
+        self.assertEqual(self.contact_a.postal_code, "4710001")
+
+    def test_ajax_normalize_postal_code_intl(self):
+        # GB の英数混在 postal が "11" に破壊されず保護される（country 別正規化が AJAX でも効く）
+        self._set_country("GB")
+        resp = self._update("postal_code", "SW1A 1AA")
+        self.assertEqual(resp.status_code, 200)
+        self.contact_a.refresh_from_db()
+        self.assertEqual(self.contact_a.postal_code, "SW1A1AA")
+
+    def test_ajax_normalize_rest_of_address_jp(self):
+        self._set_country("JP")
+        resp = self._update("rest_of_address", "1丁目2番地3号")
+        self.assertEqual(resp.status_code, 200)
+        self.contact_a.refresh_from_db()
+        self.assertEqual(self.contact_a.rest_of_address, "1-2-3")
+
+    def test_ajax_normalize_rest_of_address_intl(self):
+        self._set_country("US")
+        resp = self._update("rest_of_address", "123  Market   St")
+        self.assertEqual(resp.status_code, 200)
+        self.contact_a.refresh_from_db()
+        self.assertEqual(self.contact_a.rest_of_address, "123 Market St")
+
+    # ---- §9.2 salutation_name ----
+
+    def test_ajax_salutation_empty_string_400(self):
+        resp = self._update("salutation_name", "")
+        self.assertEqual(resp.status_code, 400)
+        self.contact_a.refresh_from_db()
+        self.assertEqual(self.contact_a.salutation_name, "テスト 様")  # 不変
+
+    def test_ajax_salutation_whitespace_only_400(self):
+        resp = self._update("salutation_name", "   ")
+        self.assertEqual(resp.status_code, 400)
+
+    def test_ajax_salutation_sets_is_manual_true(self):
+        # is_manual=False から AJAX 更新 → True になる
+        self.contact_a.salutation_name_is_manual = False
+        self.contact_a.save(
+            update_fields=["salutation_name_is_manual", "updated_at"]
+        )
+        resp = self._update("salutation_name", "山田 会長")
+        self.assertEqual(resp.status_code, 200)
+        self.contact_a.refresh_from_db()
+        self.assertTrue(self.contact_a.salutation_name_is_manual)
+        self.assertEqual(self.contact_a.salutation_name, "山田 会長")
+
+    def test_ajax_last_name_change_after_manual_salutation_keeps_value(self):
+        # salutation を AJAX 更新（is_manual=True 固定）後、last_name を変更しても salutation 維持
+        self._update("salutation_name", "山田 会長")
+        resp = self._update("last_name", "佐藤")
+        self.assertEqual(resp.status_code, 200)
+        self.contact_a.refresh_from_db()
+        self.assertEqual(self.contact_a.salutation_name, "山田 会長")
+
+    # ---- §9.4 address 弾き ----
+
+    def test_ajax_address_field_400(self):
+        resp = self._update("address", "anything")
+        self.assertEqual(resp.status_code, 400)
+
+    # ---- §9.5 ValidationError ハンドリング ----
+
+    def test_ajax_normalize_validation_error_returns_400(self):
+        # full_name を空白のみ → normalize_full_name が ValidationError → 400
+        resp = self._update("full_name", "　 ")
+        self.assertEqual(resp.status_code, 400)
+
+    def test_ajax_validation_error_message_in_response(self):
+        resp = self._update("salutation_name", "")
+        self.assertEqual(resp.status_code, 400)
+        body = resp.json()
+        self.assertFalse(body["success"])
+        self.assertIn("salutation_name", body["error"])
+
+    # ---- §9.6 セキュリティ ----
+
+    def test_ajax_address_injection_attempt(self):
+        # address は UPDATABLE_FIELDS 外（Phase E で除外）→ 直接送信は弾かれる
+        resp = self._update("address", "<script>alert(1)</script>")
+        self.assertEqual(resp.status_code, 400)
+
+    def test_ajax_salutation_is_manual_not_directly_writable(self):
+        # is_manual フラグは UPDATABLE_FIELDS 外 → field_name 経由で書き換え不可
+        resp = self._update("salutation_name_is_manual", True)
+        self.assertEqual(resp.status_code, 400)
+
+
+class ContactSaveAddressComposeTests(TestCase):
+    """Phase E §9.3：Contact.save() が住所構成要素変更時に address を自動 compose する。"""
+
+    def _make(self, **kwargs):
+        person = Person.objects.create()
+        defaults = dict(
+            status=Contact.Status.PRIMARY,
+            full_name="住所太郎",
+            salutation_name="住所 様",
+            salutation_name_is_manual=True,
+        )
+        defaults.update(kwargs)
+        return Contact.objects.create(person=person, **defaults)
+
+    def test_save_composes_address_when_postal_code_changes(self):
+        c = self._make(
+            country="JP", region="愛知県", city="豊田市", rest_of_address="1-2-3"
+        )
+        self.assertEqual(c.address, "愛知県豊田市1-2-3")  # 作成時に compose 済み
+        c.postal_code = "4710001"
+        c.save()
+        c.refresh_from_db()
+        self.assertEqual(c.address, "〒4710001 愛知県豊田市1-2-3")
+
+    def test_save_composes_address_when_region_changes(self):
+        c = self._make(
+            country="JP", region="愛知県", city="豊田市", rest_of_address="1-2-3"
+        )
+        c.region = "東京都"
+        c.save()
+        c.refresh_from_db()
+        self.assertEqual(c.address, "東京都豊田市1-2-3")
+
+    def test_save_composes_address_when_city_changes(self):
+        c = self._make(
+            country="JP", region="愛知県", city="豊田市", rest_of_address="1-2-3"
+        )
+        c.city = "名古屋市"
+        c.save()
+        c.refresh_from_db()
+        self.assertEqual(c.address, "愛知県名古屋市1-2-3")
+
+    def test_save_composes_address_when_rest_changes(self):
+        c = self._make(
+            country="JP", region="愛知県", city="豊田市", rest_of_address="1-2-3"
+        )
+        c.rest_of_address = "9-9-9"
+        c.save()
+        c.refresh_from_db()
+        self.assertEqual(c.address, "愛知県豊田市9-9-9")
+
+    def test_save_composes_address_when_country_changes(self):
+        c = self._make(
+            country="JP",
+            postal_code="94103",
+            region="CA",
+            city="San Francisco",
+            rest_of_address="123 Market St",
+        )
+        self.assertEqual(c.address, "〒94103 CASan Francisco123 Market St")
+        c.country = "US"
+        c.save()
+        c.refresh_from_db()
+        self.assertEqual(
+            c.address, "123 Market St, San Francisco, CA 94103, US"
+        )
+
+    def test_save_does_not_compose_when_no_source_changes(self):
+        c = self._make(
+            country="JP", region="愛知県", city="豊田市", rest_of_address="1-2-3"
+        )
+        # save() を経由せず address を書き換え、source 以外（notes）変更で save → 維持
+        Contact.objects.filter(pk=c.pk).update(address="MANUAL")
+        c2 = Contact.objects.get(pk=c.pk)
+        c2.notes = "changed"
+        c2.save()
+        c2.refresh_from_db()
+        self.assertEqual(c2.address, "MANUAL")
+
+    def test_save_jp_address_format(self):
+        c = self._make(
+            country="JP",
+            postal_code="4710001",
+            region="愛知県",
+            city="豊田市",
+            rest_of_address="1-2-3",
+        )
+        self.assertEqual(c.address, "〒4710001 愛知県豊田市1-2-3")
+
+    def test_save_us_address_format(self):
+        c = self._make(
+            country="US",
+            postal_code="94103",
+            region="CA",
+            city="San Francisco",
+            rest_of_address="123 Market St",
+        )
+        self.assertEqual(
+            c.address, "123 Market St, San Francisco, CA 94103, US"
+        )
+
+
+class UpdateFieldAddressRejectionTests(TestCase):
+    """Phase E §9.4：Contact.update_field("address", ...) は ValueError（UPDATABLE_FIELDS 外）。"""
+
+    def test_update_field_address_rejected(self):
+        person = Person.objects.create()
+        contact = Contact.objects.create(
+            person=person,
+            status=Contact.Status.PRIMARY,
+            full_name="x",
+            salutation_name="x 様",
+            salutation_name_is_manual=True,
+        )
+        user = User.objects.create_user(username="rej_user", password="dummy")
+        with self.assertRaises(ValueError):
+            contact.update_field("address", "anything", user)
+
+
+# ======================================================================
+# Phase F1：ContactSns InlineFormSet（仕様書 §11.6.7）
+# ======================================================================
+
+
+class ContactSnsFormSetTests(TestCase):
+    """ContactSnsFormSet（build_contact_sns_formset）の単体テスト（§11.6.7 / §1.8.1）。"""
+
+    def setUp(self):
+        self.person = Person.objects.create()
+        self.contact = Contact.objects.create(
+            person=self.person,
+            status=Contact.Status.PRIMARY,
+            full_name="C",
+        )
+
+    def _data(self, rows, initial=0):
+        data = _sns_management_form(len(rows), initial=initial)
+        for i, row in enumerate(rows):
+            for key, value in row.items():
+                data[f"sns-{i}-{key}"] = value
+        return data
+
+    def test_empty_formset_creates_nothing(self):
+        formset = build_contact_sns_formset(
+            data=_empty_sns_management_form(), instance=self.contact, prefix="sns"
+        )
+        self.assertTrue(formset.is_valid())
+        formset.save()
+        self.assertEqual(self.contact.sns_accounts.count(), 0)
+
+    def test_single_row_creates_record(self):
+        data = self._data([{"sns_type": "twitter", "sns_id": "@taro"}])
+        formset = build_contact_sns_formset(
+            data=data, instance=self.contact, prefix="sns"
+        )
+        self.assertTrue(formset.is_valid())
+        formset.save()
+        self.assertEqual(self.contact.sns_accounts.count(), 1)
+        sns = self.contact.sns_accounts.first()
+        self.assertEqual(sns.sns_type, "twitter")
+        self.assertEqual(sns.sns_id, "@taro")
+
+    def test_duplicate_rows_invalid(self):
+        data = self._data(
+            [
+                {"sns_type": "github", "sns_id": "taro"},
+                {"sns_type": "github", "sns_id": "taro"},
+            ]
+        )
+        formset = build_contact_sns_formset(
+            data=data, instance=self.contact, prefix="sns"
+        )
+        self.assertFalse(formset.is_valid())
+        msg = str(formset.non_form_errors())
+        # 日本語メッセージで出る（Phase F1 follow-up 不具合③）
+        self.assertIn("同じ種別・同じ ID の SNS が重複しています。", msg)
+        # Django 標準の英語フィールド名混じりメッセージが出ない
+        self.assertNotIn("sns_type", msg)
+        self.assertNotIn("sns_id", msg)
+
+    def test_delete_existing_removes_record(self):
+        sns = ContactSns.objects.create(
+            contact=self.contact, sns_type="line", sns_id="line-id"
+        )
+        data = self._data(
+            [
+                {
+                    "id": str(sns.id),
+                    "sns_type": "line",
+                    "sns_id": "line-id",
+                    "DELETE": "on",
+                }
+            ],
+            initial=1,
+        )
+        formset = build_contact_sns_formset(
+            data=data, instance=self.contact, prefix="sns"
+        )
+        self.assertTrue(formset.is_valid())
+        formset.save()
+        self.assertEqual(self.contact.sns_accounts.count(), 0)
+
+    def test_partial_row_invalid(self):
+        """sns_type だけ・sns_id 空 → 標準バリデーションエラー（片方だけ入力禁止）。"""
+        data = self._data([{"sns_type": "twitter", "sns_id": ""}])
+        formset = build_contact_sns_formset(
+            data=data, instance=self.contact, prefix="sns"
+        )
+        self.assertFalse(formset.is_valid())
+
+    def test_invalid_sns_type_choice(self):
+        """choices 外の sns_type → ChoiceField バリデーションエラー。"""
+        data = self._data([{"sns_type": "myspace", "sns_id": "x"}])
+        formset = build_contact_sns_formset(
+            data=data, instance=self.contact, prefix="sns"
+        )
+        self.assertFalse(formset.is_valid())
+
+    def test_sns_id_is_stripped(self):
+        data = self._data([{"sns_type": "blog", "sns_id": "  https://b.example  "}])
+        formset = build_contact_sns_formset(
+            data=data, instance=self.contact, prefix="sns"
+        )
+        self.assertTrue(formset.is_valid())
+        formset.save()
+        self.assertEqual(
+            self.contact.sns_accounts.first().sns_id, "https://b.example"
+        )
+
+    def test_get_formset_shows_existing_rows(self):
+        ContactSns.objects.create(
+            contact=self.contact, sns_type="twitter", sns_id="@a"
+        )
+        ContactSns.objects.create(
+            contact=self.contact, sns_type="github", sns_id="a"
+        )
+        formset = build_contact_sns_formset(instance=self.contact, prefix="sns")
+        self.assertEqual(formset.initial_form_count(), 2)
+
+    def test_initial_prefills_extra_rows(self):
+        """initial を渡すと新規 Contact 用に extra 行で初期表示される（9 番別肩書用）。"""
+        initial = [
+            {"sns_type": "twitter", "sns_id": "@a"},
+            {"sns_type": "line", "sns_id": "l"},
+        ]
+        formset = build_contact_sns_formset(
+            instance=None, initial=initial, prefix="sns"
+        )
+        self.assertEqual(formset.total_form_count(), 2)
+        self.assertEqual(formset.forms[0].initial["sns_type"], "twitter")
+
+
+class UpdatePrimaryContactSnsTests(TestCase):
+    """12 番 UpdatePrimaryContactView の ContactSns 連携（§11.6.7 / §1.8.2）。"""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="up_sns_user", password="x")
+        self.person = Person.objects.create()
+        self.primary = Contact.objects.create(
+            person=self.person,
+            status=Contact.Status.PRIMARY,
+            full_name="P",
+            salutation_name="P 様",
+            salutation_name_is_manual=True,
+        )
+        self.person.primary_contact = self.primary
+        self.person.save(update_fields=["primary_contact", "updated_at"])
+        self.client = Client()
+        self.client.force_login(self.user)
+
+    def _url(self):
+        return reverse(
+            "contacts:contact_update_primary", kwargs={"pk": self.primary.pk}
+        )
+
+    def _base(self, change_reason="fix"):
+        data = {f: getattr(self.primary, f) or "" for f in Contact.UPDATABLE_FIELDS}
+        data["change_reason"] = change_reason
+        data["note"] = ""
+        return data
+
+    def test_get_renders_sns_formset(self):
+        ContactSns.objects.create(
+            contact=self.primary, sns_type="twitter", sns_id="@p"
+        )
+        resp = self.client.get(self._url())
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("sns_formset", resp.context)
+        self.assertContains(resp, "js-sns-formset-container")
+        self.assertContains(resp, "@p")
+
+    def test_fix_adds_sns(self):
+        data = self._base("fix")
+        data.update(_sns_management_form(1, initial=0))
+        data["sns-0-sns_type"] = "github"
+        data["sns-0-sns_id"] = "p-gh"
+        resp = self.client.post(self._url(), data=data)
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(self.primary.sns_accounts.count(), 1)
+        self.assertEqual(self.primary.sns_accounts.first().sns_type, "github")
+
+    def test_fix_deletes_sns(self):
+        sns = ContactSns.objects.create(
+            contact=self.primary, sns_type="line", sns_id="l"
+        )
+        data = self._base("fix")
+        data.update(_sns_management_form(1, initial=1))
+        data["sns-0-id"] = str(sns.id)
+        data["sns-0-sns_type"] = "line"
+        data["sns-0-sns_id"] = "l"
+        data["sns-0-DELETE"] = "on"
+        resp = self.client.post(self._url(), data=data)
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(self.primary.sns_accounts.count(), 0)
+
+    def test_transfer_copies_sns_to_new_contact(self):
+        """transfer 系：旧 primary の SNS は維持され、新 primary に submit 内容が作られる。"""
+        sns = ContactSns.objects.create(
+            contact=self.primary, sns_type="twitter", sns_id="@old"
+        )
+        data = self._base("transfer")
+        # ブラウザ実機と同じく、GET で旧 primary の既存行（pk 付き）が描画され、それを
+        # そのまま submit する。既存 1 行（id 付き・INITIAL=1）+ 追加 1 行（id なし）。
+        data.update(_sns_management_form(2, initial=1))
+        data["sns-0-id"] = str(sns.id)
+        data["sns-0-sns_type"] = "twitter"
+        data["sns-0-sns_id"] = "@old"
+        data["sns-1-sns_type"] = "line"
+        data["sns-1-sns_id"] = "new-line"
+        resp = self.client.post(self._url(), data=data)
+        self.assertEqual(resp.status_code, 302)
+        self.person.refresh_from_db()
+        new_primary = self.person.primary_contact
+        self.assertNotEqual(new_primary.pk, self.primary.pk)
+        self.assertEqual(new_primary.sns_accounts.count(), 2)
+        # 旧 primary（inactive 化）の SNS は時点スナップショットとして残る
+        self.primary.refresh_from_db()
+        self.assertEqual(self.primary.sns_accounts.count(), 1)
+
+
+class UpdateActiveContactSnsTests(TestCase):
+    """13 番 UpdateActiveContactView の ContactSns 連携（§11.6.7 / §1.8.2）。"""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="ua_sns_user", password="x")
+        self.person = Person.objects.create()
+        self.primary = Contact.objects.create(
+            person=self.person, status=Contact.Status.PRIMARY, full_name="P"
+        )
+        self.person.primary_contact = self.primary
+        self.person.save(update_fields=["primary_contact", "updated_at"])
+        self.active = Contact.objects.create(
+            person=self.person,
+            status=Contact.Status.ACTIVE,
+            full_name="A",
+            salutation_name="A 様",
+            salutation_name_is_manual=True,
+        )
+        self.client = Client()
+        self.client.force_login(self.user)
+
+    def _url(self):
+        return reverse(
+            "contacts:contact_update_active", kwargs={"pk": self.active.pk}
+        )
+
+    def test_fix_adds_sns(self):
+        data = {f: getattr(self.active, f) or "" for f in Contact.UPDATABLE_FIELDS}
+        data["note"] = ""
+        data.update(_sns_management_form(1, initial=0))
+        data["sns-0-sns_type"] = "instagram"
+        data["sns-0-sns_id"] = "a-ig"
+        resp = self.client.post(self._url(), data=data)
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(self.active.sns_accounts.count(), 1)
+        self.assertEqual(self.active.sns_accounts.first().sns_type, "instagram")
+
+
+class ContactCreateSnsTests(TestCase):
+    """10 番 ContactCreateView の ContactSns 連携（§11.6.7 / §1.8.2）。"""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="cc_sns_user", password="x")
+        self.client = Client()
+        self.client.force_login(self.user)
+        self.url = reverse("contacts:contact_create")
+
+    def test_create_with_sns(self):
+        data = {f: "" for f in Contact.UPDATABLE_FIELDS}
+        data["full_name"] = "新規太郎"
+        data["salutation_name"] = "新規太郎 様"
+        data.update(_sns_management_form(1, initial=0))
+        data["sns-0-sns_type"] = "youtube"
+        data["sns-0-sns_id"] = "ch-1"
+        resp = self.client.post(self.url, data=data)
+        self.assertEqual(resp.status_code, 302)
+        contact = Contact.objects.get(full_name="新規太郎")
+        self.assertEqual(contact.sns_accounts.count(), 1)
+        self.assertEqual(contact.sns_accounts.first().sns_type, "youtube")
+
+    def test_get_renders_empty_sns_formset(self):
+        resp = self.client.get(self.url)
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("sns_formset", resp.context)
+        self.assertContains(resp, "js-sns-formset-container")
+
+
+class ContactSnsTemplateRenderTests(TestCase):
+    """ContactSns formset コンテナの描画確認（§1.8.3）。"""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="render_sns_user", password="x")
+        self.person = Person.objects.create()
+        self.primary = Contact.objects.create(
+            person=self.person, status=Contact.Status.PRIMARY, full_name="P"
+        )
+        self.person.primary_contact = self.primary
+        self.person.save(update_fields=["primary_contact", "updated_at"])
+        self.active = Contact.objects.create(
+            person=self.person, status=Contact.Status.ACTIVE, full_name="A"
+        )
+        self.client = Client()
+        self.client.force_login(self.user)
+
+    def test_primary_template_has_sns_container(self):
+        url = reverse(
+            "contacts:contact_update_primary", kwargs={"pk": self.primary.pk}
+        )
+        resp = self.client.get(url)
+        self.assertContains(resp, "js-sns-formset-container")
+        self.assertContains(resp, "js-sns-add-btn")
+
+    def test_active_template_has_sns_container(self):
+        url = reverse(
+            "contacts:contact_update_active", kwargs={"pk": self.active.pk}
+        )
+        resp = self.client.get(url)
+        self.assertContains(resp, "js-sns-formset-container")
+
+    def test_create_template_has_sns_container(self):
+        resp = self.client.get(reverse("contacts:contact_create"))
+        self.assertContains(resp, "js-sns-formset-container")
+
+
+class CommentLeakRegressionTests(TestCase):
+    """Phase F1 follow-up 不具合②：複数行 {# #} コメント本文の画面露出が無いこと。"""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="leak_user", password="x")
+        self.person = Person.objects.create()
+        self.contact = Contact.objects.create(
+            person=self.person,
+            status=Contact.Status.PRIMARY,
+            full_name="L",
+            organization="L-co",
+        )
+        self.person.primary_contact = self.contact
+        self.person.save(update_fields=["primary_contact", "updated_at"])
+        self.client = Client()
+        self.client.force_login(self.user)
+
+    def test_contact_detail_no_leaked_comment(self):
+        """11 番 Contact 詳細画面でコメント本文が漏れない。"""
+        url = reverse("contacts:contact_detail", kwargs={"pk": self.contact.pk})
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, "SNS グループは v1.6.1 で")
+        self.assertNotContains(resp, "別途実装する")
+
+    def test_preview_no_leaked_comment(self):
+        """14 番プレビュー（_preview_modal_body.html）でコメント本文が漏れない。"""
+        url = reverse("contacts:contact_preview", kwargs={"pk": self.contact.pk})
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, "SNS グループは v1.6.1 で")
+        self.assertNotContains(resp, "別途実装する")
+
+
+class SnsFormsetHiddenRowCssTests(TestCase):
+    """Phase F1 follow-up 不具合①：既存行 [hidden] を隠す CSS ルールが app.css にあること。
+
+    CSS の実表示はクローム君の視覚確認に委ねるが、ルールの存在だけは回帰防止で固定する。
+    """
+
+    def test_hidden_row_css_rule_present(self):
+        from pathlib import Path
+
+        from django.conf import settings
+
+        css = Path(settings.BASE_DIR, "static", "css", "app.css").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(".app-sns-formset__row[hidden]", css)
+        self.assertIn("display: none !important", css)
 

@@ -20,8 +20,8 @@
           <input type="text" id="id_name" name="name" value="{{ name }}" class="app-input">
         </div>
         <div class="app-form__group">
-          <label class="app-form__label" for="id_company">会社名</label>
-          <input type="text" id="id_company" name="company" value="{{ company }}" class="app-input">
+          <label class="app-form__label" for="id_organization">会社名</label>
+          <input type="text" id="id_organization" name="organization" value="{{ organization }}" class="app-input">
         </div>
         <div class="app-form__group">
           <label class="app-form__label" for="id_department">部署名</label>
@@ -82,7 +82,7 @@
             <th class="app-table__col--action">操作</th>
             <th class="app-table__col--name">氏名</th>
             <th class="app-table__col--status">status</th>
-            <th class="app-table__col--company">会社</th>
+            <th class="app-table__col--organization">会社</th>
             <th class="app-table__col--dept">役職</th>
             <th class="app-table__col--email">連絡先</th>
             <th>アクティブ数</th>
@@ -113,17 +113,17 @@
                 {% endif %}
               </td>
               <td>
-                {% if person.primary_contact.company %}
-                  <span class="app-ellipsis" data-tooltip="{{ person.primary_contact.company }}">{{ person.primary_contact.company|truncatechars:30 }}</span>
+                {% if person.primary_contact.organization %}
+                  <span class="app-ellipsis" data-tooltip="{{ person.primary_contact.organization }}">{{ person.primary_contact.organization|truncatechars:30 }}</span>
                 {% else %}-{% endif %}
               </td>
               <td>{{ person.primary_contact.title|default:"-" }}</td>
               <td>
                 {% if person.primary_contact.email %}<div>{{ person.primary_contact.email }}</div>{% endif %}
-                {% if person.primary_contact.mobile %}<div>{{ person.primary_contact.mobile }}</div>{% endif %}
-                {% if person.primary_contact.phone %}<div>{{ person.primary_contact.phone }}</div>{% endif %}
-                {% if person.primary_contact.fax %}<div>FAX: {{ person.primary_contact.fax }}</div>{% endif %}
-                {% if not person.primary_contact.email and not person.primary_contact.mobile and not person.primary_contact.phone and not person.primary_contact.fax %}-{% endif %}
+                {% if person.primary_contact.mobile_phone %}<div>{{ person.primary_contact.mobile_phone }}</div>{% endif %}
+                {% if person.primary_contact.personal_phone %}<div>{{ person.primary_contact.personal_phone }}</div>{% endif %}
+                {% if person.primary_contact.personal_fax %}<div>FAX: {{ person.primary_contact.personal_fax }}</div>{% endif %}
+                {% if not person.primary_contact.email and not person.primary_contact.mobile_phone and not person.primary_contact.personal_phone and not person.primary_contact.personal_fax %}-{% endif %}
               </td>
               <td>{{ person.active_count }}</td>
               <td>{{ person.updated_at|date:"Y/m/d H:i" }}</td>
@@ -156,7 +156,7 @@
             {% elif person.status == "archived" %}
               <span class="app-status-badge app-status-badge--muted">archived</span>
             {% endif %}
-            {% if person.primary_contact.company %}<div>{{ person.primary_contact.company }}</div>{% endif %}
+            {% if person.primary_contact.organization %}<div>{{ person.primary_contact.organization }}</div>{% endif %}
             {% if person.primary_contact.title %}<div class="app-muted">{{ person.primary_contact.title }}</div>{% endif %}
           </div>
           <div class="app-list-card__sub">
@@ -172,7 +172,7 @@
     {% if is_paginated %}
       <nav class="app-pagination" aria-label="ページネーション">
         {% if page_obj.has_previous %}
-          <a href="?name={{ name }}&company={{ company }}&department={{ department }}&title={{ title }}&email={{ email }}&tel={{ tel }}&address={{ address }}{% for s in selected_statuses %}&status={{ s }}{% endfor %}&searched=1&page={{ page_obj.previous_page_number }}" class="app-pagination__button">‹</a>
+          <a href="?name={{ name }}&organization={{ organization }}&department={{ department }}&title={{ title }}&email={{ email }}&tel={{ tel }}&address={{ address }}{% for s in selected_statuses %}&status={{ s }}{% endfor %}&searched=1&page={{ page_obj.previous_page_number }}" class="app-pagination__button">‹</a>
         {% else %}
           <button type="button" class="app-pagination__button" disabled>‹</button>
         {% endif %}
@@ -181,12 +181,12 @@
           {% if num == page_obj.number %}
             <button type="button" class="app-pagination__button is-active">{{ num }}</button>
           {% else %}
-            <a href="?name={{ name }}&company={{ company }}&department={{ department }}&title={{ title }}&email={{ email }}&tel={{ tel }}&address={{ address }}{% for s in selected_statuses %}&status={{ s }}{% endfor %}&searched=1&page={{ num }}" class="app-pagination__button">{{ num }}</a>
+            <a href="?name={{ name }}&organization={{ organization }}&department={{ department }}&title={{ title }}&email={{ email }}&tel={{ tel }}&address={{ address }}{% for s in selected_statuses %}&status={{ s }}{% endfor %}&searched=1&page={{ num }}" class="app-pagination__button">{{ num }}</a>
           {% endif %}
         {% endfor %}
 
         {% if page_obj.has_next %}
-          <a href="?name={{ name }}&company={{ company }}&department={{ department }}&title={{ title }}&email={{ email }}&tel={{ tel }}&address={{ address }}{% for s in selected_statuses %}&status={{ s }}{% endfor %}&searched=1&page={{ page_obj.next_page_number }}" class="app-pagination__button">›</a>
+          <a href="?name={{ name }}&organization={{ organization }}&department={{ department }}&title={{ title }}&email={{ email }}&tel={{ tel }}&address={{ address }}{% for s in selected_statuses %}&status={{ s }}{% endfor %}&searched=1&page={{ page_obj.next_page_number }}" class="app-pagination__button">›</a>
         {% else %}
           <button type="button" class="app-pagination__button" disabled>›</button>
         {% endif %}

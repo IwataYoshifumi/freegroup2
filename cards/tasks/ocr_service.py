@@ -28,7 +28,7 @@ class OcrService:
     DEFAULT_MODEL = "claude-sonnet-4-6"
     DEFAULT_MAX_TOKENS = 4096
     MAX_LONG_EDGE = 1568
-    SCHEMA_VERSION = "1.3.0"
+    SCHEMA_VERSION = "1.6.1"
     TOOL_NAME = "extract_business_card"
 
     def __init__(self, api_key=None, model=None):
@@ -131,7 +131,7 @@ class OcrService:
                 settings.BASE_DIR
                 / "docs"
                 / "json_schema"
-                / "v1.3.0"
+                / f"v{self.SCHEMA_VERSION}"
                 / "combined_response.json"
             )
             try:

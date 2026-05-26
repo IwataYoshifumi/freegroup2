@@ -52,13 +52,13 @@ class DifferentPersonReason(models.TextChoices):
 # 重複検出のスコア計算と Contact 編集の発火判定で共通利用するフィールド一覧（仕様書 §14.3.5）。
 DUPLICATE_CHECK_FIELDS = [
     "full_name",
-    "company",
+    "organization",
     "department",
     "title",
     "branch",
     "email",
-    "phone",
-    "mobile",
+    "personal_phone",
+    "mobile_phone",
     "address",
 ]
 
@@ -86,12 +86,12 @@ DUPLICATE_GENERIC_EMAIL_LOCALPARTS = [
 # branch（支店・営業所）は配点なし（所属5フィールド判定にのみ参加）。
 DUPLICATE_FIELD_SCORES = {
     "full_name": 40,
-    "company": 10,
+    "organization": 10,
     "department": 10,
     "title": 5,
     "address": 10,
-    "phone": 5,
-    "mobile": 80,
+    "personal_phone": 5,
+    "mobile_phone": 80,
 }
 DUPLICATE_SCORE_EMAIL_PERSONAL = 80
 DUPLICATE_SCORE_EMAIL_GENERIC = 5
@@ -102,10 +102,10 @@ POSSIBLE_MID_MIN_SCORE = 120
 POSSIBLE_HIGH_MIN_SCORE = 200
 
 # 所属5フィールド（仕様書 §8.4 exact_match の「両方一致 or 両方空」判定用）。
-# DUPLICATE_CHECK_FIELDS 9 項目から個人系（full_name / email / phone / mobile）を
+# DUPLICATE_CHECK_FIELDS 9 項目から個人系（full_name / email / personal_phone / mobile_phone）を
 # 除いた 5 項目。
 DUPLICATE_LOCATION_FIELDS = [
-    "company",
+    "organization",
     "department",
     "title",
     "branch",

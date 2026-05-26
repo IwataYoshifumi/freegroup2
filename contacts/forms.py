@@ -16,11 +16,21 @@ ModelForm 基底クラス。UI 構造を持たず、子 Form から継承して�
 """
 
 from django import forms
+from django.core.exceptions import ValidationError
 from django.forms.utils import ErrorList
 
 from config.constants import PersonChangeReason
 
-from .models import Contact
+from .models import Contact, ContactSns
+from .services.normalization import (
+    normalize_department_title_branch,
+    normalize_email,
+    normalize_full_name,
+    normalize_organization,
+    normalize_phone_value,
+    normalize_postal_code_by_country,
+    normalize_rest_of_address_by_country,
+)
 
 
 class AppErrorList(ErrorList):
@@ -60,6 +70,36 @@ class ContactBaseForm(forms.ModelForm):
     # 下記の __init__ で kwargs に明示注入する（D-4d-1 第 3 弾 §2-5）。
     error_class = AppErrorList
 
+    # 手動 Form 経路の正規化通し（仕様書 §11.9.5.1 / Phase D §3.4）。
+    # 3 経路（OCR / 手動 Form / AJAX）が同じ normalization 純関数を共有し、入力経路に
+    # よらず Contact に格納される値を一致させる。対象フィールドは Contact.UPDATABLE_FIELDS
+    # のサブセット（Form に存在しないフィールドは正規化しない）。dict の値は素の関数
+    # （クラス属性ではなく dict 値なので descriptor 束縛は起きず、そのまま呼べる）。
+    _FIELD_NORMALIZERS = {
+        "full_name": normalize_full_name,
+        "organization": normalize_organization,
+        "mobile_phone": normalize_phone_value,
+        "personal_phone": normalize_phone_value,
+        "personal_fax": normalize_phone_value,
+        "org_phone": normalize_phone_value,
+        "org_fax": normalize_phone_value,
+        "email": normalize_email,
+        "department": normalize_department_title_branch,
+        "title": normalize_department_title_branch,
+        "branch": normalize_department_title_branch,
+    }
+
+    # full_name 補助組み立て JS（Phase D §3.7）用の js- フック。氏名系 widget の class に
+    # 付与し、static/js/app.js がこれらを検出して last_name/first_name/other_name_parts/
+    # name_order の変更に追従して full_name を補助組み立てする。
+    _NAME_COMPOSE_CLASSES = {
+        "full_name": "js-name-full",
+        "last_name": "js-name-last",
+        "first_name": "js-name-first",
+        "other_name_parts": "js-name-other",
+        "name_order": "js-name-order",
+    }
+
     class Meta:
         model = Contact
         fields = list(Contact.UPDATABLE_FIELDS)
@@ -67,6 +107,25 @@ class ContactBaseForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         kwargs.setdefault("error_class", self.error_class)
         super().__init__(*args, **kwargs)
+        # Phase E：address は UPDATABLE_FIELDS から除外され Form フィールドではなくなった。
+        # 住所組み立ては Contact.save() が住所構成要素から自動で行う（§11.9.4 / Phase E §2）。
+        self._tag_name_compose_widgets()
+
+    def _tag_name_compose_widgets(self):
+        """氏名系 widget に full_name 補助 JS 用の js- フッククラスを付与する（Phase D §3.7）。
+
+        [性質] 副作用あり（widget.attrs['class'] を更新）。DB 操作なし
+
+        既存クラス（app-input 等）に追記する。_apply_widget_classes より前に呼ばれても
+        後で app-input が追記されるだけで衝突しない。
+        """
+        for field_name, js_class in self._NAME_COMPOSE_CLASSES.items():
+            field = self.fields.get(field_name)
+            if field is None:
+                continue
+            css = field.widget.attrs.get("class", "")
+            if js_class not in css.split():
+                field.widget.attrs["class"] = (css + " " + js_class).strip()
 
     def get_update_contact(self):
         """フォーム値を反映した未保存の Contact インスタンスを返す（仕様書 §11.6.5）。
@@ -103,6 +162,74 @@ class ContactBaseForm(forms.ModelForm):
             css = widget.attrs.get("class", "")
             if "app-input" not in css.split():
                 widget.attrs["class"] = (css + " app-input").strip()
+
+    def clean(self):
+        """フォーム値を normalization 純関数に通して正規化する（仕様書 §11.9.5.1 / Phase D §3.4）。
+
+        [性質] presentation 層メソッド（DB 操作なし。cleaned_data を書き換える）
+
+        Contact.UPDATABLE_FIELDS のうち ``_FIELD_NORMALIZERS`` に対応のあるフィールドのみ
+        を正規化する。子 Form（ContactUpdateForm 等）が clean() をオーバーライドする場合も
+        ``super().clean()`` 経由で本処理が先に走るため、正規化後の値に対して追加検証できる。
+        """
+        cleaned = super().clean()
+        self._normalize_cleaned_fields(cleaned)
+        self._normalize_address_by_country(cleaned)
+        # address の組み立ては Contact.save() が住所構成要素から自動で行う（Phase E §3）。
+        return cleaned
+
+    def _normalize_address_by_country(self, cleaned):
+        """postal_code / rest_of_address を country 別に正規化する（Phase D2）。
+
+        [性質] 副作用あり（cleaned の postal_code / rest_of_address を更新）。DB 操作なし
+
+        postal_code：JP/US＝数字のみ、_default（GB 等）＝英字保持（``normalize_postal_code_by_country``）。
+        rest_of_address：JP＝全スペース除去、US/_default＝スペース保持（``normalize_rest_of_address_by_country``）。
+        いずれも country 依存のため _FIELD_NORMALIZERS には載せず、country 確定後にここで処理する。
+        空値はスキップ。
+        """
+        country = cleaned.get("country", "")
+        if "postal_code" in self.fields and cleaned.get("postal_code"):
+            cleaned["postal_code"] = normalize_postal_code_by_country(
+                cleaned["postal_code"], country
+            )
+        if "rest_of_address" in self.fields and cleaned.get("rest_of_address"):
+            cleaned["rest_of_address"] = normalize_rest_of_address_by_country(
+                cleaned["rest_of_address"], country
+            )
+
+    def _normalize_cleaned_fields(self, cleaned):
+        """cleaned_data の各フィールドを対応する normalization 純関数で正規化する。
+
+        [性質] 副作用あり（cleaned dict を更新 / 検証失敗時 add_error）。DB 操作なし
+
+        空値（None / ""）は正規化対象外（required は各フィールドの field 検証が担う）。
+        normalize_full_name は空白のみ入力で ValidationError を送出するため、その場合は
+        当該フィールドのエラーとして add_error に変換する（他の純関数は例外を投げない）。
+        """
+        for field_name, normalizer in self._FIELD_NORMALIZERS.items():
+            if field_name not in self.fields or field_name not in cleaned:
+                continue
+            raw = cleaned.get(field_name)
+            if raw in (None, ""):
+                continue
+            try:
+                cleaned[field_name] = normalizer(raw)
+            except ValidationError as exc:
+                self.add_error(field_name, exc)
+
+    def _require_salutation_name(self, cleaned):
+        """salutation_name 必須化バリデーション（仕様書 §1.5.2 / Phase D §3.5）。
+
+        [性質] 副作用あり（検証失敗時 add_error）。DB 操作なし
+
+        手動入力 3 Form（Create / Update / UpdateActive）でのみ呼ぶ
+        （ContactAddAdditionalRoleForm は対象外）。DB レベルは NULL 許容のまま
+        （マイグレーション不要）、Form 層で空文字・空白のみ入力を禁止する。
+        """
+        value = (cleaned.get("salutation_name") or "").strip()
+        if not value:
+            self.add_error("salutation_name", "宛名は必須です。")
 
 
 class ContactUpdateForm(ContactBaseForm):
@@ -152,7 +279,7 @@ class ContactUpdateForm(ContactBaseForm):
         # high 扱い（CFC レコードなしの疑似 high）と confirmed 済みは追加しない。
         confidences = self.target_contact.get_field_confidences()
         for field_name, conf in confidences.items():
-            if conf.confidence in ("low", "medium") and conf.confirmed_at is None:
+            if conf.confidence in ("low", "mid") and conf.confirmed_at is None:
                 self.fields[f"confirmed_{field_name}"] = forms.BooleanField(
                     required=False,
                     label=f"『{field_name}』フィールドを確認しました",
@@ -162,10 +289,12 @@ class ContactUpdateForm(ContactBaseForm):
 
     def clean(self):
         cleaned = super().clean()
+        # salutation_name 必須化（仕様書 §1.5.2 / Phase D §3.5）。
+        self._require_salutation_name(cleaned)
         # 動的追加した confirmed_<field> がすべて ON か検証（§11.7.1）。
         confidences = self.target_contact.get_field_confidences()
         for field_name, conf in confidences.items():
-            if conf.confidence in ("low", "medium") and conf.confirmed_at is None:
+            if conf.confidence in ("low", "mid") and conf.confirmed_at is None:
                 chk_name = f"confirmed_{field_name}"
                 if not cleaned.get(chk_name):
                     self.add_error(
@@ -235,6 +364,14 @@ class ContactCreateForm(ContactBaseForm):
         kwargs.pop("instance", None)
         super().__init__(*args, **kwargs)
         self._apply_widget_classes()
+        # 新規作成は国デフォルト JP（UI §2.2、未バインド表示用 initial）。
+        self.fields["country"].initial = "JP"
+
+    def clean(self):
+        cleaned = super().clean()
+        # salutation_name 必須化（仕様書 §1.5.2 / Phase D §3.5）。
+        self._require_salutation_name(cleaned)
+        return cleaned
 
 
 class ContactAddAdditionalRoleForm(ContactBaseForm):
@@ -264,3 +401,140 @@ class ContactAddAdditionalRoleForm(ContactBaseForm):
         kwargs.pop("instance", None)
         super().__init__(*args, **kwargs)
         self._apply_widget_classes()
+        # 新規作成は国デフォルト JP（UI §2.2、未バインド表示用 initial）。
+        self.fields["country"].initial = "JP"
+
+    def clean(self):
+        cleaned = super().clean()
+        # salutation_name 必須化（仕様書 §1.5.2 / Phase F1 追加）。9 番別肩書追加で作る
+        # active Contact もメール配信の宛名・敬称に使うため、Create/Update/UpdateActive と
+        # 揃えて必須とする（Phase F1 で 12/13/10 番に続いて 9 番も対象化）。
+        self._require_salutation_name(cleaned)
+        return cleaned
+
+
+# ======================================================================
+# ContactSns 編集 UI（InlineFormSet）（v1.6.1 Phase F1、仕様書 §11.6.7）
+# ======================================================================
+
+
+class ContactSnsForm(forms.ModelForm):
+    """ContactSns 1 レコードの編集フォーム（InlineFormSet の構成要素、§11.6.7）。
+
+    [性質] presentation 層クラス（DB 操作なし・副作用なし）
+
+    sns_type（choices）と sns_id（CharField、Django 標準で前後空白を strip）のみを編集
+    対象とする。widget に既存 BEM クラス app-input を付与する（CLAUDE.md §7）。
+    """
+
+    class Meta:
+        model = ContactSns
+        fields = ["sns_type", "sns_id"]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for name in ("sns_type", "sns_id"):
+            widget = self.fields[name].widget
+            css = widget.attrs.get("class", "")
+            if "app-input" not in css.split():
+                widget.attrs["class"] = (css + " app-input").strip()
+        self.fields["sns_id"].widget.attrs.setdefault(
+            "placeholder", "ID・URL・アカウント名など"
+        )
+
+
+class _BaseContactSnsFormSet(forms.BaseInlineFormSet):
+    """ContactSns InlineFormSet の基底。各子フォームに AppErrorList を配る（§11.6.6）。
+
+    [性質] presentation 層クラス（DB 操作なし）
+
+    BaseFormSet が _construct_form で error_class を各子フォームに渡すため、ここで
+    error_class の既定を AppErrorList にすることで、行ごとのフィールドエラーにも
+    app-form__error クラスが自動付与され、Contact 本体 Form と表示が統一される。
+    """
+
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault("error_class", AppErrorList)
+        super().__init__(*args, **kwargs)
+
+    def validate_unique(self):
+        """Django 標準の英語 unique エラーを抑止する（Phase F1 follow-up 不具合③）。
+
+        [性質] presentation 層メソッド（DB 操作なし）
+
+        BaseModelFormSet.clean() は validate_unique() を呼び、(sns_type, sns_id) の重複時に
+        「sns_type と sns_id の重複したデータを…」という英語フィールド名混じりの定型
+        メッセージを raise する。これが super().clean() 経由で先に発火し、本クラスの
+        clean() の日本語メッセージへ到達しなかった。本メソッドを no-op 化して標準検証を
+        止め、重複検証を clean() の日本語メッセージに一本化する（DB の UniqueConstraint は維持）。
+        """
+        return
+
+    def clean(self):
+        """送信行のうち非削除・有効な (sns_type, sns_id) の重複を弾く（§3.7.4 / §11.6.7）。
+
+        [性質] presentation 層メソッド（DB 操作なし）
+
+        同一 Contact 内の (sns_type, sns_id) 重複を本 clean で日本語メッセージとして検証する
+        （DB の UniqueConstraint と二重で守る）。Django 標準の英語 unique 検証は
+        validate_unique() の no-op 化で抑止済み。
+        """
+        super().clean()
+        if any(self.errors):
+            return
+        seen = set()
+        for form in self.forms:
+            cleaned = getattr(form, "cleaned_data", None)
+            if not cleaned or cleaned.get("DELETE"):
+                continue
+            sns_type = cleaned.get("sns_type")
+            sns_id = (cleaned.get("sns_id") or "").strip()
+            if not sns_type or not sns_id:
+                continue
+            key = (sns_type, sns_id)
+            if key in seen:
+                raise ValidationError(
+                    "同じ種別・同じ ID の SNS が重複しています。"
+                )
+            seen.add(key)
+
+
+# 既定の InlineFormSet クラス（extra=0）。初期表示行数を変える 9 番別肩書追加では
+# build_contact_sns_formset() で extra を動的指定する。
+ContactSnsFormSet = forms.inlineformset_factory(
+    Contact,
+    ContactSns,
+    form=ContactSnsForm,
+    formset=_BaseContactSnsFormSet,
+    fields=["sns_type", "sns_id"],
+    extra=0,
+    can_delete=True,
+    max_num=None,
+)
+
+
+def build_contact_sns_formset(*, data=None, instance=None, initial=None, prefix="sns"):
+    """ContactSns InlineFormSet インスタンスを生成する（§11.6.7）。
+
+    [性質] presentation 層関数（DB 操作なし。queryset 評価・保存は呼び出し側の責務）
+    [入力] data: POST 辞書 or None / instance: 親 Contact or None /
+           initial: list[dict]（GET 初期表示行、9 番別肩書で primary の SNS を引き継ぐ用途）/
+           prefix: フォーム接頭辞（既定 "sns"）
+    [出力] _BaseContactSnsFormSet インスタンス
+
+    initial を渡すと、その件数だけ extra 行を確保して未保存の初期表示行とする
+    （instance が未保存のため queryset は空 → initial が extra フォームに反映される）。
+    error_class は _BaseContactSnsFormSet が AppErrorList を配る。
+    """
+    extra = len(initial) if initial else 0
+    formset_cls = forms.inlineformset_factory(
+        Contact,
+        ContactSns,
+        form=ContactSnsForm,
+        formset=_BaseContactSnsFormSet,
+        fields=["sns_type", "sns_id"],
+        extra=extra,
+        can_delete=True,
+        max_num=None,
+    )
+    return formset_cls(data, instance=instance, initial=initial, prefix=prefix)

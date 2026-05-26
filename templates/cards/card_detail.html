@@ -97,10 +97,10 @@
             {% endif %}
           {% endif %}
 
-          {% if contact.company or contact.branch or contact.department or contact.title or contact.qualification or contact.catchphrase %}
+          {% if contact.organization or contact.branch or contact.department or contact.title or contact.qualification or contact.catchphrase %}
             <div class="app-section__header" style="margin-top: var(--app-space-md);"><h2>所属</h2></div>
-            {% if contact.company %}
-              {% include "contacts/_contact_field.html" with field_name="company" label="会社" value=contact.company %}
+            {% if contact.organization %}
+              {% include "contacts/_contact_field.html" with field_name="organization" label="会社" value=contact.organization %}
             {% endif %}
             {% if contact.branch %}
               {% include "contacts/_contact_field.html" with field_name="branch" label="支店・店舗" value=contact.branch %}
@@ -119,41 +119,22 @@
             {% endif %}
           {% endif %}
 
-          {% if contact.email or contact.mobile or contact.phone or contact.fax or contact.website %}
+          {% if contact.email or contact.mobile_phone or contact.personal_phone or contact.personal_fax or contact.website %}
             <div class="app-section__header" style="margin-top: var(--app-space-md);"><h2>連絡先</h2></div>
             {% if contact.email %}
               {% include "contacts/_contact_field.html" with field_name="email" label="メール" value=contact.email %}
             {% endif %}
-            {% if contact.mobile %}
-              {% include "contacts/_contact_field.html" with field_name="mobile" label="携帯" value=contact.mobile %}
+            {% if contact.mobile_phone %}
+              {% include "contacts/_contact_field.html" with field_name="mobile_phone" label="携帯" value=contact.mobile_phone %}
             {% endif %}
-            {% if contact.phone %}
-              {% include "contacts/_contact_field.html" with field_name="phone" label="電話" value=contact.phone %}
+            {% if contact.personal_phone %}
+              {% include "contacts/_contact_field.html" with field_name="personal_phone" label="電話" value=contact.personal_phone %}
             {% endif %}
-            {% if contact.fax %}
-              {% include "contacts/_contact_field.html" with field_name="fax" label="FAX" value=contact.fax %}
+            {% if contact.personal_fax %}
+              {% include "contacts/_contact_field.html" with field_name="personal_fax" label="FAX" value=contact.personal_fax %}
             {% endif %}
             {% if contact.website %}
               {% include "contacts/_contact_field.html" with field_name="website" label="ウェブサイト" value=contact.website %}
-            {% endif %}
-          {% endif %}
-
-          {% if contact.twitter or contact.linkedin or contact.facebook or contact.github or contact.instagram %}
-            <div class="app-section__header" style="margin-top: var(--app-space-md);"><h2>SNS</h2></div>
-            {% if contact.twitter %}
-              {% include "contacts/_contact_field.html" with field_name="twitter" label="Twitter" value=contact.twitter %}
-            {% endif %}
-            {% if contact.linkedin %}
-              {% include "contacts/_contact_field.html" with field_name="linkedin" label="LinkedIn" value=contact.linkedin %}
-            {% endif %}
-            {% if contact.facebook %}
-              {% include "contacts/_contact_field.html" with field_name="facebook" label="Facebook" value=contact.facebook %}
-            {% endif %}
-            {% if contact.github %}
-              {% include "contacts/_contact_field.html" with field_name="github" label="GitHub" value=contact.github %}
-            {% endif %}
-            {% if contact.instagram %}
-              {% include "contacts/_contact_field.html" with field_name="instagram" label="Instagram" value=contact.instagram %}
             {% endif %}
           {% endif %}
 
@@ -242,7 +223,7 @@
                 </div>
                 <div class="app-list-card__main" style="margin:0; flex:1 1 auto;">
                   <strong>{{ sibling.contact.full_name|default:"(氏名なし)" }}</strong>
-                  {% if sibling.contact.company %}<div class="app-muted">{{ sibling.contact.company }}</div>{% endif %}
+                  {% if sibling.contact.organization %}<div class="app-muted">{{ sibling.contact.organization }}</div>{% endif %}
                 </div>
               </a>
             {% endfor %}

@@ -434,6 +434,19 @@
   上のセクション 7 から各名刺の「詳細」リンクを辿ってください。
   {% endcomment %}
 
+  {# ========== セクション 10: EXIF 情報（Phase G、仕様書 §7.2） ========== #}
+  <section class="app-card">
+    <div class="app-section__header"><h2>EXIF 情報</h2></div>
+    {% if exif_json_pretty %}
+      <details>
+        <summary>EXIF 情報を展開</summary>
+        <pre class="app-exif-json">{{ exif_json_pretty }}</pre>
+      </details>
+    {% else %}
+      <p class="app-muted">EXIF 情報なし</p>
+    {% endif %}
+  </section>
+
   {# ========== セクション 9: debug_json 全体 (json-viewer) ========== #}
   <section class="app-card app-collapsible">
     <button type="button" class="app-collapsible__header" data-action="toggle-collapsible" aria-expanded="false">

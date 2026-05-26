@@ -1,0 +1,60 @@
+{% comment %}
+ContactSns InlineFormSet 編集ブロック（Phase F1、仕様書 §11.6.7）。
+12/13/9/10 番の編集画面で {% include "contacts/_contact_sns_formset.html" with formset=sns_formset %}
+として共通利用する partial。引数 formset は build_contact_sns_formset() の戻り値（prefix="sns"）。
+
+JS フック（static/js/app.js 末尾の IIFE が処理）：
+  js-sns-formset             … ブロック全体（data-prefix を持つ）
+  js-sns-formset-container   … 行コンテナ（追加行の挿入先）
+  js-sns-formset-row         … 1 行
+  js-sns-empty-form-template … 追加用の空行テンプレート（<template>）
+  js-sns-add-btn             … ＋追加ボタン
+  js-sns-remove-btn          … × 削除ボタン（既存行は DELETE を ON にして隠す／新規行は DOM 除去）
+{% endcomment %}
+<div class="app-section__header" style="margin-top:var(--app-space-md);"><h2>SNS</h2></div>
+<div class="app-sns-formset js-sns-formset" data-prefix="{{ formset.prefix }}">
+  {{ formset.management_form }}
+  {% if formset.non_form_errors %}
+    <div class="app-alert app-alert--danger">{{ formset.non_form_errors }}</div>
+  {% endif %}
+
+  <div class="app-sns-formset__rows js-sns-formset-container">
+    {% for sns_form in formset %}
+      <div class="app-sns-formset__row js-sns-formset-row">
+        {{ sns_form.id }}
+        <div class="app-sns-formset__cell app-sns-formset__cell--type">
+          {{ sns_form.sns_type }}
+          {{ sns_form.sns_type.errors }}
+        </div>
+        <div class="app-sns-formset__cell app-sns-formset__cell--id">
+          {{ sns_form.sns_id }}
+          {{ sns_form.sns_id.errors }}
+        </div>
+        <div class="app-sns-formset__cell app-sns-formset__delete">
+          {{ sns_form.DELETE }}
+          <button type="button" class="app-btn app-btn--danger app-btn--sm js-sns-remove-btn" aria-label="このSNSを削除">×</button>
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+
+  <div class="app-action-area" style="justify-content:flex-start;margin-top:var(--app-space-sm);">
+    <button type="button" class="app-btn app-btn--secondary app-btn--sm js-sns-add-btn">＋ SNSを追加</button>
+  </div>
+
+  <template class="js-sns-empty-form-template">
+    <div class="app-sns-formset__row js-sns-formset-row">
+      {{ formset.empty_form.id }}
+      <div class="app-sns-formset__cell app-sns-formset__cell--type">
+        {{ formset.empty_form.sns_type }}
+      </div>
+      <div class="app-sns-formset__cell app-sns-formset__cell--id">
+        {{ formset.empty_form.sns_id }}
+      </div>
+      <div class="app-sns-formset__cell app-sns-formset__delete">
+        {{ formset.empty_form.DELETE }}
+        <button type="button" class="app-btn app-btn--danger app-btn--sm js-sns-remove-btn" aria-label="このSNSを削除">×</button>
+      </div>
+    </div>
+  </template>
+</div>

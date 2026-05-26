@@ -44,10 +44,10 @@
           {% for candidate, score, rank in top5 %}
             <tr>
               <td>{{ candidate.full_name|default:"(氏名なし)" }}</td>
-              <td>{{ candidate.company }}</td>
+              <td>{{ candidate.organization }}</td>
               <td>{{ candidate.department }}</td>
               <td>{{ candidate.email }}</td>
-              <td>{{ candidate.mobile }}</td>
+              <td>{{ candidate.mobile_phone }}</td>
               <td>
                 {% if rank == "exact_match" %}
                   <span class="app-status-badge app-status-badge--error">完全一致</span>
@@ -87,6 +87,16 @@
     {% for field in form.visible_fields %}
       <input type="hidden" name="{{ field.html_name }}" value="{{ field.value|default_if_none:'' }}">
     {% endfor %}
+
+    {# 入力された ContactSns 行も hidden field で保持（Phase F1、強制作成再 POST 用、§11.6.7。management_form と各行フィールドを hidden で持ち回す） #}
+    {% if sns_formset %}
+      {{ sns_formset.management_form }}
+      {% for sns_form in sns_formset %}
+        {% for field in sns_form %}
+          <input type="hidden" name="{{ field.html_name }}" value="{{ field.value|default_if_none:'' }}">
+        {% endfor %}
+      {% endfor %}
+    {% endif %}
 
     <div class="app-action-area" style="margin-top:0;">
       <button type="submit" name="force_create" value="1"

@@ -57,7 +57,7 @@ def _calculate_score(contact_a, contact_b):
 
     加算条件：
       - 両 Contact のフィールドが「両方 high 扱い」かつ「値が完全一致（空文字でない）」
-      - confidence='high'（疑似 high）または confirmed_at != None（確認済み low/medium）
+      - confidence='high'（疑似 high）または confirmed_at != None（確認済み low/mid）
         を「high 扱い」と判定（A-2b 実装済み Contact.get_high_fields()）
       - email は個人メール / 代表メールで点数が異なるため、_is_generic_email() で判定
 
@@ -108,7 +108,7 @@ def _determine_rank(score, contact_a, contact_b):
         contact_a, contact_b, "email", high_a, high_b
     )
     mobile_match = _both_high_and_equal(
-        contact_a, contact_b, "mobile", high_a, high_b
+        contact_a, contact_b, "mobile_phone", high_a, high_b
     )
 
     if score >= POSSIBLE_HIGH_MIN_SCORE:
@@ -154,7 +154,7 @@ def _location_fields_match_or_both_empty(contact_a, contact_b, high_a, high_b):
     [入力] contact_a / contact_b: Contact, high_a / high_b: set[str]
     [出力] bool
 
-    判定対象：DUPLICATE_LOCATION_FIELDS（company / department / title / branch / address）
+    判定対象：DUPLICATE_LOCATION_FIELDS（organization / department / title / branch / address）
     各フィールドにつき以下のいずれかを満たす必要がある：
       - 両 Contact で値が空文字（confidence は問わない、空なら自動 high 扱い）
       - 両 Contact で「両方 high 扱い」かつ「値が完全一致」

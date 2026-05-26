@@ -122,7 +122,7 @@ class MergeForm(ContactBaseForm):
         """[性質] 副作用あり（self.fields に confirmed_<field> BooleanField を追加）
 
         surviving 側 primary_contact の DUPLICATE_CHECK_FIELDS のうち、ContactFieldConfidence
-        が low/medium かつ未確認のものに対して動的にチェックボックスを追加する
+        が low/mid かつ未確認のものに対して動的にチェックボックスを追加する
         （仕様書 §11.6.2、ContactUpdateForm L121-129 のパターン踏襲）。
         """
         confidences = (
@@ -133,7 +133,7 @@ class MergeForm(ContactBaseForm):
             if conf is None:
                 continue
             if (
-                conf.confidence in ("low", "medium")
+                conf.confidence in ("low", "mid")
                 and conf.confirmed_at is None
             ):
                 self.fields[f"confirmed_{field_name}"] = forms.BooleanField(
@@ -250,7 +250,7 @@ class MergeForm(ContactBaseForm):
                 if conf is None:
                     continue
                 if (
-                    conf.confidence in ("low", "medium")
+                    conf.confidence in ("low", "mid")
                     and conf.confirmed_at is None
                 ):
                     chk_name = f"confirmed_{field_name}"

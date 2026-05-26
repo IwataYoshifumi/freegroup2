@@ -4,7 +4,7 @@ BusinessCard 作成可否を判定するための純関数。
 
 判定ロジック：
 - full_name が必須（strip 後に非空）
-- かつ company / email / phone / mobile のいずれか1つ以上が strip 後に非空
+- かつ organization / email / personal_phone / mobile_phone のいずれか1つ以上が strip 後に非空
 
 strip 処理ルール（v1.2.2 §8.6.2）：
 - None → 空文字扱い
@@ -15,7 +15,7 @@ strip 処理ルール（v1.2.2 §8.6.2）：
 """
 
 _REQUIRED_FIELD = "full_name"
-_AT_LEAST_ONE_OF = ("company", "email", "phone", "mobile")
+_AT_LEAST_ONE_OF = ("organization", "email", "personal_phone", "mobile_phone")
 
 
 def has_minimum_info(contact_dict):

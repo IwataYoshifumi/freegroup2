@@ -21,6 +21,7 @@ import json
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Q
 from django.http import Http404, HttpResponseRedirect, JsonResponse
@@ -37,8 +38,13 @@ from duplicates.models import DuplicateCandidate, PersonMergeLog
 from duplicates.services.duplicate_detection import find_duplicate_contacts
 from persons.models import Person
 
-from .forms import ContactCreateForm, ContactUpdateActiveForm, ContactUpdateForm
-from .models import Contact, ContactFieldConfidence
+from .forms import (
+    ContactCreateForm,
+    ContactUpdateActiveForm,
+    ContactUpdateForm,
+    build_contact_sns_formset,
+)
+from .models import Contact, ContactFieldConfidence, ContactSns
 
 
 User = get_user_model()
@@ -61,7 +67,7 @@ class ContactListView(ListView):
     GET 専用。デフォルトは active Person 配下の primary / active のみ表示。
     検索フォームの「inactive を含める」チェックで inactive も表示できる
     （merged / archived Person 配下は常に除外）。検索仕様は CardListView と
-    同形（7 フィールド AND、tel は phone / mobile / fax の OR）。
+    同形（7 フィールド AND、tel は personal_phone / mobile_phone / personal_fax の OR）。
     """
 
     model = Contact
@@ -71,7 +77,7 @@ class ContactListView(ListView):
 
     _SEARCH_PARAMS = (
         "name",
-        "company",
+        "organization",
         "department",
         "title",
         "email",
@@ -103,8 +109,8 @@ class ContactListView(ListView):
         p = self.request.GET
         if p.get("name", "").strip():
             qs = qs.filter(full_name__icontains=p["name"].strip())
-        if p.get("company", "").strip():
-            qs = qs.filter(company__icontains=p["company"].strip())
+        if p.get("organization", "").strip():
+            qs = qs.filter(organization__icontains=p["organization"].strip())
         if p.get("department", "").strip():
             qs = qs.filter(department__icontains=p["department"].strip())
         if p.get("title", "").strip():
@@ -114,9 +120,9 @@ class ContactListView(ListView):
         if p.get("tel", "").strip():
             tel = p["tel"].strip()
             qs = qs.filter(
-                Q(phone__icontains=tel)
-                | Q(mobile__icontains=tel)
-                | Q(fax__icontains=tel)
+                Q(personal_phone__icontains=tel)
+                | Q(mobile_phone__icontains=tel)
+                | Q(personal_fax__icontains=tel)
             )
         if p.get("address", "").strip():
             qs = qs.filter(address__icontains=p["address"].strip())
@@ -131,7 +137,7 @@ class ContactListView(ListView):
             "コンタクト一覧",
             [
                 "name",
-                "company",
+                "organization",
                 "department",
                 "title",
                 "email",
@@ -258,8 +264,9 @@ def _error(message, status):
 def _unconfirmed_count(contact):
     """当該 Contact 内の未確認 low/mid フィールド数（D-3c 論点 6）。
 
-    ContactFieldConfidence は low/mid のみレコードが存在する設計（§10.6 / §4.6.1）の
-    ため、`confirmed_at IS NULL` のレコード数 = 未確認 low/mid フィールド数。
+    ContactFieldConfidence は low/mid のみレコードが存在する設計（§10.6 / §4.6.1 /
+    v1.6.0 で medium → mid 統一）のため、`confirmed_at IS NULL` のレコード数
+    = 未確認 low/mid フィールド数。
     """
     return ContactFieldConfidence.objects.filter(
         contact=contact, confirmed_at__isnull=True
@@ -345,7 +352,12 @@ class ContactAjaxUpdateFieldView(_ContactAjaxBase):
         try:
             contact.update_field(field_name, new_value, request.user)
         except ValueError as exc:
+            # 引数エラー（未保存・不正 field_name 等）
             return _error(str(exc), 400)
+        except ValidationError as exc:
+            # データバリデーション失敗（salutation 空・full_name 空等）
+            message = exc.messages[0] if exc.messages else str(exc)
+            return _error(message, 400)
 
         contact.refresh_from_db()
         return JsonResponse(
@@ -449,16 +461,39 @@ class UpdatePrimaryContactView(LoginRequiredMixin, UpdateView):
                 "active_menu": "contacts:contact_list",
             }
         )
+        # ContactSns 編集ブロック（§11.6.7）。POST 再描画時は form_invalid が
+        # bound formset を渡すため、未指定（GET）のときだけ instance バインドで生成。
+        if "sns_formset" not in context:
+            context["sns_formset"] = build_contact_sns_formset(
+                instance=self.object, prefix="sns"
+            )
         return context
 
-    def form_valid(self, form):
-        change_reason = form.cleaned_data["change_reason"]
-        if change_reason == PersonChangeReason.FIX:
-            self.object.fix(form, self.request.user)
-        else:
-            _promote_new_contact_as_primary(
-                form, self.object, self.request.user
-            )
+    def post(self, request, *args, **kwargs):
+        self.object = self.get_object()
+        form = self.get_form()
+        sns_formset = build_contact_sns_formset(
+            data=request.POST, instance=self.object, prefix="sns"
+        )
+        if form.is_valid() and sns_formset.is_valid():
+            return self.form_valid(form, sns_formset)
+        return self.form_invalid(form, sns_formset)
+
+    def form_valid(self, form, sns_formset):
+        with transaction.atomic():
+            change_reason = form.cleaned_data["change_reason"]
+            if change_reason == PersonChangeReason.FIX:
+                _fix_with_salutation_flag(self.object, form, self.request.user)
+                # fix は既存 Contact のインプレース編集なので formset.save() で
+                # 追加・更新・削除を反映する（instance は self.object）。
+                sns_formset.save()
+            else:
+                new_contact = _promote_new_contact_as_primary(
+                    form, self.object, self.request.user
+                )
+                # transfer 系は新規 Contact へ submit 内容を作り直す（旧 Contact の
+                # ContactSns は時点スナップショットとして変更しない）。
+                _create_sns_from_formset(new_contact, sns_formset)
 
         back = BackNavigator(self.request)
         target_url = reverse(
@@ -466,6 +501,11 @@ class UpdatePrimaryContactView(LoginRequiredMixin, UpdateView):
             kwargs={"pk": self.object.person.pk},
         )
         return HttpResponseRedirect(back.append_url(target_url))
+
+    def form_invalid(self, form, sns_formset):
+        return self.render_to_response(
+            self.get_context_data(form=form, sns_formset=sns_formset)
+        )
 
 
 class UpdateActiveContactView(LoginRequiredMixin, UpdateView):
@@ -512,12 +552,34 @@ class UpdateActiveContactView(LoginRequiredMixin, UpdateView):
                 "active_menu": "contacts:contact_list",
             }
         )
+        if "sns_formset" not in context:
+            context["sns_formset"] = build_contact_sns_formset(
+                instance=self.object, prefix="sns"
+            )
         return context
 
-    def form_valid(self, form):
-        self.object.fix(form, self.request.user)
+    def post(self, request, *args, **kwargs):
+        self.object = self.get_object()
+        form = self.get_form()
+        sns_formset = build_contact_sns_formset(
+            data=request.POST, instance=self.object, prefix="sns"
+        )
+        if form.is_valid() and sns_formset.is_valid():
+            return self.form_valid(form, sns_formset)
+        return self.form_invalid(form, sns_formset)
+
+    def form_valid(self, form, sns_formset):
+        with transaction.atomic():
+            _fix_with_salutation_flag(self.object, form, self.request.user)
+            # active 修正は fix 相当のインプレース編集（instance は self.object）。
+            sns_formset.save()
         back = BackNavigator(self.request)
         return HttpResponseRedirect(back.append_url(self.get_success_url()))
+
+    def form_invalid(self, form, sns_formset):
+        return self.render_to_response(
+            self.get_context_data(form=form, sns_formset=sns_formset)
+        )
 
     def get_success_url(self):
         return reverse(
@@ -544,6 +606,66 @@ _RANK_PRIORITY = {
 }
 
 
+def _salutation_name_edited(form):
+    """フォーム経路で salutation_name が編集されたか判定する（Phase D §3.6・View 層）。
+
+    [性質] 純関数（form.changed_data を読むだけ・DB 操作なし）
+    [入力] form: ContactBaseForm 系（changed_data を持つバリデーション済みフォーム）
+    [出力] bool（salutation_name が changed_data に含まれれば True）
+
+    OCR 経路（json_parser）は本判定を通さず salutation_name_is_manual=False のまま。
+    手動 Form 経路でのみ、ユーザーが宛名を書き換えたかを Django 標準の changed_data で判定する。
+    """
+    return "salutation_name" in form.changed_data
+
+
+def _create_sns_from_formset(contact, sns_formset):
+    """ContactSnsFormSet の有効・非削除行から ContactSns を contact に作成する（§11.6.7）。
+
+    [性質] 副作用あり（DB 書込：ContactSns）
+    [入力] contact: Contact（保存済み）、sns_formset: bound かつ is_valid() 済みの ContactSnsFormSet
+    [出力] None
+
+    fix 経路（既存 Contact のインプレース編集）は formset.save() を使う。本関数は新規
+    Contact 作成経路（10 番新規作成 / 9 番別肩書追加 / 12 番 transfer 系昇格）で、submit
+    された行をそのまま新しい Contact 配下に作り直す。transfer 系では旧 Contact の
+    ContactSns は変更しない（時点スナップショットとして保持する）。
+    UniqueConstraint(contact, sns_type, sns_id) 違反は get_or_create で抑止する。
+    """
+    for form in sns_formset.forms:
+        cleaned = getattr(form, "cleaned_data", None)
+        if not cleaned or cleaned.get("DELETE"):
+            continue
+        sns_type = cleaned.get("sns_type")
+        sns_id = (cleaned.get("sns_id") or "").strip()
+        if not sns_type or not sns_id:
+            continue
+        ContactSns.objects.get_or_create(
+            contact=contact, sns_type=sns_type, sns_id=sns_id
+        )
+
+
+def _fix_with_salutation_flag(contact, form, user):
+    """Contact.fix() を呼びつつ salutation_name_is_manual を設定・永続化する（§3.6・View 層）。
+
+    [性質] 副作用あり（DB 書込：Contact.fix() + 手動フラグ立て時の限定 save）
+    [入力] contact: Contact（保存済み primary/active）、form: バリデーション済みフォーム、user: 操作者
+    [出力] None
+
+    salutation_name がフォームで編集された場合のみ手動フラグを True にする。Contact.save()
+    の自動再計算（姓系フィールド変更時の宛名上書き）より前にフラグを立てる必要があるため、
+    fix() 呼び出し前にメモリ上のフラグを立て、fix() 後に当該フィールドだけ限定 save で
+    永続化する（salutation_name_is_manual は UPDATABLE_FIELDS 外で fix() の差分 save には
+    載らないため）。編集がなければ既存値を維持する（False への戻しはしない、§3.6）。
+    """
+    edited = _salutation_name_edited(form)
+    if edited:
+        contact.salutation_name_is_manual = True
+    contact.fix(form, user)
+    if edited:
+        contact.save(update_fields=["salutation_name_is_manual"])
+
+
 @transaction.atomic
 def _create_person_and_contact(form, user):
     """新規 Person + primary Contact を 1 トランザクションで作成（仕様書 §11.4.4）。
@@ -563,6 +685,9 @@ def _create_person_and_contact(form, user):
     contact.status = Contact.Status.PRIMARY
     contact.created_by = user
     contact.updated_by = user
+    # §3.6：宛名がフォームで編集されていれば手動扱い（save 前に立てて自動再計算を抑止）。
+    if _salutation_name_edited(form):
+        contact.salutation_name_is_manual = True
     contact.save()
     person.set_primary_contact(contact)
     return contact
@@ -588,6 +713,9 @@ def _promote_new_contact_as_primary(form, target_contact, user):
     new_contact.status = Contact.Status.ACTIVE
     new_contact.created_by = user
     new_contact.updated_by = user
+    # §3.6：宛名がフォームで編集されていれば手動扱い（save 前に立てて自動再計算を抑止）。
+    if _salutation_name_edited(form):
+        new_contact.salutation_name_is_manual = True
     new_contact.save()
     target_contact.person.set_primary_contact(
         new_contact, old_primary_new_status="inactive"
@@ -617,19 +745,29 @@ class ContactCreateView(LoginRequiredMixin, View):
 
     def get(self, request):
         form = ContactCreateForm()
-        return render(request, self.template_name, self._context(request, form))
+        sns_formset = build_contact_sns_formset(instance=None, prefix="sns")
+        return render(
+            request, self.template_name, self._context(request, form, sns_formset)
+        )
 
     def post(self, request):
         form = ContactCreateForm(request.POST)
-        if not form.is_valid():
+        sns_formset = build_contact_sns_formset(
+            data=request.POST, instance=None, prefix="sns"
+        )
+        if not (form.is_valid() and sns_formset.is_valid()):
             return render(
-                request, self.template_name, self._context(request, form)
+                request,
+                self.template_name,
+                self._context(request, form, sns_formset),
             )
 
         # 強制作成フラグ：重複検出をスキップして即保存（仕様書 §11.4.4、ステップ3b 論点1 案 B）。
         # 強制作成された Contact は後の cron で重複候補として再検出される。
         if "force_create" in request.POST:
-            new_contact = _create_person_and_contact(form, request.user)
+            with transaction.atomic():
+                new_contact = _create_person_and_contact(form, request.user)
+                _create_sns_from_formset(new_contact, sns_formset)
             back = BackNavigator(request)
             target_url = reverse(
                 "contacts:contact_detail",
@@ -653,7 +791,8 @@ class ContactCreateView(LoginRequiredMixin, View):
             )
             top5 = critical_sorted[:5]
             extra_count = max(0, len(critical_sorted) - 5)
-            ctx = self._context(request, form)
+            # 重複確認画面でも入力済み ContactSns 行を hidden で持ち回す（強制作成再 POST 用）。
+            ctx = self._context(request, form, sns_formset)
             ctx.update(
                 {
                     "top5": top5,
@@ -663,7 +802,9 @@ class ContactCreateView(LoginRequiredMixin, View):
             return render(request, self.duplicates_template_name, ctx)
 
         # 候補なし：保存して Contact 詳細画面へリダイレクト
-        new_contact = _create_person_and_contact(form, request.user)
+        with transaction.atomic():
+            new_contact = _create_person_and_contact(form, request.user)
+            _create_sns_from_formset(new_contact, sns_formset)
         back = BackNavigator(request)
         target_url = reverse(
             "contacts:contact_detail",
@@ -671,10 +812,11 @@ class ContactCreateView(LoginRequiredMixin, View):
         )
         return HttpResponseRedirect(back.append_url(target_url))
 
-    def _context(self, request, form):
+    def _context(self, request, form, sns_formset=None):
         back = BackNavigator(request)
         return {
             "form": form,
+            "sns_formset": sns_formset,
             "back": back,
             "active_app": "contacts",
             "active_menu": "contacts:contact_create",

@@ -16,6 +16,7 @@ PersonAddAdditionalRoleView：別肩書追加画面（URL 9 番、D-Form ステ�
 """
 
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.db import transaction
 from django.db.models import Count, Q
 from django.http import Http404, HttpResponseRedirect
 from django.shortcuts import get_object_or_404, render
@@ -24,8 +25,9 @@ from django.views.generic import DetailView, ListView
 from django.views.generic.edit import FormView
 
 from back_navigator.back_navigator import BackNavigator
-from contacts.forms import ContactAddAdditionalRoleForm
+from contacts.forms import ContactAddAdditionalRoleForm, build_contact_sns_formset
 from contacts.models import Contact
+from contacts.views import _create_sns_from_formset
 from duplicates.models import PersonMergeLog
 
 from .models import Person
@@ -47,7 +49,7 @@ class PersonListView(ListView):
 
     _SEARCH_PARAMS = (
         "name",
-        "company",
+        "organization",
         "department",
         "title",
         "email",
@@ -88,9 +90,9 @@ class PersonListView(ListView):
             qs = qs.filter(
                 primary_contact__full_name__icontains=p["name"].strip()
             )
-        if p.get("company", "").strip():
+        if p.get("organization", "").strip():
             qs = qs.filter(
-                primary_contact__company__icontains=p["company"].strip()
+                primary_contact__organization__icontains=p["organization"].strip()
             )
         if p.get("department", "").strip():
             qs = qs.filter(
@@ -107,9 +109,9 @@ class PersonListView(ListView):
         if p.get("tel", "").strip():
             tel = p["tel"].strip()
             qs = qs.filter(
-                Q(primary_contact__phone__icontains=tel)
-                | Q(primary_contact__mobile__icontains=tel)
-                | Q(primary_contact__fax__icontains=tel)
+                Q(primary_contact__personal_phone__icontains=tel)
+                | Q(primary_contact__mobile_phone__icontains=tel)
+                | Q(primary_contact__personal_fax__icontains=tel)
             )
         if p.get("address", "").strip():
             qs = qs.filter(
@@ -126,7 +128,7 @@ class PersonListView(ListView):
             "人物一覧",
             [
                 "name",
-                "company",
+                "organization",
                 "department",
                 "title",
                 "email",
@@ -236,6 +238,21 @@ class PersonAddAdditionalRoleView(LoginRequiredMixin, FormView):
         kwargs["person"] = self.person
         return kwargs
 
+    def _primary_sns_initial(self):
+        """所属 Person の primary_contact の ContactSns を初期表示用 initial に変換する（§11.6.7）。
+
+        [性質] 準関数（DB 読み取りのみ）。primary_contact が無ければ空リスト。
+        別肩書は同一人物の別名刺なので、primary の SNS を初期表示として引き継ぎ、
+        ユーザーが不要なものを削除・追加できるようにする（仕様書 §11.6.7 / §11.4.2.1）。
+        """
+        primary = self.person.primary_contact
+        if primary is None:
+            return []
+        return [
+            {"sns_type": sns.sns_type, "sns_id": sns.sns_id}
+            for sns in primary.sns_accounts.all()
+        ]
+
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         back = BackNavigator(self.request)
@@ -247,16 +264,42 @@ class PersonAddAdditionalRoleView(LoginRequiredMixin, FormView):
                 "active_menu": "persons:person_list",
             }
         )
+        # GET：primary の SNS を初期表示として引き継ぐ。POST 再描画時は form_invalid が
+        # bound formset を渡すため、未指定のときだけ initial バインドで生成。
+        if "sns_formset" not in context:
+            context["sns_formset"] = build_contact_sns_formset(
+                instance=None, initial=self._primary_sns_initial(), prefix="sns"
+            )
         return context
 
-    def form_valid(self, form):
-        new_contact = form.get_update_contact()
-        new_contact.person = self.person
-        new_contact.status = Contact.Status.ACTIVE
-        new_contact.save()
+    def post(self, request, *args, **kwargs):
+        form = self.get_form()
+        sns_formset = build_contact_sns_formset(
+            data=request.POST, instance=None, prefix="sns"
+        )
+        if form.is_valid() and sns_formset.is_valid():
+            return self.form_valid(form, sns_formset)
+        return self.form_invalid(form, sns_formset)
+
+    def form_valid(self, form, sns_formset):
+        with transaction.atomic():
+            new_contact = form.get_update_contact()
+            new_contact.person = self.person
+            new_contact.status = Contact.Status.ACTIVE
+            # §3.6：宛名がフォームで編集されていれば手動扱い（save 前に立てて自動再計算を抑止）。
+            if "salutation_name" in form.changed_data:
+                new_contact.salutation_name_is_manual = True
+            new_contact.save()
+            # submit された SNS 行を新規 Contact 配下に作成（§11.6.7）。
+            _create_sns_from_formset(new_contact, sns_formset)
         self.created_contact = new_contact
         back = BackNavigator(self.request)
         return HttpResponseRedirect(back.append_url(self.get_success_url()))
+
+    def form_invalid(self, form, sns_formset):
+        return self.render_to_response(
+            self.get_context_data(form=form, sns_formset=sns_formset)
+        )
 
     def get_success_url(self):
         return reverse(

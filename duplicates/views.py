@@ -33,6 +33,8 @@ from django.views.generic import ListView, View
 
 from back_navigator.back_navigator import BackNavigator
 from config.constants import DifferentPersonReason, DuplicateMergeReason
+from contacts.models import ContactSns
+from contacts.services.normalization import format_postal_by_country
 
 from .forms import MergeForm, MergeUndoForm
 from .models import DuplicateCandidate, PersonMergeLog
@@ -44,44 +46,77 @@ from .services.merge_executor import (
 
 
 # 17 番マージレビュー画面の Contact フィールド表示用ラベル（仕様書 §11.5.5、D-4d）。
-# contact_update_primary.html のラベルと一致させる。Contact.UPDATABLE_FIELDS（24 個）
-# のすべてに対応するエントリを持つ。
+# Contact.UPDATABLE_FIELDS（v1.6.1 で 31 個に整理：v1.6.0 で 37 に拡張後、
+# 個別 SNS 5 件を ContactSns 別テーブル化、Phase E で address を除外）のすべてに対応する
+# エントリを持つ。
+# 日本語ラベルは本編仕様書 別表 A.5 を正本に、既存ラベルの簡潔化方針（個人系は無修飾、
+# 会社系は「会社」プレフィックス）に合わせて UI 表記。
+# ContactSns の比較表示（sns_type 別グルーピング）は Phase F2 で _build_sns_comparison に
+# 集約、§11.5.7。
 FIELD_LABEL_JA = {
     "full_name": "氏名",
     "last_name": "姓",
     "first_name": "名",
     "salutation_name": "敬称付き氏名",
-    "company": "会社",
+    "other_name_parts": "他の名前部分",
+    "name_order": "氏名の順序",
+    "display_name": "表示名",
+    "phonetic_name": "読みがな",
+    "alias_name": "通称・別名",
+    "organization": "会社",
+    "legal_entity_type": "法人格",
+    "legal_entity_type_position": "法人格の位置",
     "branch": "支店・店舗",
     "department": "部署",
     "title": "役職",
     "qualification": "資格",
     "catchphrase": "キャッチコピー",
     "email": "メール",
-    "mobile": "携帯",
-    "phone": "電話",
-    "fax": "FAX",
+    "mobile_phone": "携帯",
+    "personal_phone": "電話",
+    "personal_fax": "FAX",
+    "org_phone": "会社電話",
+    "org_fax": "会社 FAX",
     "website": "ウェブサイト",
     "postal_code": "郵便番号",
-    "address": "住所",
-    "twitter": "Twitter",
-    "linkedin": "LinkedIn",
-    "facebook": "Facebook",
-    "github": "GitHub",
-    "instagram": "Instagram",
+    "country": "国",
+    "region": "中間行政区画",
+    "city": "市区町村",
+    "rest_of_address": "番地・建物名",
     "notes": "メモ",
     "lang": "言語",
 }
 
 
-# 17 番マージレビュー画面のフィールドグルーピング（仕様書 §11.5.5、D-4d）。
-# contact_update_primary.html のグループ構成と一致：6 グループ、合計 24 フィールド。
+# 17 番マージレビュー画面のフィールドグルーピング（仕様書 §11.5.5 /
+# v1.6.1 で 31 件に整理：v1.6.0 で 37 に拡張後、個別 SNS 5 件を ContactSns 別テーブル化、
+# Phase E で address を UPDATABLE_FIELDS から除外）。
+# 既存「SNS」グループは廃止し 5 グループ（氏名 / 所属 / 連絡先 / 住所 / その他）構成へ。
+# ContactSns の比較表示は Phase F2 で _build_sns_comparison が sns_type 別に生成する独立
+# ブロックとして扱う（FIELD_GROUPS には含めない）。
+# test_field_groups_total_fields_match_updatable_fields が Contact.UPDATABLE_FIELDS との
+# 集合一致を検証している。
 FIELD_GROUPS = (
-    ("氏名", ("full_name", "last_name", "first_name", "salutation_name")),
+    (
+        "氏名",
+        (
+            "full_name",
+            "last_name",
+            "first_name",
+            "salutation_name",
+            "other_name_parts",
+            "name_order",
+            "display_name",
+            "phonetic_name",
+            "alias_name",
+        ),
+    ),
     (
         "所属",
         (
-            "company",
+            "organization",
+            "legal_entity_type",
+            "legal_entity_type_position",
             "branch",
             "department",
             "title",
@@ -89,9 +124,28 @@ FIELD_GROUPS = (
             "catchphrase",
         ),
     ),
-    ("連絡先", ("email", "mobile", "phone", "fax", "website")),
-    ("住所", ("postal_code", "address")),
-    ("SNS", ("twitter", "linkedin", "facebook", "github", "instagram")),
+    (
+        "連絡先",
+        (
+            "email",
+            "mobile_phone",
+            "personal_phone",
+            "personal_fax",
+            "org_phone",
+            "org_fax",
+            "website",
+        ),
+    ),
+    (
+        "住所",
+        (
+            "postal_code",
+            "country",
+            "region",
+            "city",
+            "rest_of_address",
+        ),
+    ),
     ("その他", ("notes", "lang")),
 )
 
@@ -373,16 +427,65 @@ class DuplicateCandidateGroupUpdateView(LoginRequiredMixin, View):
                 peer_value = getattr(peer_contact, fname)
                 if not self_value and not peer_value:
                     continue
+                # postal_code は表示のみ国別整形（Phase D2 話2）。is_diff は生値比較のまま。
+                display_value = self_value
+                if fname == "postal_code":
+                    display_value = format_postal_by_country(
+                        self_value, contact.country
+                    )
                 fields.append(
                     {
                         "field_name": fname,
                         "label": FIELD_LABEL_JA[fname],
-                        "value": self_value,
+                        "value": display_value,
                         "is_diff": self_value != peer_value,
                     }
                 )
             if fields:
                 groups.append({"group_name": group_name, "fields": fields})
+        return groups
+
+    def _build_sns_comparison(self, contact, peer_contact):
+        """ContactSns の sns_type 別比較データを返す（Phase F2 / 仕様書 §11.5.7）。
+
+        [性質] 純関数（contact / peer_contact から sns_accounts を読むだけ、
+               DB 操作なし・副作用なし。N+1 防止のため呼び出し側で prefetch_related
+               'sns_accounts' しておくこと）
+        [入力] contact: 自側 Contact（値を表示する側）
+               peer_contact: 対面側 Contact（is_diff 算出用）
+        [出力] list[dict]（各要素：{sns_type, sns_type_label, items}。
+               items は {sns_id, is_diff} の list）
+
+        sns_type の並び順は ContactSns.SnsType.choices 定義順
+        （twitter / linkedin / facebook / instagram / github / blog / youtube / line）。
+        両側で 1 件もない sns_type は除外（仕様書 §11.5.7 の「両側空フィールド非表示」
+        原則を ContactSns に適用）。片側のみ持つ sns_type は両側に sns_type ヘッダを残し、
+        空側は items=[] のグループとして返す（テンプレで「（なし）」を表示）。
+        is_diff: self 側の sns_id が peer の同 sns_type に同 sns_id で存在しない場合 True。
+        """
+        self_by_type = {}
+        for sa in contact.sns_accounts.all():
+            self_by_type.setdefault(sa.sns_type, []).append(sa.sns_id)
+        peer_by_type = {}
+        for sa in peer_contact.sns_accounts.all():
+            peer_by_type.setdefault(sa.sns_type, []).append(sa.sns_id)
+
+        groups = []
+        for sns_type, label in ContactSns.SnsType.choices:
+            self_ids = self_by_type.get(sns_type, [])
+            peer_ids = peer_by_type.get(sns_type, [])
+            if not self_ids and not peer_ids:
+                continue
+            peer_id_set = set(peer_ids)
+            items = [
+                {"sns_id": sid, "is_diff": sid not in peer_id_set}
+                for sid in self_ids
+            ]
+            groups.append({
+                "sns_type": sns_type,
+                "sns_type_label": label,
+                "items": items,
+            })
         return groups
 
     def _render_review_page(
@@ -416,6 +519,12 @@ class DuplicateCandidateGroupUpdateView(LoginRequiredMixin, View):
                 merged_primary,
                 surviving_primary,
                 form.hidden_name_fields(),
+            ),
+            "surviving_sns_groups": self._build_sns_comparison(
+                surviving_primary, merged_primary
+            ),
+            "merged_sns_groups": self._build_sns_comparison(
+                merged_primary, surviving_primary
             ),
             "surviving_confidences": (
                 surviving_primary.get_field_confidences()
@@ -457,6 +566,10 @@ class DuplicateCandidateGroupUpdateView(LoginRequiredMixin, View):
                 .select_related(
                     "person_a__primary_contact",
                     "person_b__primary_contact",
+                )
+                .prefetch_related(
+                    "person_a__primary_contact__sns_accounts",
+                    "person_b__primary_contact__sns_accounts",
                 )
                 .first()
             )
@@ -512,6 +625,10 @@ class DuplicateCandidateGroupUpdateView(LoginRequiredMixin, View):
             .select_related(
                 "person_a__primary_contact",
                 "person_b__primary_contact",
+            )
+            .prefetch_related(
+                "person_a__primary_contact__sns_accounts",
+                "person_b__primary_contact__sns_accounts",
             )
             .first()
         )

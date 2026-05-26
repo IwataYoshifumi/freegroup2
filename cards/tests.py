@@ -1,6 +1,11 @@
 """cards アプリの単体テスト。"""
 
+import json
+import tempfile
+from pathlib import Path
+
 from django.contrib.auth import get_user_model
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.http import QueryDict
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
@@ -12,6 +17,8 @@ from persons.models import Person
 
 
 User = get_user_model()
+
+EXIF_FIXTURES_DIR = Path(__file__).resolve().parent / "test_fixtures" / "exif"
 
 
 class CardListViewConfidenceAnnotateTests(TestCase):
@@ -61,35 +68,35 @@ class CardListViewConfidenceAnnotateTests(TestCase):
         return view.get_queryset().get(pk=self.bc.pk)
 
     def test_no_cfc_records_all_false(self):
-        """CFC レコードなし → has_unconfirmed_low / has_unconfirmed_medium /
+        """CFC レコードなし → has_unconfirmed_low / has_unconfirmed_mid /
         has_confirmed すべて False。"""
         card = self._get_card()
         self.assertFalse(card.has_unconfirmed_low)
-        self.assertFalse(card.has_unconfirmed_medium)
+        self.assertFalse(card.has_unconfirmed_mid)
         self.assertFalse(card.has_confirmed)
 
     def test_unconfirmed_low_in_dup_check_fields(self):
         """DUPLICATE_CHECK_FIELDS に含まれる未確認 low CFC → has_unconfirmed_low True。"""
         ContactFieldConfidence.objects.create(
             contact=self.contact,
-            field_name="company",
+            field_name="organization",
             confidence=ContactFieldConfidence.Confidence.LOW,
         )
         card = self._get_card()
         self.assertTrue(card.has_unconfirmed_low)
-        self.assertFalse(card.has_unconfirmed_medium)
+        self.assertFalse(card.has_unconfirmed_mid)
         self.assertFalse(card.has_confirmed)
 
-    def test_unconfirmed_medium_in_dup_check_fields(self):
-        """未確認 medium CFC → has_unconfirmed_medium True、low は False。"""
+    def test_unconfirmed_mid_in_dup_check_fields(self):
+        """未確認 mid CFC → has_unconfirmed_mid True、low は False。"""
         ContactFieldConfidence.objects.create(
             contact=self.contact,
-            field_name="phone",
-            confidence=ContactFieldConfidence.Confidence.MEDIUM,
+            field_name="personal_phone",
+            confidence=ContactFieldConfidence.Confidence.MID,
         )
         card = self._get_card()
         self.assertFalse(card.has_unconfirmed_low)
-        self.assertTrue(card.has_unconfirmed_medium)
+        self.assertTrue(card.has_unconfirmed_mid)
         self.assertFalse(card.has_confirmed)
 
     def test_confirmed_cfc(self):
@@ -103,7 +110,7 @@ class CardListViewConfidenceAnnotateTests(TestCase):
         )
         card = self._get_card()
         self.assertFalse(card.has_unconfirmed_low)
-        self.assertFalse(card.has_unconfirmed_medium)
+        self.assertFalse(card.has_unconfirmed_mid)
         self.assertTrue(card.has_confirmed)
 
     def test_field_outside_dup_check_fields_excluded(self):
@@ -116,30 +123,30 @@ class CardListViewConfidenceAnnotateTests(TestCase):
         ContactFieldConfidence.objects.create(
             contact=self.contact,
             field_name="qualification",
-            confidence=ContactFieldConfidence.Confidence.MEDIUM,
+            confidence=ContactFieldConfidence.Confidence.MID,
         )
         card = self._get_card()
         self.assertFalse(card.has_unconfirmed_low)
-        self.assertFalse(card.has_unconfirmed_medium)
+        self.assertFalse(card.has_unconfirmed_mid)
         self.assertFalse(card.has_confirmed)
 
     def test_mixed_states(self):
         """未確認 low + confirmed が混在 → 両方 True。優先順はテンプレート側で判定。"""
         ContactFieldConfidence.objects.create(
             contact=self.contact,
-            field_name="company",
+            field_name="organization",
             confidence=ContactFieldConfidence.Confidence.LOW,
         )
         ContactFieldConfidence.objects.create(
             contact=self.contact,
             field_name="email",
-            confidence=ContactFieldConfidence.Confidence.MEDIUM,
+            confidence=ContactFieldConfidence.Confidence.MID,
             confirmed_at=timezone.now(),
             confirmed_by=self.user,
         )
         card = self._get_card()
         self.assertTrue(card.has_unconfirmed_low)
-        self.assertFalse(card.has_unconfirmed_medium)
+        self.assertFalse(card.has_unconfirmed_mid)
         self.assertTrue(card.has_confirmed)
 
 
@@ -174,16 +181,23 @@ class CardDetailViewFieldConfidencesTests(TestCase):
         self.client.force_login(self.user)
         self.url = reverse("cards:card_detail", kwargs={"pk": self.bc.pk})
 
+    def test_no_leaked_multiline_comment(self):
+        """名刺詳細で旧複数行 {# #} コメントの本文が画面に漏れない（Phase F1 follow-up 不具合②）。"""
+        resp = self.client.get(self.url)
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, "SNS グループは v1.6.1 で")
+        self.assertNotContains(resp, "別途実装する")
+
     def test_field_confidences_includes_low_mid_confirmed_records(self):
         """CFC レコード（mid/low/confirmed）が field_confidences に CFC インスタンスで載る。"""
         ContactFieldConfidence.objects.create(
             contact=self.contact,
-            field_name="company",
-            confidence=ContactFieldConfidence.Confidence.MEDIUM,
+            field_name="organization",
+            confidence=ContactFieldConfidence.Confidence.MID,
         )
         ContactFieldConfidence.objects.create(
             contact=self.contact,
-            field_name="phone",
+            field_name="personal_phone",
             confidence=ContactFieldConfidence.Confidence.LOW,
         )
         ContactFieldConfidence.objects.create(
@@ -199,13 +213,13 @@ class CardDetailViewFieldConfidencesTests(TestCase):
         fc = resp.context["field_confidences"]
 
         self.assertEqual(
-            fc["company"].confidence, ContactFieldConfidence.Confidence.MEDIUM
+            fc["organization"].confidence, ContactFieldConfidence.Confidence.MID
         )
-        self.assertIsNone(fc["company"].confirmed_at)
+        self.assertIsNone(fc["organization"].confirmed_at)
         self.assertEqual(
-            fc["phone"].confidence, ContactFieldConfidence.Confidence.LOW
+            fc["personal_phone"].confidence, ContactFieldConfidence.Confidence.LOW
         )
-        self.assertIsNone(fc["phone"].confirmed_at)
+        self.assertIsNone(fc["personal_phone"].confirmed_at)
         self.assertEqual(
             fc["email"].confidence, ContactFieldConfidence.Confidence.LOW
         )
@@ -251,7 +265,7 @@ class CardDetailViewEditableModeTests(TestCase):
             status=Contact.Status.PRIMARY,
             business_card=self.bc,
             full_name="T",
-            company="C",
+            organization="C",
         )
         self.person.primary_contact = self.contact
         self.person.save(update_fields=["primary_contact", "updated_at"])
@@ -260,8 +274,8 @@ class CardDetailViewEditableModeTests(TestCase):
         # 編集 UI の表示有無を検証するために 1 件作る
         ContactFieldConfidence.objects.create(
             contact=self.contact,
-            field_name="company",
-            confidence=ContactFieldConfidence.Confidence.MEDIUM,
+            field_name="organization",
+            confidence=ContactFieldConfidence.Confidence.MID,
         )
 
         self.client.force_login(self.user)
@@ -372,4 +386,146 @@ class CardDetailDebugUidTests(TestCase):
     def test_card_uid_hidden_when_debug_false(self):
         resp = self.client.get(self._url())
         self.assertNotContains(resp, "Card UID:")
+
+
+@override_settings(MEDIA_ROOT=tempfile.mkdtemp(prefix="phase_g_exif_"))
+class PhaseGExifUploadTests(TestCase):
+    """Phase G：UploadView 経由で OriginalImage.exif_json が正しく保存される
+    （仕様書 v1.6.1 統合版 §7.2）。
+
+    4 つの fixture 画像（no_exif / with_exif / with_gps / with_odd_bytes）を
+    cards/test_fixtures/exif/ から読み込んで UploadView に POST し、生成された
+    OriginalImage.exif_json を検証する。
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_superuser(
+            username="phase_g_exif_user", password="dummy"
+        )
+        self.client = Client()
+        self.client.force_login(self.user)
+        self.url = reverse("cards:card_upload")
+
+    def _upload(self, fixture_name):
+        path = EXIF_FIXTURES_DIR / fixture_name
+        with open(path, "rb") as fp:
+            payload = fp.read()
+        upload = SimpleUploadedFile(
+            fixture_name, payload, content_type="image/jpeg"
+        )
+        response = self.client.post(self.url, {"image": upload}, follow=False)
+        self.assertEqual(
+            response.status_code,
+            302,
+            f"UploadView は成功時 302 redirect (実際: {response.status_code})",
+        )
+        return OriginalImage.objects.filter(user=self.user).latest("created_at")
+
+    def test_exif_json_populated_when_image_has_exif(self):
+        """ケース 1：EXIF 付き画像 → exif_json に値が入る（§4-1）。"""
+        original = self._upload("with_exif.jpg")
+        self.assertIsNotNone(original.exif_json)
+        self.assertEqual(original.exif_json.get("Make"), "TestCameraCo")
+        self.assertEqual(original.exif_json.get("Model"), "TestPhone X")
+        self.assertEqual(
+            original.exif_json.get("DateTimeOriginal"), "2026:05:25 10:30:00"
+        )
+
+    def test_exif_json_null_when_image_has_no_exif(self):
+        """ケース 2：EXIF なし画像 → exif_json が NULL のまま（§4-2）。"""
+        original = self._upload("no_exif.jpg")
+        self.assertIsNone(original.exif_json)
+
+    def test_exif_json_handles_non_json_serializable_values(self):
+        """ケース 3：bytes / IFDRational を含む画像 → エラーなく保存（§4-3）。
+
+        _coerce_json_value が IFDRational → float、bytes → str に変換することで、
+        生の Exif オブジェクトでは JSON ダンプできない値も exif_json に格納できる。
+        """
+        original = self._upload("with_odd_bytes.jpg")
+        self.assertIsNotNone(original.exif_json)
+        # dict 自体が JSON ダンプ可能であること（_coerce_json_value が機能した証拠）
+        json.dumps(original.exif_json)
+        # IFDRational(1, 250) が float に変換されていること
+        self.assertIsInstance(original.exif_json.get("ExposureTime"), float)
+        # bytes が ASCII decode されて str になっていること
+        self.assertIsInstance(original.exif_json.get("UserComment"), str)
+
+    def test_exif_json_contains_gps_info(self):
+        """ケース 4：GPS 付き画像 → exif_json["GPSInfo"] から GPS が取れる（§4-4）。"""
+        original = self._upload("with_gps.jpg")
+        self.assertIsNotNone(original.exif_json)
+        self.assertIn("GPSInfo", original.exif_json)
+        gps = original.exif_json["GPSInfo"]
+        self.assertEqual(gps.get("GPSLatitudeRef"), "N")
+        self.assertEqual(gps.get("GPSLongitudeRef"), "E")
+        # 度分秒の tuple → list of float（IFDRational が float 化されている）
+        self.assertIsInstance(gps.get("GPSLatitude"), list)
+        self.assertEqual(gps["GPSLatitude"][0], 35.0)
+        self.assertEqual(gps["GPSLatitude"][1], 40.0)
+        self.assertIsInstance(gps.get("GPSLongitude"), list)
+        self.assertEqual(gps["GPSLongitude"][0], 139.0)
+        self.assertEqual(gps["GPSLongitude"][1], 45.0)
+
+
+class PhaseGExifDetailViewTests(TestCase):
+    """Phase G：OriginalDetailView の EXIF 情報セクション表示（仕様書 §7.2）。
+
+    DB に exif_json を埋めた OriginalImage を作って GET し、テンプレートの
+    レンダリング結果を検証する。アップロード経路は PhaseGExifUploadTests でカバー済み。
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_superuser(
+            username="phase_g_detail_user", password="dummy"
+        )
+        self.client = Client()
+        self.client.force_login(self.user)
+
+    def _make_and_get(self, exif_json):
+        original = OriginalImage.objects.create(
+            user=self.user,
+            status=OriginalImage.STATUS_EXTRACTED,
+            exif_json=exif_json,
+        )
+        url = reverse("originals:original_detail", kwargs={"pk": original.id})
+        return self.client.get(url)
+
+    def test_detail_shows_no_data_message_when_exif_null(self):
+        """exif_json が None → 「EXIF 情報なし」が出て <details> は出ない（§詳細画面ケース 1）。"""
+        resp = self._make_and_get(None)
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "EXIF 情報なし")
+        self.assertNotContains(resp, "app-exif-json")
+        # セクション見出し自体は出る（実装漏れと区別できるよう）
+        self.assertContains(resp, "EXIF 情報")
+
+    def test_detail_renders_json_when_exif_dict_present(self):
+        """exif_json が dict → 整形 JSON が <pre class="app-exif-json"> 内に表示（§詳細画面ケース 2）。"""
+        resp = self._make_and_get({"Make": "TestCo", "Model": "X"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "app-exif-json")
+        self.assertContains(resp, "EXIF 情報を展開")
+        self.assertContains(resp, "&quot;Make&quot;")
+        self.assertContains(resp, "TestCo")
+        self.assertNotContains(resp, "EXIF 情報なし")
+
+    def test_detail_renders_gps_info(self):
+        """GPS 含む exif_json → GPSInfo の値が表示される（§詳細画面ケース 3）。"""
+        payload = {
+            "Make": "Apple",
+            "Model": "iPhone 13 mini",
+            "GPSInfo": {
+                "GPSLatitudeRef": "N",
+                "GPSLatitude": [35.0, 1.0, 21.59],
+                "GPSLongitudeRef": "E",
+                "GPSLongitude": [137.0, 5.0, 29.86],
+            },
+        }
+        resp = self._make_and_get(payload)
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "GPSInfo")
+        self.assertContains(resp, "GPSLatitudeRef")
+        self.assertContains(resp, "21.59")
+        self.assertContains(resp, "29.86")
 

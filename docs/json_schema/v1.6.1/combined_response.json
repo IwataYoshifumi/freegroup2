@@ -1,0 +1,238 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CombinedResponse",
+  "description": "raw_json 保存フォーマット v1.6.1（8 ブロック構造 / schema_version / ocr_meta / api_response / cards）",
+  "type": "object",
+  "required": ["schema_version", "ocr_meta", "api_response", "cards"],
+  "properties": {
+    "schema_version": {
+      "const": "1.6.1"
+    },
+    "ocr_meta": {
+      "type": "object",
+      "required": ["timestamp"],
+      "properties": {
+        "timestamp": { "type": "string" }
+      }
+    },
+    "api_response": {
+      "type": "object",
+      "required": ["model", "stop_reason", "usage"],
+      "properties": {
+        "model":       { "type": "string" },
+        "stop_reason": { "type": "string" },
+        "usage": {
+          "type": "object",
+          "properties": {
+            "input_tokens":                { "type": "integer" },
+            "output_tokens":               { "type": "integer" },
+            "cache_read_input_tokens":     { "type": "integer" },
+            "cache_creation_input_tokens": { "type": "integer" }
+          }
+        }
+      }
+    },
+    "cards": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "card_meta", "name", "job", "organization",
+          "address", "contact", "uncategorized_card_content", "metadata"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "card_meta": {
+            "type": "object",
+            "required": ["is_business_card", "orientation"],
+            "additionalProperties": false,
+            "properties": {
+              "is_business_card": { "type": "boolean" },
+              "orientation": {
+                "type": "string",
+                "enum": ["normal", "rotate_90_cw", "rotate_90_ccw", "rotate_180", "mirror"]
+              }
+            }
+          },
+          "name": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "original_script":  { "$ref": "#/$defs/StrValue" },
+              "last_name":        { "$ref": "#/$defs/StrValue" },
+              "first_name":       { "$ref": "#/$defs/StrValue" },
+              "other_name_parts": { "$ref": "#/$defs/StrValue" },
+              "name_order":       { "$ref": "#/$defs/NameOrderValue" },
+              "salutation_name":  { "$ref": "#/$defs/StrValue" },
+              "display_name":     { "$ref": "#/$defs/StrValue" },
+              "phonetic_name":    { "$ref": "#/$defs/StrValue" },
+              "alias_name":       { "$ref": "#/$defs/StrValue" }
+            }
+          },
+          "job": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "title":         { "$ref": "#/$defs/StrValue" },
+              "qualification": { "$ref": "#/$defs/StrValue" },
+              "department":    { "$ref": "#/$defs/StrValue" },
+              "catchphrase":   { "$ref": "#/$defs/StrValue" }
+            }
+          },
+          "organization": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "org_name_full":              { "$ref": "#/$defs/StrValue" },
+              "org_core_name":              { "$ref": "#/$defs/StrValue" },
+              "legal_entity_type":          { "$ref": "#/$defs/StrValue" },
+              "legal_entity_type_code":     { "$ref": "#/$defs/LegalEntityTypeCodeValue" },
+              "legal_entity_type_position": { "$ref": "#/$defs/LegalEntityTypePositionValue" },
+              "org_domain_name":            { "$ref": "#/$defs/StrValue" },
+              "branch":                     { "$ref": "#/$defs/StrValue" },
+              "website":                    { "$ref": "#/$defs/StrValue" }
+            }
+          },
+          "address": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "full_address":    { "$ref": "#/$defs/StrValue" },
+              "postal_code":     { "$ref": "#/$defs/StrValue" },
+              "country":         { "$ref": "#/$defs/CountryValue" },
+              "region":          { "$ref": "#/$defs/StrValue" },
+              "city":            { "$ref": "#/$defs/StrValue" },
+              "rest_of_address": { "$ref": "#/$defs/StrValue" }
+            }
+          },
+          "contact": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "email":          { "$ref": "#/$defs/StrValue" },
+              "mobile_phone":   { "$ref": "#/$defs/StrValue" },
+              "personal_phone": { "$ref": "#/$defs/StrValue" },
+              "personal_fax":   { "$ref": "#/$defs/StrValue" },
+              "org_phone":      { "$ref": "#/$defs/StrValue" },
+              "org_fax":        { "$ref": "#/$defs/StrValue" },
+              "sns":            { "$ref": "#/$defs/SnsValue" }
+            }
+          },
+          "uncategorized_card_content": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "handwritten_text":   { "$ref": "#/$defs/StrValue" },
+              "other_printed_text": { "$ref": "#/$defs/StrValue" }
+            }
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "primary_lang":         { "$ref": "#/$defs/PrimaryLangValue" },
+              "language_composition": { "$ref": "#/$defs/LanguageCompositionValue" },
+              "ai_analysis_notes":    { "$ref": "#/$defs/StrValue" }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "Confidence": {
+      "type": "string",
+      "enum": ["high", "mid", "low"]
+    },
+    "StrValue": {
+      "type": "object",
+      "required": ["value", "confidence"],
+      "additionalProperties": false,
+      "properties": {
+        "value":      { "type": ["string", "null"] },
+        "confidence": { "$ref": "#/$defs/Confidence" }
+      }
+    },
+    "NameOrderValue": {
+      "type": "object",
+      "required": ["value", "confidence"],
+      "additionalProperties": false,
+      "properties": {
+        "value":      { "enum": ["last_first", "first_last", "single", "other", null] },
+        "confidence": { "$ref": "#/$defs/Confidence" }
+      }
+    },
+    "LegalEntityTypeCodeValue": {
+      "type": "object",
+      "required": ["value", "confidence"],
+      "additionalProperties": false,
+      "properties": {
+        "value":      { "enum": ["CP", "LLP", "GOV", "NPO", "REL", "EDU", "MED", "PRO", "IND", "OTH", null] },
+        "confidence": { "$ref": "#/$defs/Confidence" }
+      }
+    },
+    "LegalEntityTypePositionValue": {
+      "type": "object",
+      "required": ["value", "confidence"],
+      "additionalProperties": false,
+      "properties": {
+        "value":      { "enum": ["Pre", "Post", "Mid", "other", null] },
+        "confidence": { "$ref": "#/$defs/Confidence" }
+      }
+    },
+    "LanguageCompositionValue": {
+      "type": "object",
+      "required": ["value", "confidence"],
+      "additionalProperties": false,
+      "properties": {
+        "value":      { "enum": ["local_only", "english_only", "mix_bilingual", "other", null] },
+        "confidence": { "$ref": "#/$defs/Confidence" }
+      }
+    },
+    "CountryValue": {
+      "type": "object",
+      "required": ["value", "confidence"],
+      "additionalProperties": false,
+      "properties": {
+        "value": {
+          "type": "string",
+          "description": "ISO 3166-1 alpha-2 country code (2 uppercase letters), e.g. 'JP'. Use 'ZZ' when undeterminable."
+        },
+        "confidence": { "$ref": "#/$defs/Confidence" }
+      }
+    },
+    "PrimaryLangValue": {
+      "type": "object",
+      "required": ["value", "confidence"],
+      "additionalProperties": false,
+      "properties": {
+        "value": {
+          "type": "string",
+          "description": "ISO 639-1 code (e.g., 'ja', 'en'); for Chinese use 'zh' (簡体字・繁体字を区別しない); use 'und' when undeterminable."
+        },
+        "confidence": { "$ref": "#/$defs/Confidence" }
+      }
+    },
+    "SnsValue": {
+      "type": "object",
+      "required": ["value", "confidence"],
+      "additionalProperties": false,
+      "properties": {
+        "value": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/SnsEntry" }
+        },
+        "confidence": { "$ref": "#/$defs/Confidence" }
+      }
+    },
+    "SnsEntry": {
+      "type": "object",
+      "required": ["type", "id"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "type": "string" },
+        "id":   { "type": ["string", "null"] }
+      }
+    }
+  }
+}

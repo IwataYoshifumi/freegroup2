@@ -8,8 +8,8 @@ Contact + Person + ContactFieldConfidence のみ生成し、BusinessCard / Origi
 - 生成は 5 グループ：① 完全同一名刺 / ② 異動・転職 / ③ 改姓・部署変更 /
   ④ 同姓同名 / ⑤ ノイズ
 - 各 Contact に 1:1 で新規 Person を作る（cron 実行前のシード状態を再現）
-- ContactFieldConfidence は §4.6.1 / §10.6.4 に従い low / medium のみ DB レコード化、
-  high はレコード作らない（CheckConstraint で物理禁止）
+- ContactFieldConfidence は §4.6.1 / §10.6.4 に従い low / mid のみ DB レコード化、
+  high はレコード作らない（CheckConstraint で物理禁止。v1.6.0 で medium → mid 統一）
 - プール値は §15.5.3 の正規化ルールで予め整形済み（電話=数字のみ、メール=小文字、
   住所=空白なし／丁目・番地・号→ハイフン、会社=前株/後株別扱い）
 - --seed で再現可能。--dry-run で DB に書かず内容表示
@@ -44,20 +44,20 @@ DEFAULT_SEED = 42
 FREE_EMAIL_DOMAINS = ["gmail.com", "yahoo.co.jp", "outlook.com"]
 
 # random モードの confidence 分布（仕様書 §10.6.4 / OCR の現実的な分布の再現）。
-# 値は (high, medium, low) の確率（合計 1.0）。
-# fax は DUPLICATE_CHECK_FIELDS には含まれないが、タスク仕様で分布が指定されているため
+# 値は (high, mid, low) の確率（合計 1.0、v1.6.0 で medium → mid 統一）。
+# personal_fax は DUPLICATE_CHECK_FIELDS には含まれないが、タスク仕様で分布が指定されているため
 # confidence レコード生成対象に含める（DB 制約上は field_name 自由）。
 CONFIDENCE_DISTRIBUTION = {
-    "full_name":  (0.80, 0.20, 0.00),
-    "email":      (0.70, 0.25, 0.05),
-    "mobile":     (0.70, 0.25, 0.05),
-    "phone":      (0.70, 0.25, 0.05),
-    "fax":        (0.70, 0.25, 0.05),
-    "company":    (0.75, 0.20, 0.05),
-    "department": (0.65, 0.25, 0.10),
-    "title":      (0.65, 0.25, 0.10),
-    "branch":     (0.65, 0.25, 0.10),
-    "address":    (0.60, 0.30, 0.10),
+    "full_name":      (0.80, 0.20, 0.00),
+    "email":          (0.70, 0.25, 0.05),
+    "mobile_phone":   (0.70, 0.25, 0.05),
+    "personal_phone": (0.70, 0.25, 0.05),
+    "personal_fax":   (0.70, 0.25, 0.05),
+    "organization":   (0.75, 0.20, 0.05),
+    "department":     (0.65, 0.25, 0.10),
+    "title":          (0.65, 0.25, 0.10),
+    "branch":         (0.65, 0.25, 0.10),
+    "address":        (0.60, 0.30, 0.10),
 }
 
 # confidence を割り当てる対象フィールド一覧。
@@ -403,7 +403,7 @@ def _resolve_confidence(
     mode: str,
     custom_high_fields: List[str],
 ) -> str:
-    """フィールドの confidence を決定する（'low' / 'medium' / 'high'）。
+    """フィールドの confidence を決定する（'low' / 'mid' / 'high'、v1.6.0 で mid 統一）。
 
     [性質] 純関数（rng は外部状態）
     """
@@ -420,7 +420,7 @@ def _resolve_confidence(
     if r < high_p:
         return "high"
     if r < high_p + mid_p:
-        return "medium"
+        return "mid"
     return "low"
 
 
@@ -513,7 +513,7 @@ class ContactSnapshot:
     fax: str
     address: str
     postal_code: str
-    confidence_map: dict  # field_name -> 'high'/'medium'/'low'
+    confidence_map: dict  # field_name -> 'high'/'mid'/'low'
 
     @property
     def company_name(self) -> str:
@@ -527,7 +527,7 @@ class ContactSnapshot:
 def _build_confidence_map(
     rng: random.Random, mode: str, custom_high_fields: List[str]
 ) -> dict:
-    """confidence_map（field_name -> 'high'/'medium'/'low'）を生成。"""
+    """confidence_map（field_name -> 'high'/'mid'/'low'）を生成。"""
     return {
         fn: _resolve_confidence(rng, fn, mode, custom_high_fields)
         for fn in TRACKED_CONFIDENCE_FIELDS
@@ -926,14 +926,14 @@ def _create_contact_from_snapshot(
         full_name=snap.full_name_obj.full,
         last_name=snap.full_name_obj.last,
         first_name=snap.full_name_obj.first,
-        company=snap.company_name,
+        organization=snap.company_name,
         branch=snap.branch_name,
         department=snap.department,
         title=snap.title,
         email=snap.email,
-        phone=snap.phone,
-        mobile=snap.mobile,
-        fax=snap.fax,
+        personal_phone=snap.phone,
+        mobile_phone=snap.mobile,
+        personal_fax=snap.fax,
         address=snap.address,
         postal_code=snap.postal_code,
     )
@@ -942,7 +942,7 @@ def _create_contact_from_snapshot(
     person.primary_contact = contact
     person.save(update_fields=["primary_contact", "updated_at"])
 
-    # ContactFieldConfidence：low / medium のみ DB レコード化（§4.6.1 / §10.6.4）
+    # ContactFieldConfidence：low / mid のみ DB レコード化（§4.6.1 / §10.6.4）
     ContactFieldConfidence.create_for_contact(contact, snap.confidence_map)
 
     return person, contact
@@ -996,7 +996,7 @@ def _reset_test_data(user, stdout) -> dict:
 def _format_snap_line(idx: int, snap: ContactSnapshot, verbose: bool) -> str:
     """1 件分の Contact を表示用文字列に。"""
     confidence_low_mid = sorted(
-        f"{k}={v}" for k, v in snap.confidence_map.items() if v in ("low", "medium")
+        f"{k}={v}" for k, v in snap.confidence_map.items() if v in ("low", "mid")
     )
     short = (
         f"  [{idx:03d}][{snap.group_label:>14s}] "
@@ -1008,7 +1008,7 @@ def _format_snap_line(idx: int, snap: ContactSnapshot, verbose: bool) -> str:
     detail = (
         f"\n         branch={snap.branch_name or '-'} phone={snap.phone} "
         f"fax={snap.fax} postal={snap.postal_code} address={snap.address}"
-        f"\n         confidence(low/medium)={','.join(confidence_low_mid) or '-'}"
+        f"\n         confidence(low/mid)={','.join(confidence_low_mid) or '-'}"
     )
     return short + detail
 

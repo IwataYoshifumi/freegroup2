@@ -16,7 +16,7 @@ from django.test import Client, TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from contacts.models import Contact, ContactFieldConfidence
+from contacts.models import Contact, ContactFieldConfidence, ContactSns
 from actionlogs.models import ActionLog
 from duplicates.forms import MergeForm, MergeUndoForm
 from duplicates.models import DuplicateCandidate, PersonMergeLog
@@ -442,23 +442,23 @@ class MergeFormInitTests(_MergeFormTestBase):
 
     def test_initial_filled_with_surviving_values(self):
         """initial が surviving 側 primary_contact の UPDATABLE_FIELDS 値で埋まる。"""
-        self.surviving_primary.company = "サバイブ社"
+        self.surviving_primary.organization = "サバイブ社"
         self.surviving_primary.email = "alive@example.com"
         self.surviving_primary.save()
 
         form = self._make_form()
         self.assertEqual(form.initial["full_name"], "生存太郎")
-        self.assertEqual(form.initial["company"], "サバイブ社")
+        self.assertEqual(form.initial["organization"], "サバイブ社")
         self.assertEqual(form.initial["email"], "alive@example.com")
 
     def test_dynamic_confirm_checkboxes_added_for_low_mid_unconfirmed(self):
         """surviving 側 low/mid 未確認の DUPLICATE_CHECK_FIELDS に CB が動的追加される。"""
         self._set_cfc(self.surviving_primary, "full_name", confidence="low")
-        self._set_cfc(self.surviving_primary, "email", confidence="medium")
+        self._set_cfc(self.surviving_primary, "email", confidence="mid")
         # confirmed 済みは追加対象外
         self._set_cfc(
             self.surviving_primary,
-            "phone",
+            "personal_phone",
             confidence="low",
             confirmed=True,
         )
@@ -466,17 +466,17 @@ class MergeFormInitTests(_MergeFormTestBase):
         form = self._make_form()
         self.assertIn("confirmed_full_name", form.fields)
         self.assertIn("confirmed_email", form.fields)
-        self.assertNotIn("confirmed_phone", form.fields)
+        self.assertNotIn("confirmed_personal_phone", form.fields)
         # CFC レコードなし（疑似 high）にも追加されない
-        self.assertNotIn("confirmed_company", form.fields)
+        self.assertNotIn("confirmed_organization", form.fields)
 
     def test_value_diff_and_match_classification(self):
         """DUPLICATE_CHECK_FIELDS で値違い / 値一致が正しく分類される。"""
-        self.surviving_primary.company = "A社"
+        self.surviving_primary.organization = "A社"
         self.surviving_primary.email = "a@example.com"
         self.surviving_primary.save()
 
-        self.merged_primary.company = "A社"  # 一致
+        self.merged_primary.organization = "A社"  # 一致
         self.merged_primary.email = "b@example.com"  # 不一致
         self.merged_primary.save()
 
@@ -484,10 +484,10 @@ class MergeFormInitTests(_MergeFormTestBase):
         # setUp で full_name は surviving/merged で異なる
         self.assertIn("full_name", form.value_diff_fields())
         self.assertIn("email", form.value_diff_fields())
-        self.assertIn("company", form.value_match_fields())
+        self.assertIn("organization", form.value_match_fields())
         # 値違いと値一致は排他
         self.assertNotIn("email", form.value_match_fields())
-        self.assertNotIn("company", form.value_diff_fields())
+        self.assertNotIn("organization", form.value_diff_fields())
 
 
 class MergeFormCleanTests(_MergeFormTestBase):
@@ -725,11 +725,11 @@ class MergeFormHelpersTests(_MergeFormTestBase):
 
     def test_confirmed_field_names_includes_checked(self):
         """編集なしでも CB ON のフィールドは confirmed_field_names に含まれる。"""
-        self._set_cfc(self.surviving_primary, "company", confidence="low")
-        data = self._valid_data(confirmed_company=True)
+        self._set_cfc(self.surviving_primary, "organization", confidence="low")
+        data = self._valid_data(confirmed_organization=True)
         form = self._make_form(data)
         self.assertTrue(form.is_valid(), form.errors)
-        self.assertIn("company", form.confirmed_field_names())
+        self.assertIn("organization", form.confirmed_field_names())
 
     def test_confirmed_field_names_empty_when_no_changes(self):
         """編集なし・CB なしのとき confirmed_field_names は空リスト。"""
@@ -756,15 +756,15 @@ class MergeFormHelpersTests(_MergeFormTestBase):
         form = self._make_form()
         diff = form.value_diff_fields()
         self.assertIn("full_name", diff)
-        # company は空文字同士で一致
-        self.assertNotIn("company", diff)
+        # organization は空文字同士で一致
+        self.assertNotIn("organization", diff)
 
     def test_value_match_fields_returns_match_only(self):
         """value_match_fields() は DUPLICATE_CHECK_FIELDS の値一致のみ返す。"""
         form = self._make_form()
         match = form.value_match_fields()
-        # company / email / phone 等は空文字同士で一致
-        self.assertIn("company", match)
+        # organization / email / personal_phone 等は空文字同士で一致
+        self.assertIn("organization", match)
         self.assertIn("email", match)
         # full_name は不一致
         self.assertNotIn("full_name", match)
@@ -1528,16 +1528,25 @@ class DuplicateCandidateGroupUpdateViewContextTests(
         self.assertEqual(resp.context["surviving_card_image_url"], "")
         self.assertEqual(resp.context["merged_card_image_url"], "")
 
-    def test_field_groups_have_six_groups_when_filled(self):
-        """両側ともフィールドが埋まっていれば 6 グループすべて出る。"""
+    def test_field_groups_have_five_groups_when_filled(self):
+        """両側ともフィールドが埋まっていれば 5 グループすべて出る。
+
+        v1.6.1 で SNS グループは ContactSns 別テーブル化に伴い廃止し
+        FIELD_GROUPS から削除（6 → 5 グループ）。
+        """
         self._fill_all_fields(self.candidate.person_a.primary_contact)
         self._fill_all_fields(self.candidate.person_b.primary_contact)
         resp = self.client.get(self._url())
-        self.assertEqual(len(resp.context["surviving_field_groups"]), 6)
-        self.assertEqual(len(resp.context["merged_field_groups"]), 6)
+        self.assertEqual(len(resp.context["surviving_field_groups"]), 5)
+        self.assertEqual(len(resp.context["merged_field_groups"]), 5)
 
     def test_field_groups_total_fields_match_updatable_fields(self):
-        """両側ともフィールドが埋まっていれば全 24 フィールドが出る（順序は問わず）。"""
+        """両側ともフィールドが埋まっていれば Contact.UPDATABLE_FIELDS の全件が出る（順序は問わず）。
+
+        v1.6.1 で UPDATABLE_FIELDS は 31 件に整理（v1.6.0 で 37 に拡張後、個別 SNS 5 件を
+        ContactSns 別テーブル化、Phase E で address を除外）。集合一致は set 比較で検証する
+        ため、件数自体はマスター側の変動に追従する。
+        """
         self._fill_all_fields(self.candidate.person_a.primary_contact)
         self._fill_all_fields(self.candidate.person_b.primary_contact)
         resp = self.client.get(self._url())
@@ -1600,15 +1609,15 @@ class DuplicateCandidateGroupUpdateViewContextTests(
         ]
         # email は両側に値あり → 出る
         self.assertIn("email", surviving_field_names)
-        # company は両側空 → 出ない
-        self.assertNotIn("company", surviving_field_names)
-        # twitter / instagram などの SNS も両側空 → 出ない
-        self.assertNotIn("twitter", surviving_field_names)
+        # organization は両側空 → 出ない
+        self.assertNotIn("organization", surviving_field_names)
+        # 個別 SNS フィールドは v1.6.1 で ContactSns 別テーブル化に伴い廃止済（Phase A3）。
+        # SNS 比較表示の検証は Phase F2 で sns_type 別グルーピングとして別途実装する。
 
     def test_field_groups_keeps_when_only_one_side_filled(self):
         """片側だけ値がある場合、自側が空でも当該フィールドは表示される。"""
         merged_primary = self.candidate.person_b.primary_contact
-        merged_primary.company = "B社"
+        merged_primary.organization = "B社"
         merged_primary.save()
 
         resp = self.client.get(self._url())
@@ -1623,8 +1632,8 @@ class DuplicateCandidateGroupUpdateViewContextTests(
             for f in g["fields"]
         ]
         # 片側に値があれば両側の表示に含まれる
-        self.assertIn("company", surviving_field_names)
-        self.assertIn("company", merged_field_names)
+        self.assertIn("organization", surviving_field_names)
+        self.assertIn("organization", merged_field_names)
 
     def test_field_groups_excludes_empty_group(self):
         """グループ内の全フィールドが両側空のときグループ自体が除外される。"""
@@ -1725,6 +1734,146 @@ class DuplicateCandidateGroupUpdateViewContextTests(
                 names.add(field["field_name"])
         self.assertIn("last_name", names)
         self.assertIn("first_name", names)
+
+    # ------------------------------------------------------------------
+    # Phase F2: ContactSns 比較表示（仕様書 §11.5.7）
+    # ------------------------------------------------------------------
+
+    def _add_sns(self, contact, sns_type, sns_id):
+        return ContactSns.objects.create(
+            contact=contact, sns_type=sns_type, sns_id=sns_id
+        )
+
+    def test_sns_groups_in_context(self):
+        """context に surviving_sns_groups / merged_sns_groups が含まれる。"""
+        resp = self.client.get(self._url())
+        self.assertIn("surviving_sns_groups", resp.context)
+        self.assertIn("merged_sns_groups", resp.context)
+
+    def test_sns_groups_empty_when_no_sns(self):
+        """両側に ContactSns がゼロ件のとき surviving_sns_groups / merged_sns_groups は空リスト。"""
+        resp = self.client.get(self._url())
+        self.assertEqual(resp.context["surviving_sns_groups"], [])
+        self.assertEqual(resp.context["merged_sns_groups"], [])
+
+    def test_sns_groups_excludes_both_empty_sns_type(self):
+        """両側で 1 件もない sns_type は除外される（twitter だけ持たせて facebook は両側 0 件）。"""
+        surviving_primary = self.candidate.person_a.primary_contact
+        merged_primary = self.candidate.person_b.primary_contact
+        self._add_sns(surviving_primary, "twitter", "@a")
+        self._add_sns(merged_primary, "twitter", "@b")
+
+        resp = self.client.get(self._url())
+        for side_key in ("surviving_sns_groups", "merged_sns_groups"):
+            sns_types = [g["sns_type"] for g in resp.context[side_key]]
+            self.assertIn("twitter", sns_types)
+            self.assertNotIn("facebook", sns_types)
+            self.assertNotIn("linkedin", sns_types)
+
+    def test_sns_groups_keeps_when_only_one_side_has_sns_type(self):
+        """片側のみ持つ sns_type は両側に sns_type ヘッダを残す（空側は items=[]）。"""
+        surviving_primary = self.candidate.person_a.primary_contact
+        self._add_sns(surviving_primary, "twitter", "@a")
+
+        resp = self.client.get(self._url())
+        surviving_groups = resp.context["surviving_sns_groups"]
+        merged_groups = resp.context["merged_sns_groups"]
+
+        self.assertEqual([g["sns_type"] for g in surviving_groups], ["twitter"])
+        self.assertEqual([g["sns_type"] for g in merged_groups], ["twitter"])
+        # 自側は 1 件、対面側は items=[]（テンプレで「（なし）」を出すため）
+        self.assertEqual(len(surviving_groups[0]["items"]), 1)
+        self.assertEqual(merged_groups[0]["items"], [])
+
+    def test_sns_groups_is_diff_true_for_unique_sns_id(self):
+        """片側のみ持つ sns_id は is_diff=True、両側で同じ (sns_type, sns_id) は is_diff=False。"""
+        surviving_primary = self.candidate.person_a.primary_contact
+        merged_primary = self.candidate.person_b.primary_contact
+        self._add_sns(surviving_primary, "twitter", "@common")
+        self._add_sns(surviving_primary, "twitter", "@unique_to_a")
+        self._add_sns(merged_primary, "twitter", "@common")
+        self._add_sns(merged_primary, "twitter", "@unique_to_b")
+
+        resp = self.client.get(self._url())
+        surviving_items = resp.context["surviving_sns_groups"][0]["items"]
+        diff_map = {item["sns_id"]: item["is_diff"] for item in surviving_items}
+        self.assertEqual(diff_map["@common"], False)
+        self.assertEqual(diff_map["@unique_to_a"], True)
+
+    def test_sns_groups_is_diff_false_for_matching_sns_id(self):
+        """両側で同じ (sns_type, sns_id) を持つ行は is_diff=False（自側からも対面側からも見て）。"""
+        surviving_primary = self.candidate.person_a.primary_contact
+        merged_primary = self.candidate.person_b.primary_contact
+        self._add_sns(surviving_primary, "linkedin", "/in/jdoe")
+        self._add_sns(merged_primary, "linkedin", "/in/jdoe")
+
+        resp = self.client.get(self._url())
+        for side_key in ("surviving_sns_groups", "merged_sns_groups"):
+            groups = resp.context[side_key]
+            self.assertEqual(len(groups), 1)
+            self.assertEqual(groups[0]["sns_type"], "linkedin")
+            self.assertEqual(groups[0]["items"][0]["is_diff"], False)
+
+    def test_sns_groups_sorted_by_sns_type_choices(self):
+        """sns_type の並び順は ContactSns.SnsType.choices 定義順を保つ。"""
+        surviving_primary = self.candidate.person_a.primary_contact
+        # 投入順は choices 順と逆にして並び替えが効いていることを確認
+        self._add_sns(surviving_primary, "line", "line_id")
+        self._add_sns(surviving_primary, "facebook", "fb_id")
+        self._add_sns(surviving_primary, "twitter", "@a")
+
+        resp = self.client.get(self._url())
+        sns_types = [g["sns_type"] for g in resp.context["surviving_sns_groups"]]
+        # ContactSns.SnsType.choices 定義順：twitter, linkedin, facebook, instagram,
+        # github, blog, youtube, line のうち、登録済みのものだけがこの順序で並ぶ。
+        self.assertEqual(sns_types, ["twitter", "facebook", "line"])
+
+    def test_template_renders_sns_groups(self):
+        """レンダリング時に SNS 比較ブロック見出しと sns_type ラベルが表示される。"""
+        surviving_primary = self.candidate.person_a.primary_contact
+        self._add_sns(surviving_primary, "twitter", "@displayed")
+
+        resp = self.client.get(self._url())
+        self.assertContains(resp, "SNS 比較")
+        self.assertContains(resp, "Twitter")
+        self.assertContains(resp, "@displayed")
+        # 対面側は items=[] なので「（なし）」が出る
+        self.assertContains(resp, "（なし）")
+
+    def test_template_renders_diff_class_for_diff_sns(self):
+        """is_diff の行に app-sns-compare__item--diff クラスが付く。一致行には付かない。"""
+        surviving_primary = self.candidate.person_a.primary_contact
+        merged_primary = self.candidate.person_b.primary_contact
+        self._add_sns(surviving_primary, "twitter", "@same")
+        self._add_sns(surviving_primary, "twitter", "@unique_a")
+        self._add_sns(merged_primary, "twitter", "@same")
+        self._add_sns(merged_primary, "twitter", "@unique_b")
+
+        resp = self.client.get(self._url())
+        # 片側のみ持つ sns_id 2 件（@unique_a, @unique_b）に diff クラスが付く
+        self.assertContains(resp, "app-sns-compare__item--diff", count=2)
+        # @same は両側に出るので合計 2 回（左右）レンダリングされるが、diff クラスなし
+        self.assertContains(resp, "@same")
+        self.assertContains(resp, "@unique_a")
+        self.assertContains(resp, "@unique_b")
+
+    def test_sns_accounts_prefetch_avoids_n_plus_one(self):
+        """sns_accounts を prefetch しているため、SNS 件数を増やしてもクエリ数は一定。
+
+        ContactSns prefetch は 2 クエリ固定（surviving / merged の sns_accounts を
+        それぞれ 1 回ずつ IN 句で取得）。15 件追加してもこの 2 クエリで完結する。
+        prefetch_related を外すと sns_accounts.all() がテンプレループ内で発行され
+        クエリ数が +10〜20 に膨らむため、その回帰を検出する。
+        """
+        surviving_primary = self.candidate.person_a.primary_contact
+        merged_primary = self.candidate.person_b.primary_contact
+        for i in range(5):
+            self._add_sns(surviving_primary, "twitter", f"@a{i}")
+            self._add_sns(merged_primary, "twitter", f"@b{i}")
+            self._add_sns(surviving_primary, "facebook", f"fb_a_{i}")
+
+        with self.assertNumQueries(10):
+            self.client.get(self._url())
 
 
 class _PersonMergeLogViewTestBase(_DuplicatesTestBase):
