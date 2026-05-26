@@ -88,6 +88,9 @@
     </section>
   {% endif %}
 
+  {# ---- タグ付与・解除 UI（v1.6 Phase 1b-β、§5.2.3）---- #}
+  {% include "persons/_tag_assignment_ui.html" %}
+
   {# ---- User-Person 紐付け UI ---- #}
   {% with linked=person.linked_user %}
     {% if not linked or linked == user or perms.accounts.link_user_to_person %}

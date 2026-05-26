@@ -1,0 +1,96 @@
+{% extends "cards/app_base.html" %}
+{% load back_tags %}
+
+{% block title %}タグ管理 — FreeGroup2{% endblock %}
+
+{% block content %}
+  <div class="app-page-header">
+    <div>
+      <div class="app-breadcrumb">タグ管理 / タグ一覧</div>
+      <h1>タグ管理</h1>
+    </div>
+    <div class="app-action-area">
+      {% if categories %}
+        {% url 'tags:tag_create' as create_url %}
+        <a href="{% append_back_url create_url back %}" class="app-btn app-btn--primary">＋ 新規タグ作成</a>
+      {% endif %}
+      {% url 'tags:tag_category_list' as cat_url %}
+      <a href="{% append_back_url cat_url back %}" class="app-btn app-btn--secondary">カテゴリ管理</a>
+    </div>
+  </div>
+
+  {% if not categories %}
+    <section class="app-card">
+      <div style="padding:24px; text-align:center;">
+        <h2 style="margin-bottom:12px;">先にカテゴリを作成してください</h2>
+        <p class="app-muted" style="margin-bottom:16px;">
+          タグはカテゴリに必ず属する設計です（仕様書 §4.9A）。<br>
+          まずカテゴリ管理画面で最初のカテゴリを作成してください。
+        </p>
+        {% url 'tags:tag_category_list' as cat_url %}
+        <a href="{% append_back_url cat_url back %}" class="app-btn app-btn--primary">カテゴリ管理画面へ</a>
+      </div>
+    </section>
+  {% else %}
+    <section class="app-card">
+      <form method="get" class="app-form-grid-edit">
+        <div class="app-form-grid" style="grid-template-columns: 1fr auto;">
+          <div class="app-form__group">
+            <label class="app-form__label" for="id_category">カテゴリで絞り込み</label>
+            <select id="id_category" name="category" class="app-input" onchange="this.form.submit();">
+              <option value="">全カテゴリ</option>
+              {% for cat in categories %}
+                <option value="{{ cat.id }}" {% if selected_category == cat.id|stringformat:"s" %}selected{% endif %}>{{ cat.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+      </form>
+    </section>
+
+    <section class="app-card">
+      {% if tags %}
+        <div class="app-table-wrapper">
+          <table class="app-table app-table--nowrap">
+            <thead>
+              <tr>
+                <th class="app-table__col--action">操作</th>
+                <th>カテゴリ</th>
+                <th>タグ名</th>
+                <th>説明</th>
+                <th>作成者</th>
+                <th class="app-table__col--date">更新日時</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for tag in tags %}
+                {% url 'tags:tag_update' pk=tag.id as update_url %}
+                <tr>
+                  <td class="app-table__col--action">
+                    <a href="{% append_back_url update_url back %}" class="app-btn app-btn--secondary app-btn--sm">編集</a>
+                    <form method="post" action="{% url 'tags:tag_delete' pk=tag.id %}" style="display:inline;"
+                          onsubmit="return confirm('「{{ tag.name }}」を論理削除します。よろしいですか？');">
+                      {% csrf_token %}
+                      <button type="submit" class="app-btn app-btn--danger app-btn--sm">削除</button>
+                    </form>
+                  </td>
+                  <td>{{ tag.category.name }}</td>
+                  <td>{{ tag.name }}</td>
+                  <td>{{ tag.description|default:"-"|truncatechars:60 }}</td>
+                  <td>{{ tag.created_by.username|default:"-" }}</td>
+                  <td>{{ tag.updated_at|date:"Y/m/d H:i" }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+
+        {% if is_paginated %}
+          {% include "persons/_pagination.html" %}
+        {% endif %}
+      {% else %}
+        <p class="app-muted">タグがまだありません。</p>
+      {% endif %}
+    </section>
+  {% endif %}
+{% endblock %}

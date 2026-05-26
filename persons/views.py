@@ -141,6 +141,26 @@ class PersonDetailView(DetailView):
         context["back"] = BackNavigator(self.request)
         context["active_app"] = "persons"
         context["active_menu"] = "persons:person_list"
+
+        # v1.6 Phase 1b-β：タグ付与・解除 UI 用 context（仕様書 §5.2.3）。
+        # 遅延 import で循環回避（tags は persons より後の INSTALLED_APPS）。
+        from tags.models import TagAssignment, TagCategory
+
+        context["person_tag_assignments"] = (
+            TagAssignment.objects.filter(person=person)
+            .select_related("tag", "tag__category")
+            .order_by("tag__category__sort_order", "tag__name")
+        )
+        categories = (
+            TagCategory.objects.filter(is_archived=False)
+            .prefetch_related("tags")
+            .order_by("sort_order", "name")
+        )
+        context["tags_by_category"] = [
+            (cat, list(cat.tags.filter(is_archived=False).order_by("name")))
+            for cat in categories
+        ]
+
         return context
 
 

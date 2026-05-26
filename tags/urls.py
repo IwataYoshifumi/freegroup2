@@ -1,0 +1,55 @@
+"""tags アプリの URL ルーティング（仕様書 v1.6 §5.1 No.20〜26 / §6.2.5 / §6.2.6）。"""
+
+from django.urls import path
+
+from . import views
+
+app_name = "tags"
+
+
+urlpatterns = [
+    # タグカテゴリ管理（§6.2.5、URL 名はコード君A 判断）
+    path(
+        "categories/",
+        views.TagCategoryListView.as_view(),
+        name="tag_category_list",
+    ),
+    path(
+        "categories/create/",
+        views.TagCategoryCreateView.as_view(),
+        name="tag_category_create",
+    ),
+    path(
+        "categories/<uuid:pk>/update/",
+        views.TagCategoryUpdateView.as_view(),
+        name="tag_category_update",
+    ),
+    path(
+        "categories/<uuid:pk>/delete/",
+        views.TagCategoryDeleteView.as_view(),
+        name="tag_category_delete",
+    ),
+    path(
+        "categories/reorder/",
+        views.TagCategoryReorderView.as_view(),
+        name="tag_category_reorder",
+    ),
+    # タグ管理（§5.1 No.20〜24）
+    path("", views.TagListView.as_view(), name="tag_list"),
+    path("create/", views.TagCreateView.as_view(), name="tag_create"),
+    path(
+        "<uuid:pk>/update/",
+        views.TagUpdateView.as_view(),
+        name="tag_update",
+    ),
+    path(
+        "<uuid:pk>/delete/",
+        views.TagDeleteView.as_view(),
+        name="tag_delete",
+    ),
+    # AJAX タグ付与・解除（§5.1 No.25・No.26）
+    path("assign/", views.TagAssignView.as_view(), name="tag_assign"),
+    path("unassign/", views.TagUnassignView.as_view(), name="tag_unassign"),
+    # 検索結果一括タグ付け（§6.2.6、URL 名はコード君A 判断）
+    path("bulk-tagging/", views.BulkTaggingView.as_view(), name="bulk_tagging"),
+]

@@ -111,3 +111,8 @@ DUPLICATE_LOCATION_FIELDS = [
     "branch",
     "address",
 ]
+
+# 検索結果一括タグ付け（仕様書 v1.6 §6.2.6）の Person 件数上限。
+# 1 回の操作で全 Person × 全タグを誤選択する事故防止と、
+# bulk_create の SQL バッファ・サーバ応答時間の現実的な上限。
+BULK_TAGGING_MAX_PERSONS = 500

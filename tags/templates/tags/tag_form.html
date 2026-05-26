@@ -1,0 +1,43 @@
+{% extends "cards/app_base.html" %}
+{% load back_tags %}
+
+{% block title %}{% if is_create %}タグ作成{% else %}タグ編集{% endif %} — FreeGroup2{% endblock %}
+
+{% block content %}
+  <div class="app-page-header">
+    <div>
+      <div class="app-breadcrumb">タグ管理 / タグ一覧 / {% if is_create %}新規作成{% else %}編集{% endif %}</div>
+      <h1>{% if is_create %}タグ作成{% else %}タグ編集：{{ object.name }}{% endif %}</h1>
+    </div>
+    <div class="app-action-area">
+      {% if back.back_exist %}
+        <a href="{% back_url back %}" class="app-btn app-btn--secondary">
+          <span class="app-icon--back"></span> 戻る
+        </a>
+      {% endif %}
+    </div>
+  </div>
+
+  <section class="app-card">
+    <form method="post" class="app-form-grid-edit">
+      {% csrf_token %}
+
+      <div class="app-form-grid" style="grid-template-columns: 1fr;">
+        {% for field in form %}
+          <div class="app-form__group">
+            <label class="app-form__label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+            {{ field }}
+            {% if field.errors %}{{ field.errors }}{% endif %}
+            {% if field.help_text %}<small class="app-muted">{{ field.help_text }}</small>{% endif %}
+          </div>
+        {% endfor %}
+      </div>
+
+      <div class="app-action-area">
+        <button type="submit" class="app-btn app-btn--primary">保存</button>
+        {% url 'tags:tag_list' as cancel_url %}
+        <a href="{% append_back_url cancel_url back %}" class="app-btn app-btn--secondary">キャンセル</a>
+      </div>
+    </form>
+  </section>
+{% endblock %}

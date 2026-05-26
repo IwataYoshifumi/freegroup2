@@ -1,0 +1,127 @@
+{% extends "cards/app_base.html" %}
+{% load back_tags %}
+
+{% block title %}タグカテゴリ管理 — FreeGroup2{% endblock %}
+
+{% block content %}
+  <div class="app-page-header">
+    <div>
+      <div class="app-breadcrumb">タグ管理 / タグカテゴリ管理</div>
+      <h1>タグカテゴリ管理</h1>
+    </div>
+    <div class="app-action-area">
+      {% url 'tags:tag_category_create' as create_url %}
+      <a href="{% append_back_url create_url back %}" class="app-btn app-btn--primary">＋ 新規カテゴリ作成</a>
+    </div>
+  </div>
+
+  {% if categories %}
+    <section class="app-card">
+      <p class="app-muted" style="margin-bottom:8px;">
+        行頭の <span style="font-weight:bold;">⋮⋮</span> をドラッグして並び替えできます（JS 環境のみ）。
+        並び順を直接編集したい場合は「編集」→「並び順」フィールドを変更してください。
+      </p>
+      <div class="app-table-wrapper">
+        <table class="app-table app-table--nowrap">
+          <thead>
+            <tr>
+              <th style="width:32px;"></th>
+              <th class="app-table__col--action">操作</th>
+              <th>並び順</th>
+              <th>カテゴリ名</th>
+              <th>説明</th>
+              <th class="app-table__col--date">更新日時</th>
+            </tr>
+          </thead>
+          <tbody class="js-category-sortable">
+            {% for cat in categories %}
+              {% url 'tags:tag_category_update' pk=cat.id as update_url %}
+              <tr data-pk="{{ cat.id }}">
+                <td class="js-sort-handle" style="cursor:grab; text-align:center; user-select:none; color:#888;">⋮⋮</td>
+                <td class="app-table__col--action">
+                  <a href="{% append_back_url update_url back %}" class="app-btn app-btn--secondary app-btn--sm">編集</a>
+                  <form method="post" action="{% url 'tags:tag_category_delete' pk=cat.id %}" style="display:inline;"
+                        onsubmit="return confirm('「{{ cat.name }}」を論理削除します。よろしいですか？');">
+                    {% csrf_token %}
+                    <button type="submit" class="app-btn app-btn--danger app-btn--sm">削除</button>
+                  </form>
+                </td>
+                <td class="js-sort-order-cell">{{ cat.sort_order }}</td>
+                <td>{{ cat.name }}</td>
+                <td>{{ cat.description|default:"-"|truncatechars:60 }}</td>
+                <td>{{ cat.updated_at|date:"Y/m/d H:i" }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      {% if is_paginated %}
+        {% include "persons/_pagination.html" %}
+      {% endif %}
+    </section>
+
+    {# 並び替え D&D UI（SortableJS、JS 無効時は手入力フォールバック）。 #}
+    <form style="display:none;">{% csrf_token %}</form>
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
+    <script>
+      (function () {
+        var el = document.querySelector('.js-category-sortable');
+        if (!el || typeof Sortable === 'undefined') return;
+
+        function getCsrf() {
+          var input = document.querySelector('[name=csrfmiddlewaretoken]');
+          if (input) return input.value;
+          var match = document.cookie.match(/csrftoken=([^;]+)/);
+          return match ? match[1] : '';
+        }
+
+        function refreshOrderCells() {
+          var rows = el.querySelectorAll('tr');
+          rows.forEach(function (row, idx) {
+            var cell = row.querySelector('.js-sort-order-cell');
+            if (cell) cell.textContent = idx;
+          });
+        }
+
+        Sortable.create(el, {
+          handle: '.js-sort-handle',
+          animation: 150,
+          onEnd: function () {
+            var rows = el.querySelectorAll('tr');
+            var order = Array.prototype.map.call(rows, function (r) {
+              return r.dataset.pk;
+            });
+            fetch("{% url 'tags:tag_category_reorder' %}", {
+              method: 'POST',
+              credentials: 'same-origin',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCsrf(),
+              },
+              body: JSON.stringify({ order: order }),
+            }).then(function (r) {
+              if (!r.ok) throw new Error('HTTP ' + r.status);
+              return r.json();
+            }).then(function (data) {
+              if (!data.ok) { alert('並び替えの保存に失敗しました'); return; }
+              refreshOrderCells();
+            }).catch(function () { alert('並び替えの保存に失敗しました'); });
+          },
+        });
+      })();
+    </script>
+  {% else %}
+    <section class="app-card">
+      <div style="padding:24px; text-align:center;">
+        <h2 style="margin-bottom:12px;">初回セットアップ：まず最初のカテゴリを作成してください</h2>
+        <p class="app-muted" style="margin-bottom:16px;">
+          タグカテゴリは「業種」「役職」「決裁権限」「展示会名」などの分類軸です。<br>
+          タグはカテゴリに必ず属するため、まずカテゴリを作成してからタグを作成してください。
+        </p>
+        {% url 'tags:tag_category_create' as create_url %}
+        <a href="{% append_back_url create_url back %}" class="app-btn app-btn--primary">＋ 最初のカテゴリを作成</a>
+      </div>
+    </section>
+  {% endif %}
+{% endblock %}

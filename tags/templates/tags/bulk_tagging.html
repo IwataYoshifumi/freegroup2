@@ -1,0 +1,129 @@
+{% extends "cards/app_base.html" %}
+{% load back_tags %}
+
+{% block title %}検索結果一括タグ付け — FreeGroup2{% endblock %}
+
+{% block content %}
+  <div class="app-page-header">
+    <div>
+      <div class="app-breadcrumb">タグ管理 / 検索結果一括タグ付け</div>
+      <h1>検索結果一括タグ付け</h1>
+    </div>
+  </div>
+
+  {% if bulk_result %}
+    <section class="app-card">
+      <div class="app-message app-message--success">
+        <strong>一括タグ付け完了：</strong>
+        {{ bulk_result.person_count }} 人 × {{ bulk_result.tag_count }} タグ →
+        {{ bulk_result.created_count }} 件の TagAssignment を新規作成（既存重複は ignore_conflicts でスキップ）。
+      </div>
+    </section>
+  {% endif %}
+
+  {% if bulk_error %}
+    <section class="app-card">
+      <div class="app-message app-message--warning">
+        <strong>処理中止：</strong>{{ bulk_error }}
+      </div>
+    </section>
+  {% endif %}
+
+  {# Step 1: 検索フォーム（A-1 / B-1 で切り出した _search_form.html を再利用） #}
+  <section class="app-card">
+    <h2 style="margin-bottom:12px;">Step 1：対象 Person を検索</h2>
+    {% include "persons/_search_form.html" %}
+  </section>
+
+  {% if has_results %}
+    <form method="post">
+      {% csrf_token %}
+
+      {# Step 2: 検索結果（選択チェックボックス付き） #}
+      <section class="app-card">
+        <h2 style="margin-bottom:12px;">Step 2：タグ付与対象を選択（{{ result_persons|length }} 件中、一度に最大 500 件まで）</h2>
+        <div class="app-table-wrapper">
+          <table class="app-table app-table--nowrap">
+            <thead>
+              <tr>
+                <th><input type="checkbox" id="select_all"></th>
+                <th>氏名</th>
+                <th>会社</th>
+                <th>役職</th>
+                <th>メール</th>
+                <th>status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for person in result_persons %}
+                <tr>
+                  <td><input type="checkbox" name="person_ids" value="{{ person.id }}" class="js-bulk-person-cb"></td>
+                  <td>
+                    {% if person.primary_contact %}{{ person.primary_contact.full_name|default:"(氏名なし)" }}
+                    {% else %}<span class="app-muted">(primary_contact 未設定)</span>{% endif %}
+                  </td>
+                  <td>{{ person.primary_contact.organization|default:"-" }}</td>
+                  <td>{{ person.primary_contact.title|default:"-" }}</td>
+                  <td>{{ person.primary_contact.email|default:"-" }}</td>
+                  <td>{{ person.status }}</td>
+                </tr>
+              {% empty %}
+                <tr><td colspan="6" class="app-muted">該当する人物がいません。</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {# Step 3: 付与するタグの選択 #}
+      <section class="app-card">
+        <h2 style="margin-bottom:12px;">Step 3：付与するタグを選択</h2>
+        {% if tags_by_category %}
+          <div class="app-form-grid" style="grid-template-columns: repeat(3, 1fr);">
+            {% for cat, tags_in_cat in tags_by_category %}
+              <div class="app-form__group">
+                <label class="app-form__label">{{ cat.name }}</label>
+                <div style="display:flex; flex-direction:column; gap:4px;">
+                  {% for tag in tags_in_cat %}
+                    <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+                      <input type="checkbox" name="tag_ids" value="{{ tag.id }}">
+                      {{ tag.name }}
+                    </label>
+                  {% empty %}
+                    <span class="app-muted">（このカテゴリにタグなし）</span>
+                  {% endfor %}
+                </div>
+              </div>
+            {% endfor %}
+          </div>
+        {% else %}
+          <p class="app-muted">タグがまだ作成されていません。
+            <a href="{% url 'tags:tag_list' %}">タグ管理画面</a>で作成してください。
+          </p>
+        {% endif %}
+      </section>
+
+      <div class="app-action-area">
+        <button type="submit" class="app-btn app-btn--primary"
+                onclick="return confirm('選択した Person に選択タグを一括付与します。よろしいですか？');">
+          一括タグ付け実行
+        </button>
+        {% url 'tags:bulk_tagging' as reset %}
+        <a href="{{ reset }}" class="app-btn app-btn--secondary">条件をリセット</a>
+      </div>
+    </form>
+
+    <script>
+      // 全選択チェックボックス
+      (function () {
+        var master = document.getElementById('select_all');
+        if (!master) return;
+        master.addEventListener('change', function () {
+          document.querySelectorAll('.js-bulk-person-cb').forEach(function (cb) {
+            cb.checked = master.checked;
+          });
+        });
+      })();
+    </script>
+  {% endif %}
+{% endblock %}
