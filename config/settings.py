@@ -56,6 +56,8 @@ INSTALLED_APPS = [
     "contacts",
     "duplicates",
     "actionlogs",
+    "tags",
+    "mailings",
 ]
 
 AUTH_USER_MODEL = "accounts.CustomUser"
