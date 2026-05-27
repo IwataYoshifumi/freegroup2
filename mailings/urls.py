@@ -67,6 +67,12 @@ urlpatterns = [
         views.MailingListRemoveMemberView.as_view(),
         name="list_remove_member",
     ),
+    # rev14.1 §11.3.6（Phase 1b-ε.6 追補 修正 4）：本体（name/description）AJAX 自動保存
+    path(
+        "lists/<uuid:pk>/update-meta/",
+        views.MailingListUpdateMetaView.as_view(),
+        name="list_update_meta",
+    ),
     # MailingConfig 編集（§5.1 No.38 改 / §4.13 シングルトン）
     path("config/", views.MailingConfigEditView.as_view(), name="config_edit"),
 ]

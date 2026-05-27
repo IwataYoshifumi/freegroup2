@@ -283,10 +283,16 @@ def _render_delete_confirm(request, mailing_list):
 
 @method_decorator(require_POST, name="dispatch")
 class MailingListFreezeView(LoginRequiredMixin, View):
-    """凍結 AJAX。タグ ID リストを受け取り extract_persons_by_tags → freeze_members。
+    """リスト保存 AJAX（rev14.1 §11.4.3、Phase 1b-ε.6 追補で「凍結保存」→「保存」）。
+
+    タグ ID リストを受け取り extract_persons_by_tags → freeze_members で
+    MailingListMember を置き換え保存する。`members_frozen_at` は触らない（rev14.1）。
+
+    凍結済み（members_frozen_at IS NOT NULL）リストは編集禁止（§11.3.6 dispatch ガード）。
 
     POST: form-encoded or JSON {"mailing_list_id": uuid, "tag_ids": [uuid, ...]}
-    レスポンス: {"ok": true, "member_count": int, "members_frozen_at": iso8601}
+    レスポンス成功: {"ok": true, "member_count": int}
+    レスポンス凍結: HTTP 409 {"ok": false, "error": "frozen", "message": str}
     """
 
     def post(self, request):
@@ -298,18 +304,60 @@ class MailingListFreezeView(LoginRequiredMixin, View):
         mailing_list = get_object_or_404(
             MailingList, pk=mailing_list_id, is_archived=False
         )
+        if mailing_list.members_frozen_at is not None:
+            return JsonResponse(
+                {
+                    "ok": False,
+                    "error": "frozen",
+                    "message": "このリストは凍結済みのため、保存できません。",
+                },
+                status=409,
+            )
         persons = extract_persons_by_tags(tag_ids or [])
         count = freeze_members(mailing_list, persons, request.user)
-        mailing_list.refresh_from_db(fields=["members_frozen_at"])
+        return JsonResponse({"ok": True, "member_count": count})
+
+
+@method_decorator(require_POST, name="dispatch")
+class MailingListUpdateMetaView(LoginRequiredMixin, View):
+    """リスト本体（name / description）の AJAX 自動保存（Phase 1b-ε.6 追補、修正 4）。
+
+    rev14.1 §11.3.6：凍結後もリスト本体の編集は可能。本 View は archived のみ拒否し、
+    frozen 時も保存を許可する。
+
+    POST: form-encoded or JSON {"name": str, "description": str}
+    レスポンス成功: {"ok": true, "name": str, "description": str, "updated_at": iso8601}
+    レスポンス失敗: HTTP 400 {"ok": false, "errors": {field: [msg, ...]}}
+    レスポンス archived: HTTP 404 {"ok": false, "error": "archived"}
+    """
+
+    def post(self, request, pk):
+        mailing_list = get_object_or_404(MailingList, pk=pk)
+        if mailing_list.is_archived:
+            return JsonResponse(
+                {"ok": False, "error": "archived", "message": "アーカイブ済みリストは編集できません。"},
+                status=404,
+            )
+        if request.content_type and request.content_type.startswith("application/json"):
+            try:
+                payload = json.loads(request.body.decode("utf-8"))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                return JsonResponse({"ok": False, "error": "invalid_json"}, status=400)
+        else:
+            payload = {
+                "name": request.POST.get("name", ""),
+                "description": request.POST.get("description", ""),
+            }
+        form = MailingListForm(payload, instance=mailing_list)
+        if not form.is_valid():
+            return JsonResponse({"ok": False, "errors": form.errors}, status=400)
+        obj = form.save()
         return JsonResponse(
             {
                 "ok": True,
-                "member_count": count,
-                "members_frozen_at": (
-                    mailing_list.members_frozen_at.isoformat()
-                    if mailing_list.members_frozen_at
-                    else None
-                ),
+                "name": obj.name,
+                "description": obj.description,
+                "updated_at": obj.updated_at.isoformat(),
             }
         )
 
@@ -334,6 +382,10 @@ class MailingListPreviewView(LoginRequiredMixin, View):
                     "id": str(person.id),
                     "name": (primary.full_name if primary else "") or "(氏名なし)",
                     "org": (primary.organization if primary else "") or "",
+                    "title": (primary.title if primary else "") or "",
+                    "department": (primary.department if primary else "") or "",
+                    "address": (primary.address if primary else "") or "",
+                    "email": (primary.email if primary else "") or "",
                 }
             )
         return JsonResponse({"ok": True, "count": count, "samples": samples})
@@ -395,6 +447,8 @@ class MailingListAddMemberView(LoginRequiredMixin, View):
                         "name": (m.person.primary_contact.full_name if m.person.primary_contact else "") or "(氏名なし)",
                         "org": (m.person.primary_contact.organization if m.person.primary_contact else "") or "",
                         "title": (m.person.primary_contact.title if m.person.primary_contact else "") or "",
+                        "department": (m.person.primary_contact.department if m.person.primary_contact else "") or "",
+                        "address": (m.person.primary_contact.address if m.person.primary_contact else "") or "",
                         "email": (m.person.primary_contact.email if m.person.primary_contact else "") or "",
                     }
                     for m in new_members

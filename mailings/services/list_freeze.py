@@ -1,37 +1,36 @@
-"""リスト凍結保存サービス（仕様書 v1.6 §11.3 / §11.4.3 / §4.12）。
+"""リスト保存サービス（仕様書 v1.6 rev14.1 §11.3 / §11.4.3 / §4.12）。
 
 タグ抽出＋検索条件の結果として得た Person 集合を MailingListMember として物理保存
-（凍結）する。リスト作成・再抽出の両方で使う共通処理。
+する。リスト作成・再抽出の両方で使う共通処理（**rev14.1: 凍結発動はここでは行わない**）。
 
-凍結後のメンバー操作（Phase 1）：
-  - メンバーを増やす方向 → 実装しない（凍結思想に反する、§11.3.1）
-  - メンバーを減らす方向（対象外） → 物理削除で実装、`members_frozen_at` は更新しない
+凍結タイミング（rev14.1 §11.4.3）：
+  - リスト保存（本関数）では `members_frozen_at` をセットしない（流動・未凍結のまま）
+  - `members_frozen_at` は Campaign の status が `scheduled` → `sending` に遷移した
+    瞬間に配信実行サービス（§4.2.1、Phase 2 で実装）がセットする
 """
 
 from django.db import transaction
-from django.utils import timezone
 
 from mailings.models import MailingList, MailingListMember
 
 
 def freeze_members(mailing_list, persons, user):
-    """Person 集合を MailingListMember として一括凍結保存する（§11.3.1 / §11.4.3）。
+    """Person 集合を MailingListMember として一括保存する（rev14.1 §11.3 / §11.4.3）。
 
-    [性質] 副作用あり（DB 書込：既存メンバー全削除 → 新規 bulk_create →
-            members_frozen_at 更新を 1 トランザクションで実行）
-    [入力] mailing_list: MailingList（凍結先、保存済み）
-           persons: iterable[Person]（凍結対象 Person）
+    [性質] 副作用あり（DB 書込：既存メンバー全削除 → 新規 bulk_create を 1 トランザク
+            ションで実行。**rev14.1: members_frozen_at はセットしない**）
+    [入力] mailing_list: MailingList（保存先、保存済み）
+           persons: iterable[Person]（保存対象 Person）
            user: CustomUser（added_by に記録）
-    [出力] int（凍結したメンバー数）
+    [出力] int（保存したメンバー数）
 
     リスト作成時・再抽出時の両方で使う。リスト再作成（メンバー上書き）方式：
       1. 既存 MailingListMember を全削除（CASCADE で消える）
       2. 引数 persons を bulk_create で再作成
-      3. `mailing_list.members_frozen_at = now()` を保存
+      ※ `mailing_list.members_frozen_at` には触らない（rev14.1）
 
-    `members_frozen_at` は「凍結された時点」の記録（§4.12）。Phase 1 での
-    「対象外」操作（個別物理削除）では更新しないが、本関数の凍結保存では更新する
-    （新規 / 再抽出の両方で「この時点で凍結し直した」を記録する）。
+    関数名は履歴互換のため `freeze_members` を維持（rev14.1 で意味的には「保存」だが、
+    Phase 2 で配信実行サービスから本関数を間接利用する想定）。
     """
     persons_list = list(persons)
     with transaction.atomic():
@@ -46,8 +45,6 @@ def freeze_members(mailing_list, persons, user):
         ]
         if members:
             MailingListMember.objects.bulk_create(members)
-        mailing_list.members_frozen_at = timezone.now()
-        mailing_list.save(update_fields=["members_frozen_at", "updated_at"])
     return len(persons_list)
 
 

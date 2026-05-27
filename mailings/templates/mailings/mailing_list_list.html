@@ -40,7 +40,6 @@
               <th>説明</th>
               <th>メンバー数</th>
               <th>状態</th>
-              <th>凍結</th>
               <th>作成者</th>
               <th class="app-table__col--date">更新日時</th>
             </tr>
@@ -65,7 +64,13 @@
                     </span>
                   {% endif %}
                 </td>
-                <td>{{ ml.name }}</td>
+                <td>
+                  {% if ml.members_frozen_at %}
+                    <i class="bi bi-lock-fill" style="color:#64748b; margin-right:4px;"
+                       title="凍結: {{ ml.members_frozen_at|date:'Y/m/d H:i' }}"></i>
+                  {% endif %}
+                  {{ ml.name }}
+                </td>
                 <td>
                   {% if ml.description %}
                     <span class="app-ellipsis" data-tooltip="{{ ml.description }}" style="display:inline-block; max-width:280px; overflow:hidden; text-overflow:ellipsis; vertical-align:bottom;">{{ ml.description|truncatechars:40 }}</span>
@@ -77,12 +82,6 @@
                     <span class="app-status-badge app-status-badge--muted">アーカイブ済み</span>
                   {% else %}
                     <span class="app-status-badge app-status-badge--success">アクティブ</span>
-                  {% endif %}
-                </td>
-                <td>
-                  {% if ml.members_frozen_at %}
-                    <i class="bi bi-lock-fill" style="color:#64748b;"
-                       title="凍結: {{ ml.members_frozen_at|date:'Y/m/d H:i' }}"></i>
                   {% endif %}
                 </td>
                 <td>{{ ml.created_by.username|default:"-" }}</td>
