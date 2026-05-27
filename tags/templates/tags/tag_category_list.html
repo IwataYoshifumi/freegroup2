@@ -1,13 +1,13 @@
 {% extends "mailings/app_base.html" %}
 {% load back_tags %}
 
-{% block title %}タグカテゴリ管理 — FreeGroup2{% endblock %}
+{% block title %}タグカテゴリ一覧 — FreeGroup2{% endblock %}
 
 {% block content %}
   <div class="app-page-header">
     <div>
-      <div class="app-breadcrumb">タグ管理 / タグカテゴリ管理</div>
-      <h1>タグカテゴリ管理</h1>
+      <div class="app-breadcrumb">タグカテゴリ一覧</div>
+      <h1>タグカテゴリ一覧</h1>
     </div>
     <div class="app-action-area">
       {% url 'tags:tag_category_create' as create_url %}
@@ -17,6 +17,19 @@
 
   {% if categories %}
     <section class="app-card">
+      <form method="get" style="margin-bottom:8px;">
+        <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+          <label for="id_archived_only"
+                 class="app-btn {% if archived_only %}app-btn--primary{% else %}app-btn--secondary{% endif %}"
+                 style="cursor:pointer; margin-left:auto;">
+            {% if archived_only %}✓ {% endif %}アーカイブ済みのみを表示
+          </label>
+          <input type="checkbox" id="id_archived_only" name="archived_only" value="1"
+                 style="position:absolute; opacity:0; pointer-events:none;"
+                 onchange="this.form.submit();"
+                 {% if archived_only %}checked{% endif %}>
+        </div>
+      </form>
       <p class="app-muted" style="margin-bottom:8px;">
         行頭の <span style="font-weight:bold;">⋮⋮</span> をドラッグして並び替えできます（JS 環境のみ）。
         並び順を直接編集したい場合は「編集」→「並び順」フィールドを変更してください。
@@ -30,25 +43,32 @@
               <th>並び順</th>
               <th>カテゴリ名</th>
               <th>説明</th>
+              <th>状態</th>
               <th class="app-table__col--date">更新日時</th>
             </tr>
           </thead>
           <tbody class="js-category-sortable">
             {% for cat in categories %}
+              {% url 'tags:tag_category_detail' pk=cat.id as detail_url %}
               {% url 'tags:tag_category_update' pk=cat.id as update_url %}
               <tr data-pk="{{ cat.id }}">
                 <td class="js-sort-handle" style="cursor:grab; text-align:center; user-select:none; color:#888;">⋮⋮</td>
                 <td class="app-table__col--action">
-                  <a href="{% append_back_url update_url back %}" class="app-btn app-btn--secondary app-btn--sm">編集</a>
-                  <form method="post" action="{% url 'tags:tag_category_delete' pk=cat.id %}" style="display:inline;"
-                        onsubmit="return confirm('「{{ cat.name }}」をアーカイブ化します。よろしいですか？');">
-                    {% csrf_token %}
-                    <button type="submit" class="app-btn app-btn--danger app-btn--sm">アーカイブ化</button>
-                  </form>
+                  <a href="{% append_back_url detail_url back %}" class="app-btn app-btn--outline-secondary app-btn--sm">詳細</a>
+                  {% if not cat.is_archived %}
+                    <a href="{% append_back_url update_url back %}" class="app-btn app-btn--success app-btn--sm">編集</a>
+                  {% endif %}
                 </td>
                 <td class="js-sort-order-cell">{{ cat.sort_order }}</td>
                 <td>{{ cat.name }}</td>
                 <td>{{ cat.description|default:"-"|truncatechars:60 }}</td>
+                <td>
+                  {% if cat.is_archived %}
+                    <span class="app-status-badge app-status-badge--muted">アーカイブ済み</span>
+                  {% else %}
+                    <span class="app-status-badge app-status-badge--success">アクティブ</span>
+                  {% endif %}
+                </td>
                 <td>{{ cat.updated_at|date:"Y/m/d H:i" }}</td>
               </tr>
             {% endfor %}

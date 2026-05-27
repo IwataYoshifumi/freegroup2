@@ -6,7 +6,7 @@
 {% block content %}
   <div class="app-page-header">
     <div>
-      <div class="app-breadcrumb">メール配信 / 配信リスト管理 / {% if is_create %}新規作成{% else %}編集{% endif %}</div>
+      <div class="app-breadcrumb">メール配信 / 配信リスト一覧 / {% if is_create %}新規作成{% else %}編集{% endif %}</div>
       <h1>{% if is_create %}リスト作成{% else %}リスト編集：{{ object.name }}{% endif %}</h1>
     </div>
     <div class="app-action-area">
@@ -151,7 +151,7 @@
           </script>
         {% else %}
           <p class="app-muted">タグがまだ作成されていません。
-            <a href="{% url 'tags:tag_category_list' %}">タグカテゴリ管理</a>でカテゴリとタグを作成してください。
+            <a href="{% url 'tags:tag_category_list' %}">タグカテゴリ一覧</a>でカテゴリとタグを作成してください。
           </p>
         {% endif %}
       </section>

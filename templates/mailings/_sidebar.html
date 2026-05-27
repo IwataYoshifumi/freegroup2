@@ -3,19 +3,19 @@
   <div class="app-sidebar__section-title">メール配信</div>
   <a href="{% url 'tags:tag_category_list' %}"
      {% if active_menu == 'tags:tag_category_list' %}class="is-active"{% endif %}>
-    タグカテゴリ管理
+    タグカテゴリ一覧
   </a>
   <a href="{% url 'tags:tag_list' %}"
      {% if active_menu == 'tags:tag_list' %}class="is-active"{% endif %}>
-    タグ管理
+    タグ一覧
   </a>
   <a href="{% url 'tags:bulk_tagging' %}"
      {% if active_menu == 'tags:bulk_tagging' %}class="is-active"{% endif %}>
-    検索結果一括タグ付け
+    検索＆一括タグ付け
   </a>
   <a href="{% url 'mailings:mailing_list_list' %}"
      {% if active_menu == 'mailings:mailing_list_list' %}class="is-active"{% endif %}>
-    配信リスト管理
+    配信リスト一覧
   </a>
   <a href="{% url 'mailings:config_edit' %}"
      {% if active_menu == 'mailings:config_edit' %}class="is-active"{% endif %}>

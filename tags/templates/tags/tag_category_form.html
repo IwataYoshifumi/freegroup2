@@ -6,7 +6,7 @@
 {% block content %}
   <div class="app-page-header">
     <div>
-      <div class="app-breadcrumb">タグ管理 / タグカテゴリ管理 / {% if is_create %}新規作成{% else %}編集{% endif %}</div>
+      <div class="app-breadcrumb">タグカテゴリ一覧 / {% if is_create %}新規作成{% else %}編集{% endif %}</div>
       <h1>{% if is_create %}タグカテゴリ作成{% else %}タグカテゴリ編集：{{ object.name }}{% endif %}</h1>
     </div>
     <div class="app-action-area">
@@ -22,8 +22,9 @@
     {% if object and object.is_archived %}
       <p class="app-muted" style="margin-bottom:12px;">
         <span class="app-status-badge app-status-badge--muted">アーカイブ済み</span>
-        このカテゴリは現在アーカイブ済みのため、一覧画面に表示されません。
-        下記の「非アーカイブ化」ボタンで元に戻せます。
+        このカテゴリは現在アーカイブ済みのため、一覧画面に表示されません
+        （「アーカイブ済みを含める」チェックで一覧表示可）。
+        非アーカイブ化はタグカテゴリ詳細画面から行ってください。
       </p>
     {% endif %}
 
@@ -48,14 +49,5 @@
         <a href="{% append_back_url cancel_url back %}" class="app-btn app-btn--secondary">キャンセル</a>
       </div>
     </form>
-
-    {% if object and object.is_archived %}
-      <form method="post" action="{% url 'tags:tag_category_unarchive' pk=object.id %}" style="margin-top:16px;"
-            onsubmit="return confirm('「{{ object.name }}」を非アーカイブ化します。よろしいですか？');">
-        {% csrf_token %}
-        {{ back.hidden_fields }}
-        <button type="submit" class="app-btn app-btn--primary">非アーカイブ化</button>
-      </form>
-    {% endif %}
   </section>
 {% endblock %}

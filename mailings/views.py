@@ -63,7 +63,7 @@ class MailingListListView(LoginRequiredMixin, ListView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         back = BackNavigator(self.request)
-        back.push_current("配信リスト管理", ["page"])
+        back.push_current("配信リスト一覧", ["page"])
         context.update(
             {
                 "back": back,

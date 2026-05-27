@@ -6,7 +6,7 @@
 {% block content %}
   <div class="app-page-header">
     <div>
-      <div class="app-breadcrumb">メール配信 / 配信リスト管理 / 詳細</div>
+      <div class="app-breadcrumb">メール配信 / 配信リスト一覧 / 詳細</div>
       <h1>
         {{ mailing_list.name }}
         {% if mailing_list.is_archived %}
@@ -107,6 +107,18 @@
       </div>
     {% else %}
       <p class="app-muted">メンバーがまだ凍結されていません。</p>
+    {% endif %}
+
+    {# ε.4：戻るボタン画面下部 #}
+    {% if back.back_exist or back.back_all_exist %}
+      <div class="app-action-area" style="margin-top:16px; justify-content:flex-start;">
+        {% if back.back_exist %}
+          <a href="{% back_url back %}" class="app-btn app-btn--secondary">戻る</a>
+        {% endif %}
+        {% if back.back_all_exist %}
+          <a href="{{ back.back_all_url }}" class="app-btn app-btn--secondary">最初に戻る</a>
+        {% endif %}
+      </div>
     {% endif %}
   </section>
 {% endblock %}

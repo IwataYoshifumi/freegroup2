@@ -1,13 +1,13 @@
 {% extends "mailings/app_base.html" %}
 {% load back_tags %}
 
-{% block title %}配信リスト管理 — FreeGroup2{% endblock %}
+{% block title %}配信リスト一覧 — FreeGroup2{% endblock %}
 
 {% block content %}
   <div class="app-page-header">
     <div>
-      <div class="app-breadcrumb">メール配信 / 配信リスト管理</div>
-      <h1>配信リスト管理</h1>
+      <div class="app-breadcrumb">メール配信 / 配信リスト一覧</div>
+      <h1>配信リスト一覧</h1>
     </div>
     <div class="app-action-area">
       {% url 'mailings:mailing_list_create' as create_url %}

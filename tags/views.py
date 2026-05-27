@@ -32,6 +32,16 @@ from .forms import TagCategoryForm, TagForm
 from .models import Tag, TagAssignment, TagCategory
 
 
+def _archived_only(request):
+    """[性質] 純関数。URL クエリ `?archived_only=1` の真偽を返す。
+
+    一覧画面の「アーカイブ済みのみを表示」トグルから渡される。
+    True/false/1/0 等を寛容に受け付ける（フォーム submit と直接 URL 編集の両対応）。
+    True なら一覧は archived のみ、False（デフォルト）なら active のみ表示する。
+    """
+    return request.GET.get("archived_only", "").lower() in ("1", "true", "on", "yes")
+
+
 # ======================================================================
 # TagCategory CRUD（§6.2.5）
 # ======================================================================
@@ -44,19 +54,23 @@ class TagCategoryListView(LoginRequiredMixin, ListView):
     paginate_by = 50
 
     def get_queryset(self):
-        return TagCategory.objects.filter(is_archived=False).order_by(
-            "sort_order", "name"
-        )
+        qs = TagCategory.objects.all()
+        if _archived_only(self.request):
+            qs = qs.filter(is_archived=True)
+        else:
+            qs = qs.filter(is_archived=False)
+        return qs.order_by("sort_order", "name")
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         back = BackNavigator(self.request)
-        back.push_current("タグカテゴリ管理", ["page"])
+        back.push_current("タグカテゴリ一覧", ["page", "archived_only"])
         context.update(
             {
                 "back": back,
                 "active_app": "mailings",
                 "active_menu": "tags:tag_category_list",
+                "archived_only": _archived_only(self.request),
             }
         )
         return context
@@ -87,6 +101,19 @@ class TagCategoryUpdateView(LoginRequiredMixin, UpdateView):
     template_name = "tags/tag_category_form.html"
     success_url = reverse_lazy("tags:tag_category_list")
 
+    def dispatch(self, request, *args, **kwargs):
+        # Phase 1b-ε.1 追加修正：アーカイブ済みは編集禁止（詳細画面に redirect + warning）。
+        category = get_object_or_404(TagCategory, pk=kwargs.get("pk"))
+        if category.is_archived:
+            from django.contrib import messages
+
+            messages.warning(
+                request,
+                "アーカイブ済みは編集できません。非アーカイブ化してから編集してください。",
+            )
+            return redirect("tags:tag_category_detail", pk=category.pk)
+        return super().dispatch(request, *args, **kwargs)
+
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context.update(
@@ -100,8 +127,63 @@ class TagCategoryUpdateView(LoginRequiredMixin, UpdateView):
         return context
 
 
+class TagCategoryDetailView(LoginRequiredMixin, DetailView):
+    """タグカテゴリ詳細（Phase 1b-ε.1 追加）。
+
+    カテゴリ基本情報 + 配下タグ一覧（ページネーション 20 件/ページ）。
+    archived カテゴリも閲覧可能（非アーカイブ化導線のため queryset は全件）。
+
+    配下タグ一覧は include_archived 切替で archived タグ含む/含まないを制御。
+    BackNavigator は contacts/cards 慣例どおり詳細画面では push_current を呼ばない。
+    """
+
+    model = TagCategory
+    template_name = "tags/tag_category_detail.html"
+    context_object_name = "category"
+
+    def get_queryset(self):
+        return TagCategory.objects.all()
+
+    def get_context_data(self, **kwargs):
+        from django.core.paginator import Paginator
+        from django.db.models import Count, Q
+
+        context = super().get_context_data(**kwargs)
+        tag_qs = self.object.tags.all()
+        if _archived_only(self.request):
+            tag_qs = tag_qs.filter(is_archived=True)
+        else:
+            tag_qs = tag_qs.filter(is_archived=False)
+        tag_qs = tag_qs.annotate(
+            person_count=Count(
+                "assignments",
+                filter=Q(assignments__person__status=Person.Status.ACTIVE),
+            )
+        ).order_by("-updated_at", "-created_at")
+        paginator = Paginator(tag_qs, 20)
+        page_number = self.request.GET.get("page") or 1
+        page_obj = paginator.get_page(page_number)
+        context.update(
+            {
+                "back": BackNavigator(self.request),
+                "active_app": "mailings",
+                "active_menu": "tags:tag_category_list",
+                "tag_total": tag_qs.count(),
+                "page_obj": page_obj,
+                "paginator": paginator,
+                "is_paginated": page_obj.has_other_pages(),
+                "archived_only": _archived_only(self.request),
+            }
+        )
+        return context
+
+
 class TagCategoryDeleteView(LoginRequiredMixin, View):
-    """論理削除（is_archived=True、§11.1.4）。物理削除はしない。"""
+    """論理アーカイブ化（is_archived=True、§11.1.4）。物理削除はしない。
+
+    Phase 1b-δ で UI ラベルは「削除」→「アーカイブ化」に統一したが、コード内表現
+    （URL 名・View 名）は維持する方針（指示書準拠）。
+    """
 
     def post(self, request, pk):
         category = get_object_or_404(TagCategory, pk=pk)
@@ -142,9 +224,11 @@ class TagListView(LoginRequiredMixin, ListView):
     paginate_by = 50
 
     def get_queryset(self):
-        qs = Tag.objects.filter(is_archived=False).select_related(
-            "category", "created_by"
-        )
+        qs = Tag.objects.select_related("category", "created_by")
+        if _archived_only(self.request):
+            qs = qs.filter(is_archived=True)
+        else:
+            qs = qs.filter(is_archived=False)
         category_id = self.request.GET.get("category")
         if category_id:
             qs = qs.filter(category_id=category_id)
@@ -153,7 +237,7 @@ class TagListView(LoginRequiredMixin, ListView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         back = BackNavigator(self.request)
-        back.push_current("タグ管理", ["category", "page"])
+        back.push_current("タグ一覧", ["category", "page", "archived_only"])
         context.update(
             {
                 "back": back,
@@ -163,6 +247,7 @@ class TagListView(LoginRequiredMixin, ListView):
                     "sort_order", "name"
                 ),
                 "selected_category": self.request.GET.get("category", ""),
+                "archived_only": _archived_only(self.request),
             }
         )
         return context
@@ -203,6 +288,19 @@ class TagUpdateView(LoginRequiredMixin, UpdateView):
     form_class = TagForm
     template_name = "tags/tag_form.html"
     success_url = reverse_lazy("tags:tag_list")
+
+    def dispatch(self, request, *args, **kwargs):
+        # Phase 1b-ε.1 追加修正：アーカイブ済みは編集禁止（詳細画面に redirect + warning）。
+        tag = get_object_or_404(Tag, pk=kwargs.get("pk"))
+        if tag.is_archived:
+            from django.contrib import messages
+
+            messages.warning(
+                request,
+                "アーカイブ済みは編集できません。非アーカイブ化してから編集してください。",
+            )
+            return redirect("tags:tag_detail", pk=tag.pk)
+        return super().dispatch(request, *args, **kwargs)
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -305,7 +403,7 @@ class TagCategoryUnarchiveView(LoginRequiredMixin, View):
         back = BackNavigator(request)
         if back.back_exist:
             return redirect(back.back_url)
-        return redirect("tags:tag_category_update", pk=category.pk)
+        return redirect("tags:tag_category_detail", pk=category.pk)
 
 
 # ======================================================================
@@ -402,7 +500,7 @@ class BulkTaggingView(LoginRequiredMixin, TemplateView):
         context = super().get_context_data(**kwargs)
         back = BackNavigator(self.request)
         back.push_current(
-            "検索結果一括タグ付け",
+            "検索＆一括タグ付け",
             list(SEARCH_PARAMS) + ["status", "searched", "page"],
         )
         context.update(
@@ -414,22 +512,20 @@ class BulkTaggingView(LoginRequiredMixin, TemplateView):
                 "reset_url": reverse_lazy("tags:bulk_tagging"),
                 "submit_label": "検索",
                 "bulk_tagging_max_persons": BULK_TAGGING_MAX_PERSONS,
+                # Phase 1b-ε.1 追加修正：bulk_tagging のステータスフィルタを廃止し active 固定。
+                # 仕様書 §7.3 手順 3 / §11.7.1（マージ後表示は active のみ）と整合。
+                # merged / archived の TagAssignment 確認は Django admin（TagAdmin）で行う。
+                "selected_statuses": ["active"],
             }
         )
         # _search_form.html partial が参照するコンテキスト
         for key in SEARCH_PARAMS:
             context[key] = self.request.GET.get(key, "")
-        if self.request.GET.get("searched") != "1":
-            context["selected_statuses"] = ["active"]
-        else:
-            context["selected_statuses"] = [
-                s
-                for s in self.request.GET.getlist("status")
-                if s in ("active", "merged", "archived")
-            ]
-        # 検索済みなら絞り込み済み Person 一覧を出す
+        # 検索済みなら絞り込み済み Person 一覧を出す（status は active 強制）。
         if self.request.GET.get("searched") == "1":
-            context["result_persons"] = search_persons(self.request.GET)
+            search_params = self.request.GET.copy()
+            search_params.setlist("status", ["active"])
+            context["result_persons"] = search_persons(search_params)
             context["has_results"] = True
         else:
             context["result_persons"] = Person.objects.none()

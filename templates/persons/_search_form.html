@@ -43,26 +43,34 @@ v1.4.2 既存 7 項目（name/organization/department/title/email/tel/address）
       <input type="text" id="id_address" name="address" value="{{ address }}" class="app-input">
     </div>
 
-    <div class="app-form__group" style="grid-column: span 4;">
-      <label class="app-form__label">ステータス</label>
-      <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:center;">
-        <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
-          <input type="checkbox" name="status" value="active"
-                 {% if "active" in selected_statuses %}checked{% endif %}>
-          active
-        </label>
-        <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
-          <input type="checkbox" name="status" value="merged"
-                 {% if "merged" in selected_statuses %}checked{% endif %}>
-          merged
-        </label>
-        <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
-          <input type="checkbox" name="status" value="archived"
-                 {% if "archived" in selected_statuses %}checked{% endif %}>
-          archived
-        </label>
+    {% if show_status_filter == False %}
+      {% comment %}
+        bulk_tagging から show_status_filter=False で呼ばれた場合：ステータス UI を出さず、
+        hidden で status=active を強制送信。仕様書 §7.3 手順 3 / §11.7.1（マージ後は active のみ）。
+      {% endcomment %}
+      <input type="hidden" name="status" value="active">
+    {% else %}
+      <div class="app-form__group" style="grid-column: span 4;">
+        <label class="app-form__label">ステータス</label>
+        <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:center;">
+          <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+            <input type="checkbox" name="status" value="active"
+                   {% if "active" in selected_statuses %}checked{% endif %}>
+            active
+          </label>
+          <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+            <input type="checkbox" name="status" value="merged"
+                   {% if "merged" in selected_statuses %}checked{% endif %}>
+            merged
+          </label>
+          <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+            <input type="checkbox" name="status" value="archived"
+                   {% if "archived" in selected_statuses %}checked{% endif %}>
+            archived
+          </label>
+        </div>
       </div>
-    </div>
+    {% endif %}
   </div>
 
   <div class="app-action-area app-action-area--search">

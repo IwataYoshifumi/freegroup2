@@ -20,6 +20,11 @@ urlpatterns = [
         name="tag_category_create",
     ),
     path(
+        "categories/<uuid:pk>/",
+        views.TagCategoryDetailView.as_view(),
+        name="tag_category_detail",
+    ),
+    path(
         "categories/<uuid:pk>/update/",
         views.TagCategoryUpdateView.as_view(),
         name="tag_category_update",

@@ -1,13 +1,13 @@
 {% extends "mailings/app_base.html" %}
 {% load back_tags %}
 
-{% block title %}検索結果一括タグ付け — FreeGroup2{% endblock %}
+{% block title %}検索＆一括タグ付け — FreeGroup2{% endblock %}
 
 {% block content %}
   <div class="app-page-header">
     <div>
-      <div class="app-breadcrumb">タグ管理 / 検索結果一括タグ付け</div>
-      <h1>検索結果一括タグ付け</h1>
+      <div class="app-breadcrumb">検索＆一括タグ付け</div>
+      <h1>検索＆一括タグ付け</h1>
     </div>
   </div>
 
@@ -32,7 +32,7 @@
   {# Step 1: 検索フォーム（A-1 / B-1 で切り出した _search_form.html を再利用） #}
   <section class="app-card">
     <h2 style="margin-bottom:12px;">Step 1：対象 Person を検索</h2>
-    {% include "persons/_search_form.html" %}
+    {% include "persons/_search_form.html" with show_status_filter=False %}
   </section>
 
   {% if has_results %}
@@ -98,7 +98,7 @@
           </div>
         {% else %}
           <p class="app-muted">タグがまだ作成されていません。
-            <a href="{% url 'tags:tag_list' %}">タグ管理画面</a>で作成してください。
+            <a href="{% url 'tags:tag_list' %}">タグ一覧画面</a>で作成してください。
           </p>
         {% endif %}
       </section>
