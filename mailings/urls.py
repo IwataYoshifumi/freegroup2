@@ -73,6 +73,40 @@ urlpatterns = [
         views.MailingListUpdateMetaView.as_view(),
         name="list_update_meta",
     ),
+    # Phase 1c-α（仕様書 §3 / §10 / §12）：個別追加・個別削除
+    # 選択画面（GET 表示・POST 確認画面へ snapshot 保存）
+    path(
+        "lists/<uuid:pk>/members/add/",
+        views.MemberAddView.as_view(),
+        name="list_member_add",
+    ),
+    path(
+        "lists/<uuid:pk>/members/remove/",
+        views.MemberRemoveView.as_view(),
+        name="list_member_remove",
+    ),
+    # 確認画面（GET 専用、session の snapshot を表示）
+    path(
+        "lists/<uuid:pk>/members/add/confirm/",
+        views.MemberAddConfirmView.as_view(),
+        name="list_member_add_confirm",
+    ),
+    path(
+        "lists/<uuid:pk>/members/remove/confirm/",
+        views.MemberRemoveConfirmView.as_view(),
+        name="list_member_remove_confirm",
+    ),
+    # 確定エンドポイント（POST 専用、bulk_create / delete → session クリア → 詳細へ PRG）
+    path(
+        "lists/<uuid:pk>/members/confirm-add/",
+        views.MemberAddCommitView.as_view(),
+        name="list_member_commit_add",
+    ),
+    path(
+        "lists/<uuid:pk>/members/confirm-remove/",
+        views.MemberRemoveCommitView.as_view(),
+        name="list_member_commit_remove",
+    ),
     # MailingConfig 編集（§5.1 No.38 改 / §4.13 シングルトン）
     path("config/", views.MailingConfigEditView.as_view(), name="config_edit"),
 ]

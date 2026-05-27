@@ -1,0 +1,104 @@
+{% extends "mailings/app_base.html" %}
+{% load back_tags %}
+
+{% block title %}{{ mode_label }}（確認）：{{ mailing_list.name }} — FreeGroup2{% endblock %}
+
+{% block content %}
+  <div class="app-page-header">
+    <div>
+      <div class="app-breadcrumb">メール配信 / 配信リスト一覧 / 詳細 / {{ mode_label }} / 確認</div>
+      <h1 style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+        <span>{{ mode_label }}（確認）：{{ mailing_list.name }}</span>
+      </h1>
+      <div style="margin-top:4px; color:#475569;">
+        {% if mode == "add" %}
+          以下の Person をこのリストに追加します。確認のうえ「追加を確定」を押してください。
+        {% else %}
+          以下の Person をこのリストから削除します。確認のうえ「削除を確定」を押してください。
+        {% endif %}
+      </div>
+    </div>
+    <div class="app-action-area">
+      <a href="{{ back_to_selection_url }}" class="app-btn app-btn--secondary">戻って修正</a>
+    </div>
+  </div>
+
+  {% if messages %}
+    <section class="app-card">
+      {% for message in messages %}
+        <div class="app-message{% if message.tags %} app-message--{{ message.tags }}{% endif %}">{{ message }}</div>
+      {% endfor %}
+    </section>
+  {% endif %}
+
+  <section class="app-card">
+    <div class="app-section__header" style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+      <h2 style="margin:0;">
+        {% if mode == "add" %}追加対象{% else %}削除対象{% endif %}
+      </h2>
+      <span class="app-status-badge {% if mode == 'add' %}app-status-badge--success{% else %}app-status-badge--warning{% endif %}">
+        全 {{ total_count }} 件
+      </span>
+      {% if total_count > display_limit %}
+        <span class="app-status-badge app-status-badge--muted">先頭 {{ display_limit }} 件を表示</span>
+      {% endif %}
+    </div>
+
+    {% if persons %}
+      <div class="js-limited-list" data-limit="{{ display_limit }}">
+        <div class="app-table-wrapper">
+          <table class="app-table app-table--nowrap">
+            <thead>
+              <tr>
+                <th>氏名</th>
+                <th>会社</th>
+                <th>役職</th>
+                <th>部署</th>
+                <th>住所</th>
+                <th style="min-width:240px;">メール</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for p in persons %}
+                <tr>
+                  <td>
+                    {% if p.primary_contact %}{{ p.primary_contact.full_name|default:"(氏名なし)" }}
+                    {% else %}<span class="app-muted">(primary_contact 未設定)</span>{% endif %}
+                    {% include "mailings/_unsubscribed_badge.html" with person=p %}
+                  </td>
+                  <td>{{ p.primary_contact.organization|default:"-" }}</td>
+                  <td>{{ p.primary_contact.title|default:"-" }}</td>
+                  <td>{{ p.primary_contact.department|default:"-" }}</td>
+                  <td>{{ p.primary_contact.address|default:"-" }}</td>
+                  <td style="font-weight:bold;">{{ p.primary_contact.email|default:"-" }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <div class="js-limited-list__footer" style="display:none; margin-top:8px;">
+          <button type="button" class="app-btn app-btn--secondary app-btn--sm js-limited-list__expand">
+            他 <span class="js-limited-list__hidden-count">0</span> 件を表示
+          </button>
+        </div>
+      </div>
+    {% else %}
+      <p class="app-muted">対象がありません。</p>
+    {% endif %}
+
+    <form method="post" action="{{ commit_url }}" style="margin-top:16px;">
+      {% csrf_token %}
+      {{ back.hidden_fields }}
+      <div class="app-action-area">
+        <a href="{{ back_to_selection_url }}" class="app-btn app-btn--secondary">戻って修正</a>
+        {% if mode == "add" %}
+          <button type="submit" class="app-btn app-btn--primary">追加を確定</button>
+        {% else %}
+          <button type="submit" class="app-btn app-btn--warning">削除を確定</button>
+        {% endif %}
+      </div>
+    </form>
+  </section>
+
+  {% include "mailings/_limited_list_script.html" %}
+{% endblock %}

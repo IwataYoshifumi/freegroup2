@@ -9,12 +9,15 @@
 """
 
 import json
+import uuid
 
 from django.contrib.auth.decorators import login_required, permission_required
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.db import transaction
+from django.db.models import Q
 from django.http import JsonResponse
-from django.shortcuts import get_object_or_404, redirect
-from django.urls import reverse_lazy
+from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse, reverse_lazy
 from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.decorators.http import require_POST
@@ -563,6 +566,365 @@ def _tags_grouped_by_category_for_picker():
         tags = list(cat.tags.filter(is_archived=False).order_by("name"))
         result.append((cat, tags))
     return result
+
+
+# ======================================================================
+# 個別追加・個別削除（Phase 1c-α、仕様書 §3.1〜§3.9）
+# ======================================================================
+#
+# snapshot 方式（§6.3）：選択画面 POST で確定された Person ID 集合を session に保存し、
+# 確認画面では再抽出せず session の中身をそのまま表示・確定する。タグや status の
+# 変化があっても確認画面で見えた顔ぶれが確定処理に渡る。
+#
+# PRG パターン：選択画面 POST → session 保存 → 302 確認画面 GET、
+#               確定処理 POST → DB 反映 → session クリア → 302 詳細画面 GET。
+# 確認画面は GET 専用（リロードで再送信警告を出さない）。
+#
+# session キー：mailing_list_<pk>_add_selection / mailing_list_<pk>_remove_selection。
+# ?restore=1 ルール（§6.4）：選択画面 GET が restore=1 付きなら session から復元、
+# 付いていなければ session を破棄して新規開始。
+#
+# 確認画面 session 空フォールバック（§6.5）：snapshot が無い状態で確認画面に来たら
+# 選択画面へ 302 で差し戻す（直叩き / 期限切れ対策）。
+
+
+def _is_session_truthy(seq):
+    """[性質] 純関数。session の person_ids が実体として持っているかを判定。"""
+    return bool(seq)
+
+
+def _apply_person_text_filters(qs, params):
+    """SEARCH_PARAMS の 7 項目を Person QuerySet に icontains で適用する（status は触らない）。
+
+    [性質] 純関数（QuerySet を加工して返すのみ、DB 操作なし）
+    [入力] qs: QuerySet[Person]、params: QueryDict 様
+    [出力] QuerySet[Person]
+
+    個別削除の母集合は status / is_unsubscribed を問わないため search_persons は
+    使わずに本ヘルパーで text 7 項目のみ絞り込む。search_persons は status を
+    一緒に扱うため remove のセマンティクスと合わない。
+    """
+    name = (params.get("name") or "").strip()
+    if name:
+        qs = qs.filter(primary_contact__full_name__icontains=name)
+    organization = (params.get("organization") or "").strip()
+    if organization:
+        qs = qs.filter(primary_contact__organization__icontains=organization)
+    department = (params.get("department") or "").strip()
+    if department:
+        qs = qs.filter(primary_contact__department__icontains=department)
+    title = (params.get("title") or "").strip()
+    if title:
+        qs = qs.filter(primary_contact__title__icontains=title)
+    email = (params.get("email") or "").strip()
+    if email:
+        qs = qs.filter(primary_contact__email__icontains=email)
+    tel = (params.get("tel") or "").strip()
+    if tel:
+        qs = qs.filter(
+            Q(primary_contact__personal_phone__icontains=tel)
+            | Q(primary_contact__mobile_phone__icontains=tel)
+            | Q(primary_contact__personal_fax__icontains=tel)
+        )
+    address = (params.get("address") or "").strip()
+    if address:
+        qs = qs.filter(primary_contact__address__icontains=address)
+    return qs
+
+
+def _sanitize_uuid_list(values):
+    """[性質] 純関数。文字列リストから UUID 形式のものだけ取り出す（重複は除去）。"""
+    clean = []
+    seen = set()
+    for v in values or []:
+        try:
+            u = str(uuid.UUID(str(v)))
+        except (ValueError, TypeError, AttributeError):
+            continue
+        if u in seen:
+            continue
+        seen.add(u)
+        clean.append(u)
+    return clean
+
+
+def _render_member_edit_error(request, mailing_list, message, *, status):
+    """[性質] 副作用あり（HttpResponse 返却）。凍結 / archived 時のエラーページ。"""
+    return render(
+        request,
+        "mailings/_member_edit_error.html",
+        {
+            "mailing_list": mailing_list,
+            "error_message": message,
+            "status_code": status,
+            "back": BackNavigator(request),
+            "active_app": "mailings",
+            "active_menu": "mailings:mailing_list_list",
+        },
+        status=status,
+    )
+
+
+def _guard_member_edit(request, mailing_list):
+    """[性質] 副作用あり（HttpResponse 返却 or None）。archived 404 / frozen 409 ガード。"""
+    if mailing_list.is_archived:
+        return _render_member_edit_error(
+            request,
+            mailing_list,
+            "アーカイブ済みリストはメンバーを編集できません。",
+            status=404,
+        )
+    if mailing_list.members_frozen_at is not None:
+        return _render_member_edit_error(
+            request,
+            mailing_list,
+            "凍結中のため編集できません。",
+            status=409,
+        )
+    return None
+
+
+def _selection_session_key(mailing_list_pk, mode):
+    """[性質] 純関数。session キー名を返す。"""
+    return f"mailing_list_{mailing_list_pk}_{mode}_selection"
+
+
+def _selection_url_name(mode):
+    return "mailings:list_member_add" if mode == "add" else "mailings:list_member_remove"
+
+
+def _confirm_url_name(mode):
+    return "mailings:list_member_add_confirm" if mode == "add" else "mailings:list_member_remove_confirm"
+
+
+def _commit_url_name(mode):
+    return "mailings:list_member_commit_add" if mode == "add" else "mailings:list_member_commit_remove"
+
+
+class _MemberSelectionView(LoginRequiredMixin, View):
+    """個別追加・個別削除 選択画面の共通基底（仕様書 §3.2 / §3.4）。
+
+    mode 属性で 'add' / 'remove' を分岐。母集合 SQL のみ mode で違い、それ以外
+    （session / restore / ガード / レンダリング）は共通化。
+
+    GET: 母集合の検索結果と選択状態（session または ?restore=1 で復元）を render。
+         restore=1 以外の GET は対応 session を破棄して新規開始（§6.4）。
+    POST: 選択された person_ids を session に保存し確認画面へ 302（PRG）。
+    """
+
+    mode = None  # 'add' or 'remove'
+    template_name = "mailings/_member_selection.html"
+
+    def get(self, request, pk):
+        mailing_list = get_object_or_404(MailingList, pk=pk)
+        guard = _guard_member_edit(request, mailing_list)
+        if guard is not None:
+            return guard
+        key = _selection_session_key(mailing_list.pk, self.mode)
+        if request.GET.get("restore") != "1":
+            request.session.pop(key, None)
+        selected_ids = set(str(x) for x in (request.session.get(key) or []))
+        candidates_qs = self._build_candidates(mailing_list, request.GET)
+        total = candidates_qs.count()
+        # 安全上限：通常は 50 件 + 展開で十分。大量データでも 1,000 件で頭打ち。
+        candidates = list(candidates_qs[:1000])
+        context = self._build_context(
+            request, mailing_list, candidates, total, selected_ids
+        )
+        return render(request, self.template_name, context)
+
+    def post(self, request, pk):
+        from django.contrib import messages
+
+        mailing_list = get_object_or_404(MailingList, pk=pk)
+        guard = _guard_member_edit(request, mailing_list)
+        if guard is not None:
+            return guard
+        person_ids = _sanitize_uuid_list(request.POST.getlist("person_ids"))
+        if not person_ids:
+            messages.warning(request, "Person を 1 件以上選択してください。")
+            return redirect(_selection_url_name(self.mode), pk=mailing_list.pk)
+        # snapshot を session に保存（§3.7 / §6.3）。
+        request.session[_selection_session_key(mailing_list.pk, self.mode)] = person_ids
+        request.session.modified = True
+        target = reverse(_confirm_url_name(self.mode), args=[mailing_list.pk])
+        back = BackNavigator(request)
+        if back.back_stack:
+            target = back.append_url(target)
+        return redirect(target)
+
+    # ------------------------------------------------------------------
+    # mode 別の母集合 SQL
+    # ------------------------------------------------------------------
+
+    def _build_candidates(self, mailing_list, params):
+        existing_member_ids = list(
+            MailingListMember.objects.filter(mailing_list=mailing_list).values_list(
+                "person_id", flat=True
+            )
+        )
+        if self.mode == "add":
+            # 母集合：このリストに未所属の status='active' な Person
+            # （is_unsubscribed は問わない、§6.7）。
+            # filter(status='active') は URL クエリで status=archived 等を直手入力された
+            # ケースでも active 限定を担保するための二重防衛。
+            qs = search_persons(params, default_statuses=("active",))
+            return qs.filter(status="active").exclude(pk__in=existing_member_ids)
+        # remove: 母集合：このリストの現メンバー全件（status / is_unsubscribed は問わない、§6.7）。
+        qs = Person.objects.filter(pk__in=existing_member_ids).select_related(
+            "primary_contact"
+        )
+        qs = _apply_person_text_filters(qs, params)
+        return qs.order_by("-updated_at", "-created_at")
+
+    def _build_context(self, request, mailing_list, candidates, total, selected_ids):
+        context = {
+            "mailing_list": mailing_list,
+            "mode": self.mode,
+            "mode_label": "個別追加" if self.mode == "add" else "個別削除",
+            "candidates": candidates,
+            "total_count": total,
+            "display_limit": 50,
+            "selected_ids": selected_ids,
+            "back": BackNavigator(request),
+            "active_app": "mailings",
+            "active_menu": "mailings:mailing_list_list",
+            # _search_form.html partial 用 context
+            "show_status_filter": False,
+            "selected_statuses": ["active"],
+            "reset_url": reverse(_selection_url_name(self.mode), args=[mailing_list.pk]),
+            "submit_label": "検索",
+            "self_url": reverse(_selection_url_name(self.mode), args=[mailing_list.pk]),
+            "detail_url": reverse(
+                "mailings:mailing_list_detail", args=[mailing_list.pk]
+            ),
+        }
+        for key in SEARCH_PARAMS:
+            context[key] = request.GET.get(key, "")
+        return context
+
+
+class MemberAddView(_MemberSelectionView):
+    mode = "add"
+
+
+class MemberRemoveView(_MemberSelectionView):
+    mode = "remove"
+
+
+class _MemberConfirmView(LoginRequiredMixin, View):
+    """個別追加・個別削除 確認画面の共通基底（仕様書 §3.3 / §3.5、GET 専用）。
+
+    session から snapshot を取り出して表示する。session 空時は対応する選択画面へ
+    302 で差し戻し（§6.5、直叩き / 期限切れフォールバック）。
+    """
+
+    mode = None
+    template_name = "mailings/_member_confirmation.html"
+
+    def get(self, request, pk):
+        from django.contrib import messages
+
+        mailing_list = get_object_or_404(MailingList, pk=pk)
+        guard = _guard_member_edit(request, mailing_list)
+        if guard is not None:
+            return guard
+        key = _selection_session_key(mailing_list.pk, self.mode)
+        person_ids = request.session.get(key) or []
+        if not _is_session_truthy(person_ids):
+            messages.info(
+                request, "選択がリセットされました。もう一度選択してください。"
+            )
+            return redirect(_selection_url_name(self.mode), pk=mailing_list.pk)
+        persons = list(
+            Person.objects.filter(pk__in=person_ids).select_related("primary_contact")
+        )
+        back = BackNavigator(request)
+        back_to_selection = reverse(
+            _selection_url_name(self.mode), args=[mailing_list.pk]
+        ) + "?restore=1"
+        if back.back_stack:
+            back_to_selection = back.append_url(back_to_selection)
+        commit_url = reverse(_commit_url_name(self.mode), args=[mailing_list.pk])
+        context = {
+            "mailing_list": mailing_list,
+            "mode": self.mode,
+            "mode_label": "個別追加" if self.mode == "add" else "個別削除",
+            "persons": persons,
+            "total_count": len(persons),
+            "display_limit": 50,
+            "back": back,
+            "active_app": "mailings",
+            "active_menu": "mailings:mailing_list_list",
+            "back_to_selection_url": back_to_selection,
+            "commit_url": commit_url,
+        }
+        return render(request, self.template_name, context)
+
+
+class MemberAddConfirmView(_MemberConfirmView):
+    mode = "add"
+
+
+class MemberRemoveConfirmView(_MemberConfirmView):
+    mode = "remove"
+
+
+@method_decorator(require_POST, name="dispatch")
+class _MemberCommitView(LoginRequiredMixin, View):
+    """個別追加・個別削除 確定エンドポイント（仕様書 §3.4 / §3.6、POST 専用）。
+
+    session の snapshot を DB に反映し、session クリア後に詳細画面へ 302（PRG）。
+    確定処理は atomic ブロック内で実行する（§6.8）。
+    """
+
+    mode = None
+
+    def post(self, request, pk):
+        from django.contrib import messages
+
+        mailing_list = get_object_or_404(MailingList, pk=pk)
+        guard = _guard_member_edit(request, mailing_list)
+        if guard is not None:
+            return guard
+        key = _selection_session_key(mailing_list.pk, self.mode)
+        person_ids = request.session.get(key) or []
+        if not _is_session_truthy(person_ids):
+            messages.warning(
+                request, "セッションが切れています。もう一度選択してください。"
+            )
+            return redirect(_selection_url_name(self.mode), pk=mailing_list.pk)
+        with transaction.atomic():
+            if self.mode == "add":
+                persons = list(Person.objects.filter(pk__in=person_ids))
+                to_create = [
+                    MailingListMember(
+                        mailing_list=mailing_list, person=p, added_by=request.user
+                    )
+                    for p in persons
+                ]
+                MailingListMember.objects.bulk_create(
+                    to_create, ignore_conflicts=True
+                )
+            else:
+                MailingListMember.objects.filter(
+                    mailing_list=mailing_list, person__in=person_ids
+                ).delete()
+        request.session.pop(key, None)
+        request.session.modified = True
+        target = reverse("mailings:mailing_list_detail", args=[mailing_list.pk])
+        back = BackNavigator(request)
+        if back.back_stack:
+            target = back.append_url(target)
+        return redirect(target)
+
+
+class MemberAddCommitView(_MemberCommitView):
+    mode = "add"
+
+
+class MemberRemoveCommitView(_MemberCommitView):
+    mode = "remove"
 
 
 # ======================================================================

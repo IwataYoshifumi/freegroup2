@@ -1,0 +1,26 @@
+{% extends "mailings/app_base.html" %}
+{% load back_tags %}
+
+{% block title %}編集できません — {{ mailing_list.name }} — FreeGroup2{% endblock %}
+
+{% block content %}
+  <div class="app-page-header">
+    <div>
+      <div class="app-breadcrumb">メール配信 / 配信リスト一覧 / 詳細 / エラー</div>
+      <h1>編集できません</h1>
+    </div>
+    <div class="app-action-area">
+      <a href="{% url 'mailings:mailing_list_detail' pk=mailing_list.pk %}" class="app-btn app-btn--secondary">リスト詳細へ</a>
+    </div>
+  </div>
+
+  <section class="app-card">
+    <div class="app-message app-message--warning">
+      <i class="bi bi-lock-fill" style="margin-right:6px;"></i>
+      {{ error_message }}（HTTP {{ status_code }}）
+    </div>
+    <p style="margin-top:12px;">
+      対象リスト：<strong>{{ mailing_list.name }}</strong>
+    </p>
+  </section>
+{% endblock %}

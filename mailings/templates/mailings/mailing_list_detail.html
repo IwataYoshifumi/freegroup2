@@ -89,43 +89,75 @@
   {% endif %}
 
   <section class="app-card">
-    <div class="app-section__header">
-      <h2>{% if is_frozen %}凍結メンバー{% else %}メンバー{% endif %}: {{ members|length }} 件</h2>
+    <div class="app-section__header" style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+      <h2 style="margin:0;">{% if is_frozen %}凍結メンバー{% else %}メンバー{% endif %}</h2>
+      <span class="app-status-badge app-status-badge--info">全 {{ members|length }} 件</span>
+      {% if members|length > 50 %}
+        <span class="app-status-badge app-status-badge--muted">先頭 50 件を表示</span>
+      {% endif %}
+      <div style="margin-left:auto; display:flex; gap:8px;">
+        {# Phase 1c-α #1：個別追加・個別削除ボタン。凍結時は disabled + ツールチップ（§6.6）#}
+        {% url 'mailings:list_member_add' pk=mailing_list.id as member_add_url %}
+        {% url 'mailings:list_member_remove' pk=mailing_list.id as member_remove_url %}
+        {% if mailing_list.is_archived %}
+          <span class="app-btn app-btn--primary" style="opacity:0.5; pointer-events:none;" aria-disabled="true"
+                title="アーカイブ済みのため編集できません">個別追加</span>
+          <span class="app-btn app-btn--warning" style="opacity:0.5; pointer-events:none;" aria-disabled="true"
+                title="アーカイブ済みのため編集できません">個別削除</span>
+        {% elif is_frozen %}
+          <span class="app-btn app-btn--primary" style="opacity:0.5; pointer-events:none;" aria-disabled="true"
+                title="凍結中のため編集できません">個別追加</span>
+          <span class="app-btn app-btn--warning" style="opacity:0.5; pointer-events:none;" aria-disabled="true"
+                title="凍結中のため編集できません">個別削除</span>
+        {% else %}
+          <a href="{% append_back_url member_add_url back %}" class="app-btn app-btn--primary">個別追加</a>
+          <a href="{% append_back_url member_remove_url back %}" class="app-btn app-btn--warning">個別削除</a>
+        {% endif %}
+      </div>
     </div>
     {% if members %}
-      <div class="app-table-wrapper">
-        <table class="app-table app-table--nowrap">
-          <thead>
-            <tr>
-              <th>氏名</th>
-              <th>会社</th>
-              <th>役職</th>
-              <th>部署</th>
-              <th>住所</th>
-              <th style="min-width:240px;">メール</th>
-              <th>追加者</th>
-              <th class="app-table__col--date">追加日時</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for m in members %}
+      <div class="js-limited-list" data-limit="50">
+        <div class="app-table-wrapper">
+          <table class="app-table app-table--nowrap">
+            <thead>
               <tr>
-                <td>
-                  {% if m.person.primary_contact %}{{ m.person.primary_contact.full_name|default:"(氏名なし)" }}
-                  {% else %}<span class="app-muted">(primary_contact 未設定)</span>{% endif %}
-                </td>
-                <td>{{ m.person.primary_contact.organization|default:"-" }}</td>
-                <td>{{ m.person.primary_contact.title|default:"-" }}</td>
-                <td>{{ m.person.primary_contact.department|default:"-" }}</td>
-                <td>{{ m.person.primary_contact.address|default:"-" }}</td>
-                <td style="font-weight:bold;">{{ m.person.primary_contact.email|default:"-" }}</td>
-                <td>{{ m.added_by.username|default:"-" }}</td>
-                <td>{{ m.created_at|date:"Y/m/d H:i" }}</td>
+                <th>氏名</th>
+                <th>会社</th>
+                <th>役職</th>
+                <th>部署</th>
+                <th>住所</th>
+                <th style="min-width:240px;">メール</th>
+                <th>追加者</th>
+                <th class="app-table__col--date">追加日時</th>
               </tr>
-            {% endfor %}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {% for m in members %}
+                <tr>
+                  <td>
+                    {% if m.person.primary_contact %}{{ m.person.primary_contact.full_name|default:"(氏名なし)" }}
+                    {% else %}<span class="app-muted">(primary_contact 未設定)</span>{% endif %}
+                    {% include "mailings/_unsubscribed_badge.html" with person=m.person %}
+                  </td>
+                  <td>{{ m.person.primary_contact.organization|default:"-" }}</td>
+                  <td>{{ m.person.primary_contact.title|default:"-" }}</td>
+                  <td>{{ m.person.primary_contact.department|default:"-" }}</td>
+                  <td>{{ m.person.primary_contact.address|default:"-" }}</td>
+                  <td style="font-weight:bold;">{{ m.person.primary_contact.email|default:"-" }}</td>
+                  <td>{{ m.added_by.username|default:"-" }}</td>
+                  <td>{{ m.created_at|date:"Y/m/d H:i" }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <div class="js-limited-list__footer" style="display:none; margin-top:8px;">
+          <button type="button" class="app-btn app-btn--secondary app-btn--sm js-limited-list__expand">
+            他 <span class="js-limited-list__hidden-count">0</span> 件を表示
+          </button>
+        </div>
       </div>
+      {% include "mailings/_limited_list_script.html" %}
     {% else %}
       <p class="app-muted">{% if is_frozen %}メンバーがまだ凍結されていません。{% else %}メンバーがまだいません。{% endif %}</p>
     {% endif %}
