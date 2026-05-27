@@ -7,7 +7,13 @@
   <div class="app-page-header">
     <div>
       <div class="app-breadcrumb">メール配信 / 配信リスト一覧 / {% if is_create %}新規作成{% else %}編集{% endif %}</div>
-      <h1>{% if is_create %}リスト作成{% else %}リスト編集：{{ object.name }}{% endif %}</h1>
+      <h1 style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+        <span>{% if is_create %}リスト作成{% else %}リスト編集：{{ object.name }}{% endif %}</span>
+        {% if not is_create and is_frozen %}
+          <i class="bi bi-lock-fill" style="color:#64748b;"
+             title="凍結: {{ mailing_list.members_frozen_at|date:'Y/m/d H:i' }}"></i>
+        {% endif %}
+      </h1>
     </div>
     <div class="app-action-area">
       {% if back.back_exist %}
@@ -155,15 +161,61 @@
           </p>
         {% endif %}
       </section>
-    {% else %}
-      {# 凍結後：メンバー一覧 + 対象外 AJAX #}
+      {# Step 3: 手動メンバー編集（rev14.1 §11.3.6、未凍結時のみ） #}
       <section class="app-card">
-        <h2 style="margin-bottom:12px;">凍結メンバー一覧（{{ members|length }} 件）</h2>
+        <h2 style="margin-bottom:12px;">Step 3：メンバーを手動で追加・削除</h2>
         <p class="app-muted" style="margin-bottom:12px;">
-          凍結時刻：{{ mailing_list.members_frozen_at|date:"Y/m/d H:i:s" }}。
-          凍結後はメンバーを増やすことはできません。「対象外」で個別に減らすことのみ可能（物理削除）。
+          Step 2 でタグ抽出した結果に加えて、個別に Person を追加・削除できます。
+          配信開始時（Campaign が sending に遷移）まではメンバーは流動的です。
         </p>
-        <form style="display:none;">{% csrf_token %}</form>
+
+        <h3 style="margin-bottom:8px;">Person 検索（active のみ）</h3>
+        {% include "persons/_search_form.html" with show_status_filter=False %}
+
+        {% if search_results is not None %}
+          <h3 style="margin-top:16px; margin-bottom:8px;">検索結果（既存メンバー除く、先頭 100 件）</h3>
+          {% if search_results %}
+            <form id="js-add-member-form" data-mailing-list-id="{{ object.id }}">
+              {% csrf_token %}
+              <div class="app-table-wrapper">
+                <table class="app-table app-table--nowrap">
+                  <thead>
+                    <tr>
+                      <th><input type="checkbox" id="js-add-select-all"></th>
+                      <th>氏名</th>
+                      <th>会社</th>
+                      <th>役職</th>
+                      <th>メール</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for p in search_results %}
+                      <tr>
+                        <td><input type="checkbox" name="person_ids" value="{{ p.id }}" class="js-add-person-cb"></td>
+                        <td>
+                          {% if p.primary_contact %}{{ p.primary_contact.full_name|default:"(氏名なし)" }}
+                          {% else %}<span class="app-muted">(primary_contact 未設定)</span>{% endif %}
+                        </td>
+                        <td>{{ p.primary_contact.organization|default:"-" }}</td>
+                        <td>{{ p.primary_contact.title|default:"-" }}</td>
+                        <td>{{ p.primary_contact.email|default:"-" }}</td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+              <div class="app-action-area" style="margin-top:12px;">
+                <button type="button" id="js-add-member-btn" class="app-btn app-btn--primary">
+                  選択した Person を追加
+                </button>
+              </div>
+            </form>
+          {% else %}
+            <p class="app-muted">検索結果はありません（または既に全員メンバーに入っています）。</p>
+          {% endif %}
+        {% endif %}
+
+        <h3 style="margin-top:24px; margin-bottom:8px;">現在のメンバー一覧（{{ members|length }} 件）</h3>
         {% if members %}
           <div class="app-table-wrapper">
             <table class="app-table app-table--nowrap js-member-table">
@@ -180,7 +232,7 @@
                 {% for m in members %}
                   <tr data-member-id="{{ m.id }}">
                     <td class="app-table__col--action">
-                      <button type="button" class="app-btn app-btn--danger app-btn--sm js-member-remove">対象外</button>
+                      <button type="button" class="app-btn app-btn--warning app-btn--sm js-member-remove">削除</button>
                     </td>
                     <td>
                       {% if m.person.primary_contact %}{{ m.person.primary_contact.full_name|default:"(氏名なし)" }}
@@ -194,38 +246,119 @@
               </tbody>
             </table>
           </div>
+        {% else %}
+          <p class="app-muted">メンバーがまだいません。Step 2 のタグ抽出か上記の Person 検索から追加してください。</p>
+        {% endif %}
 
-          <script>
-            (function () {
-              var table = document.querySelector('.js-member-table');
-              if (!table) return;
-              function getCsrf() {
-                var input = document.querySelector('[name=csrfmiddlewaretoken]');
-                return input ? input.value : '';
-              }
+        <script>
+          (function () {
+            function getCsrf() {
+              var input = document.querySelector('[name=csrfmiddlewaretoken]');
+              return input ? input.value : '';
+            }
+            // 全選択チェックボックス（追加）
+            var selectAll = document.getElementById('js-add-select-all');
+            if (selectAll) {
+              selectAll.addEventListener('change', function () {
+                document.querySelectorAll('.js-add-person-cb').forEach(function (cb) {
+                  cb.checked = selectAll.checked;
+                });
+              });
+            }
+            // 追加 AJAX
+            var addBtn = document.getElementById('js-add-member-btn');
+            if (addBtn) {
+              addBtn.addEventListener('click', function () {
+                var listId = document.getElementById('js-add-member-form').dataset.mailingListId;
+                var ids = Array.prototype.map.call(
+                  document.querySelectorAll('.js-add-person-cb:checked'),
+                  function (cb) { return cb.value; }
+                );
+                if (ids.length === 0) { alert('追加する Person を選択してください'); return; }
+                if (!confirm(ids.length + ' 件の Person をメンバーに追加します。よろしいですか？')) return;
+                fetch("/mailings/lists/" + listId + "/add-member/", {
+                  method: 'POST',
+                  credentials: 'same-origin',
+                  headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrf() },
+                  body: JSON.stringify({ person_ids: ids }),
+                }).then(function (r) {
+                  if (r.status === 409) { return r.json().then(function (d) { alert(d.message || '凍結済みのため追加できません'); throw new Error('frozen'); }); }
+                  if (!r.ok) throw new Error('HTTP ' + r.status);
+                  return r.json();
+                }).then(function (data) {
+                  if (!data.ok) { alert('追加に失敗しました'); return; }
+                  alert(data.created_count + ' 件追加しました。');
+                  location.reload();
+                }).catch(function (e) { if (e.message !== 'frozen') alert('追加に失敗しました'); });
+              });
+            }
+            // 削除 AJAX
+            var table = document.querySelector('.js-member-table');
+            if (table) {
               table.addEventListener('click', function (event) {
                 var btn = event.target.closest('.js-member-remove');
                 if (!btn) return;
                 var row = btn.closest('tr');
                 var memberId = row.dataset.memberId;
-                if (!confirm('このメンバーを対象外にします（物理削除）。よろしいですか？')) return;
-                fetch("{% url 'mailings:mailing_list_member_remove' %}", {
+                if (!confirm('このメンバーを削除します。よろしいですか？')) return;
+                var listId = "{{ object.id }}";
+                fetch("/mailings/lists/" + listId + "/remove-member/", {
                   method: 'POST',
                   credentials: 'same-origin',
                   headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrf() },
                   body: JSON.stringify({ member_id: memberId }),
                 }).then(function (r) {
+                  if (r.status === 409) { return r.json().then(function (d) { alert(d.message || '凍結済みのため削除できません'); throw new Error('frozen'); }); }
                   if (!r.ok) throw new Error('HTTP ' + r.status);
                   return r.json();
                 }).then(function (data) {
                   if (!data.ok) { alert('削除に失敗しました'); return; }
                   row.remove();
-                }).catch(function () { alert('削除に失敗しました'); });
+                }).catch(function (e) { if (e.message !== 'frozen') alert('削除に失敗しました'); });
               });
-            })();
-          </script>
+            }
+          })();
+        </script>
+      </section>
+    {% else %}
+      {# 凍結後：注意メッセージ + メンバー一覧（閲覧のみ、rev14.1 §11.3.6 / §11.4.3） #}
+      <section class="app-card">
+        <h2 style="margin-bottom:12px;">
+          <i class="bi bi-lock-fill" style="color:#64748b; margin-right:6px;"></i>凍結メンバー一覧（{{ members|length }} 件）
+        </h2>
+        <div class="app-message app-message--warning" style="margin-bottom:12px;">
+          <i class="bi bi-lock-fill" style="margin-right:6px;"></i>
+          このリストは凍結済み（{{ mailing_list.members_frozen_at|date:"Y/m/d H:i:s" }}）のため、メンバーの追加・削除はできません。
+          リスト本体（name / description）の編集は引き続き可能です。
+        </div>
+        {% if members %}
+          <div class="app-table-wrapper">
+            <table class="app-table app-table--nowrap">
+              <thead>
+                <tr>
+                  <th>氏名</th>
+                  <th>会社</th>
+                  <th>役職</th>
+                  <th>メール</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for m in members %}
+                  <tr>
+                    <td>
+                      {% if m.person.primary_contact %}{{ m.person.primary_contact.full_name|default:"(氏名なし)" }}
+                      {% else %}<span class="app-muted">(primary_contact 未設定)</span>{% endif %}
+                    </td>
+                    <td>{{ m.person.primary_contact.organization|default:"-" }}</td>
+                    <td>{{ m.person.primary_contact.title|default:"-" }}</td>
+                    <td>{{ m.person.primary_contact.email|default:"-" }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
         {% else %}
-          <p class="app-muted">凍結メンバーが 0 件です（全員「対象外」にしたか、抽出条件が 0 件でした）。</p>
+          <p class="app-muted">凍結メンバーが 0 件です。</p>
         {% endif %}
       </section>
     {% endif %}

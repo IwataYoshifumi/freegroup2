@@ -16,12 +16,8 @@
           <i class="bi bi-info-circle"></i>
         </button>
         {% if mailing_list.members_frozen_at %}
-          <span class="app-status-badge app-status-badge--success">
-            <i class="bi bi-snow" style="margin-right:4px;"></i>
-            凍結: {{ mailing_list.members_frozen_at|date:"Y/m/d H:i" }}
-          </span>
-        {% else %}
-          <span class="app-status-badge app-status-badge--muted">未凍結</span>
+          <i class="bi bi-lock-fill" style="color:#64748b;"
+             title="凍結: {{ mailing_list.members_frozen_at|date:'Y/m/d H:i' }}"></i>
         {% endif %}
         {% if mailing_list.is_archived %}
           <span class="app-status-badge app-status-badge--muted">アーカイブ済み</span>

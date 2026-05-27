@@ -40,8 +40,7 @@
               <th>説明</th>
               <th>メンバー数</th>
               <th>状態</th>
-              <th>凍結状態</th>
-              <th>凍結日時</th>
+              <th>凍結</th>
               <th>作成者</th>
               <th class="app-table__col--date">更新日時</th>
             </tr>
@@ -82,12 +81,10 @@
                 </td>
                 <td>
                   {% if ml.members_frozen_at %}
-                    <span class="app-status-badge app-status-badge--success">凍結済</span>
-                  {% else %}
-                    <span class="app-status-badge app-status-badge--muted">未凍結</span>
+                    <i class="bi bi-lock-fill" style="color:#64748b;"
+                       title="凍結: {{ ml.members_frozen_at|date:'Y/m/d H:i' }}"></i>
                   {% endif %}
                 </td>
-                <td>{{ ml.members_frozen_at|date:"Y/m/d H:i"|default:"-" }}</td>
                 <td>{{ ml.created_by.username|default:"-" }}</td>
                 <td>{{ ml.updated_at|date:"Y/m/d H:i" }}</td>
               </tr>

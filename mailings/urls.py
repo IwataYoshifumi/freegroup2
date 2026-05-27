@@ -56,6 +56,17 @@ urlpatterns = [
         views.MailingListMemberRemoveView.as_view(),
         name="mailing_list_member_remove",
     ),
+    # rev14.1 §5.1 No.32/33（Phase 1b-ε.6 追加）：未凍結時の手動メンバー追加・削除
+    path(
+        "lists/<uuid:pk>/add-member/",
+        views.MailingListAddMemberView.as_view(),
+        name="list_add_member",
+    ),
+    path(
+        "lists/<uuid:pk>/remove-member/",
+        views.MailingListRemoveMemberView.as_view(),
+        name="list_remove_member",
+    ),
     # MailingConfig 編集（§5.1 No.38 改 / §4.13 シングルトン）
     path("config/", views.MailingConfigEditView.as_view(), name="config_edit"),
 ]

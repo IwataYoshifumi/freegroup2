@@ -30,6 +30,8 @@ from back_navigator.back_navigator import BackNavigator
 from persons.models import Person
 from tags.models import TagCategory
 
+from persons.services.person_search import SEARCH_PARAMS, search_persons
+
 from .forms import MailingConfigForm, MailingListForm
 from .models import MailingList, MailingListMember
 from .services.list_freeze import (
@@ -183,8 +185,20 @@ class MailingListUpdateView(LoginRequiredMixin, UpdateView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         is_frozen = self.object.members_frozen_at is not None
-        # BackNavigator（編集画面なので push_current は呼ばない、既存 contacts 慣例に揃える）。
-        # 編集→削除→キャンセルで編集に戻る挙動はテンプレ側 {% append_back_url %} で実現。
+        # Phase 1b-ε.6 rev14.1：凍結後は閲覧のみ、未凍結時はメンバー追加・削除可能。
+        # 既存メンバー一覧は凍結状態に関わらず常に渡す（未凍結時も削除 UI のため必要）。
+        members = (
+            MailingListMember.objects.filter(mailing_list=self.object)
+            .select_related("person", "person__primary_contact", "added_by")
+            .order_by("created_at")
+        )
+        existing_person_ids = list(members.values_list("person_id", flat=True))
+        # 未凍結時のみ Person 検索結果を渡す（_search_form.html partial で searched=1 のとき）。
+        search_results = None
+        if not is_frozen and self.request.GET.get("searched") == "1":
+            qs = search_persons(self.request.GET, default_statuses=("active",))
+            # 既にメンバーに入っている Person は除外（UniqueConstraint 重複防止 + UX 簡素化）。
+            search_results = qs.exclude(pk__in=existing_person_ids)[:100]
         context.update(
             {
                 "back": BackNavigator(self.request),
@@ -193,15 +207,18 @@ class MailingListUpdateView(LoginRequiredMixin, UpdateView):
                 "is_create": False,
                 "is_frozen": is_frozen,
                 "tags_by_category": _tags_grouped_by_category_for_picker(),
-                "members": (
-                    MailingListMember.objects.filter(mailing_list=self.object)
-                    .select_related("person", "person__primary_contact")
-                    .order_by("created_at")
-                    if is_frozen
-                    else MailingListMember.objects.none()
+                "members": members,
+                "search_results": search_results,
+                # _search_form.html partial が参照するコンテキスト
+                "selected_statuses": ["active"],
+                "reset_url": reverse_lazy(
+                    "mailings:mailing_list_update", args=[self.object.pk]
                 ),
+                "submit_label": "Person 検索",
             }
         )
+        for key in SEARCH_PARAMS:
+            context[key] = self.request.GET.get(key, "")
         return context
 
 
@@ -323,6 +340,109 @@ class MailingListPreviewView(LoginRequiredMixin, View):
 
 
 @method_decorator(require_POST, name="dispatch")
+class MailingListAddMemberView(LoginRequiredMixin, View):
+    """メンバー追加 AJAX（rev14.1 §5.1 No.32、Phase 1b-ε.6 追加）。
+
+    リスト編集中（未凍結）の手動メンバー追加。凍結済み（members_frozen_at IS NOT NULL）
+    のときは HTTP 409 Conflict で弾く（§11.3.6 dispatch ガード）。
+
+    POST: form-encoded or JSON {"person_ids": [uuid, ...]}
+    レスポンス成功: {"ok": true, "created_count": int, "members": [{member_id, person_id, name, org, title, email}]}
+    レスポンス凍結: HTTP 409 {"ok": false, "error": "frozen", "message": str}
+    レスポンス archived: HTTP 404 {"ok": false, "error": "archived"}
+    """
+
+    def post(self, request, pk):
+        mailing_list = get_object_or_404(MailingList, pk=pk)
+        if mailing_list.is_archived:
+            return JsonResponse(
+                {"ok": False, "error": "archived", "message": "アーカイブ済みリストにメンバーは追加できません。"},
+                status=404,
+            )
+        if mailing_list.members_frozen_at is not None:
+            return JsonResponse(
+                {
+                    "ok": False,
+                    "error": "frozen",
+                    "message": "このリストは凍結済みのため、メンバーの追加はできません。",
+                },
+                status=409,
+            )
+        person_ids = _parse_person_ids(request)
+        if not person_ids:
+            return JsonResponse({"ok": False, "error": "missing_person_ids"}, status=400)
+        persons = list(Person.objects.filter(pk__in=person_ids).select_related("primary_contact"))
+        to_create = [
+            MailingListMember(mailing_list=mailing_list, person=p, added_by=request.user)
+            for p in persons
+        ]
+        created = MailingListMember.objects.bulk_create(to_create, ignore_conflicts=True)
+        # bulk_create + ignore_conflicts では created に DB の pk が入らない場合があるため
+        # 改めて取得してレスポンス用に整形（重複は元から弾かれているので created_count は実数）。
+        new_members = list(
+            MailingListMember.objects.filter(
+                mailing_list=mailing_list, person_id__in=person_ids
+            ).select_related("person", "person__primary_contact")
+        )
+        return JsonResponse(
+            {
+                "ok": True,
+                "created_count": len(created),
+                "members": [
+                    {
+                        "member_id": str(m.id),
+                        "person_id": str(m.person_id),
+                        "name": (m.person.primary_contact.full_name if m.person.primary_contact else "") or "(氏名なし)",
+                        "org": (m.person.primary_contact.organization if m.person.primary_contact else "") or "",
+                        "title": (m.person.primary_contact.title if m.person.primary_contact else "") or "",
+                        "email": (m.person.primary_contact.email if m.person.primary_contact else "") or "",
+                    }
+                    for m in new_members
+                ],
+            }
+        )
+
+
+@method_decorator(require_POST, name="dispatch")
+class MailingListRemoveMemberView(LoginRequiredMixin, View):
+    """メンバー削除 AJAX（rev14.1 §5.1 No.33、Phase 1b-ε.6 追加）。
+
+    リスト編集中（未凍結）の手動メンバー削除。凍結済みは HTTP 409 で弾く（§11.3.6）。
+
+    POST: form-encoded or JSON {"member_id": uuid}
+    レスポンス成功: {"ok": true, "removed_member_id": uuid}
+    レスポンス凍結: HTTP 409 {"ok": false, "error": "frozen", "message": str}
+    レスポンス archived: HTTP 404 {"ok": false, "error": "archived"}
+    """
+
+    def post(self, request, pk):
+        mailing_list = get_object_or_404(MailingList, pk=pk)
+        if mailing_list.is_archived:
+            return JsonResponse(
+                {"ok": False, "error": "archived", "message": "アーカイブ済みリストのメンバーは削除できません。"},
+                status=404,
+            )
+        if mailing_list.members_frozen_at is not None:
+            return JsonResponse(
+                {
+                    "ok": False,
+                    "error": "frozen",
+                    "message": "このリストは凍結済みのため、メンバーの削除はできません。",
+                },
+                status=409,
+            )
+        member_id = _parse_member_id(request)
+        if not member_id:
+            return JsonResponse({"ok": False, "error": "missing_member_id"}, status=400)
+        deleted, _ = MailingListMember.objects.filter(
+            pk=member_id, mailing_list=mailing_list
+        ).delete()
+        if deleted == 0:
+            return JsonResponse({"ok": False, "error": "member_not_found"}, status=404)
+        return JsonResponse({"ok": True, "removed_member_id": member_id})
+
+
+@method_decorator(require_POST, name="dispatch")
 class MailingListMemberRemoveView(LoginRequiredMixin, View):
     """対象外 AJAX。凍結後の MailingListMember を物理削除する（§11.7.2.1 / 過去発注書）。
 
@@ -363,6 +483,18 @@ def _parse_member_id(request):
             return None
         return payload.get("member_id")
     return request.POST.get("member_id")
+
+
+def _parse_person_ids(request):
+    """[性質] 純関数。POST request から person_ids（複数）を取り出す（form / JSON 両対応）。"""
+    if request.content_type and request.content_type.startswith("application/json"):
+        try:
+            payload = json.loads(request.body.decode("utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return []
+        ids = payload.get("person_ids") or []
+        return list(ids) if isinstance(ids, list) else []
+    return request.POST.getlist("person_ids")
 
 
 def _tags_grouped_by_category_for_picker():
