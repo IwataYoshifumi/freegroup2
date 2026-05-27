@@ -1,0 +1,45 @@
+{% comment %}
+列ソート用 JS partial（Phase 1c-α UI 改善 要望1）。
+
+利用側のマークアップ規約：
+  <th data-sort-key="name">氏名 ...icon...</th>
+
+挙動：
+  - 列ヘッダクリックで URL クエリ ?sort=<key>&dir=<asc|desc> をトグル更新
+  - 状態遷移：未指定 → asc → desc → 未指定 …（tri-state、§2.2）
+  - 列が CSS で hidden（列切替で非表示）の場合はクリック無効
+  - sort/dir 以外の URL クエリ（検索条件・restore 等）は維持する
+
+1 ページに何度 include されてもイベント登録は 1 回。
+{% endcomment %}
+<script>
+  (function () {
+    if (window.__sortHeaderInit) return;
+    window.__sortHeaderInit = true;
+    document.querySelectorAll('th[data-sort-key]').forEach(function (th) {
+      th.style.cursor = 'pointer';
+      th.style.userSelect = 'none';
+      th.addEventListener('click', function () {
+        if (window.getComputedStyle(th).display === 'none') return;
+        var key = th.dataset.sortKey;
+        var url = new URL(window.location.href);
+        var sp = url.searchParams;
+        var cur = sp.get('sort') || 'name';
+        var dir = sp.get('dir') || 'asc';
+        if (cur === key) {
+          if (dir === 'asc') {
+            sp.set('sort', key);
+            sp.set('dir', 'desc');
+          } else {
+            sp.delete('sort');
+            sp.delete('dir');
+          }
+        } else {
+          sp.set('sort', key);
+          sp.set('dir', 'asc');
+        }
+        window.location.href = url.toString();
+      });
+    });
+  })();
+</script>

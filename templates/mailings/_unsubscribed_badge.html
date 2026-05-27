@@ -6,4 +6,4 @@ is_unsubscribed=True の Person にバッジを表示する共通部品。
 
 期待 context:
   person: Person インスタンス（必須、is_unsubscribed を持つ）
-{% endcomment %}{% if person.is_unsubscribed %}<span class="app-status-badge app-status-badge--warning" style="margin-left:6px; font-size:0.85em;" title="メール配信停止フラグが立っています">退会済み</span>{% endif %}
+{% endcomment %}{% if person.is_unsubscribed %}<span class="app-status-badge app-status-badge--warning js-unsubscribed-badge" style="margin-left:6px; font-size:0.85em;" title="メール配信停止フラグが立っています">退会済み</span>{% endif %}

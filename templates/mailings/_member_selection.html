@@ -8,7 +8,7 @@
     <div>
       <div class="app-breadcrumb">メール配信 / 配信リスト一覧 / 詳細 / {{ mode_label }}</div>
       <h1 style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-        <span>{{ mode_label }}：{{ mailing_list.name }}</span>
+        <span>{{ mode_label }}：{{ mailing_list.name }}（現在 {{ current_member_count }} 件）</span>
       </h1>
       <div style="margin-top:4px; color:#475569;">
         {% if mode == "add" %}
@@ -46,6 +46,9 @@
       {% if total_count > display_limit %}
         <span class="app-status-badge app-status-badge--muted">先頭 {{ display_limit }} 件を表示</span>
       {% endif %}
+      <div style="margin-left:auto;">
+        {% include "mailings/_column_toggle.html" with storage_key="mailing_list_visible_columns_selection_"|add:mode %}
+      </div>
     </div>
 
     {% if candidates %}
@@ -58,12 +61,12 @@
               <thead>
                 <tr>
                   <th style="width:36px;"><input type="checkbox" id="js-member-select-all" aria-label="全選択"></th>
-                  <th>氏名</th>
-                  <th>会社</th>
-                  <th>役職</th>
-                  <th>部署</th>
-                  <th>住所</th>
-                  <th style="min-width:240px;">メール</th>
+                  {% include "mailings/_sortable_th.html" with key="name" label="氏名" %}
+                  {% include "mailings/_sortable_th.html" with key="company" label="会社" %}
+                  {% include "mailings/_sortable_th.html" with key="title" label="役職" %}
+                  {% include "mailings/_sortable_th.html" with key="department" label="部署" %}
+                  {% include "mailings/_sortable_th.html" with key="address" label="住所" %}
+                  {% include "mailings/_sortable_th.html" with key="email" label="メール" extra_style="min-width:240px;" %}
                 </tr>
               </thead>
               <tbody>
@@ -74,16 +77,16 @@
                              class="js-member-cb"
                              {% if p.id|stringformat:"s" in selected_ids %}checked{% endif %}>
                     </td>
-                    <td>
+                    <td data-col-key="name">
                       {% if p.primary_contact %}{{ p.primary_contact.full_name|default:"(氏名なし)" }}
                       {% else %}<span class="app-muted">(primary_contact 未設定)</span>{% endif %}
                       {% include "mailings/_unsubscribed_badge.html" with person=p %}
                     </td>
-                    <td>{{ p.primary_contact.organization|default:"-" }}</td>
-                    <td>{{ p.primary_contact.title|default:"-" }}</td>
-                    <td>{{ p.primary_contact.department|default:"-" }}</td>
-                    <td>{{ p.primary_contact.address|default:"-" }}</td>
-                    <td style="font-weight:bold;">{{ p.primary_contact.email|default:"-" }}</td>
+                    <td data-col-key="company">{{ p.primary_contact.organization|default:"-" }}</td>
+                    <td data-col-key="title">{{ p.primary_contact.title|default:"-" }}</td>
+                    <td data-col-key="department">{{ p.primary_contact.department|default:"-" }}</td>
+                    <td data-col-key="address">{{ p.primary_contact.address|default:"-" }}</td>
+                    <td data-col-key="email" style="font-weight:bold;">{{ p.primary_contact.email|default:"-" }}</td>
                   </tr>
                 {% endfor %}
               </tbody>
@@ -97,10 +100,39 @@
         </div>
 
         <div class="app-action-area" style="margin-top:16px;">
-          <button type="submit" class="app-btn app-btn--primary">確認画面へ進む</button>
+          {% if mode == "add" %}
+            <button type="submit" class="app-btn app-btn--primary js-selection-submit"
+                    data-label-template="選択した {count} 件を追加する" disabled>
+              選択した 0 件を追加する
+            </button>
+          {% else %}
+            <button type="submit" class="app-btn app-btn--danger js-selection-submit"
+                    data-label-template="選択した {count} 件を削除する" disabled>
+              選択した 0 件を削除する
+            </button>
+          {% endif %}
           <a href="{{ detail_url }}" class="app-btn app-btn--secondary">キャンセル</a>
         </div>
       </form>
+
+      <script>
+        (function () {
+          var btn = document.querySelector('.js-selection-submit');
+          if (!btn) return;
+          var template = btn.dataset.labelTemplate;
+          var cbs = document.querySelectorAll('.js-member-cb');
+          function refresh() {
+            var n = 0;
+            cbs.forEach(function (cb) { if (cb.checked) n++; });
+            btn.textContent = template.replace('{count}', n);
+            btn.disabled = (n === 0);
+          }
+          cbs.forEach(function (cb) { cb.addEventListener('change', refresh); });
+          var selectAll = document.getElementById('js-member-select-all');
+          if (selectAll) selectAll.addEventListener('change', refresh);
+          refresh();
+        })();
+      </script>
     {% else %}
       <p class="app-muted">
         {% if mode == "add" %}
@@ -113,6 +145,7 @@
   </section>
 
   {% include "mailings/_limited_list_script.html" %}
+  {% include "mailings/_sort_script.html" %}
 
   <script>
     (function () {

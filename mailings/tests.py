@@ -107,7 +107,7 @@ class MemberAddViewGetTests(_MemberEditTestBase):
         url = reverse("mailings:list_member_add", args=[ml.pk])
         resp = self.client.get(url)
         self.assertIn(p, list(resp.context["candidates"]))
-        self.assertIn("退会済み", resp.content.decode("utf-8"))
+        self.assertIn(">退会済み</span>", resp.content.decode("utf-8"))
 
     def test_excludes_archived_person(self):
         """個別追加の母集合は active のみ（§6.7）。"""
@@ -250,7 +250,7 @@ class MemberRemoveViewGetTests(_MemberEditTestBase):
         url = reverse("mailings:list_member_remove", args=[ml.pk])
         resp = self.client.get(url)
         self.assertIn(p, list(resp.context["candidates"]))
-        self.assertIn("退会済み", resp.content.decode("utf-8"))
+        self.assertIn(">退会済み</span>", resp.content.decode("utf-8"))
 
     def test_text_filter_applied(self):
         ml = self._make_list()
@@ -580,9 +580,9 @@ class DetailViewUnsubscribedBadgeTests(_MemberEditTestBase):
         url = reverse("mailings:mailing_list_detail", args=[ml.pk])
         resp = self.client.get(url)
         body = resp.content.decode("utf-8")
-        # バッジは <span class="app-status-badge app-status-badge--warning"...>退会済み</span>
-        self.assertIn("退会済み", body)
-        self.assertIn("app-status-badge--warning", body)
+        # バッジ本体は <span class="app-status-badge app-status-badge--warning js-unsubscribed-badge" ...>退会済み</span>
+        self.assertIn(">退会済み</span>", body)
+        self.assertIn("js-unsubscribed-badge", body)
 
     def test_no_badge_for_normal_member(self):
         ml = self._make_list()
@@ -590,7 +590,9 @@ class DetailViewUnsubscribedBadgeTests(_MemberEditTestBase):
         self._add_member(ml, p)
         url = reverse("mailings:mailing_list_detail", args=[ml.pk])
         resp = self.client.get(url)
-        self.assertNotIn("退会済み", resp.content.decode("utf-8"))
+        # 列切替メニュー側にも「退会済みバッジ」ラベルや JS 内 selector 文字列が出るため
+        # substring チェックは不適。バッジ本体タグ（>退会済み</span>）の有無で判定する。
+        self.assertNotIn(">退会済み</span>", resp.content.decode("utf-8"))
 
 
 class DisplayCountUITests(_MemberEditTestBase):
@@ -637,3 +639,301 @@ class SessionLargeSnapshotTests(_MemberEditTestBase):
         url = reverse("mailings:list_member_add_confirm", args=[ml.pk])
         resp = self.client.get(url)
         self.assertEqual(resp.status_code, 200)
+
+
+# ======================================================================
+# UI 改善（要望1：ソート機能）
+# ======================================================================
+
+
+class SortViewTests(_MemberEditTestBase):
+    """サーバサイドソートの ORM 適用検証（5 画面共通の挙動）。"""
+
+    def _setup_three_persons(self, ml=None):
+        ml = ml or self._make_list()
+        c = self._make_person("Charlie", organization="Globex", email="c@x")
+        a = self._make_person("Alice", organization="Acme", email="a@x")
+        b = self._make_person("Bob", organization="Initech", email="b@x")
+        return ml, [a, b, c]
+
+    def test_selection_add_default_sort_is_name_asc(self):
+        ml, expected = self._setup_three_persons()
+        url = reverse("mailings:list_member_add", args=[ml.pk])
+        resp = self.client.get(url)
+        ids = [str(p.pk) for p in resp.context["candidates"]]
+        self.assertEqual(ids, [str(p.pk) for p in expected])
+        self.assertEqual(resp.context["current_sort"], "name")
+        self.assertEqual(resp.context["current_dir"], "asc")
+
+    def test_selection_add_sort_by_company_asc(self):
+        ml, _ = self._setup_three_persons()
+        url = reverse("mailings:list_member_add", args=[ml.pk]) + "?sort=company&dir=asc"
+        resp = self.client.get(url)
+        names = [p.primary_contact.full_name for p in resp.context["candidates"]]
+        self.assertEqual(names, ["Alice", "Charlie", "Bob"])  # Acme / Globex / Initech
+
+    def test_selection_add_sort_by_company_desc(self):
+        ml, _ = self._setup_three_persons()
+        url = reverse("mailings:list_member_add", args=[ml.pk]) + "?sort=company&dir=desc"
+        resp = self.client.get(url)
+        names = [p.primary_contact.full_name for p in resp.context["candidates"]]
+        self.assertEqual(names, ["Bob", "Charlie", "Alice"])
+
+    def test_invalid_sort_key_falls_back_to_default(self):
+        ml, _ = self._setup_three_persons()
+        url = reverse("mailings:list_member_add", args=[ml.pk]) + "?sort=BOGUS&dir=desc"
+        resp = self.client.get(url)
+        self.assertEqual(resp.context["current_sort"], "name")
+        # dir も desc は維持される（dir 自体は有効値）
+        self.assertEqual(resp.context["current_dir"], "desc")
+
+    def test_invalid_dir_falls_back_to_default(self):
+        ml, _ = self._setup_three_persons()
+        url = reverse("mailings:list_member_add", args=[ml.pk]) + "?sort=name&dir=sideways"
+        resp = self.client.get(url)
+        self.assertEqual(resp.context["current_dir"], "asc")
+
+    def test_sort_works_with_restore_param(self):
+        """?restore=1 と ?sort=...&dir=... を併用しても両方機能する（仕様書 §2.5）。"""
+        ml = self._make_list()
+        p = self._make_person("Alice")
+        self._put_session(f"mailing_list_{ml.pk}_add_selection", [str(p.pk)])
+        url = (
+            reverse("mailings:list_member_add", args=[ml.pk])
+            + "?restore=1&sort=company&dir=desc"
+        )
+        resp = self.client.get(url)
+        self.assertEqual(resp.context["current_sort"], "company")
+        self.assertEqual(resp.context["current_dir"], "desc")
+        # session は保持される（restore=1 のため）
+        self.assertEqual(
+            self.client.session.get(f"mailing_list_{ml.pk}_add_selection"),
+            [str(p.pk)],
+        )
+
+    def test_detail_view_sort_applies(self):
+        ml = self._make_list()
+        c = self._make_person("Charlie")
+        a = self._make_person("Alice")
+        b = self._make_person("Bob")
+        self._add_member(ml, c)
+        self._add_member(ml, a)
+        self._add_member(ml, b)
+        url = reverse("mailings:mailing_list_detail", args=[ml.pk]) + "?sort=name&dir=desc"
+        resp = self.client.get(url)
+        members = list(resp.context["members"])
+        names = [m.person.primary_contact.full_name for m in members]
+        self.assertEqual(names, ["Charlie", "Bob", "Alice"])
+        self.assertEqual(resp.context["current_sort"], "name")
+        self.assertEqual(resp.context["current_dir"], "desc")
+
+    def test_confirm_view_sort_applies(self):
+        ml = self._make_list()
+        c = self._make_person("Charlie")
+        a = self._make_person("Alice")
+        b = self._make_person("Bob")
+        self._put_session(
+            f"mailing_list_{ml.pk}_add_selection",
+            [str(c.pk), str(a.pk), str(b.pk)],
+        )
+        url = (
+            reverse("mailings:list_member_add_confirm", args=[ml.pk])
+            + "?sort=name&dir=asc"
+        )
+        resp = self.client.get(url)
+        names = [p.primary_contact.full_name for p in resp.context["persons"]]
+        self.assertEqual(names, ["Alice", "Bob", "Charlie"])
+
+    def test_sort_arrow_rendered_for_active_column(self):
+        ml = self._make_list()
+        self._make_person("Alice")
+        url = reverse("mailings:list_member_add", args=[ml.pk]) + "?sort=company&dir=desc"
+        resp = self.client.get(url)
+        body = resp.content.decode("utf-8")
+        # company 列のヘッダに data-sort-key と bi-arrow-down アイコン
+        self.assertIn('data-sort-key="company"', body)
+        self.assertIn('bi-arrow-down', body)
+        # name 列はアクティブでないのでアイコンは出ない
+        # （body 内 bi-arrow-up は出ないはず）
+        self.assertNotIn('bi-arrow-up', body)
+
+
+# ======================================================================
+# UI 改善（要望2：表示列切替）
+# ======================================================================
+
+
+class ColumnToggleTests(_MemberEditTestBase):
+    """列切替 partial の埋め込みと data-col-key の整合性。
+
+    クライアントサイド永続化（localStorage）と display 切替は JS 挙動のため pytest
+    では検証しない（カバレッジは実機確認で担保）。ここでは partial が正しく埋め込まれ
+    必要な data-col-key が <th>/<td> に揃っていることを検証する。
+    """
+
+    def test_detail_embeds_column_toggle_with_storage_key(self):
+        ml = self._make_list()
+        url = reverse("mailings:mailing_list_detail", args=[ml.pk])
+        resp = self.client.get(url)
+        body = resp.content.decode("utf-8")
+        self.assertIn('data-storage-key="mailing_list_visible_columns_detail"', body)
+        self.assertIn("表示列を選択", body)
+
+    def test_selection_storage_key_is_mode_specific(self):
+        ml = self._make_list()
+        add_url = reverse("mailings:list_member_add", args=[ml.pk])
+        rem_url = reverse("mailings:list_member_remove", args=[ml.pk])
+        add_resp = self.client.get(add_url)
+        rem_resp = self.client.get(rem_url)
+        self.assertIn(
+            "mailing_list_visible_columns_selection_add",
+            add_resp.content.decode("utf-8"),
+        )
+        self.assertIn(
+            "mailing_list_visible_columns_selection_remove",
+            rem_resp.content.decode("utf-8"),
+        )
+
+    def test_confirm_storage_key_is_mode_specific(self):
+        ml = self._make_list()
+        p = self._make_person("Alice")
+        self._put_session(
+            f"mailing_list_{ml.pk}_add_selection", [str(p.pk)]
+        )
+        self._put_session(
+            f"mailing_list_{ml.pk}_remove_selection", [str(p.pk)]
+        )
+        add_resp = self.client.get(
+            reverse("mailings:list_member_add_confirm", args=[ml.pk])
+        )
+        rem_resp = self.client.get(
+            reverse("mailings:list_member_remove_confirm", args=[ml.pk])
+        )
+        self.assertIn(
+            "mailing_list_visible_columns_confirm_add",
+            add_resp.content.decode("utf-8"),
+        )
+        self.assertIn(
+            "mailing_list_visible_columns_confirm_remove",
+            rem_resp.content.decode("utf-8"),
+        )
+
+    def test_table_cells_have_data_col_key(self):
+        ml = self._make_list()
+        self._add_member(ml, self._make_person("Alice"))
+        url = reverse("mailings:mailing_list_detail", args=[ml.pk])
+        resp = self.client.get(url)
+        body = resp.content.decode("utf-8")
+        for key in ("name", "company", "title", "department", "address", "email"):
+            self.assertIn(f'data-col-key="{key}"', body)
+
+    def test_unsubscribed_badge_has_js_marker_class(self):
+        ml = self._make_list()
+        p = self._make_person("Alice", is_unsubscribed=True)
+        self._add_member(ml, p)
+        url = reverse("mailings:mailing_list_detail", args=[ml.pk])
+        resp = self.client.get(url)
+        body = resp.content.decode("utf-8")
+        # バッジ span に js-unsubscribed-badge クラスが付与されている
+        self.assertIn("js-unsubscribed-badge", body)
+
+
+# ======================================================================
+# UI 改善（要望3：ボタン色とラベル）
+# ======================================================================
+
+
+class ButtonColorAndLabelTests(_MemberEditTestBase):
+    def test_detail_add_button_is_primary_with_new_label(self):
+        ml = self._make_list()
+        url = reverse("mailings:mailing_list_detail", args=[ml.pk])
+        resp = self.client.get(url)
+        body = resp.content.decode("utf-8")
+        self.assertIn('class="app-btn app-btn--primary">メンバーを追加</a>', body)
+        self.assertNotIn(">個別追加<", body)
+
+    def test_detail_remove_button_is_danger_with_new_label(self):
+        ml = self._make_list()
+        url = reverse("mailings:mailing_list_detail", args=[ml.pk])
+        resp = self.client.get(url)
+        body = resp.content.decode("utf-8")
+        self.assertIn('class="app-btn app-btn--danger">メンバーを削除</a>', body)
+        self.assertNotIn(">個別削除<", body)
+        # warning カラーは旧ラベルでは使われていない（=危険操作=danger）
+        self.assertNotIn('class="app-btn app-btn--warning">メンバーを削除', body)
+
+    def test_frozen_detail_buttons_keep_color_and_label(self):
+        ml = self._make_list(frozen=True)
+        url = reverse("mailings:mailing_list_detail", args=[ml.pk])
+        resp = self.client.get(url)
+        body = resp.content.decode("utf-8")
+        # disabled でも色クラスは維持（§4.1）
+        self.assertIn("app-btn--primary", body)
+        self.assertIn("app-btn--danger", body)
+        self.assertIn("メンバーを追加", body)
+        self.assertIn("メンバーを削除", body)
+
+    def test_selection_header_label_with_current_count(self):
+        ml = self._make_list()
+        self._add_member(ml, self._make_person("Existing"))
+        url = reverse("mailings:list_member_add", args=[ml.pk])
+        resp = self.client.get(url)
+        body = resp.content.decode("utf-8")
+        self.assertIn("メンバーを追加：", body)
+        self.assertIn("（現在 1 件）", body)
+
+    def test_selection_add_submit_button_is_primary_with_count_placeholder(self):
+        ml = self._make_list()
+        self._make_person("Alice")
+        url = reverse("mailings:list_member_add", args=[ml.pk])
+        resp = self.client.get(url)
+        body = resp.content.decode("utf-8")
+        # mode=add の確定ボタンは primary
+        self.assertIn('class="app-btn app-btn--primary js-selection-submit"', body)
+        self.assertIn('data-label-template="選択した {count} 件を追加する"', body)
+        # 初期描画は "0 件" + disabled
+        self.assertIn("選択した 0 件を追加する", body)
+
+    def test_selection_remove_submit_button_is_danger(self):
+        ml = self._make_list()
+        self._add_member(ml, self._make_person("Alice"))
+        url = reverse("mailings:list_member_remove", args=[ml.pk])
+        resp = self.client.get(url)
+        body = resp.content.decode("utf-8")
+        self.assertIn('class="app-btn app-btn--danger js-selection-submit"', body)
+        self.assertIn('data-label-template="選択した {count} 件を削除する"', body)
+
+    def test_confirm_add_button_is_primary(self):
+        ml = self._make_list()
+        p = self._make_person("Alice")
+        self._put_session(f"mailing_list_{ml.pk}_add_selection", [str(p.pk)])
+        url = reverse("mailings:list_member_add_confirm", args=[ml.pk])
+        resp = self.client.get(url)
+        body = resp.content.decode("utf-8")
+        self.assertIn('class="app-btn app-btn--primary">追加を確定</button>', body)
+
+    def test_confirm_remove_button_is_danger(self):
+        ml = self._make_list()
+        p = self._make_person("Alice")
+        self._add_member(ml, p)
+        self._put_session(f"mailing_list_{ml.pk}_remove_selection", [str(p.pk)])
+        url = reverse("mailings:list_member_remove_confirm", args=[ml.pk])
+        resp = self.client.get(url)
+        body = resp.content.decode("utf-8")
+        self.assertIn('class="app-btn app-btn--danger">削除を確定</button>', body)
+
+    def test_confirm_description_uses_count(self):
+        ml = self._make_list()
+        for n in ["Alice", "Bob"]:
+            self._put_session_addhelper = self._make_person(n)
+        ids = [
+            str(p.pk)
+            for p in Person.objects.filter(
+                primary_contact__full_name__in=["Alice", "Bob"]
+            )
+        ]
+        self._put_session(f"mailing_list_{ml.pk}_add_selection", ids)
+        url = reverse("mailings:list_member_add_confirm", args=[ml.pk])
+        resp = self.client.get(url)
+        body = resp.content.decode("utf-8")
+        self.assertIn("以下の 2 件をリストに追加します", body)

@@ -139,17 +139,22 @@ class MailingListDetailView(LoginRequiredMixin, DetailView):
         # ため、詳細画面ではスタック生成だけ行い、一覧画面側で push_current 済みのスタックを参照する。
         # 詳細→削除→キャンセルで詳細に戻る挙動はテンプレ側で {% append_back_url %} を使って
         # back_stack に詳細 URL を追加することで実現する）。
+        members_qs = (
+            MailingListMember.objects.filter(mailing_list=self.object)
+            .select_related("person", "person__primary_contact", "added_by")
+        )
+        # ?sort=...&dir=... があれば適用、無ければ name asc がデフォルト（UI 改善 要望1）
+        members_qs = _apply_sort_to_members(members_qs, self.request.GET)
+        sort_key, sort_dir = _resolve_sort(self.request.GET)
         context.update(
             {
                 "back": BackNavigator(self.request),
                 "active_app": "mailings",
                 "active_menu": "mailings:mailing_list_list",
-                "members": (
-                    MailingListMember.objects.filter(mailing_list=self.object)
-                    .select_related("person", "person__primary_contact", "added_by")
-                    .order_by("created_at")
-                ),
+                "members": members_qs,
                 "is_frozen": self.object.members_frozen_at is not None,
+                "current_sort": sort_key,
+                "current_dir": sort_dir,
             }
         )
         return context
@@ -593,6 +598,53 @@ def _is_session_truthy(seq):
     return bool(seq)
 
 
+# ----------------------------------------------------------------------
+# 列ソート（Phase 1c-α UI 改善 要望1、サーバサイド order_by）
+# ----------------------------------------------------------------------
+# URL クエリ ?sort=<key>&dir=<asc|desc>。不正値はデフォルト（name asc）に戻す。
+# 詳細・選択・確認の 5 画面で共通の鍵を使う。Person QuerySet と
+# MailingListMember QuerySet で関連パスが異なるため適用ヘルパーを 2 種用意。
+
+SORT_FIELD_MAP = {
+    "name": "primary_contact__full_name",
+    "company": "primary_contact__organization",
+    "department": "primary_contact__department",
+    "title": "primary_contact__title",
+    "address": "primary_contact__address",
+    "email": "primary_contact__email",
+}
+SORT_DEFAULT_KEY = "name"
+SORT_DEFAULT_DIR = "asc"
+SORT_ALLOWED_DIRS = ("asc", "desc")
+
+
+def _resolve_sort(params):
+    """[性質] 純関数。GET から (sort_key, direction) を取り出し、不正値はデフォルトに戻す。"""
+    sort_key = params.get("sort") or SORT_DEFAULT_KEY
+    direction = params.get("dir") or SORT_DEFAULT_DIR
+    if sort_key not in SORT_FIELD_MAP:
+        sort_key = SORT_DEFAULT_KEY
+    if direction not in SORT_ALLOWED_DIRS:
+        direction = SORT_DEFAULT_DIR
+    return sort_key, direction
+
+
+def _apply_sort_to_persons(qs, params):
+    """[性質] 純関数。Person QuerySet に ?sort=...&dir=... を適用。"""
+    sort_key, direction = _resolve_sort(params)
+    field = SORT_FIELD_MAP[sort_key]
+    prefix = "" if direction == "asc" else "-"
+    return qs.order_by(prefix + field, "pk")
+
+
+def _apply_sort_to_members(qs, params):
+    """[性質] 純関数。MailingListMember QuerySet に sort を適用（person__ プレフィクス経由）。"""
+    sort_key, direction = _resolve_sort(params)
+    field = "person__" + SORT_FIELD_MAP[sort_key]
+    prefix = "" if direction == "asc" else "-"
+    return qs.order_by(prefix + field, "pk")
+
+
 def _apply_person_text_filters(qs, params):
     """SEARCH_PARAMS の 7 項目を Person QuerySet に icontains で適用する（status は触らない）。
 
@@ -769,23 +821,31 @@ class _MemberSelectionView(LoginRequiredMixin, View):
             # filter(status='active') は URL クエリで status=archived 等を直手入力された
             # ケースでも active 限定を担保するための二重防衛。
             qs = search_persons(params, default_statuses=("active",))
-            return qs.filter(status="active").exclude(pk__in=existing_member_ids)
+            qs = qs.filter(status="active").exclude(pk__in=existing_member_ids)
+            return _apply_sort_to_persons(qs, params)
         # remove: 母集合：このリストの現メンバー全件（status / is_unsubscribed は問わない、§6.7）。
         qs = Person.objects.filter(pk__in=existing_member_ids).select_related(
             "primary_contact"
         )
         qs = _apply_person_text_filters(qs, params)
-        return qs.order_by("-updated_at", "-created_at")
+        return _apply_sort_to_persons(qs, params)
 
     def _build_context(self, request, mailing_list, candidates, total, selected_ids):
+        current_member_count = MailingListMember.objects.filter(
+            mailing_list=mailing_list
+        ).count()
+        sort_key, sort_dir = _resolve_sort(request.GET)
         context = {
             "mailing_list": mailing_list,
             "mode": self.mode,
-            "mode_label": "個別追加" if self.mode == "add" else "個別削除",
+            "mode_label": "メンバーを追加" if self.mode == "add" else "メンバーを削除",
+            "current_member_count": current_member_count,
             "candidates": candidates,
             "total_count": total,
             "display_limit": 50,
             "selected_ids": selected_ids,
+            "current_sort": sort_key,
+            "current_dir": sort_dir,
             "back": BackNavigator(request),
             "active_app": "mailings",
             "active_menu": "mailings:mailing_list_list",
@@ -836,9 +896,11 @@ class _MemberConfirmView(LoginRequiredMixin, View):
                 request, "選択がリセットされました。もう一度選択してください。"
             )
             return redirect(_selection_url_name(self.mode), pk=mailing_list.pk)
-        persons = list(
-            Person.objects.filter(pk__in=person_ids).select_related("primary_contact")
+        persons_qs = Person.objects.filter(pk__in=person_ids).select_related(
+            "primary_contact"
         )
+        persons = list(_apply_sort_to_persons(persons_qs, request.GET))
+        sort_key, sort_dir = _resolve_sort(request.GET)
         back = BackNavigator(request)
         back_to_selection = reverse(
             _selection_url_name(self.mode), args=[mailing_list.pk]
@@ -849,10 +911,12 @@ class _MemberConfirmView(LoginRequiredMixin, View):
         context = {
             "mailing_list": mailing_list,
             "mode": self.mode,
-            "mode_label": "個別追加" if self.mode == "add" else "個別削除",
+            "mode_label": "メンバーを追加" if self.mode == "add" else "メンバーを削除",
             "persons": persons,
             "total_count": len(persons),
             "display_limit": 50,
+            "current_sort": sort_key,
+            "current_dir": sort_dir,
             "back": back,
             "active_app": "mailings",
             "active_menu": "mailings:mailing_list_list",
