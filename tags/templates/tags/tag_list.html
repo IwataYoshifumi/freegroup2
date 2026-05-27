@@ -66,6 +66,7 @@
                 <th class="app-table__col--action">操作</th>
                 <th>カテゴリ</th>
                 <th>タグ名</th>
+                <th>付与 Person 数</th>
                 <th>説明</th>
                 <th>状態</th>
                 <th>作成者</th>
@@ -85,6 +86,7 @@
                   </td>
                   <td>{{ tag.category.name }}</td>
                   <td>{{ tag.name }}</td>
+                  <td>{{ tag.person_count }}</td>
                   <td>{{ tag.description|default:"-"|truncatechars:60 }}</td>
                   <td>
                     {% if tag.is_archived %}

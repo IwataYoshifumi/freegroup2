@@ -39,6 +39,15 @@ from .services.list_freeze import (
 from .services.tag_extraction import count_persons_by_tags, extract_persons_by_tags
 
 
+def _archived_only(request):
+    """[性質] 純関数。URL クエリ `?archived_only=1` の真偽を返す（Phase 1b-ε.5）。
+
+    一覧画面の「アーカイブ済みのみを表示」トグルから渡される。tags 側の
+    `tags.views._archived_only` と同じ流儀（apps 間 import 回避のため独立定義）。
+    """
+    return request.GET.get("archived_only", "").lower() in ("1", "true", "on", "yes")
+
+
 # ======================================================================
 # MailingList CRUD（§4.11 / §11.3）
 # ======================================================================
@@ -53,22 +62,25 @@ class MailingListListView(LoginRequiredMixin, ListView):
     def get_queryset(self):
         from django.db.models import Count
 
-        return (
-            MailingList.objects.filter(is_archived=False)
-            .select_related("created_by")
-            .annotate(member_count=Count("members"))
-            .order_by("-created_at")
+        qs = MailingList.objects.select_related("created_by").annotate(
+            member_count=Count("members")
         )
+        if _archived_only(self.request):
+            qs = qs.filter(is_archived=True)
+        else:
+            qs = qs.filter(is_archived=False)
+        return qs.order_by("-created_at")
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         back = BackNavigator(self.request)
-        back.push_current("配信リスト一覧", ["page"])
+        back.push_current("配信リスト一覧", ["page", "archived_only"])
         context.update(
             {
                 "back": back,
                 "active_app": "mailings",
                 "active_menu": "mailings:mailing_list_list",
+                "archived_only": _archived_only(self.request),
             }
         )
         return context
@@ -148,6 +160,19 @@ class MailingListUpdateView(LoginRequiredMixin, UpdateView):
     model = MailingList
     form_class = MailingListForm
     template_name = "mailings/mailing_list_form.html"
+
+    def dispatch(self, request, *args, **kwargs):
+        # Phase 1b-ε.5：アーカイブ済みは編集禁止（詳細画面に redirect + warning、tag 側流儀踏襲）。
+        mailing_list = get_object_or_404(MailingList, pk=kwargs.get("pk"))
+        if mailing_list.is_archived:
+            from django.contrib import messages
+
+            messages.warning(
+                request,
+                "アーカイブ済みは編集できません。非アーカイブ化してから編集してください。",
+            )
+            return redirect("mailings:mailing_list_detail", pk=mailing_list.pk)
+        return super().dispatch(request, *args, **kwargs)
 
     def get_queryset(self):
         return MailingList.objects.filter(is_archived=False)

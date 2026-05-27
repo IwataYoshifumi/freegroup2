@@ -15,8 +15,22 @@
     </div>
   </div>
 
-  {% if mailing_lists %}
-    <section class="app-card">
+  <section class="app-card">
+    <form method="get" style="margin-bottom:8px;">
+      <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+        <label for="id_archived_only"
+               class="app-btn {% if archived_only %}app-btn--primary{% else %}app-btn--secondary{% endif %}"
+               style="cursor:pointer; margin-left:auto;">
+          {% if archived_only %}✓ {% endif %}アーカイブ済みのみを表示
+        </label>
+        <input type="checkbox" id="id_archived_only" name="archived_only" value="1"
+               style="position:absolute; opacity:0; pointer-events:none;"
+               onchange="this.form.submit();"
+               {% if archived_only %}checked{% endif %}>
+      </div>
+    </form>
+
+    {% if mailing_lists %}
       <div class="app-table-wrapper">
         <table class="app-table app-table--nowrap">
           <thead>
@@ -25,6 +39,7 @@
               <th>リスト名</th>
               <th>説明</th>
               <th>メンバー数</th>
+              <th>状態</th>
               <th>凍結状態</th>
               <th>凍結日時</th>
               <th>作成者</th>
@@ -38,9 +53,18 @@
               {% url 'mailings:mailing_list_delete' pk=ml.id as delete_url %}
               <tr>
                 <td class="app-table__col--action">
-                  <a href="{% append_back_url detail_url back %}" class="app-btn app-btn--secondary app-btn--sm">詳細</a>
-                  <a href="{% append_back_url update_url back %}" class="app-btn app-btn--secondary app-btn--sm">編集</a>
-                  <a href="{% append_back_url delete_url back %}" class="app-btn app-btn--danger app-btn--sm">アーカイブ化</a>
+                  <a href="{% append_back_url detail_url back %}" class="app-btn app-btn--outline-secondary app-btn--sm">詳細</a>
+                  {% if not ml.is_archived %}
+                    <a href="{% append_back_url update_url back %}" class="app-btn app-btn--success app-btn--sm">編集</a>
+                    <button type="button" class="app-btn app-btn--outline-secondary app-btn--sm js-row-archive-toggle"
+                            data-target="js-row-archive-{{ ml.id }}"
+                            aria-haspopup="true" aria-expanded="false">
+                      <i class="bi bi-caret-down-fill"></i>
+                    </button>
+                    <span id="js-row-archive-{{ ml.id }}" style="display:none;">
+                      <a href="{% append_back_url delete_url back %}" class="app-btn app-btn--warning app-btn--sm">アーカイブ化</a>
+                    </span>
+                  {% endif %}
                 </td>
                 <td>{{ ml.name }}</td>
                 <td>
@@ -49,6 +73,13 @@
                   {% else %}-{% endif %}
                 </td>
                 <td>{{ ml.member_count }}</td>
+                <td>
+                  {% if ml.is_archived %}
+                    <span class="app-status-badge app-status-badge--muted">アーカイブ済み</span>
+                  {% else %}
+                    <span class="app-status-badge app-status-badge--success">アクティブ</span>
+                  {% endif %}
+                </td>
                 <td>
                   {% if ml.members_frozen_at %}
                     <span class="app-status-badge app-status-badge--success">凍結済</span>
@@ -68,10 +99,26 @@
       {% if is_paginated %}
         {% include "persons/_pagination.html" %}
       {% endif %}
-    </section>
-  {% else %}
-    <section class="app-card">
-      <p class="app-muted">配信リストがまだありません。「＋ 新規リスト作成」から作成してください。</p>
-    </section>
-  {% endif %}
+    {% else %}
+      <p class="app-muted">
+        {% if archived_only %}アーカイブ済みの配信リストはありません。
+        {% else %}アクティブな配信リストがありません（「＋ 新規リスト作成」から作成、または「アーカイブ済みのみを表示」でアーカイブ済みを確認できます）。
+        {% endif %}
+      </p>
+    {% endif %}
+  </section>
+
+  <script>
+    (function () {
+      document.querySelectorAll('.js-row-archive-toggle').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var target = document.getElementById(btn.dataset.target);
+          if (!target) return;
+          var opening = target.style.display === 'none' || target.style.display === '';
+          target.style.display = opening ? 'inline' : 'none';
+          btn.setAttribute('aria-expanded', opening ? 'true' : 'false');
+        });
+      });
+    })();
+  </script>
 {% endblock %}

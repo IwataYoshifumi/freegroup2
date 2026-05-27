@@ -224,6 +224,8 @@ class TagListView(LoginRequiredMixin, ListView):
     paginate_by = 50
 
     def get_queryset(self):
+        from django.db.models import Count, Q
+
         qs = Tag.objects.select_related("category", "created_by")
         if _archived_only(self.request):
             qs = qs.filter(is_archived=True)
@@ -232,6 +234,13 @@ class TagListView(LoginRequiredMixin, ListView):
         category_id = self.request.GET.get("category")
         if category_id:
             qs = qs.filter(category_id=category_id)
+        # 付与 Person 数（active のみ集計、§7.3 手順 3 / §11.7.1 と整合）。
+        qs = qs.annotate(
+            person_count=Count(
+                "assignments",
+                filter=Q(assignments__person__status=Person.Status.ACTIVE),
+            )
+        )
         return qs.order_by("category__sort_order", "name")
 
     def get_context_data(self, **kwargs):
