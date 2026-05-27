@@ -111,9 +111,9 @@ class MailingListDetailView(LoginRequiredMixin, DetailView):
     context_object_name = "mailing_list"
 
     def get_queryset(self):
-        return MailingList.objects.filter(is_archived=False).select_related(
-            "created_by"
-        )
+        # Phase 1b-δ：archived な MailingList も詳細表示できるよう is_archived フィルタを外す
+        # （非アーカイブ化ボタンへの導線。一覧画面側は filter(is_archived=False) のまま）。
+        return MailingList.objects.select_related("created_by")
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -181,10 +181,13 @@ class MailingListUpdateView(LoginRequiredMixin, UpdateView):
 
 
 class MailingListDeleteView(LoginRequiredMixin, View):
-    """論理削除（is_archived=True、§11.3.4）。GET で確認画面、POST で実行。
+    """論理アーカイブ化（is_archived=True、§11.3.4）。GET で確認画面、POST で実行。
 
     物理削除しない理由：Campaign の mailing_list FK が PROTECT（§4.2）のため
     （Phase 2 以降で Campaign が存在し始めると物理削除すると履歴が壊れる）。
+
+    Phase 1b-δ で UI ラベルは「削除」→「アーカイブ化」に統一したが、コード内表現
+    （URL 名・View 名）は維持する方針（指示書準拠）。
     """
 
     def get(self, request, pk):
@@ -196,6 +199,23 @@ class MailingListDeleteView(LoginRequiredMixin, View):
         mailing_list.is_archived = True
         mailing_list.save(update_fields=["is_archived", "updated_at"])
         return redirect("mailings:mailing_list_list")
+
+
+class MailingListUnarchiveView(LoginRequiredMixin, View):
+    """配信リスト非アーカイブ化（is_archived=False、Phase 1b-δ 追加）。POST 専用。
+
+    archived な MailingList を元に戻す。リダイレクト先は呼び出し元
+    （back スタックがあればそこへ、無ければ詳細画面）。
+    """
+
+    def post(self, request, pk):
+        mailing_list = get_object_or_404(MailingList, pk=pk)
+        mailing_list.is_archived = False
+        mailing_list.save(update_fields=["is_archived", "updated_at"])
+        back = BackNavigator(request)
+        if back.back_exist:
+            return redirect(back.back_url)
+        return redirect("mailings:mailing_list_detail", pk=mailing_list.pk)
 
 
 def _render_delete_confirm(request, mailing_list):

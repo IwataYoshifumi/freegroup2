@@ -64,14 +64,16 @@
             </thead>
             <tbody>
               {% for tag in tags %}
+                {% url 'tags:tag_detail' pk=tag.id as detail_url %}
                 {% url 'tags:tag_update' pk=tag.id as update_url %}
                 <tr>
                   <td class="app-table__col--action">
+                    <a href="{% append_back_url detail_url back %}" class="app-btn app-btn--secondary app-btn--sm">詳細</a>
                     <a href="{% append_back_url update_url back %}" class="app-btn app-btn--secondary app-btn--sm">編集</a>
                     <form method="post" action="{% url 'tags:tag_delete' pk=tag.id %}" style="display:inline;"
-                          onsubmit="return confirm('「{{ tag.name }}」を論理削除します。よろしいですか？');">
+                          onsubmit="return confirm('「{{ tag.name }}」をアーカイブ化します。よろしいですか？');">
                       {% csrf_token %}
-                      <button type="submit" class="app-btn app-btn--danger app-btn--sm">削除</button>
+                      <button type="submit" class="app-btn app-btn--danger app-btn--sm">アーカイブ化</button>
                     </form>
                   </td>
                   <td>{{ tag.category.name }}</td>

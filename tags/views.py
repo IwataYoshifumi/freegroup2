@@ -21,7 +21,7 @@ from django.urls import reverse_lazy
 from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.decorators.http import require_POST
-from django.views.generic import CreateView, ListView, TemplateView, UpdateView
+from django.views.generic import CreateView, DetailView, ListView, TemplateView, UpdateView
 
 from back_navigator.back_navigator import BackNavigator
 from config.constants import BULK_TAGGING_MAX_PERSONS
@@ -217,14 +217,95 @@ class TagUpdateView(LoginRequiredMixin, UpdateView):
         return context
 
 
+class TagDetailView(LoginRequiredMixin, DetailView):
+    """タグ詳細（Phase 1b-δ 追加、§5.1 No.22）。
+
+    タグ基本情報 + 付与 Person 一覧（ページネーション 20 件/ページ）を表示する。
+    archived タグも閲覧可能（非アーカイブ化導線のため queryset は全件）。
+
+    BackNavigator は contacts/cards 慣例どおり詳細画面では push_current を呼ばず、
+    一覧画面で積まれたスタックをそのまま参照する。
+    """
+
+    model = Tag
+    template_name = "tags/tag_detail.html"
+    context_object_name = "tag"
+
+    def get_queryset(self):
+        return Tag.objects.select_related("category", "created_by")
+
+    def get_context_data(self, **kwargs):
+        from django.core.paginator import Paginator
+
+        context = super().get_context_data(**kwargs)
+        person_qs = (
+            Person.objects.filter(
+                status=Person.Status.ACTIVE,
+                tag_assignments__tag=self.object,
+            )
+            .select_related("primary_contact")
+            .order_by("-updated_at", "-created_at")
+            .distinct()
+        )
+        paginator = Paginator(person_qs, 20)
+        page_number = self.request.GET.get("page") or 1
+        page_obj = paginator.get_page(page_number)
+        context.update(
+            {
+                "back": BackNavigator(self.request),
+                "active_app": "mailings",
+                "active_menu": "tags:tag_list",
+                "person_total": person_qs.count(),
+                "page_obj": page_obj,
+                "paginator": paginator,
+                "is_paginated": page_obj.has_other_pages(),
+            }
+        )
+        return context
+
+
 class TagDeleteView(LoginRequiredMixin, View):
-    """論理削除（is_archived=True、§11.2.4）。物理削除はしない。"""
+    """論理アーカイブ化（is_archived=True、§11.2.4）。物理削除はしない。
+
+    Phase 1b-δ で UI ラベルを「削除」→「アーカイブ化」に統一したが、コード内表現
+    （URL 名・View 名）は維持する方針（指示書準拠）。
+    """
 
     def post(self, request, pk):
         tag = get_object_or_404(Tag, pk=pk)
         tag.is_archived = True
         tag.save(update_fields=["is_archived", "updated_at"])
         return redirect("tags:tag_list")
+
+
+class TagUnarchiveView(LoginRequiredMixin, View):
+    """非アーカイブ化（is_archived=False、Phase 1b-δ 追加）。POST 専用。
+
+    archived タグを元に戻す。リダイレクト先は呼び出し元（back スタックがあればそこへ、
+    無ければタグ一覧）。
+    """
+
+    def post(self, request, pk):
+        tag = get_object_or_404(Tag, pk=pk)
+        tag.is_archived = False
+        tag.save(update_fields=["is_archived", "updated_at"])
+        back = BackNavigator(request)
+        if back.back_exist:
+            return redirect(back.back_url)
+        return redirect("tags:tag_detail", pk=tag.pk)
+
+
+class TagCategoryUnarchiveView(LoginRequiredMixin, View):
+    """タグカテゴリ非アーカイブ化（is_archived=False、Phase 1b-δ 追加）。POST 専用。"""
+
+    def post(self, request, pk):
+        category = get_object_or_404(TagCategory, pk=pk)
+        category.is_archived = False
+        category.save(update_fields=["is_archived", "updated_at"])
+        back = BackNavigator(request)
+        if back.back_exist:
+            return redirect(back.back_url)
+        return redirect("tags:tag_category_update", pk=category.pk)
 
 
 # ======================================================================

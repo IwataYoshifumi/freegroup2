@@ -1,0 +1,124 @@
+{% extends "mailings/app_base.html" %}
+{% load back_tags %}
+
+{% block title %}タグ詳細：{{ tag.name }} — FreeGroup2{% endblock %}
+
+{% block content %}
+  <div class="app-page-header">
+    <div>
+      <div class="app-breadcrumb">タグ管理 / タグ一覧 / 詳細</div>
+      <h1>
+        {{ tag.name }}
+        {% if tag.is_archived %}
+          <span class="app-status-badge app-status-badge--muted">アーカイブ済み</span>
+        {% endif %}
+      </h1>
+    </div>
+    <div class="app-action-area">
+      {% url 'tags:tag_update' pk=tag.id as update_url %}
+      {% if tag.is_archived %}
+        <span class="app-btn app-btn--secondary" style="opacity:0.5; pointer-events:none;" aria-disabled="true">編集</span>
+        <form method="post" action="{% url 'tags:tag_unarchive' pk=tag.id %}" style="display:inline;"
+              onsubmit="return confirm('「{{ tag.name }}」を非アーカイブ化します。よろしいですか？');">
+          {% csrf_token %}
+          {{ back.hidden_fields }}
+          <button type="submit" class="app-btn app-btn--primary">非アーカイブ化</button>
+        </form>
+      {% else %}
+        <a href="{% append_back_url update_url back %}" class="app-btn app-btn--secondary">編集</a>
+        <form method="post" action="{% url 'tags:tag_delete' pk=tag.id %}" style="display:inline;"
+              onsubmit="return confirm('「{{ tag.name }}」をアーカイブ化します。よろしいですか？');">
+          {% csrf_token %}
+          <button type="submit" class="app-btn app-btn--danger">アーカイブ化</button>
+        </form>
+      {% endif %}
+      {% if back.back_exist %}
+        <a href="{% back_url back %}" class="app-btn app-btn--secondary">戻る</a>
+      {% endif %}
+      {% if back.back_all_exist %}
+        <a href="{{ back.back_all_url }}" class="app-btn app-btn--secondary">最初に戻る</a>
+      {% endif %}
+    </div>
+  </div>
+
+  <section class="app-card">
+    <div class="app-detail-item">
+      <div class="app-detail-label">タグ名</div>
+      <div class="app-detail-value">{{ tag.name }}</div>
+    </div>
+    <div class="app-detail-item">
+      <div class="app-detail-label">カテゴリ</div>
+      <div class="app-detail-value">{{ tag.category.name }}</div>
+    </div>
+    <div class="app-detail-item">
+      <div class="app-detail-label">説明</div>
+      <div class="app-detail-value">{{ tag.description|default:"-"|linebreaksbr }}</div>
+    </div>
+    <div class="app-detail-item">
+      <div class="app-detail-label">状態</div>
+      <div class="app-detail-value">
+        {% if tag.is_archived %}
+          <span class="app-status-badge app-status-badge--muted">アーカイブ済み</span>
+        {% else %}
+          <span class="app-status-badge app-status-badge--success">アクティブ</span>
+        {% endif %}
+      </div>
+    </div>
+    <div class="app-detail-item">
+      <div class="app-detail-label">作成者</div>
+      <div class="app-detail-value">{{ tag.created_by.username|default:"-" }}</div>
+    </div>
+    <div class="app-detail-item">
+      <div class="app-detail-label">作成日時</div>
+      <div class="app-detail-value">{{ tag.created_at|date:"Y/m/d H:i:s" }}</div>
+    </div>
+    <div class="app-detail-item">
+      <div class="app-detail-label">更新日時</div>
+      <div class="app-detail-value">{{ tag.updated_at|date:"Y/m/d H:i:s" }}</div>
+    </div>
+  </section>
+
+  <section class="app-card">
+    <div class="app-section__header">
+      <h2>付与 Person 一覧（{{ person_total }} 件）</h2>
+    </div>
+    {% if page_obj.object_list %}
+      <div class="app-table-wrapper">
+        <table class="app-table app-table--nowrap">
+          <thead>
+            <tr>
+              <th class="app-table__col--action">操作</th>
+              <th>会社名</th>
+              <th>氏名</th>
+              <th>役職</th>
+              <th>メールアドレス</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for person in page_obj.object_list %}
+              {% url 'persons:person_detail' pk=person.id as person_url %}
+              <tr>
+                <td class="app-table__col--action">
+                  <a href="{% append_back_url person_url back %}" class="app-btn app-btn--secondary app-btn--sm">詳細</a>
+                </td>
+                <td>{{ person.primary_contact.organization|default:"-" }}</td>
+                <td>
+                  {% if person.primary_contact %}{{ person.primary_contact.full_name|default:"(氏名なし)" }}
+                  {% else %}<span class="app-muted">(primary_contact 未設定)</span>{% endif %}
+                </td>
+                <td>{{ person.primary_contact.title|default:"-" }}</td>
+                <td>{{ person.primary_contact.email|default:"-" }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      {% if is_paginated %}
+        {% include "persons/_pagination.html" %}
+      {% endif %}
+    {% else %}
+      <p class="app-muted">このタグが付与されたアクティブ Person はありません。</p>
+    {% endif %}
+  </section>
+{% endblock %}

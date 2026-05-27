@@ -35,6 +35,11 @@ urlpatterns = [
         views.MailingListDeleteView.as_view(),
         name="mailing_list_delete",
     ),
+    path(
+        "lists/<uuid:pk>/unarchive/",
+        views.MailingListUnarchiveView.as_view(),
+        name="mailing_list_unarchive",
+    ),
     # AJAX エンドポイント
     path(
         "lists/freeze/",

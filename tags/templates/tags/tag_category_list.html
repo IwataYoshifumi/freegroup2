@@ -41,9 +41,9 @@
                 <td class="app-table__col--action">
                   <a href="{% append_back_url update_url back %}" class="app-btn app-btn--secondary app-btn--sm">編集</a>
                   <form method="post" action="{% url 'tags:tag_category_delete' pk=cat.id %}" style="display:inline;"
-                        onsubmit="return confirm('「{{ cat.name }}」を論理削除します。よろしいですか？');">
+                        onsubmit="return confirm('「{{ cat.name }}」をアーカイブ化します。よろしいですか？');">
                     {% csrf_token %}
-                    <button type="submit" class="app-btn app-btn--danger app-btn--sm">削除</button>
+                    <button type="submit" class="app-btn app-btn--danger app-btn--sm">アーカイブ化</button>
                   </form>
                 </td>
                 <td class="js-sort-order-cell">{{ cat.sort_order }}</td>

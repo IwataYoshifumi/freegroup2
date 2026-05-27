@@ -7,13 +7,28 @@
   <div class="app-page-header">
     <div>
       <div class="app-breadcrumb">メール配信 / 配信リスト管理 / 詳細</div>
-      <h1>{{ mailing_list.name }}</h1>
+      <h1>
+        {{ mailing_list.name }}
+        {% if mailing_list.is_archived %}
+          <span class="app-status-badge app-status-badge--muted">アーカイブ済み</span>
+        {% endif %}
+      </h1>
     </div>
     <div class="app-action-area">
       {% url 'mailings:mailing_list_update' pk=mailing_list.id as update_url %}
       {% url 'mailings:mailing_list_delete' pk=mailing_list.id as delete_url %}
-      <a href="{% append_back_url update_url back %}" class="app-btn app-btn--secondary">編集</a>
-      <a href="{% append_back_url delete_url back %}" class="app-btn app-btn--danger">削除</a>
+      {% if mailing_list.is_archived %}
+        <span class="app-btn app-btn--secondary" style="opacity:0.5; pointer-events:none;" aria-disabled="true">編集</span>
+        <form method="post" action="{% url 'mailings:mailing_list_unarchive' pk=mailing_list.id %}" style="display:inline;"
+              onsubmit="return confirm('「{{ mailing_list.name }}」を非アーカイブ化します。よろしいですか？');">
+          {% csrf_token %}
+          {{ back.hidden_fields }}
+          <button type="submit" class="app-btn app-btn--primary">非アーカイブ化</button>
+        </form>
+      {% else %}
+        <a href="{% append_back_url update_url back %}" class="app-btn app-btn--secondary">編集</a>
+        <a href="{% append_back_url delete_url back %}" class="app-btn app-btn--danger">アーカイブ化</a>
+      {% endif %}
       {% if back.back_exist %}
         <a href="{% back_url back %}" class="app-btn app-btn--secondary">戻る</a>
       {% else %}

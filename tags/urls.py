@@ -30,13 +30,23 @@ urlpatterns = [
         name="tag_category_delete",
     ),
     path(
+        "categories/<uuid:pk>/unarchive/",
+        views.TagCategoryUnarchiveView.as_view(),
+        name="tag_category_unarchive",
+    ),
+    path(
         "categories/reorder/",
         views.TagCategoryReorderView.as_view(),
         name="tag_category_reorder",
     ),
-    # タグ管理（§5.1 No.20〜24）
+    # タグ管理（§5.1 No.20〜24、Phase 1b-δ で tag_detail 追加）
     path("", views.TagListView.as_view(), name="tag_list"),
     path("create/", views.TagCreateView.as_view(), name="tag_create"),
+    path(
+        "<uuid:pk>/",
+        views.TagDetailView.as_view(),
+        name="tag_detail",
+    ),
     path(
         "<uuid:pk>/update/",
         views.TagUpdateView.as_view(),
@@ -46,6 +56,11 @@ urlpatterns = [
         "<uuid:pk>/delete/",
         views.TagDeleteView.as_view(),
         name="tag_delete",
+    ),
+    path(
+        "<uuid:pk>/unarchive/",
+        views.TagUnarchiveView.as_view(),
+        name="tag_unarchive",
     ),
     # AJAX タグ付与・解除（§5.1 No.25・No.26）
     path("assign/", views.TagAssignView.as_view(), name="tag_assign"),
