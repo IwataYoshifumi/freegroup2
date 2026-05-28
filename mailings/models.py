@@ -431,6 +431,19 @@ class DeliveryHistory(models.Model):
         help_text="5 値（pending/sent/failed/bounced/unsubscribed、別表 C.22）",
     )
     error_message = models.TextField(blank=True, default="")
+    failed_count = models.IntegerField(
+        default=0,
+        help_text=(
+            "送信試行の累積失敗回数（§7.2.2）。"
+            "CAMPAIGN_RECIPIENT_MAX_FAILURES に達したら「最終 failed」確定、"
+            "status は failed のまま（別表 C.22 の 5 値は変更しない、§4.4）"
+        ),
+    )
+    last_failed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="最後の失敗日時（運用視認性・デバッグ用、§7.2.2 では任意）",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -446,6 +459,46 @@ class DeliveryHistory(models.Model):
 
     def __str__(self):
         return f"{self.campaign} → {self.to_email}"
+
+    @classmethod
+    def get_pending_for_campaign(cls, campaign, limit):
+        """配信実行サービス用：未送信 DeliveryHistory を skip_locked で取得（§7.2.1）。
+
+        [性質] 準関数（DB 読み取り、ロック取得を伴う）
+        [入力] campaign: Campaign、limit: int
+        [出力] QuerySet[DeliveryHistory]
+
+        対象：status != SENT かつ failed_count < CAMPAIGN_RECIPIENT_MAX_FAILURES
+        （最終 failed 確定済みは拾わない）。select_for_update(skip_locked=True) を
+        メソッド内に込めることで、呼び出し側にロック制御を書かせない（OriginalImage
+        の get_pending と同型、§7.2.1）。複数 cron ワーカー同時起動でも同じ受信者を
+        二重に掴まず、構造的に二重送信が起きない（PostgreSQL 前提）。
+        """
+        from config.constants import CAMPAIGN_RECIPIENT_MAX_FAILURES
+
+        return (
+            cls.objects.select_for_update(skip_locked=True)
+            .filter(campaign=campaign)
+            .exclude(status=cls.Status.SENT)
+            .filter(failed_count__lt=CAMPAIGN_RECIPIENT_MAX_FAILURES)
+            .select_related("person", "person__primary_contact")
+            .order_by("created_at")[:limit]
+        )
+
+    @classmethod
+    def is_finally_failed(cls, history):
+        """最終 failed 判定（§7.2.2）：failed_count が M に達したか。
+
+        [性質] 純関数（DB 操作なし、フィールド参照のみ）
+        [入力] history: DeliveryHistory
+        [出力] bool
+        """
+        from config.constants import CAMPAIGN_RECIPIENT_MAX_FAILURES
+
+        return (
+            history.status == cls.Status.FAILED
+            and history.failed_count >= CAMPAIGN_RECIPIENT_MAX_FAILURES
+        )
 
 
 class TrackingLink(models.Model):
@@ -490,6 +543,28 @@ class TrackingLink(models.Model):
 
     def __str__(self):
         return f"{self.campaign} → {self.token}"
+
+    @classmethod
+    def build(cls, campaign, person, original_url):
+        """未保存の TrackingLink インスタンスを組み立てる（§7.4.3、PRODUCTION 専用）。
+
+        [性質] 純関数（DB 操作なし、トークン生成のみ）
+        [入力] campaign: Campaign、person: Person、original_url: str
+        [出力] TrackingLink（未保存、後段が bulk_create で永続化）
+
+        secrets.token_urlsafe(8) で 8 byte → 約 11 文字の URL-safe トークンを生成。
+        トークン生成・URL 生成はこの classmethod に完全に閉じ、EmailContext.prepare /
+        _render_merge_field はトークンに一切関与しない（§7.4.3 三層責務）。
+        build は「保存先はあるが保存はまだ」を意味する慣用名（§7.4.3.1）。
+        """
+        import secrets
+
+        return cls(
+            campaign=campaign,
+            person=person,
+            original_url=original_url,
+            token=secrets.token_urlsafe(8),
+        )
 
 
 class UnsubscribeLink(models.Model):
@@ -542,6 +617,25 @@ class UnsubscribeLink(models.Model):
 
     def __str__(self):
         return f"{self.campaign} → {self.token}"
+
+    @classmethod
+    def build(cls, campaign, person):
+        """未保存の UnsubscribeLink インスタンスを組み立てる（§7.4.3、PRODUCTION 専用）。
+
+        [性質] 純関数（DB 操作なし、トークン生成のみ）
+        [入力] campaign: Campaign、person: Person
+        [出力] UnsubscribeLink（未保存、後段が bulk_create で永続化）
+
+        TrackingLink とは別 namespace のトークンを secrets.token_urlsafe(8) で生成。
+        original_url を持たない（配信停止画面 /u/<token>/ に固定、§4.5A.1）。
+        """
+        import secrets
+
+        return cls(
+            campaign=campaign,
+            person=person,
+            token=secrets.token_urlsafe(8),
+        )
 
 
 class ClickLog(models.Model):

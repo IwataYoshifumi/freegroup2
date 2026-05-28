@@ -3552,3 +3552,664 @@ class SoftBounceCounterModelTests(_Phase2ModelTestBase):
                     count=1,
                     last_bounce_at=timezone.now(),
                 )
+
+
+# ======================================================================
+# Phase 3：配信エンジン（EmailContext + 差し込み + cron 駆動配信実行）
+# 仕様書 §4.2.1 / §7.2 / §7.3 / §7.4 / §7.8 / §16.1（rev14）
+# ======================================================================
+
+
+from unittest.mock import patch
+
+from django.core import mail
+from django.core.exceptions import ValidationError
+from django.core.management import call_command
+from io import StringIO
+
+from actionlogs.models import ActionLog
+from config.constants import (
+    CAMPAIGN_RECIPIENT_MAX_FAILURES,
+    CAMPAIGN_SEND_BATCH_LIMIT,
+    MAILING_SITE_URL,
+)
+from mailings.models import MailingConfig
+from mailings.services.audit import (
+    ACTION_SEND_CAMPAIGN,
+    ACTION_UNSUBSCRIBE_FILTER_OFF_SEND,
+)
+from mailings.services.campaign_send import (
+    execute_campaign_send,
+    send_one_recipient,
+)
+from mailings.services.email_context import EmailContext, EmailMode
+from mailings.services.recipient_extraction import extract_recipients
+from mailings.services.sender_domain import validate_sender_domain
+
+
+class _Phase3TestBase(TestCase):
+    """Phase 3 配信エンジンテストの共通基底。"""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="phase3_user",
+            password="x",
+            email="taro@example.com",
+            first_name="太郎",
+            last_name="山田",
+        )
+        self.user.signature = "山田 太郎\n株式会社サンプル"
+        self.user.save(update_fields=["signature"])
+        self.template = EmailTemplate.objects.create(
+            name="T1",
+            subject="{{会社名}}の{{宛名}}へ：ご案内",
+            body=(
+                "{{宛名}}\n\n"
+                "いつもお世話になっております。\n"
+                "{{会社名}} {{部署}} {{役職}} {{フルネーム}} 様\n\n"
+                "詳しくはこちら：{% tracked_link %}https://www.sample.com{% endtracked_link %}\n"
+                'カタログ：{% tracked_link "https://catalog.example.com" %}カタログを見る{% endtracked_link %}\n\n'
+                "{% unsubscribe_link %}配信停止はこちら{% endunsubscribe_link %}\n\n"
+                "{{差出人の氏名}}\n{{差出人の署名}}"
+            ),
+            created_by=self.user,
+        )
+        self.mailing_list = MailingList.objects.create(
+            name="ML1", created_by=self.user
+        )
+        self.config = MailingConfig.objects.create(
+            company_name="株式会社サンプル",
+            company_address="東京都千代田区1-1-1",
+            unsubscribe_contact="unsubscribe@example.com",
+            dkim_domain="example.com",
+        )
+
+    def _make_person(self, full_name="Alice Tanaka", *, organization="Acme", email=None):
+        p = Person.objects.create(status="active")
+        c = Contact.objects.create(
+            person=p,
+            status=Contact.Status.PRIMARY,
+            full_name=full_name,
+            last_name="田中",
+            first_name="アリス",
+            salutation_name="田中 様",
+            organization=organization,
+            department="営業部",
+            title="部長",
+            branch="渋谷支店",
+            address="東京都渋谷区1-2-3",
+            postal_code="150-0001",
+            email=email if email is not None else "alice@example.com",
+            personal_phone="03-1111-2222",
+            org_phone="03-9999-8888",
+            mobile_phone="090-1111-2222",
+            personal_fax="03-1111-2223",
+            org_fax="03-9999-8889",
+            created_by=self.user,
+        )
+        p.primary_contact = c
+        p.save(update_fields=["primary_contact", "updated_at"])
+        return p
+
+    def _make_campaign(
+        self,
+        *,
+        scheduled_at=None,
+        status=Campaign.Status.SCHEDULED,
+        sender_mode=Campaign.SenderMode.CREATOR,
+        sender_email="",
+        sender_name="",
+        apply_unsubscribe_filter=True,
+    ):
+        return Campaign.objects.create(
+            name="C1",
+            template=self.template,
+            mailing_list=self.mailing_list,
+            scheduled_at=scheduled_at or (timezone.now() - timedelta(minutes=1)),
+            status=status,
+            sender_mode=sender_mode,
+            sender_email=sender_email,
+            sender_name=sender_name,
+            apply_unsubscribe_filter=apply_unsubscribe_filter,
+            created_by=self.user,
+        )
+
+    def _add_member(self, mailing_list, person):
+        return MailingListMember.objects.create(
+            mailing_list=mailing_list, person=person, added_by=self.user
+        )
+
+
+class EmailModeEnumTests(_Phase3TestBase):
+    def test_enum_3_values(self):
+        self.assertEqual(EmailMode.PRODUCTION.value, "本番送信")
+        self.assertEqual(EmailMode.TEST.value, "テスト配信")
+        self.assertEqual(EmailMode.PREVIEW.value, "プレビュー")
+        self.assertEqual(len(EmailMode), 3)
+
+    def test_prepare_rejects_string_literal_mode(self):
+        person = self._make_person()
+        campaign = self._make_campaign()
+        with self.assertRaises(TypeError):
+            EmailContext.prepare(campaign, person, "本番送信")
+
+
+class EmailContextPrepareProductionTests(_Phase3TestBase):
+    def test_18_merge_fields_expand(self):
+        person = self._make_person()
+        campaign = self._make_campaign()
+        ctx = EmailContext.prepare(campaign, person, EmailMode.PRODUCTION)
+        # 差し込みが効いていること（HTML エスケープ後でも日本語値はそのまま含まれる）
+        self.assertIn("Acme", ctx.body_html)
+        self.assertIn("田中 様", ctx.body_html)
+        self.assertIn("営業部", ctx.body_html)
+        self.assertIn("部長", ctx.body_html)
+        self.assertIn("Alice Tanaka", ctx.body_html)
+        # 件名にも差し込みが効く（HTML エスケープしない）
+        self.assertIn("Acme", ctx.subject_rendered)
+        self.assertIn("田中 様", ctx.subject_rendered)
+        # 差出人系
+        self.assertIn("山田 太郎", ctx.body_html)
+        self.assertIn("株式会社サンプル", ctx.body_html)
+
+    def test_empty_value_leaves_placeholder_intact(self):
+        # branch=空のテンプレに「{{支店}}」を入れた場合、Sansan 互換で記法が残る（§7.4.5）
+        person = self._make_person()
+        person.primary_contact.branch = ""
+        person.primary_contact.save(update_fields=["branch"])
+        tpl = EmailTemplate.objects.create(
+            name="T2", subject="件名", body="支店：{{支店}}", created_by=self.user
+        )
+        campaign = Campaign.objects.create(
+            name="C2",
+            template=tpl,
+            mailing_list=self.mailing_list,
+            scheduled_at=timezone.now(),
+            created_by=self.user,
+        )
+        ctx = EmailContext.prepare(campaign, person, EmailMode.PRODUCTION)
+        # {{支店}} が HTML エスケープされて &lbrace; 等にはならず、{ } のまま残る
+        # （html.escape は { } をエスケープしない）
+        self.assertIn("{{支店}}", ctx.body_html)
+
+    def test_production_builds_tokens_and_links(self):
+        person = self._make_person()
+        campaign = self._make_campaign()
+        ctx = EmailContext.prepare(campaign, person, EmailMode.PRODUCTION)
+        # トラッキングリンク 2 件（形態 1 と形態 2）、unsubscribe リンク 1 件
+        self.assertEqual(len(ctx.tracking_links), 2)
+        self.assertEqual(len(ctx.unsubscribe_links), 1)
+        # トークンが発行されている
+        for tl in ctx.tracking_links:
+            self.assertTrue(tl.token)
+            self.assertEqual(len(tl.token), 11)  # secrets.token_urlsafe(8) は約 11 文字
+        # build 段階では DB に存在しない（UUIDField の default で pk は振られるが未保存）
+        for tl in ctx.tracking_links:
+            self.assertFalse(TrackingLink.objects.filter(pk=tl.pk).exists())
+        for ul in ctx.unsubscribe_links:
+            self.assertFalse(UnsubscribeLink.objects.filter(pk=ul.pk).exists())
+        # 本文にトークン入り URL が埋め込まれる
+        token = ctx.tracking_links[0].token
+        self.assertIn(f"{MAILING_SITE_URL}/t/{token}/", ctx.body_html)
+        utoken = ctx.unsubscribe_links[0].token
+        self.assertIn(f"{MAILING_SITE_URL}/u/{utoken}/", ctx.body_html)
+
+    def test_processing_order_no_link_breakage_when_body_contains_lt(self):
+        """処理順事故防止（§7.4.4.5）：本文に '<' を含むケースでエスケープされ、
+        かつカスタムタグ由来 <a> は壊れないことを担保する。
+        """
+        tpl = EmailTemplate.objects.create(
+            name="T3",
+            subject="件名",
+            body=(
+                "比較演算 a < b について\n"
+                "詳しくは {% tracked_link %}https://example.com/a{% endtracked_link %}"
+            ),
+            created_by=self.user,
+        )
+        campaign = Campaign.objects.create(
+            name="C3",
+            template=tpl,
+            mailing_list=self.mailing_list,
+            scheduled_at=timezone.now(),
+            created_by=self.user,
+        )
+        person = self._make_person()
+        ctx = EmailContext.prepare(campaign, person, EmailMode.PRODUCTION)
+        # ユーザー入力の '<' はエスケープされている
+        self.assertIn("a &lt; b", ctx.body_html)
+        # カスタムタグ由来の <a> は生きている（&lt;a&gt; 化されていない）
+        self.assertIn("<a href=", ctx.body_html)
+        self.assertNotIn("&lt;a href=", ctx.body_html)
+
+    def test_double_quote_in_body_escapes_and_tracked_link_form2_still_works(self):
+        """仕様書 §7.4.4.5 ②：`"` も完全エスケープ。それでも形態 2 カスタムタグが生きる。
+
+        本文に `"Pro"` を含み、同じ本文内に `{% tracked_link "URL" %}テキスト{% endtracked_link %}`
+        が両立する。`"` は `&quot;` にエスケープされ、トラッキングリンクはトークン付き
+        `<a>` として正常生成される（form 2 の `"URL"` 内 `"` も ② で `&quot;` 化されて
+        いるが、本実装の正規表現は `&quot;` 前提で書かれているためマッチする）。
+        """
+        tpl = EmailTemplate.objects.create(
+            name="T_QUOTE",
+            subject="新製品 \"Pro\" シリーズのご案内",
+            body=(
+                "弊社の新製品 \"Pro\" シリーズは 15\" モニターと組み合わせて最適です。\n"
+                "詳細：{% tracked_link \"https://example.com/pro?model=15&size=full\" %}\"Pro\"の詳細{% endtracked_link %}"
+            ),
+            created_by=self.user,
+        )
+        campaign = Campaign.objects.create(
+            name="C_QUOTE",
+            template=tpl,
+            mailing_list=self.mailing_list,
+            scheduled_at=timezone.now(),
+            created_by=self.user,
+        )
+        person = self._make_person()
+        ctx = EmailContext.prepare(campaign, person, EmailMode.PRODUCTION)
+
+        # ① ユーザー本文の `"` は `&quot;` にエスケープされている（仕様書 §7.4.4.5 ② 厳守）
+        self.assertIn("&quot;Pro&quot;", ctx.body_html)
+        self.assertIn("15&quot; モニター", ctx.body_html)
+        # ② トラッキングリンクが正しく生成されている（形態 2 の `"URL"` がマッチ）
+        self.assertEqual(len(ctx.tracking_links), 1)
+        token = ctx.tracking_links[0].token
+        self.assertIn(f'<a href="{MAILING_SITE_URL}/t/{token}/">', ctx.body_html)
+        # ③ DB 保存される original_url は生 URL（unescape 済み、& は生のまま）
+        self.assertEqual(
+            ctx.tracking_links[0].original_url,
+            "https://example.com/pro?model=15&size=full",
+        )
+        # ④ リンクテキストの `"Pro"の詳細` も `&quot;Pro&quot;の詳細` としてエスケープ済みで <a> 内に存在
+        self.assertIn(f'>&quot;Pro&quot;の詳細</a>', ctx.body_html)
+        # ⑤ 件名にも差し込みエスケープが効く（§7.4.4.4：件名はプレーンテキスト、HTML 化しない）
+        # ※ 件名側は HTML 化しないため `"` はそのまま（_render_subject は _render_merge_field のみ）
+        self.assertIn('"Pro"', ctx.subject_rendered)
+
+    def test_newline_to_br_conversion(self):
+        person = self._make_person()
+        campaign = self._make_campaign()
+        ctx = EmailContext.prepare(campaign, person, EmailMode.PRODUCTION)
+        # 改行が <br> に変換されている
+        self.assertIn("<br>", ctx.body_html)
+        # 生の \n は残っていない（HTML 化前のテンプレ）
+        # ※ <br>\n の形にはなりうるが、ここでは雑に「行末の改行が <br> 化」だけ検証
+        self.assertGreater(ctx.body_html.count("<br>"), 0)
+
+    def test_sender_mode_creator_uses_created_by(self):
+        person = self._make_person()
+        campaign = self._make_campaign(sender_mode=Campaign.SenderMode.CREATOR)
+        ctx = EmailContext.prepare(campaign, person, EmailMode.PRODUCTION)
+        self.assertEqual(ctx.from_email, self.user.email)
+
+    def test_sender_mode_newsletter_uses_campaign_sender(self):
+        person = self._make_person()
+        campaign = self._make_campaign(
+            sender_mode=Campaign.SenderMode.NEWSLETTER,
+            sender_email="news@example.com",
+            sender_name="メルマガ事務局",
+        )
+        ctx = EmailContext.prepare(campaign, person, EmailMode.PRODUCTION)
+        self.assertEqual(ctx.from_email, "news@example.com")
+        self.assertEqual(ctx.from_name, "メルマガ事務局")
+
+    def test_frozen_context_cannot_be_mutated(self):
+        person = self._make_person()
+        campaign = self._make_campaign()
+        ctx = EmailContext.prepare(campaign, person, EmailMode.PRODUCTION)
+        with self.assertRaises(Exception):
+            ctx.to_email = "evil@example.com"  # type: ignore[misc]
+
+
+class EmailContextPrepareTestPreviewTests(_Phase3TestBase):
+    def test_test_mode_no_token_generation(self):
+        person = self._make_person()
+        campaign = self._make_campaign()
+        ctx = EmailContext.prepare(campaign, person, EmailMode.TEST)
+        self.assertEqual(len(ctx.tracking_links), 0)
+        self.assertEqual(len(ctx.unsubscribe_links), 0)
+        # 素リンクに変換（トークンなしの URL）
+        self.assertIn('href="https://www.sample.com"', ctx.body_html)
+        self.assertIn('href="https://catalog.example.com"', ctx.body_html)
+        # unsubscribe は /u/ 案内ルート（トークン無し独立ルート、§4.5A.2.1）
+        self.assertIn(f'href="{MAILING_SITE_URL}/u/"', ctx.body_html)
+        self.assertNotIn("/u/abc", ctx.body_html)  # トークン入りでないこと
+
+    def test_preview_mode_no_token_generation(self):
+        person = self._make_person()
+        campaign = self._make_campaign()
+        ctx = EmailContext.prepare(campaign, person, EmailMode.PREVIEW)
+        self.assertEqual(len(ctx.tracking_links), 0)
+        self.assertEqual(len(ctx.unsubscribe_links), 0)
+        self.assertIn(f'href="{MAILING_SITE_URL}/u/"', ctx.body_html)
+
+
+class RecipientExtractionTests(_Phase3TestBase):
+    def test_returns_active_members(self):
+        p1 = self._make_person("Alice")
+        p2 = self._make_person("Bob", email="bob@example.com")
+        self._add_member(self.mailing_list, p1)
+        self._add_member(self.mailing_list, p2)
+        campaign = self._make_campaign()
+        result = list(extract_recipients(campaign).values_list("id", flat=True))
+        self.assertCountEqual(result, [p1.id, p2.id])
+
+    def test_excludes_merged_archived_persons(self):
+        active = self._make_person("Alice")
+        merged_p = self._make_person("Bob", email="bob@example.com")
+        merged_p.status = "merged"
+        merged_p.save(update_fields=["status"])
+        archived_p = self._make_person("Carol", email="carol@example.com")
+        archived_p.status = "archived"
+        archived_p.save(update_fields=["status"])
+        for p in (active, merged_p, archived_p):
+            self._add_member(self.mailing_list, p)
+        campaign = self._make_campaign()
+        result = list(extract_recipients(campaign).values_list("id", flat=True))
+        self.assertEqual(result, [active.id])
+
+    def test_unsubscribe_filter_on_excludes_is_unsubscribed(self):
+        p1 = self._make_person("Alice")
+        p2 = self._make_person("Bob", email="bob@example.com")
+        p2.is_unsubscribed = True
+        p2.save(update_fields=["is_unsubscribed"])
+        self._add_member(self.mailing_list, p1)
+        self._add_member(self.mailing_list, p2)
+        campaign = self._make_campaign(apply_unsubscribe_filter=True)
+        result = list(extract_recipients(campaign).values_list("id", flat=True))
+        self.assertEqual(result, [p1.id])
+
+    def test_unsubscribe_filter_off_includes_is_unsubscribed(self):
+        p1 = self._make_person("Alice")
+        p2 = self._make_person("Bob", email="bob@example.com")
+        p2.is_unsubscribed = True
+        p2.save(update_fields=["is_unsubscribed"])
+        self._add_member(self.mailing_list, p1)
+        self._add_member(self.mailing_list, p2)
+        campaign = self._make_campaign(apply_unsubscribe_filter=False)
+        result = list(extract_recipients(campaign).values_list("id", flat=True))
+        self.assertCountEqual(result, [p1.id, p2.id])
+
+    def test_suppressed_email_always_excluded_even_with_filter_off(self):
+        """§7.3 重大警告：SuppressedEmail フィルタは ON/OFF 不可、常時 ON 固定。"""
+        p1 = self._make_person("Alice", email="alice@example.com")
+        p2 = self._make_person("Bob", email="bob@example.com")
+        SuppressedEmail.objects.create(
+            email="bob@example.com",
+            source=SuppressedEmail.Source.BOUNCE_HARD,
+        )
+        self._add_member(self.mailing_list, p1)
+        self._add_member(self.mailing_list, p2)
+        # フィルタ OFF でも SuppressedEmail は除外される
+        campaign = self._make_campaign(apply_unsubscribe_filter=False)
+        result = list(extract_recipients(campaign).values_list("id", flat=True))
+        self.assertEqual(result, [p1.id])
+
+    def test_cancelled_suppression_does_not_exclude(self):
+        p1 = self._make_person("Alice")
+        SuppressedEmail.objects.create(
+            email="alice@example.com",
+            source=SuppressedEmail.Source.BOUNCE_HARD,
+            cancelled_at=timezone.now(),
+            cancelled_by=self.user,
+        )
+        self._add_member(self.mailing_list, p1)
+        campaign = self._make_campaign()
+        result = list(extract_recipients(campaign).values_list("id", flat=True))
+        self.assertEqual(result, [p1.id])
+
+    def test_empty_email_excluded(self):
+        p1 = self._make_person("Alice")
+        p2 = self._make_person("Bob", email="")
+        self._add_member(self.mailing_list, p1)
+        self._add_member(self.mailing_list, p2)
+        campaign = self._make_campaign()
+        result = list(extract_recipients(campaign).values_list("id", flat=True))
+        self.assertEqual(result, [p1.id])
+
+
+class ValidateSenderDomainTests(_Phase3TestBase):
+    def test_creator_mode_skip(self):
+        # creator では検証しない（差出人 = created_by の個人メアド）
+        campaign = self._make_campaign(sender_mode=Campaign.SenderMode.CREATOR)
+        validate_sender_domain(campaign)  # 例外が出ないことを確認
+
+    def test_newsletter_mode_within_dkim_domain_passes(self):
+        campaign = self._make_campaign(
+            sender_mode=Campaign.SenderMode.NEWSLETTER,
+            sender_email="news@example.com",
+            sender_name="メルマガ",
+        )
+        validate_sender_domain(campaign)
+
+    def test_newsletter_mode_subdomain_passes(self):
+        campaign = self._make_campaign(
+            sender_mode=Campaign.SenderMode.NEWSLETTER,
+            sender_email="news@mail.example.com",
+            sender_name="メルマガ",
+        )
+        validate_sender_domain(campaign)
+
+    def test_newsletter_mode_outside_domain_raises(self):
+        campaign = self._make_campaign(
+            sender_mode=Campaign.SenderMode.NEWSLETTER,
+            sender_email="news@evil.com",
+            sender_name="メルマガ",
+        )
+        with self.assertRaises(ValidationError):
+            validate_sender_domain(campaign)
+
+    def test_newsletter_mode_empty_sender_email_raises(self):
+        campaign = self._make_campaign(
+            sender_mode=Campaign.SenderMode.NEWSLETTER,
+            sender_email="",
+            sender_name="メルマガ",
+        )
+        with self.assertRaises(ValidationError):
+            validate_sender_domain(campaign)
+
+
+class SendOneRecipientTests(_Phase3TestBase):
+    def setUp(self):
+        super().setUp()
+        self.person = self._make_person("Alice")
+        self._add_member(self.mailing_list, self.person)
+        self.campaign = self._make_campaign(status=Campaign.Status.SENDING)
+        self.history = DeliveryHistory.objects.create(
+            campaign=self.campaign,
+            person=self.person,
+            contact=self.person.primary_contact,
+            to_email=self.person.primary_contact.email,
+            status=DeliveryHistory.Status.PENDING,
+        )
+
+    def test_successful_send_sets_sent_status(self):
+        mail.outbox = []
+        result = send_one_recipient(self.campaign, self.history)
+        self.assertTrue(result)
+        self.history.refresh_from_db()
+        self.assertEqual(self.history.status, DeliveryHistory.Status.SENT)
+        self.assertIsNotNone(self.history.sent_at)
+        self.assertEqual(self.history.failed_count, 0)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn("alice@example.com", mail.outbox[0].to)
+
+    def test_successful_send_persists_tracking_and_unsubscribe_links(self):
+        send_one_recipient(self.campaign, self.history)
+        self.assertEqual(
+            TrackingLink.objects.filter(campaign=self.campaign).count(), 2
+        )
+        self.assertEqual(
+            UnsubscribeLink.objects.filter(campaign=self.campaign).count(), 1
+        )
+
+    def test_failed_send_increments_failed_count_no_softbounce_touch(self):
+        """【最重大事故防止】 送信失敗で SoftBounceCounter に一切触れない（§7.2.3）。"""
+        mail.outbox = []
+        with patch(
+            "mailings.services.campaign_send._send_email_via_backend",
+            side_effect=Exception("SMTP timeout"),
+        ):
+            result = send_one_recipient(self.campaign, self.history)
+        self.assertFalse(result)
+        self.history.refresh_from_db()
+        self.assertEqual(self.history.status, DeliveryHistory.Status.FAILED)
+        self.assertEqual(self.history.failed_count, 1)
+        self.assertIsNotNone(self.history.last_failed_at)
+        self.assertIn("SMTP timeout", self.history.error_message)
+        # ネガティブ担保：SoftBounceCounter が増えていない
+        self.assertEqual(SoftBounceCounter.objects.count(), 0)
+        # トラッキングリンクも保存されていない（送信失敗時は bulk_create を呼ばない）
+        self.assertEqual(
+            TrackingLink.objects.filter(campaign=self.campaign).count(), 0
+        )
+
+    def test_repeated_failure_accumulates_count(self):
+        with patch(
+            "mailings.services.campaign_send._send_email_via_backend",
+            side_effect=Exception("err"),
+        ):
+            send_one_recipient(self.campaign, self.history)
+            send_one_recipient(self.campaign, self.history)
+            send_one_recipient(self.campaign, self.history)
+        self.history.refresh_from_db()
+        self.assertEqual(self.history.failed_count, 3)
+        self.assertTrue(DeliveryHistory.is_finally_failed(self.history))
+
+
+class ExecuteCampaignSendTests(_Phase3TestBase):
+    def test_first_invocation_sets_sending_and_records_actionlog(self):
+        p1 = self._make_person("Alice")
+        self._add_member(self.mailing_list, p1)
+        campaign = self._make_campaign()
+        mail.outbox = []
+        summary = execute_campaign_send(campaign)
+        campaign.refresh_from_db()
+        # 全員 sent なので done になる
+        self.assertEqual(campaign.status, Campaign.Status.DONE)
+        self.assertIsNotNone(campaign.started_at)
+        self.assertIsNotNone(campaign.completed_at)
+        # ActionLog が 1 件（配信開始操作）記録される
+        self.assertTrue(
+            ActionLog.objects.filter(
+                action=ACTION_SEND_CAMPAIGN, object_id=str(campaign.pk)
+            ).exists()
+        )
+        self.assertEqual(summary["sent"], 1)
+        self.assertTrue(summary["done"])
+
+    def test_unsubscribe_filter_off_creator_records_audit(self):
+        p1 = self._make_person("Alice")
+        self._add_member(self.mailing_list, p1)
+        campaign = self._make_campaign(apply_unsubscribe_filter=False)
+        execute_campaign_send(campaign)
+        # §7.8.4：OFF 配信は監査記録される
+        self.assertTrue(
+            ActionLog.objects.filter(
+                action=ACTION_UNSUBSCRIBE_FILTER_OFF_SEND,
+                object_id=str(campaign.pk),
+            ).exists()
+        )
+
+    def test_newsletter_off_combination_rejected(self):
+        """§7.8.4 構造的禁止：newsletter × apply_unsubscribe_filter=False を拒否。"""
+        campaign = self._make_campaign(
+            sender_mode=Campaign.SenderMode.NEWSLETTER,
+            sender_email="news@example.com",
+            sender_name="メルマガ",
+            apply_unsubscribe_filter=False,
+        )
+        with self.assertRaises(ValidationError):
+            execute_campaign_send(campaign)
+
+    def test_newsletter_invalid_domain_rejected(self):
+        campaign = self._make_campaign(
+            sender_mode=Campaign.SenderMode.NEWSLETTER,
+            sender_email="news@evil.com",
+            sender_name="メルマガ",
+        )
+        with self.assertRaises(ValidationError):
+            execute_campaign_send(campaign)
+
+    def test_completion_when_all_sent_or_finally_failed(self):
+        """全員 sent または M 回失敗で done（§7.2.2）。"""
+        p1 = self._make_person("Alice")
+        p2 = self._make_person("Bob", email="bob@example.com")
+        self._add_member(self.mailing_list, p1)
+        self._add_member(self.mailing_list, p2)
+        campaign = self._make_campaign()
+
+        # Bob だけ常に失敗するように mock
+        original_send = mail.EmailMultiAlternatives.send
+
+        def selective_fail(self, *args, **kwargs):
+            if "bob@example.com" in self.to:
+                raise Exception("permanent bounce")
+            return original_send(self, *args, **kwargs)
+
+        with patch.object(
+            mail.EmailMultiAlternatives, "send", autospec=True, side_effect=selective_fail
+        ):
+            # 1 回目：Alice sent、Bob failed_count=1
+            execute_campaign_send(campaign)
+            # 2-3 回目：Bob 失敗を積む（M=3 まで）
+            execute_campaign_send(campaign)
+            execute_campaign_send(campaign)
+
+        campaign.refresh_from_db()
+        # 全員 sent or 最終 failed なので done
+        self.assertEqual(campaign.status, Campaign.Status.DONE)
+        bob_history = DeliveryHistory.objects.get(campaign=campaign, person=p2)
+        self.assertEqual(bob_history.failed_count, CAMPAIGN_RECIPIENT_MAX_FAILURES)
+
+    def test_batch_limit_partial_processing(self):
+        """batch_limit=1 で 1 件だけ処理し残りは次回起動が拾う。"""
+        for i in range(3):
+            p = self._make_person(f"Person{i}", email=f"p{i}@example.com")
+            self._add_member(self.mailing_list, p)
+        campaign = self._make_campaign()
+        summary = execute_campaign_send(campaign, batch_limit=1)
+        self.assertEqual(summary["sent"], 1)
+        campaign.refresh_from_db()
+        # まだ全員終わってないので sending のまま
+        self.assertEqual(campaign.status, Campaign.Status.SENDING)
+        # 残りも処理
+        execute_campaign_send(campaign, batch_limit=10)
+        campaign.refresh_from_db()
+        self.assertEqual(campaign.status, Campaign.Status.DONE)
+
+
+class SendScheduledCampaignsCommandTests(_Phase3TestBase):
+    def test_command_picks_pending_campaigns(self):
+        p1 = self._make_person("Alice")
+        self._add_member(self.mailing_list, p1)
+        campaign = self._make_campaign()
+        # 未来日時の予約は拾わない
+        future_p = self._make_person("FutureUser", email="future@example.com")
+        future_list = MailingList.objects.create(
+            name="FutureList", created_by=self.user
+        )
+        MailingListMember.objects.create(
+            mailing_list=future_list, person=future_p, added_by=self.user
+        )
+        Campaign.objects.create(
+            name="FutureCampaign",
+            template=self.template,
+            mailing_list=future_list,
+            scheduled_at=timezone.now() + timedelta(hours=1),
+            status=Campaign.Status.SCHEDULED,
+            created_by=self.user,
+        )
+        out = StringIO()
+        call_command("send_scheduled_campaigns", stdout=out)
+        campaign.refresh_from_db()
+        self.assertEqual(campaign.status, Campaign.Status.DONE)
+        # FutureCampaign は scheduled のまま
+        future_campaign = Campaign.objects.get(name="FutureCampaign")
+        self.assertEqual(future_campaign.status, Campaign.Status.SCHEDULED)
+
+    def test_command_no_targets_does_not_error(self):
+        out = StringIO()
+        call_command("send_scheduled_campaigns", stdout=out)
+        self.assertIn("対象キャンペーンなし", out.getvalue())

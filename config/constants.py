@@ -116,3 +116,35 @@ DUPLICATE_LOCATION_FIELDS = [
 # 1 回の操作で全 Person × 全タグを誤選択する事故防止と、
 # bulk_create の SQL バッファ・サーバ応答時間の現実的な上限。
 BULK_TAGGING_MAX_PERSONS = 500
+
+# ======================================================================
+# v1.6 メルマガ配信系（Phase 3）
+# ======================================================================
+
+# cron 1 起動あたりの未送信受信者処理上限 N（仕様書 v1.6 §7.2.1）。
+# send_scheduled_campaigns 管理コマンドが 1 起動でこの件数まで処理し、
+# 残りは次回 cron 起動が続きを拾う（自然再処理方式、§7.2.4 弱点許容）。
+CAMPAIGN_SEND_BATCH_LIMIT = 100
+
+# 受信者単位の送信失敗上限 M（仕様書 v1.6 §7.2.2）。
+# DeliveryHistory.failed_count がこの値に達したら「最終 failed」確定、
+# Campaign.status=done 判定の対象になる。
+# 重複チェック系（失敗回数を数えない）からの意図的逸脱の理由は §7.2.2 重要警告を参照：
+# 配信は永久失敗メアド（無効アドレス等）が混在するため回数を数えないと永久に done にならない。
+CAMPAIGN_RECIPIENT_MAX_FAILURES = 3
+
+# ソフトバウンス連続回数の SuppressedEmail 昇格閾値（仕様書 v1.6 §4.8A / §10.3.2）。
+# SoftBounceCounter.count がこの値に達したら SuppressedEmail に
+# source='bounce_soft_promoted' で登録、SoftBounceCounter は物理削除。
+# Phase 5 で使うが、Phase 3 時点で定数を予約定義する（§19.1 論点 4）。
+SOFT_BOUNCE_PROMOTION_THRESHOLD = 5
+
+# ClickLog.ip_masked の保持日数（仕様書 v1.6 §4.6 / §8.3.2）。
+# 期限経過後に管理コマンドが NULL 上書きする（個人情報保護観点）。
+# Phase 4 で使うが、Phase 3 時点で定数を予約定義する。
+CLICK_LOG_IP_RETENTION_DAYS = 90
+
+# 配信メール内のリンクのベース URL（仕様書 v1.6 §7.4.6.4 / §8.1）。
+# TrackingLink: {MAILING_SITE_URL}/t/<token>/、UnsubscribeLink: {MAILING_SITE_URL}/u/<token>/
+# Phase 8 で .env / settings 経由の環境別管理に切り替える想定。Phase 3 ではここを正本とする。
+MAILING_SITE_URL = "https://freegroup2.example.com"
