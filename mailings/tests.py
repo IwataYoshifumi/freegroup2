@@ -3080,3 +3080,475 @@ class PreviewV2NeutralAliasIntegrationTests(_RemoveByTagTestBase):
         self.assertEqual(data["out_of_list_count"], data["new_count"])
         self.assertEqual(data["in_list_count"], 1)
         self.assertEqual(data["out_of_list_count"], 1)
+
+
+# ======================================================================
+# Phase 2：配信系モデル骨格テスト（仕様書 §4.2 / §4.4 / §4.5 / §4.5A /
+# §4.6 / §4.7 / §4.8 / §4.8A、別表 C.21〜C.26）。
+# ======================================================================
+
+
+from datetime import timedelta
+
+from django.contrib.auth.models import Permission
+from django.contrib.contenttypes.models import ContentType
+from django.db import IntegrityError, transaction
+
+from mailings.models import (
+    Campaign,
+    ClickLog,
+    DeliveryHistory,
+    EmailTemplate,
+    SoftBounceCounter,
+    SuppressedEmail,
+    TrackingLink,
+    Unsubscribe,
+    UnsubscribeLink,
+)
+
+
+class _Phase2ModelTestBase(TestCase):
+    """Phase 2 配信系モデルテストの共通基底。
+
+    Campaign を作るために必要な依存物（EmailTemplate / MailingList / Person /
+    CustomUser）を一通り用意する。
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="phase2_user", password="x")
+        self.other_user = User.objects.create_user(
+            username="phase2_other", password="x"
+        )
+        self.template = EmailTemplate.objects.create(
+            name="T1",
+            subject="件名",
+            body="本文",
+            created_by=self.user,
+        )
+        self.mailing_list = MailingList.objects.create(
+            name="ML1", created_by=self.user
+        )
+        self.person = self._make_person("Alice")
+        self.person2 = self._make_person("Bob")
+
+    def _make_person(self, full_name):
+        p = Person.objects.create(status="active")
+        c = Contact.objects.create(
+            person=p,
+            status=Contact.Status.PRIMARY,
+            full_name=full_name,
+            email=f"{full_name.lower()}@example.com",
+            created_by=self.user,
+        )
+        p.primary_contact = c
+        p.save(update_fields=["primary_contact", "updated_at"])
+        return p
+
+    def _make_campaign(self, *, status=Campaign.Status.DRAFT, scheduled_at=None):
+        return Campaign.objects.create(
+            name="C1",
+            template=self.template,
+            mailing_list=self.mailing_list,
+            scheduled_at=scheduled_at,
+            status=status,
+            created_by=self.user,
+        )
+
+
+class CampaignModelTests(_Phase2ModelTestBase):
+    def test_create_minimal(self):
+        c = self._make_campaign()
+        self.assertIsNotNone(c.pk)
+        self.assertEqual(c.status, Campaign.Status.DRAFT)
+        self.assertEqual(c.sender_mode, Campaign.SenderMode.CREATOR)
+        self.assertTrue(c.apply_unsubscribe_filter)
+        self.assertEqual(c.total_count, 0)
+        self.assertEqual(c.sent_count, 0)
+        self.assertEqual(c.failed_count, 0)
+
+    def test_status_choices_5_values(self):
+        values = {v for v, _ in Campaign.Status.choices}
+        self.assertEqual(
+            values, {"draft", "scheduled", "sending", "done", "failed"}
+        )
+
+    def test_sender_mode_choices_2_values(self):
+        values = {v for v, _ in Campaign.SenderMode.choices}
+        self.assertEqual(values, {"creator", "newsletter"})
+
+    def test_mailing_list_is_required(self):
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                Campaign.objects.create(
+                    name="C2",
+                    template=self.template,
+                    mailing_list=None,
+                    created_by=self.user,
+                )
+
+    def test_view_all_campaigns_permission_exists(self):
+        ct = ContentType.objects.get_for_model(Campaign)
+        self.assertTrue(
+            Permission.objects.filter(
+                content_type=ct, codename="view_all_campaigns"
+            ).exists()
+        )
+
+
+class CampaignGetPendingScheduledTests(_Phase2ModelTestBase):
+    def test_returns_only_scheduled_with_past_scheduled_at(self):
+        now = timezone.now()
+        past = self._make_campaign(
+            status=Campaign.Status.SCHEDULED, scheduled_at=now - timedelta(minutes=5)
+        )
+        # future scheduled は除外
+        self._make_campaign(
+            status=Campaign.Status.SCHEDULED, scheduled_at=now + timedelta(minutes=5)
+        )
+        # draft は除外（scheduled_at=NULL）
+        self._make_campaign(status=Campaign.Status.DRAFT)
+        # 既に sending / done は除外
+        self._make_campaign(
+            status=Campaign.Status.SENDING, scheduled_at=now - timedelta(minutes=5)
+        )
+        self._make_campaign(
+            status=Campaign.Status.DONE, scheduled_at=now - timedelta(minutes=5)
+        )
+        result = list(Campaign.get_pending_scheduled())
+        self.assertEqual(result, [past])
+
+    def test_exact_now_boundary_included(self):
+        now = timezone.now()
+        c = self._make_campaign(
+            status=Campaign.Status.SCHEDULED, scheduled_at=now - timedelta(seconds=1)
+        )
+        self.assertIn(c, Campaign.get_pending_scheduled())
+
+
+class CampaignHasViewPermissionTests(_Phase2ModelTestBase):
+    def test_creator_can_view(self):
+        c = self._make_campaign()
+        self.assertTrue(c.has_view_permission(self.user))
+
+    def test_other_user_without_permission_cannot_view(self):
+        c = self._make_campaign()
+        self.assertFalse(c.has_view_permission(self.other_user))
+
+    def test_user_with_view_all_campaigns_permission_can_view(self):
+        perm = Permission.objects.get(
+            content_type=ContentType.objects.get_for_model(Campaign),
+            codename="view_all_campaigns",
+        )
+        self.other_user.user_permissions.add(perm)
+        # has_perm キャッシュ回避のため再取得
+        other = User.objects.get(pk=self.other_user.pk)
+        c = self._make_campaign()
+        self.assertTrue(c.has_view_permission(other))
+
+
+class DeliveryHistoryModelTests(_Phase2ModelTestBase):
+    def test_create_with_snapshot_fields(self):
+        c = self._make_campaign()
+        dh = DeliveryHistory.objects.create(
+            campaign=c,
+            person=self.person,
+            to_email="alice@example.com",
+            organization_at_send="Acme",
+            full_name_at_send="Alice Tanaka",
+            salutation_name_at_send="田中 様",
+        )
+        self.assertEqual(dh.status, DeliveryHistory.Status.PENDING)
+        self.assertEqual(dh.organization_at_send, "Acme")
+
+    def test_snapshot_fields_default_empty(self):
+        c = self._make_campaign()
+        dh = DeliveryHistory.objects.create(
+            campaign=c, person=self.person, to_email="alice@example.com"
+        )
+        self.assertEqual(dh.organization_at_send, "")
+        self.assertEqual(dh.full_name_at_send, "")
+        self.assertEqual(dh.salutation_name_at_send, "")
+        self.assertEqual(dh.error_message, "")
+
+    def test_unique_campaign_person(self):
+        c = self._make_campaign()
+        DeliveryHistory.objects.create(
+            campaign=c, person=self.person, to_email="alice@example.com"
+        )
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                DeliveryHistory.objects.create(
+                    campaign=c, person=self.person, to_email="alice2@example.com"
+                )
+
+    def test_same_person_different_campaign_ok(self):
+        c1 = self._make_campaign()
+        c2 = Campaign.objects.create(
+            name="C2",
+            template=self.template,
+            mailing_list=self.mailing_list,
+            created_by=self.user,
+        )
+        DeliveryHistory.objects.create(
+            campaign=c1, person=self.person, to_email="alice@example.com"
+        )
+        DeliveryHistory.objects.create(
+            campaign=c2, person=self.person, to_email="alice@example.com"
+        )
+
+    def test_status_choices_5_values(self):
+        values = {v for v, _ in DeliveryHistory.Status.choices}
+        self.assertEqual(
+            values, {"pending", "sent", "failed", "bounced", "unsubscribed"}
+        )
+
+
+class TrackingLinkModelTests(_Phase2ModelTestBase):
+    def test_create_minimal(self):
+        c = self._make_campaign()
+        tl = TrackingLink.objects.create(
+            campaign=c,
+            person=self.person,
+            original_url="https://example.com/a",
+            token="tok_abc12345",
+        )
+        self.assertEqual(tl.click_count, 0)
+        self.assertEqual(tl.total_access_count, 0)
+        self.assertIsNone(tl.last_clicked_at)
+
+    def test_unique_campaign_person_original_url(self):
+        c = self._make_campaign()
+        TrackingLink.objects.create(
+            campaign=c,
+            person=self.person,
+            original_url="https://example.com/a",
+            token="tok_aaaaaaaa",
+        )
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                TrackingLink.objects.create(
+                    campaign=c,
+                    person=self.person,
+                    original_url="https://example.com/a",
+                    token="tok_bbbbbbbb",
+                )
+
+    def test_same_campaign_person_different_url_ok(self):
+        c = self._make_campaign()
+        TrackingLink.objects.create(
+            campaign=c,
+            person=self.person,
+            original_url="https://example.com/a",
+            token="tok_aaaaaaaa",
+        )
+        TrackingLink.objects.create(
+            campaign=c,
+            person=self.person,
+            original_url="https://example.com/b",
+            token="tok_bbbbbbbb",
+        )
+
+    def test_token_unique_across_campaigns(self):
+        c1 = self._make_campaign()
+        c2 = Campaign.objects.create(
+            name="C2",
+            template=self.template,
+            mailing_list=self.mailing_list,
+            created_by=self.user,
+        )
+        TrackingLink.objects.create(
+            campaign=c1,
+            person=self.person,
+            original_url="https://example.com/a",
+            token="dup_token",
+        )
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                TrackingLink.objects.create(
+                    campaign=c2,
+                    person=self.person2,
+                    original_url="https://example.com/x",
+                    token="dup_token",
+                )
+
+
+class UnsubscribeLinkModelTests(_Phase2ModelTestBase):
+    def test_create_minimal(self):
+        c = self._make_campaign()
+        ul = UnsubscribeLink.objects.create(
+            campaign=c, person=self.person, token="utok_abcdef12"
+        )
+        self.assertIsNone(ul.accessed_at)
+        self.assertIsNone(ul.unsubscribed_at)
+
+    def test_unique_campaign_person(self):
+        c = self._make_campaign()
+        UnsubscribeLink.objects.create(
+            campaign=c, person=self.person, token="utok_aaaaaaaa"
+        )
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                UnsubscribeLink.objects.create(
+                    campaign=c, person=self.person, token="utok_bbbbbbbb"
+                )
+
+    def test_token_unique_across_campaigns(self):
+        c1 = self._make_campaign()
+        c2 = Campaign.objects.create(
+            name="C2",
+            template=self.template,
+            mailing_list=self.mailing_list,
+            created_by=self.user,
+        )
+        UnsubscribeLink.objects.create(
+            campaign=c1, person=self.person, token="udup_token"
+        )
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                UnsubscribeLink.objects.create(
+                    campaign=c2, person=self.person2, token="udup_token"
+                )
+
+
+class ClickLogModelTests(_Phase2ModelTestBase):
+    def test_create_valid_click(self):
+        c = self._make_campaign()
+        tl = TrackingLink.objects.create(
+            campaign=c,
+            person=self.person,
+            original_url="https://example.com/a",
+            token="tok_a",
+        )
+        log = ClickLog.objects.create(
+            tracking_link=tl,
+            http_method="GET",
+            is_valid_click=True,
+        )
+        self.assertEqual(log.bot_reason, "")
+        self.assertEqual(log.user_agent, "")
+
+    def test_bot_reason_choices_5_values(self):
+        values = {v for v, _ in ClickLog.BotReason.choices}
+        self.assertEqual(
+            values, {"non_get", "known_bot", "too_fast", "duplicate", "test_send"}
+        )
+
+
+class UnsubscribeModelTests(_Phase2ModelTestBase):
+    def test_create_minimal(self):
+        u = Unsubscribe.objects.create(
+            person=self.person,
+            source_email="alice@example.com",
+            source=Unsubscribe.Source.UNSUBSCRIBE_LINK,
+        )
+        self.assertIsNone(u.cancelled_at)
+        self.assertIsNone(u.cancelled_by)
+
+    def test_source_choices_3_values_no_bounce(self):
+        values = {v for v, _ in Unsubscribe.Source.choices}
+        self.assertEqual(values, {"unsubscribe_link", "manual", "api"})
+        self.assertNotIn("bounce", values)
+
+    def test_bulk_create_supported(self):
+        # bulk_create で save() オーバーライド・signal の干渉がないことを担保（§9.5.3）。
+        objs = [
+            Unsubscribe(
+                person=self.person,
+                source_email="alice@example.com",
+                source=Unsubscribe.Source.MANUAL,
+            ),
+            Unsubscribe(
+                person=self.person2,
+                source_email="bob@example.com",
+                source=Unsubscribe.Source.MANUAL,
+            ),
+        ]
+        created = Unsubscribe.objects.bulk_create(objs)
+        self.assertEqual(len(created), 2)
+        self.assertEqual(Unsubscribe.objects.count(), 2)
+
+
+class SuppressedEmailPartialUniqueTests(_Phase2ModelTestBase):
+    def test_create_minimal(self):
+        s = SuppressedEmail.objects.create(
+            email="bad@example.com", source=SuppressedEmail.Source.BOUNCE_HARD
+        )
+        self.assertIsNone(s.cancelled_at)
+        self.assertEqual(s.bounce_reason, "")
+
+    def test_active_duplicate_email_rejected(self):
+        SuppressedEmail.objects.create(
+            email="dup@example.com", source=SuppressedEmail.Source.BOUNCE_HARD
+        )
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                SuppressedEmail.objects.create(
+                    email="dup@example.com",
+                    source=SuppressedEmail.Source.MANUAL,
+                )
+
+    def test_cancelled_duplicate_email_allowed(self):
+        # 解除済みは email 重複可（履歴として残せる）。
+        SuppressedEmail.objects.create(
+            email="hist@example.com",
+            source=SuppressedEmail.Source.BOUNCE_HARD,
+            cancelled_at=timezone.now(),
+            cancelled_by=self.user,
+        )
+        SuppressedEmail.objects.create(
+            email="hist@example.com",
+            source=SuppressedEmail.Source.MANUAL,
+            cancelled_at=timezone.now(),
+            cancelled_by=self.user,
+        )
+        self.assertEqual(
+            SuppressedEmail.objects.filter(email="hist@example.com").count(), 2
+        )
+
+    def test_cancel_then_readd_ok(self):
+        # 解除 → 再追加が IntegrityError なしで可能（§4.8.1 の主目的）。
+        s1 = SuppressedEmail.objects.create(
+            email="recycle@example.com", source=SuppressedEmail.Source.BOUNCE_HARD
+        )
+        s1.cancelled_at = timezone.now()
+        s1.cancelled_by = self.user
+        s1.save()
+        # 解除後の再追加は OK
+        SuppressedEmail.objects.create(
+            email="recycle@example.com", source=SuppressedEmail.Source.BOUNCE_HARD
+        )
+
+    def test_source_choices_5_values(self):
+        values = {v for v, _ in SuppressedEmail.Source.choices}
+        self.assertEqual(
+            values,
+            {
+                "unsubscribe_generic",
+                "bounce_hard",
+                "bounce_soft_promoted",
+                "manual",
+                "api",
+            },
+        )
+
+
+class SoftBounceCounterModelTests(_Phase2ModelTestBase):
+    def test_create_minimal(self):
+        sbc = SoftBounceCounter.objects.create(
+            email="soft@example.com", count=1, last_bounce_at=timezone.now()
+        )
+        self.assertEqual(sbc.count, 1)
+
+    def test_email_unique_no_partial(self):
+        # SuppressedEmail と違い素の unique=True（§4.8A）。
+        # cancelled_at=NULL 等の条件付きではなく、解除済み概念なし。
+        SoftBounceCounter.objects.create(
+            email="dup@example.com", count=1, last_bounce_at=timezone.now()
+        )
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                SoftBounceCounter.objects.create(
+                    email="dup@example.com",
+                    count=1,
+                    last_bounce_at=timezone.now(),
+                )

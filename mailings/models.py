@@ -11,6 +11,7 @@ from django.conf import settings
 from django.db import models
 from django.db.models import CheckConstraint, Q, UniqueConstraint
 
+from contacts.models import Contact
 from persons.models import Person
 
 
@@ -221,3 +222,515 @@ class MailingConfig(models.Model):
 
     def __str__(self):
         return f"MailingConfig (id={self.id})"
+
+
+# ======================================================================
+# Phase 2：配信系モデル骨格（仕様書 v1.6 §4.2 / §4.4 / §4.5 / §4.5A /
+# §4.6 / §4.7 / §4.8 / §4.8A、rev13）。
+#
+# 本セクションは骨格（フィールド・制約・FK・choices）のみ。
+# extract_recipients / build() / validate_sender_domain 本体 / 配信実行サービス /
+# EmailContext / cron / バウンス処理 / マージ追従 はすべて Phase 3 以降。
+# save() オーバーライドや post_save / pre_save signal は入れない
+# （特に Unsubscribe：Phase 9 のサービス関数と二重実行・干渉するため、§9.5.3）。
+# ======================================================================
+
+
+class Campaign(models.Model):
+    """配信キャンペーン（仕様書 §4.2、rev13）。
+
+    rev12 で tag_condition を削除し mailing_list を必須 FK 化（NOT NULL、PROTECT）。
+    rev6 で sender_mode を導入（creator / newsletter、別表 C.26）。
+    Phase 2 では get_pending_scheduled / has_view_permission のみ実装、
+    extract_recipients / validate_sender_domain 本体・配信実行サービスは Phase 3。
+    """
+
+    class Status(models.TextChoices):
+        DRAFT = "draft", "下書き"
+        SCHEDULED = "scheduled", "予約配信待機中"
+        SENDING = "sending", "配信中"
+        DONE = "done", "配信完了"
+        FAILED = "failed", "配信失敗"
+
+    class SenderMode(models.TextChoices):
+        CREATOR = "creator", "送信元（メール作成者）"
+        NEWSLETTER = "newsletter", "送信元（メルマガ）"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(
+        max_length=200,
+        help_text="キャンペーン名（管理用、受信者には見えない）",
+    )
+    template = models.ForeignKey(
+        EmailTemplate,
+        on_delete=models.PROTECT,
+        related_name="+",
+    )
+    mailing_list = models.ForeignKey(
+        MailingList,
+        on_delete=models.PROTECT,
+        related_name="+",
+        help_text=(
+            "宛先リスト（必須、rev12 で必須 FK 化）。リスト削除でキャンペーン履歴が"
+            "壊れないよう PROTECT。リストは論理削除運用（§4.11 / §11）"
+        ),
+    )
+    scheduled_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text=(
+            "予約配信日時。rev9 で即時配信モード廃止。status=scheduled 遷移時の"
+            "未来日時必須は Phase 3 のサービス層・フォーム層で担保（§4.2）"
+        ),
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.DRAFT,
+    )
+    sender_mode = models.CharField(
+        max_length=20,
+        choices=SenderMode.choices,
+        default=SenderMode.CREATOR,
+        help_text="送信元方式（§7.8、別表 C.26）",
+    )
+    sender_email = models.EmailField(
+        blank=True,
+        help_text=(
+            "メルマガ方式時の差出人アドレス（自社 DKIM 許可ドメイン配下のみ）。"
+            "メール作成者方式時は空（created_by から取得、§7.8.3）"
+        ),
+    )
+    sender_name = models.CharField(
+        max_length=200,
+        blank=True,
+        default="",
+        help_text="メルマガ方式時の差出人名。メール作成者方式時は空",
+    )
+    apply_unsubscribe_filter = models.BooleanField(
+        default=True,
+        help_text=(
+            "Unsubscribe フィルタ適用フラグ。default=True（安全側）。"
+            "sender_mode='newsletter' のときは構造的に常時 True 固定（特電法事故防止）。"
+            "強制ロジックは Phase 3 のサービス層・フォーム層（§7.8.4）"
+        ),
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="+",
+    )
+    started_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    total_count = models.IntegerField(default=0)
+    sent_count = models.IntegerField(default=0)
+    failed_count = models.IntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "キャンペーン"
+        verbose_name_plural = "キャンペーン"
+        permissions = [
+            ("view_all_campaigns", "他人の配信キャンペーン・配信レポートを閲覧できる"),
+        ]
+
+    def __str__(self):
+        return self.name
+
+    @classmethod
+    def get_pending_scheduled(cls):
+        """status='scheduled' かつ scheduled_at <= now() の Campaign を返す（§4.2.1）。
+
+        [性質] 準関数（DB 読み取りのみ）
+        [入力] なし
+        [出力] QuerySet[Campaign]
+
+        cron 起動の管理コマンド（Phase 3 で実装する send_scheduled_campaigns）が
+        起動対象の絞り込みに使用する。scheduled_at が NULL の draft は __lte で
+        自動的に除外される。
+        """
+        from django.utils import timezone
+
+        return cls.objects.filter(
+            status=cls.Status.SCHEDULED,
+            scheduled_at__lte=timezone.now(),
+        )
+
+    def has_view_permission(self, user):
+        """閲覧権限判定（§4.2.1）。
+
+        [性質] 純関数（DB 操作なし、user.has_perm のみ参照）
+        [入力] user: CustomUser
+        [出力] bool
+
+        view_all_campaigns 持ち、または作成者本人なら True。
+        """
+        if user.has_perm("mailings.view_all_campaigns"):
+            return True
+        return self.created_by_id == user.id
+
+
+class DeliveryHistory(models.Model):
+    """配信履歴（仕様書 §4.4、rev13）。
+
+    キャンペーン × 受信者 1 件 1 件の送信レコード。Person マージ時の FK 付け替えは
+    行わない（rev5、§9.4）。会社名・氏名・宛名は配信時点でスナップショット凍結保存
+    （rev4、§4.4.1）。rev13 で本編 v1.6.0 リネーム反映により
+    company_at_send → organization_at_send に改名（Contact.organization と整合）。
+    """
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "送信前"
+        SENT = "sent", "送信成功"
+        FAILED = "failed", "送信失敗"
+        BOUNCED = "bounced", "バウンス"
+        UNSUBSCRIBED = "unsubscribed", "配信停止"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    campaign = models.ForeignKey(
+        Campaign,
+        on_delete=models.CASCADE,
+        related_name="delivery_histories",
+    )
+    person = models.ForeignKey(
+        Person,
+        on_delete=models.PROTECT,
+        related_name="delivery_histories",
+    )
+    contact = models.ForeignKey(
+        Contact,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        help_text=(
+            "配信時のプライマリーコンタクト（参考情報、マージ・削除で失われる可能性あり）"
+        ),
+    )
+    to_email = models.EmailField(
+        help_text="配信先メアド（送信時点の値を凍結保存、§4.4.1）",
+    )
+    organization_at_send = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        help_text=(
+            "送信時点の組織名（会社名）スナップショット。rev13 で本編 v1.6.0 の "
+            "Contact.organization リネーム反映により company_at_send から改名"
+        ),
+    )
+    full_name_at_send = models.CharField(max_length=255, blank=True, default="")
+    salutation_name_at_send = models.CharField(max_length=255, blank=True, default="")
+    sent_at = models.DateTimeField(null=True, blank=True)
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.PENDING,
+        help_text="5 値（pending/sent/failed/bounced/unsubscribed、別表 C.22）",
+    )
+    error_message = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "配信履歴"
+        verbose_name_plural = "配信履歴"
+        constraints = [
+            UniqueConstraint(
+                fields=["campaign", "person"],
+                name="unique_delivery_history_campaign_person",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.campaign} → {self.to_email}"
+
+
+class TrackingLink(models.Model):
+    """トラッキングリンク（§4.5）。
+
+    キャンペーン × 受信者 × 元 URL の組合せで一意。token は CharField(20) unique の
+    定義のみ。secrets.token_urlsafe(8) での生成は Phase 3 の build() 責務（§4.5）。
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    campaign = models.ForeignKey(
+        Campaign,
+        on_delete=models.CASCADE,
+        related_name="tracking_links",
+    )
+    person = models.ForeignKey(
+        Person,
+        on_delete=models.PROTECT,
+        related_name="tracking_links",
+    )
+    original_url = models.URLField(max_length=2000)
+    token = models.CharField(
+        max_length=20,
+        unique=True,
+        help_text="URL 埋め込みトークン（生成は Phase 3 build()、自動生成を Phase 2 で仕込まない）",
+    )
+    click_count = models.IntegerField(default=0, help_text="有効クリック回数（ボット除外後）")
+    total_access_count = models.IntegerField(default=0, help_text="総アクセス回数（ボット含む）")
+    last_clicked_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "トラッキングリンク"
+        verbose_name_plural = "トラッキングリンク"
+        constraints = [
+            UniqueConstraint(
+                fields=["campaign", "person", "original_url"],
+                name="unique_tracking_link_campaign_person_url",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.campaign} → {self.token}"
+
+
+class UnsubscribeLink(models.Model):
+    """配信停止リンク（§4.5A、rev4 で新設）。
+
+    TrackingLink と類似だが original_url を持たず（配信停止画面に固定）、配信停止と
+    一般クリックを集計対象として分離するため別モデル（§4.5A.1）。
+    トークン有効期限なし（rev10、§4.5A.0）：古いメールからの配信停止を正常利用と
+    位置づけ、特電法のオプトアウト確実提供を優先する。
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    campaign = models.ForeignKey(
+        Campaign,
+        on_delete=models.CASCADE,
+        related_name="unsubscribe_links",
+    )
+    person = models.ForeignKey(
+        Person,
+        on_delete=models.PROTECT,
+        related_name="unsubscribe_links",
+    )
+    token = models.CharField(
+        max_length=20,
+        unique=True,
+        help_text="URL 埋め込みトークン（TrackingLink とは別 namespace、生成は Phase 3）",
+    )
+    accessed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="受信者の初回 GET 日時（§4.5A.2）",
+    )
+    unsubscribed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="配信停止確定日時（POST、§4.5A.2）",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "配信停止リンク"
+        verbose_name_plural = "配信停止リンク"
+        constraints = [
+            UniqueConstraint(
+                fields=["campaign", "person"],
+                name="unique_unsubscribe_link_campaign_person",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.campaign} → {self.token}"
+
+
+class ClickLog(models.Model):
+    """クリックログ（§4.6）。
+
+    トラッキングリンクへの 1 アクセスを表す。生のクリックログは全件記録し、
+    ボット判定で is_valid_click を分岐。bot_reason に判定理由を別表 C.23 の
+    5 値で保存（is_valid_click=False のときのみ値あり）。
+    """
+
+    class BotReason(models.TextChoices):
+        NON_GET = "non_get", "GET 以外"
+        KNOWN_BOT = "known_bot", "既知のボット"
+        TOO_FAST = "too_fast", "プリフェッチ"
+        DUPLICATE = "duplicate", "重複クリック"
+        TEST_SEND = "test_send", "テスト配信"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tracking_link = models.ForeignKey(
+        TrackingLink,
+        on_delete=models.CASCADE,
+        related_name="click_logs",
+    )
+    clicked_at = models.DateTimeField(auto_now_add=True)
+    ip_masked = models.GenericIPAddressField(
+        null=True,
+        blank=True,
+        help_text=(
+            "マスク済み IP（IPv4 末尾 0、IPv6 下位ビットマスク）。"
+            "保持日数経過後に NULL 上書き（Phase 3 の管理コマンド、§4.6）"
+        ),
+    )
+    user_agent = models.TextField(blank=True, default="")
+    http_method = models.CharField(max_length=10)
+    is_valid_click = models.BooleanField()
+    bot_reason = models.CharField(
+        max_length=50,
+        choices=BotReason.choices,
+        blank=True,
+        default="",
+        help_text="無効と判定された理由（is_valid_click=False 時のみ値あり、別表 C.23）",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "クリックログ"
+        verbose_name_plural = "クリックログ"
+
+    def __str__(self):
+        return f"{self.tracking_link} @ {self.clicked_at}"
+
+
+class Unsubscribe(models.Model):
+    """配信停止履歴（§4.7）。
+
+    Person 単位の不変履歴（解除は cancelled_at の論理削除）。
+    rev5 で source の 'bounce' を削除：バウンスは SuppressedEmail へのメアド登録のみ、
+    Person 単位の Unsubscribe は作らない（§10）。
+    bulk_create を使う前提のため save() オーバーライド・post_save signal は入れない
+    （Phase 9 のサービス関数と二重実行・干渉するため、§9.5.3）。
+    """
+
+    class Source(models.TextChoices):
+        UNSUBSCRIBE_LINK = "unsubscribe_link", "配信停止リンク"
+        MANUAL = "manual", "管理者手動"
+        API = "api", "API 経由"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    person = models.ForeignKey(
+        Person,
+        on_delete=models.PROTECT,
+        related_name="unsubscribes",
+    )
+    source_email = models.EmailField(
+        help_text="操作元のメアド文字列（Contact が消えても残す、§4.7）",
+    )
+    source = models.CharField(max_length=30, choices=Source.choices)
+    cancelled_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="配信停止解除日時（解除は論理削除、§4.7 設計趣旨）",
+    )
+    cancelled_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+    )
+    note = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "配信停止履歴"
+        verbose_name_plural = "配信停止履歴"
+
+    def __str__(self):
+        return f"{self.person} ({self.source})"
+
+
+class SuppressedEmail(models.Model):
+    """配信拒否リスト（§4.8）。
+
+    メアド単位の配信拒否レコード（代表メール由来 / ハードバウンス由来）。
+    partial unique constraint（§4.8.1）：active (cancelled_at=NULL) は email ごとに
+    1 件まで・解除済みは重複可・解除 → 再追加が IntegrityError なしで可能。
+    Person との直接 FK は持たない（複数 Person が同じ代表メアドを共有しうるため、§4.8）。
+    """
+
+    class Source(models.TextChoices):
+        UNSUBSCRIBE_GENERIC = "unsubscribe_generic", "代表メール配信停止"
+        BOUNCE_HARD = "bounce_hard", "ハードバウンス"
+        BOUNCE_SOFT_PROMOTED = "bounce_soft_promoted", "ソフトバウンス昇格"
+        MANUAL = "manual", "管理者手動"
+        API = "api", "API 経由"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    email = models.EmailField(
+        help_text=(
+            "配信拒否メアド。unique=True は付けない（partial unique で制御、§4.8.1）。"
+            "解除 → 再追加を IntegrityError なしで可能にするため"
+        ),
+    )
+    source = models.CharField(max_length=30, choices=Source.choices)
+    bounce_reason = models.TextField(
+        blank=True,
+        default="",
+        help_text="バウンスの場合の MTA 応答メッセージ等",
+    )
+    cancelled_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="配信拒否解除日時（論理削除、§4.8.1）",
+    )
+    cancelled_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+    )
+    note = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "配信拒否メアド"
+        verbose_name_plural = "配信拒否メアド"
+        constraints = [
+            UniqueConstraint(
+                fields=["email"],
+                condition=Q(cancelled_at__isnull=True),
+                name="unique_active_suppressed_email",
+            ),
+        ]
+
+    def __str__(self):
+        return self.email
+
+
+class SoftBounceCounter(models.Model):
+    """ソフトバウンス連続失敗カウンタ（§4.8A、rev4 で新設）。
+
+    SuppressedEmail と責務分離（§4.8A.1）。閾値到達で SuppressedEmail に
+    'bounce_soft_promoted' で昇格、本レコードは物理削除（§4.8A.2）。
+    解除概念がないため email は素の unique=True（SuppressedEmail の partial と対照、§4.8A）。
+    配信フィルタには使わない（フィルタは SuppressedEmail のみ、§4.8A.3）。
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    email = models.EmailField(
+        unique=True,
+        help_text=(
+            "カウント対象メアド。昇格時・送信成功時に物理削除されるため "
+            "素の unique=True で十分（SuppressedEmail の partial unique と対照、§4.8A）"
+        ),
+    )
+    count = models.IntegerField(default=0, help_text="現時点の連続ソフトバウンス回数")
+    last_bounce_at = models.DateTimeField(help_text="最後にソフトバウンスを観測した日時")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-last_bounce_at"]
+        verbose_name = "ソフトバウンスカウンタ"
+        verbose_name_plural = "ソフトバウンスカウンタ"
+
+    def __str__(self):
+        return f"{self.email} (count={self.count})"
