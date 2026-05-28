@@ -2174,3 +2174,97 @@ class MailingConfigEditView(LoginRequiredMixin, View):
                 "active_menu": "mailings:config_edit",
             },
         )
+
+
+# ======================================================================
+# Phase 4：クリック中継ビュー（仕様書 v1.6 §8.1 / §8.2、rev14）
+# ======================================================================
+
+
+class TrackingRedirectView(View):
+    """クリック中継ビュー（§8.1 / §5.1 No.34、URL: /t/<token>/）。
+
+    ログイン不要・外部公開・CSRF 無関係（GET / HEAD のみ）。
+    判定ロジックは純関数 detect_bot_status に分離（§2.2.2 / §8.2）。
+    本ビューは「副作用」側：ClickLog 作成、TrackingLink の各カウンタ更新、302 リダイレクト。
+
+    HEAD はメーラープリフェッチ用に 302 を返すが、有効クリックにはカウントしない
+    （bot_reason="non_get"）。POST 等は現実にはほぼ来ないため 405 等の特別扱いは
+    せず、http_method_names で GET/HEAD のみ受け付ける。
+
+    同時クリック耐性：TrackingLink のカウンタ更新は QuerySet.update + F() で
+    SQL レベルの "field = field + 1" として発行する（Python レベルの read-modify-write
+    を避ける）。テストでも保証する。
+    """
+
+    http_method_names = ["get", "head"]
+
+    def get(self, request, token):
+        return self._handle(request, token)
+
+    def head(self, request, token):
+        # 順 1：non_get 扱いだが 302 は返す（メーラープリフェッチを正常終了させるため）。
+        return self._handle(request, token)
+
+    def _handle(self, request, token):
+        from django.db.models import F
+        from django.http import HttpResponseRedirect
+        from django.shortcuts import get_object_or_404
+        from django.utils import timezone
+
+        from config.constants import (
+            CLICK_PREFETCH_THRESHOLD_SECONDS,
+            KNOWN_BOT_USER_AGENT_PATTERNS,
+        )
+
+        from .models import ClickLog, TrackingLink
+        from .services.bot_detection import detect_bot_status
+        from .services.ip_masking import mask_ip
+
+        # 無効トークンは 404（ClickLog は tracking_link FK NOT NULL のため構造的に作れない）
+        tracking_link = get_object_or_404(TrackingLink, token=token)
+
+        http_method = request.method or ""
+        user_agent = request.META.get("HTTP_USER_AGENT", "") or ""
+        raw_ip = request.META.get("REMOTE_ADDR", "") or ""
+        now = timezone.now()
+
+        # duplicate 判定はサマリベース（TrackingLink.click_count > 0）。
+        # 履歴ベース（is_valid_click=True の ClickLog 存在）と同じ結論になる
+        # （click_count は is_valid_click=True 時のみ +1 される、§8.2）。
+        has_existing_valid_click = tracking_link.click_count > 0
+
+        is_valid_click, bot_reason = detect_bot_status(
+            http_method=http_method,
+            user_agent=user_agent,
+            sent_at=tracking_link.created_at,
+            now=now,
+            threshold_seconds=CLICK_PREFETCH_THRESHOLD_SECONDS,
+            bot_patterns=KNOWN_BOT_USER_AGENT_PATTERNS,
+            has_existing_valid_click=has_existing_valid_click,
+        )
+
+        ClickLog.objects.create(
+            tracking_link=tracking_link,
+            ip_masked=mask_ip(raw_ip),
+            user_agent=user_agent,
+            http_method=http_method[:10],
+            is_valid_click=is_valid_click,
+            bot_reason=bot_reason,
+        )
+
+        # F() expression で race-safe にカウンタ更新（指示書「同時クリック耐性」）。
+        # total_access_count はボット込みで毎回 +1（§8.2 末尾、§13.2）。
+        # click_count / last_clicked_at は有効クリック時のみ。
+        if is_valid_click:
+            TrackingLink.objects.filter(pk=tracking_link.pk).update(
+                total_access_count=F("total_access_count") + 1,
+                click_count=F("click_count") + 1,
+                last_clicked_at=now,
+            )
+        else:
+            TrackingLink.objects.filter(pk=tracking_link.pk).update(
+                total_access_count=F("total_access_count") + 1,
+            )
+
+        return HttpResponseRedirect(tracking_link.original_url)

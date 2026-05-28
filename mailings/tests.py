@@ -4213,3 +4213,527 @@ class SendScheduledCampaignsCommandTests(_Phase3TestBase):
         out = StringIO()
         call_command("send_scheduled_campaigns", stdout=out)
         self.assertIn("対象キャンペーンなし", out.getvalue())
+
+
+# ======================================================================
+# Phase 4：クリック中継ビュー（仕様書 v1.6 §8.1 / §8.2 / §8.3、rev14）
+#
+# - TrackingRedirectView（GET /t/<token>/、URL name mailings:tracking_redirect）
+# - ボット・プリフェッチ判定 5 段階（純関数）
+# - IP マスキング（純関数）
+# - ClickLog 作成（副作用）+ TrackingLink カウンタ更新（F() expression）
+# - purge_old_click_log_ips 管理コマンド（90 日経過 ip_masked → NULL 上書き）
+# ======================================================================
+
+
+from django.test import TransactionTestCase
+
+from mailings.services.bot_detection import detect_bot_status
+from mailings.services.ip_masking import mask_ip
+
+
+class _Phase4TestBase(TestCase):
+    """Phase 4 テストの共通基底（Person / Campaign / TrackingLink を用意）。"""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="phase4_user", password="x")
+        self.template = EmailTemplate.objects.create(
+            name="T1",
+            subject="件名",
+            body="本文",
+            created_by=self.user,
+        )
+        self.mailing_list = MailingList.objects.create(
+            name="ML1", created_by=self.user
+        )
+        self.person = self._make_person("Alice")
+        self.campaign = Campaign.objects.create(
+            name="C1",
+            template=self.template,
+            mailing_list=self.mailing_list,
+            created_by=self.user,
+        )
+
+    def _make_person(self, full_name):
+        p = Person.objects.create(status="active")
+        c = Contact.objects.create(
+            person=p,
+            status=Contact.Status.PRIMARY,
+            full_name=full_name,
+            email=f"{full_name.lower()}@example.com",
+            created_by=self.user,
+        )
+        p.primary_contact = c
+        p.save(update_fields=["primary_contact", "updated_at"])
+        return p
+
+    def _make_tracking_link(self, *, token="tok_abc1234", original_url=None,
+                            created_at=None):
+        url = original_url or "https://example.com/landing"
+        tl = TrackingLink.objects.create(
+            campaign=self.campaign,
+            person=self.person,
+            original_url=url,
+            token=token,
+        )
+        if created_at is not None:
+            # auto_now_add の値を後から上書きするには update が必要
+            TrackingLink.objects.filter(pk=tl.pk).update(created_at=created_at)
+            tl.refresh_from_db()
+        return tl
+
+
+class IpMaskingPureFunctionTests(TestCase):
+    """services/ip_masking.py の純関数テスト（§8.3.1）。"""
+
+    def test_ipv4_normal(self):
+        self.assertEqual(mask_ip("118.243.45.67"), "118.243.45.0")
+
+    def test_ipv4_already_zero_tail(self):
+        self.assertEqual(mask_ip("10.0.0.0"), "10.0.0.0")
+
+    def test_ipv4_loopback(self):
+        self.assertEqual(mask_ip("127.0.0.1"), "127.0.0.0")
+
+    def test_ipv6_normal(self):
+        result = mask_ip("2001:db8:1234:5678:abcd:ef01:2345:6789")
+        # ipaddress モジュールの正規化形式：2001:db8:1234:5678::
+        self.assertEqual(result, "2001:db8:1234:5678::")
+
+    def test_ipv6_already_zero_lower(self):
+        result = mask_ip("2001:db8:1234:5678::")
+        self.assertEqual(result, "2001:db8:1234:5678::")
+
+    def test_ipv6_full_zero(self):
+        self.assertEqual(mask_ip("::"), "::")
+
+    def test_invalid_string_returns_none(self):
+        self.assertIsNone(mask_ip("not_an_ip"))
+        self.assertIsNone(mask_ip("999.999.999.999"))
+        self.assertIsNone(mask_ip("123.45.67"))
+
+    def test_empty_returns_none(self):
+        self.assertIsNone(mask_ip(""))
+
+    def test_none_returns_none(self):
+        self.assertIsNone(mask_ip(None))
+
+
+class BotDetectionPureFunctionTests(TestCase):
+    """services/bot_detection.py の純関数テスト（§8.2、5 段階判定）。"""
+
+    def _base_kwargs(self):
+        now = timezone.now()
+        return dict(
+            user_agent="Mozilla/5.0",
+            sent_at=now - timedelta(minutes=5),
+            now=now,
+            threshold_seconds=3,
+            bot_patterns=["bot", "crawl"],
+            has_existing_valid_click=False,
+        )
+
+    def test_rank1_non_get_returns_non_get(self):
+        kwargs = self._base_kwargs()
+        is_valid, reason = detect_bot_status(http_method="HEAD", **kwargs)
+        self.assertFalse(is_valid)
+        self.assertEqual(reason, "non_get")
+
+    def test_rank1_post_returns_non_get(self):
+        kwargs = self._base_kwargs()
+        is_valid, reason = detect_bot_status(http_method="POST", **kwargs)
+        self.assertFalse(is_valid)
+        self.assertEqual(reason, "non_get")
+
+    def test_rank2_known_bot_by_user_agent_case_insensitive(self):
+        kwargs = self._base_kwargs()
+        kwargs["user_agent"] = "Googlebot/2.1"
+        is_valid, reason = detect_bot_status(http_method="GET", **kwargs)
+        self.assertFalse(is_valid)
+        self.assertEqual(reason, "known_bot")
+
+    def test_rank2_known_bot_partial_match(self):
+        kwargs = self._base_kwargs()
+        kwargs["user_agent"] = "MyCrawlerAgent/1.0"
+        is_valid, reason = detect_bot_status(http_method="GET", **kwargs)
+        self.assertFalse(is_valid)
+        self.assertEqual(reason, "known_bot")
+
+    def test_rank3_too_fast_within_threshold(self):
+        now = timezone.now()
+        kwargs = self._base_kwargs()
+        kwargs["now"] = now
+        kwargs["sent_at"] = now - timedelta(seconds=2)
+        kwargs["threshold_seconds"] = 3
+        is_valid, reason = detect_bot_status(http_method="GET", **kwargs)
+        self.assertFalse(is_valid)
+        self.assertEqual(reason, "too_fast")
+
+    def test_rank3_just_at_threshold_is_valid(self):
+        # delta == threshold は too_fast 扱いではない（< 未満で判定）
+        now = timezone.now()
+        kwargs = self._base_kwargs()
+        kwargs["now"] = now
+        kwargs["sent_at"] = now - timedelta(seconds=3)
+        kwargs["threshold_seconds"] = 3
+        is_valid, reason = detect_bot_status(http_method="GET", **kwargs)
+        self.assertTrue(is_valid)
+        self.assertEqual(reason, "")
+
+    def test_rank4_duplicate_when_existing_valid_click(self):
+        kwargs = self._base_kwargs()
+        kwargs["has_existing_valid_click"] = True
+        is_valid, reason = detect_bot_status(http_method="GET", **kwargs)
+        self.assertFalse(is_valid)
+        self.assertEqual(reason, "duplicate")
+
+    def test_rank5_all_pass_is_valid(self):
+        kwargs = self._base_kwargs()
+        is_valid, reason = detect_bot_status(http_method="GET", **kwargs)
+        self.assertTrue(is_valid)
+        self.assertEqual(reason, "")
+
+    def test_priority_non_get_beats_known_bot(self):
+        # 順 1 → 順 2 の優先順序：HEAD かつ UA にボット文字列があれば non_get
+        kwargs = self._base_kwargs()
+        kwargs["user_agent"] = "Googlebot/2.1"
+        is_valid, reason = detect_bot_status(http_method="HEAD", **kwargs)
+        self.assertFalse(is_valid)
+        self.assertEqual(reason, "non_get")
+
+    def test_priority_known_bot_beats_too_fast(self):
+        now = timezone.now()
+        kwargs = self._base_kwargs()
+        kwargs["user_agent"] = "Googlebot/2.1"
+        kwargs["now"] = now
+        kwargs["sent_at"] = now - timedelta(seconds=1)
+        is_valid, reason = detect_bot_status(http_method="GET", **kwargs)
+        self.assertFalse(is_valid)
+        self.assertEqual(reason, "known_bot")
+
+
+class TrackingRedirectView404Tests(_Phase4TestBase):
+    """無効トークンの 404 経路（§8.1）。"""
+
+    def test_unknown_token_returns_404(self):
+        response = self.client.get("/t/nonexistent_token/")
+        self.assertEqual(response.status_code, 404)
+
+    def test_unknown_token_does_not_create_clicklog(self):
+        before = ClickLog.objects.count()
+        self.client.get("/t/nonexistent_token/")
+        self.assertEqual(ClickLog.objects.count(), before)
+
+
+class TrackingRedirectViewValidClickTests(_Phase4TestBase):
+    """有効クリック（順 5）の経路（§8.1 / §8.2）。"""
+
+    def test_valid_click_redirects_to_original_url(self):
+        tl = self._make_tracking_link(
+            token="tok_valid01",
+            original_url="https://example.com/landing?utm=mail",
+            created_at=timezone.now() - timedelta(minutes=10),
+        )
+        response = self.client.get(f"/t/{tl.token}/", HTTP_USER_AGENT="Mozilla/5.0")
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], "https://example.com/landing?utm=mail")
+
+    def test_valid_click_increments_both_counters(self):
+        tl = self._make_tracking_link(
+            token="tok_valid02",
+            created_at=timezone.now() - timedelta(minutes=10),
+        )
+        self.client.get(f"/t/{tl.token}/", HTTP_USER_AGENT="Mozilla/5.0")
+        tl.refresh_from_db()
+        self.assertEqual(tl.total_access_count, 1)
+        self.assertEqual(tl.click_count, 1)
+        self.assertIsNotNone(tl.last_clicked_at)
+
+    def test_valid_click_creates_clicklog_with_is_valid_true(self):
+        tl = self._make_tracking_link(
+            token="tok_valid03",
+            created_at=timezone.now() - timedelta(minutes=10),
+        )
+        self.client.get(
+            f"/t/{tl.token}/",
+            HTTP_USER_AGENT="Mozilla/5.0",
+            REMOTE_ADDR="118.243.45.67",
+        )
+        log = ClickLog.objects.get(tracking_link=tl)
+        self.assertTrue(log.is_valid_click)
+        self.assertEqual(log.bot_reason, "")
+        self.assertEqual(log.http_method, "GET")
+        self.assertEqual(log.user_agent, "Mozilla/5.0")
+        self.assertEqual(log.ip_masked, "118.243.45.0")
+
+
+class TrackingRedirectViewHeadMethodTests(_Phase4TestBase):
+    """HEAD（順 1：non_get）の経路（§8.2、§8.1 末尾の 302 返却）。"""
+
+    def test_head_returns_302_for_prefetcher(self):
+        tl = self._make_tracking_link(
+            token="tok_head01",
+            created_at=timezone.now() - timedelta(minutes=10),
+        )
+        response = self.client.head(f"/t/{tl.token}/")
+        # HEAD でも 302 を返す（メーラープリフェッチを正常終了させる）
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], "https://example.com/landing")
+
+    def test_head_does_not_increment_click_count(self):
+        tl = self._make_tracking_link(
+            token="tok_head02",
+            created_at=timezone.now() - timedelta(minutes=10),
+        )
+        self.client.head(f"/t/{tl.token}/")
+        tl.refresh_from_db()
+        # total_access_count は +1、click_count は据え置き
+        self.assertEqual(tl.total_access_count, 1)
+        self.assertEqual(tl.click_count, 0)
+        self.assertIsNone(tl.last_clicked_at)
+
+    def test_head_creates_clicklog_with_non_get_reason(self):
+        tl = self._make_tracking_link(
+            token="tok_head03",
+            created_at=timezone.now() - timedelta(minutes=10),
+        )
+        self.client.head(f"/t/{tl.token}/")
+        log = ClickLog.objects.get(tracking_link=tl)
+        self.assertFalse(log.is_valid_click)
+        self.assertEqual(log.bot_reason, "non_get")
+        self.assertEqual(log.http_method, "HEAD")
+
+
+class TrackingRedirectViewBotUserAgentTests(_Phase4TestBase):
+    """既知ボット UA（順 2：known_bot）の経路。"""
+
+    def test_googlebot_ua_is_known_bot(self):
+        tl = self._make_tracking_link(
+            token="tok_bot01",
+            created_at=timezone.now() - timedelta(minutes=10),
+        )
+        response = self.client.get(
+            f"/t/{tl.token}/", HTTP_USER_AGENT="Googlebot/2.1 (+http://www.google.com/bot.html)"
+        )
+        self.assertEqual(response.status_code, 302)
+        tl.refresh_from_db()
+        self.assertEqual(tl.total_access_count, 1)
+        self.assertEqual(tl.click_count, 0)
+        log = ClickLog.objects.get(tracking_link=tl)
+        self.assertFalse(log.is_valid_click)
+        self.assertEqual(log.bot_reason, "known_bot")
+
+
+class TrackingRedirectViewTooFastTests(_Phase4TestBase):
+    """プリフェッチ（順 3：too_fast）の経路。"""
+
+    def test_click_within_threshold_is_too_fast(self):
+        # TrackingLink.created_at = 今（=送信直後）。閾値 3 秒以内のクリック → too_fast
+        tl = self._make_tracking_link(token="tok_fast01")
+        response = self.client.get(f"/t/{tl.token}/", HTTP_USER_AGENT="Mozilla/5.0")
+        self.assertEqual(response.status_code, 302)
+        tl.refresh_from_db()
+        self.assertEqual(tl.total_access_count, 1)
+        self.assertEqual(tl.click_count, 0)
+        log = ClickLog.objects.get(tracking_link=tl)
+        self.assertFalse(log.is_valid_click)
+        self.assertEqual(log.bot_reason, "too_fast")
+
+
+class TrackingRedirectViewDuplicateTests(_Phase4TestBase):
+    """重複クリック（順 4：duplicate）の経路。"""
+
+    def test_second_valid_click_is_duplicate(self):
+        tl = self._make_tracking_link(
+            token="tok_dup01",
+            created_at=timezone.now() - timedelta(minutes=10),
+        )
+        # 1 回目：有効
+        self.client.get(f"/t/{tl.token}/", HTTP_USER_AGENT="Mozilla/5.0")
+        # 2 回目：duplicate
+        self.client.get(f"/t/{tl.token}/", HTTP_USER_AGENT="Mozilla/5.0")
+        tl.refresh_from_db()
+        self.assertEqual(tl.total_access_count, 2)
+        self.assertEqual(tl.click_count, 1)  # 初回のみ
+        logs = ClickLog.objects.filter(tracking_link=tl).order_by("clicked_at")
+        self.assertEqual(logs.count(), 2)
+        self.assertTrue(logs[0].is_valid_click)
+        self.assertFalse(logs[1].is_valid_click)
+        self.assertEqual(logs[1].bot_reason, "duplicate")
+
+
+class TrackingRedirectViewCounterIntegrityTests(_Phase4TestBase):
+    """カウンタの数え方検証：total は毎回 +1、click は有効時のみ +1（§13.2）。"""
+
+    def test_total_access_count_increments_for_every_request(self):
+        tl = self._make_tracking_link(
+            token="tok_cnt01",
+            created_at=timezone.now() - timedelta(minutes=10),
+        )
+        # 連続 5 回（1 回目有効 + 2-5 回目 duplicate）
+        for _ in range(5):
+            self.client.get(f"/t/{tl.token}/", HTTP_USER_AGENT="Mozilla/5.0")
+        tl.refresh_from_db()
+        self.assertEqual(tl.total_access_count, 5)
+        self.assertEqual(tl.click_count, 1)
+
+    def test_last_clicked_at_only_updates_on_valid_click(self):
+        tl = self._make_tracking_link(
+            token="tok_cnt02",
+            created_at=timezone.now() - timedelta(minutes=10),
+        )
+        # 1 回目：有効
+        self.client.get(f"/t/{tl.token}/", HTTP_USER_AGENT="Mozilla/5.0")
+        tl.refresh_from_db()
+        first_last_clicked = tl.last_clicked_at
+        self.assertIsNotNone(first_last_clicked)
+        # 2 回目：duplicate（last_clicked_at 据え置き）
+        self.client.get(f"/t/{tl.token}/", HTTP_USER_AGENT="Mozilla/5.0")
+        tl.refresh_from_db()
+        self.assertEqual(tl.last_clicked_at, first_last_clicked)
+
+
+class TrackingRedirectViewConcurrencySafetyTests(TransactionTestCase):
+    """同時クリック耐性：F() expression で race-free にカウンタ更新されること。
+
+    SQLite/PG 共通で確実に通すため、TransactionTestCase 配下で threading.Thread を
+    2 本走らせる。F() を使わない実装（Python レベルの read-modify-write）だと
+    片方の +1 が消えるため total_access_count == 1 になり失敗するが、F() なら 2 が確定。
+    """
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+        from contacts.models import Contact
+        from persons.models import Person
+
+        User = get_user_model()
+        self.user = User.objects.create_user(username="phase4_concur", password="x")
+        self.template = EmailTemplate.objects.create(
+            name="T1", subject="件名", body="本文", created_by=self.user
+        )
+        self.mailing_list = MailingList.objects.create(
+            name="ML1", created_by=self.user
+        )
+        person = Person.objects.create(status="active")
+        Contact.objects.create(
+            person=person,
+            status=Contact.Status.PRIMARY,
+            full_name="Alice",
+            email="alice@example.com",
+            created_by=self.user,
+        )
+        person.refresh_from_db()
+        self.campaign = Campaign.objects.create(
+            name="C1",
+            template=self.template,
+            mailing_list=self.mailing_list,
+            created_by=self.user,
+        )
+        self.tl = TrackingLink.objects.create(
+            campaign=self.campaign,
+            person=person,
+            original_url="https://example.com/landing",
+            token="tok_concur01",
+        )
+        # created_at を過去にして too_fast を回避
+        TrackingLink.objects.filter(pk=self.tl.pk).update(
+            created_at=timezone.now() - timedelta(minutes=10)
+        )
+
+    def test_concurrent_clicks_do_not_lose_total_access_count(self):
+        import threading
+        from django.db import connection
+
+        client1 = Client()
+        client2 = Client()
+
+        def _hit(client):
+            try:
+                client.get(f"/t/{self.tl.token}/", HTTP_USER_AGENT="Mozilla/5.0")
+            finally:
+                # 各スレッドの DB 接続を閉じる（threading 共有を避ける）
+                connection.close()
+
+        t1 = threading.Thread(target=_hit, args=(client1,))
+        t2 = threading.Thread(target=_hit, args=(client2,))
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+
+        self.tl.refresh_from_db()
+        # F() expression なので並行 2 リクエストでも total_access_count は 2 で確定
+        self.assertEqual(self.tl.total_access_count, 2)
+        # ClickLog も 2 件作られる
+        self.assertEqual(ClickLog.objects.filter(tracking_link=self.tl).count(), 2)
+
+
+class PurgeOldClickLogIpsCommandTests(_Phase4TestBase):
+    """purge_old_click_log_ips 管理コマンド（§8.3.2）。"""
+
+    def _make_click_log(self, *, created_at, ip_masked="118.243.45.0"):
+        # original_url も毎回ユニークにする（TrackingLink の UNIQUE (campaign, person,
+        # original_url) 制約を回避）
+        unique_suffix = uuid.uuid4().hex[:8]
+        tl = TrackingLink.objects.create(
+            campaign=self.campaign,
+            person=self.person,
+            original_url=f"https://example.com/page-{unique_suffix}",
+            token=f"tok_{uuid.uuid4().hex[:10]}",
+        )
+        log = ClickLog.objects.create(
+            tracking_link=tl,
+            ip_masked=ip_masked,
+            user_agent="UA",
+            http_method="GET",
+            is_valid_click=True,
+            bot_reason="",
+        )
+        ClickLog.objects.filter(pk=log.pk).update(created_at=created_at)
+        log.refresh_from_db()
+        return log
+
+    def test_purges_logs_older_than_retention_days(self):
+        old_log = self._make_click_log(
+            created_at=timezone.now() - timedelta(days=91),
+        )
+        recent_log = self._make_click_log(
+            created_at=timezone.now() - timedelta(days=10),
+        )
+        out = StringIO()
+        call_command("purge_old_click_log_ips", stdout=out)
+
+        old_log.refresh_from_db()
+        recent_log.refresh_from_db()
+        self.assertIsNone(old_log.ip_masked)
+        self.assertEqual(recent_log.ip_masked, "118.243.45.0")
+
+    def test_already_null_logs_are_not_counted(self):
+        # 既に NULL のレコードは update 対象外（運用ログでの差分検知のため）
+        old_null = self._make_click_log(
+            created_at=timezone.now() - timedelta(days=100),
+            ip_masked=None,
+        )
+        old_with_ip = self._make_click_log(
+            created_at=timezone.now() - timedelta(days=100),
+            ip_masked="10.0.0.0",
+        )
+        out = StringIO()
+        call_command("purge_old_click_log_ips", stdout=out)
+        # 出力の件数は 1 件のみ（既に NULL のものは数えない）
+        self.assertIn("1 件", out.getvalue())
+        old_with_ip.refresh_from_db()
+        self.assertIsNone(old_with_ip.ip_masked)
+
+    def test_no_targets_outputs_zero(self):
+        out = StringIO()
+        call_command("purge_old_click_log_ips", stdout=out)
+        self.assertIn("0 件", out.getvalue())
+
+    def test_custom_days_argument(self):
+        # --days=7 を指定すると、7 日経過分が NULL 化される
+        log = self._make_click_log(created_at=timezone.now() - timedelta(days=8))
+        out = StringIO()
+        call_command("purge_old_click_log_ips", "--days=7", stdout=out)
+        log.refresh_from_db()
+        self.assertIsNone(log.ip_masked)

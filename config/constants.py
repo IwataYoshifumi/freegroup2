@@ -148,3 +148,31 @@ CLICK_LOG_IP_RETENTION_DAYS = 90
 # TrackingLink: {MAILING_SITE_URL}/t/<token>/、UnsubscribeLink: {MAILING_SITE_URL}/u/<token>/
 # Phase 8 で .env / settings 経由の環境別管理に切り替える想定。Phase 3 ではここを正本とする。
 MAILING_SITE_URL = "https://freegroup2.example.com"
+
+# ======================================================================
+# v1.6 クリックトラッキング系（Phase 4、仕様書 §8.2.1）
+# ======================================================================
+
+# クリック中継ビュー（TrackingRedirectView）の User-Agent ボット判定パターン（§8.2 順2）。
+# 部分一致・大文字小文字区別なしで判定する（detect_bot_status 純関数側で小文字化）。
+# v1.7+ で拡充予定（仕様書 §8.2.1）。クラウド IP レンジ判定は v1.6 ではスコープ外。
+KNOWN_BOT_USER_AGENT_PATTERNS = [
+    "bot",
+    "crawl",
+    "spider",
+    "fetch",
+    "preview",
+    "scan",
+    "monitor",
+    "headless",
+    "slurp",
+    "curl",
+    "wget",
+    "python-requests",
+]
+
+# プリフェッチ判定の閾値秒数（§8.2 順3、§8.2.1）。
+# TrackingLink.created_at から本秒数以内のクリックはメーラープリフェッチ扱い（too_fast）。
+# TrackingLink.created_at は PRODUCTION mode 配信の (III) atomic 内で確定するため、
+# 実質「メール送信時刻」と近似される（仕様書 §7.4.3.3 / §8.4）。
+CLICK_PREFETCH_THRESHOLD_SECONDS = 3
