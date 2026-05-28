@@ -612,6 +612,26 @@ a { color: inherit; text-decoration: none; }
   color: #92400e;
 }
 
+/* β-2b で導入：Django messages framework と JS のエラー / 成功 / 情報通知表示。
+   warning と同じパターン（border + background + color の 3 値）。 */
+.app-message--error {
+  border-color: #fca5a5;
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+.app-message--success {
+  border-color: #86efac;
+  background: #f0fdf4;
+  color: #166534;
+}
+
+.app-message--info {
+  border-color: #93c5fd;
+  background: #eff6ff;
+  color: #1e40af;
+}
+
 .app-status-badge--muted { background: #f1f5f9; color: #475569; }
 .app-status-badge--info { background: #dbeafe; color: #1d4ed8; }
 

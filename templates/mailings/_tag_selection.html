@@ -90,10 +90,14 @@ JS フック予約：
         {% with cat=cat_block.category cat_tags=cat_block.tags %}
           <details class="app-card js-category-block"
                    data-category-id="{{ cat.id }}"
+                   data-total-tags="{{ cat_tags|length }}"
                    style="margin-bottom:8px; padding:12px;"
                    open>
             <summary style="cursor:pointer; display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
               <strong>カテゴリ：{{ cat.name }}</strong>
+              <span class="js-category-count app-status-badge app-status-badge--info"
+                    data-category-id="{{ cat.id }}"
+                    hidden></span>
               <span style="margin-left:auto; display:flex; align-items:center; gap:8px;">
                 <label style="color:#64748b; font-size:0.9em;">演算：</label>
                 <select name="operator_{{ cat.id }}"
@@ -155,26 +159,42 @@ JS フック予約：
       <hr style="margin:16px 0; border:none; border-top:1px solid #e2e8f0;">
       <div class="app-card js-global-exclude-block"
            style="padding:12px; background:#f8fafc;">
-        <h3 style="margin:0 0 8px;">全カテゴリ横断の除外タグ</h3>
+        <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:8px;">
+          <h3 style="margin:0;">全カテゴリ横断の除外タグ</h3>
+          <button type="button"
+                  class="app-btn app-btn--secondary app-btn--sm"
+                  data-action="open-modal"
+                  data-target="globalExcludeModal">
+            <i class="bi bi-plus-circle"></i> タグを追加
+          </button>
+        </div>
         <p class="app-muted" style="margin-bottom:8px; font-size:0.9em;">
           ここに指定したタグを 1 つでも持つ Person は、上記のカテゴリ条件にかかわらず除外されます。
         </p>
-        <div style="display:flex; flex-wrap:wrap; gap:8px 16px; max-height:240px; overflow-y:auto;">
-          {% for tag in global_exclude_tags %}
-            <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
-              <input type="checkbox"
-                     name="global_exclude_tag_ids"
-                     value="{{ tag.id }}"
-                     class="js-global-exclude-checkbox"
-                     data-tag-id="{{ tag.id }}"
-                     data-tag-name="{{ tag.name }}">
-              <span style="color:#64748b; font-size:0.85em;">[{{ tag.category.name }}]</span>
-              {{ tag.name }}
-            </label>
-          {% empty %}
-            <span class="app-muted">（タグがまだありません）</span>
-          {% endfor %}
-        </div>
+        {# JS が現在選択中の横断除外をチップとして描画する。空時は js-global-exclude-empty を表示 #}
+        <div class="js-global-exclude-chips" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px;"></div>
+        <div class="js-global-exclude-empty app-muted" style="font-size:0.9em;">（現在、横断除外タグは指定されていません）</div>
+        {# JS off フォールバック / サーバ POST 用の static checkbox 群（JS は表示せず非表示で連動制御） #}
+        <details class="js-global-exclude-fallback" style="margin-top:8px;">
+          <summary class="app-muted" style="cursor:pointer; font-size:0.85em;">タグを直接選択（JavaScript なし環境向け）</summary>
+          <div style="display:flex; flex-wrap:wrap; gap:8px 16px; max-height:240px; overflow-y:auto; margin-top:8px;">
+            {% for tag in global_exclude_tags %}
+              <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+                <input type="checkbox"
+                       name="global_exclude_tag_ids"
+                       value="{{ tag.id }}"
+                       class="js-global-exclude-checkbox"
+                       data-tag-id="{{ tag.id }}"
+                       data-tag-name="{{ tag.name }}"
+                       data-tag-category-name="{{ tag.category.name }}">
+                <span style="color:#64748b; font-size:0.85em;">[{{ tag.category.name }}]</span>
+                {{ tag.name }}
+              </label>
+            {% empty %}
+              <span class="app-muted">（タグがまだありません）</span>
+            {% endfor %}
+          </div>
+        </details>
       </div>
 
       {# プレビュー欄：JS が AJAX 結果を書き込む。β-2a では静的プレースホルダ #}
@@ -209,4 +229,31 @@ JS フック予約：
   {# β-2a 復元用：current_conditions を JS が読み取るためのデータブロック
      （JS は β-2b で実装。サーバ側はキーだけ予約、値は JSON 文字列） #}
   {{ current_conditions|json_script:"js-current-conditions" }}
+
+  {# 横断除外モーダル（β-2b 追加、§3.5 / §4.4.2）。
+     既存 app-modal 機構（data-action="open-modal" / "close-modal"）を流用。
+     base.html には backdrop が無いため本画面に個別配置する。 #}
+  <div class="app-modal-backdrop" hidden></div>
+  <div id="globalExcludeModal" class="app-modal" hidden role="dialog" aria-modal="true"
+       aria-labelledby="globalExcludeModalTitle">
+    <div class="app-modal__panel">
+      <div class="app-modal__header">
+        <h2 id="globalExcludeModalTitle">横断除外タグを追加</h2>
+        <button type="button" class="app-btn--icon" data-action="close-modal" aria-label="閉じる">×</button>
+      </div>
+      <div class="app-modal__body">
+        <input type="text"
+               id="js-global-exclude-modal-search"
+               class="app-input"
+               placeholder="タグ名 / カテゴリ名で絞り込み"
+               autocomplete="off">
+        <div id="js-global-exclude-modal-list"
+             style="max-height:360px; overflow-y:auto; margin-top:12px;
+                    border:1px solid #e2e8f0; border-radius:6px;"></div>
+      </div>
+      <div class="app-modal__footer">
+        <button type="button" class="app-btn app-btn--secondary" data-action="close-modal">閉じる</button>
+      </div>
+    </div>
+  </div>
 {% endblock %}
