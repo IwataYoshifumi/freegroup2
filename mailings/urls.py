@@ -57,6 +57,31 @@ urlpatterns = [
         views.PreviewV2View.as_view(),
         name="mailing_list_preview_v2",
     ),
+    # Phase 1c-β-2a（仕様書 rev6 §4.5 / §4.7 / §12.8）：新規作成ウィザード
+    # 1-B：リスト名・備考入力
+    path(
+        "lists/new/",
+        views.NewListMetaView.as_view(),
+        name="new_list_meta",
+    ),
+    # 1-C：タグ選択（新規作成モード）
+    path(
+        "lists/new/tags/",
+        views.NewListTagSelectionView.as_view(),
+        name="new_list_tag_selection",
+    ),
+    # 1-D：新規作成確認（GET 専用）
+    path(
+        "lists/new/tags/confirm/",
+        views.NewListConfirmView.as_view(),
+        name="new_list_confirm",
+    ),
+    # 新規作成確定（POST 専用、PRG）
+    path(
+        "lists/new/confirm/",
+        views.NewListCommitView.as_view(),
+        name="new_list_commit",
+    ),
     path(
         "lists/member/remove/",
         views.MailingListMemberRemoveView.as_view(),

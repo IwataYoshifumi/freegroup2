@@ -996,6 +996,351 @@ class MemberRemoveCommitView(_MemberCommitView):
 
 
 # ======================================================================
+# Phase 1c-β-2a 新規作成ウィザード（仕様書 rev6 §4.5、§10 #17〜#20 #25）
+# ======================================================================
+#
+# 1-B → 1-C → 1-D → 確定 の 4 ステップで MailingList + MailingListMember を
+# snapshot 方式で一括作成する。session 'mailing_list_new_create_state' を
+# 唯一の真実として保持し、各 GET 冒頭でステップ進行ガードする（§4.5.1a）。
+#
+# 既存 MailingListCreateView（リスト本体のみ作成 → 編集画面でタグ抽出 → 凍結）
+# とは別フローとして併存。旧フローは β-3 完成まで触らない。
+#
+# β-2a スコープ：バックエンド（view / URL / セッション / テンプレ骨格）まで。
+# §4.4 タグ選択 UI の動的挙動（プレビュー AJAX 発火・警告ダイアログ・備考
+# プリセット等）は β-2b でコード君B が担当する。
+
+NEW_LIST_SESSION_KEY = "mailing_list_new_create_state"
+
+
+def _new_list_state(request):
+    """[性質] 純関数。session からウィザード状態 dict を取り出す（無ければ空 dict）。"""
+    return request.session.get(NEW_LIST_SESSION_KEY) or {}
+
+
+def _new_list_save(request, **patch):
+    """[性質] 副作用あり（session 書き込み）。state を patch して保存する。"""
+    state = _new_list_state(request)
+    state.update(patch)
+    request.session[NEW_LIST_SESSION_KEY] = state
+    request.session.modified = True
+    return state
+
+
+def _new_list_clear(request):
+    """[性質] 副作用あり（session 削除）。確定 / キャンセル時の session クリア。"""
+    if NEW_LIST_SESSION_KEY in request.session:
+        del request.session[NEW_LIST_SESSION_KEY]
+        request.session.modified = True
+
+
+def _new_list_guard(request, *, required):
+    """[性質] 副作用あり（HttpResponse 返却 or None）。
+
+    required: tuple[str, ...] 必須 session キー（順序保持）
+    どれか欠けていれば「揃っている最後のステップ」へ 302 差し戻し（§4.5.1a / §9.2-44）。
+    すべて揃っていれば None を返し、呼び出し元は通常処理を続行。
+    """
+    state = _new_list_state(request)
+    if all(key in state and state[key] for key in required):
+        return None
+    # snapshot_person_ids は空リストも falsy になるため、上の all() で空リストは
+    # 「欠落扱い」になる。これは 1-D の前提（1-C POST で必ず非空保存）と整合。
+
+    # どこまで揃っているかで差し戻し先を決定
+    if "name" not in state or not state.get("name"):
+        return redirect("mailings:new_list_meta")
+    # name はあるが snapshot 等が無い → 1-C へ
+    return redirect("mailings:new_list_tag_selection")
+
+
+def _all_categories_with_tags():
+    """[性質] 準関数。1-C 描画用：全アクティブカテゴリ + 各カテゴリのアクティブタグ。
+
+    順序：TagCategory.Meta.ordering (sort_order, name)、Tag.Meta.ordering
+    (category__sort_order, name)。
+    """
+    cats = (
+        TagCategory.objects.filter(is_archived=False)
+        .prefetch_related("tags")
+        .order_by("sort_order", "name")
+    )
+    result = []
+    for cat in cats:
+        tags = list(cat.tags.filter(is_archived=False).order_by("name"))
+        result.append({"category": cat, "tags": tags})
+    return result
+
+
+def _all_active_tags():
+    """[性質] 準関数。横断除外 UI の候補：全アクティブカテゴリ × 全アクティブタグ。
+
+    β-2a では JS 検索ダイアログを実装しないため、横断除外用の単純 multi-select
+    リストとして全件を渡す。β-2b で JS 検索化される予定。
+    """
+    return list(
+        Tag.objects.filter(
+            is_archived=False, category__is_archived=False
+        )
+        .select_related("category")
+        .order_by("category__sort_order", "category__name", "name")
+    )
+
+
+def _parse_conditions_from_post(post):
+    """[性質] 純関数。1-C POST から conditions dict を組み立てる（§4.1.4）。
+
+    フォームの規約：
+      - 含むタグ：name="include_<category_id>"（multiple checkbox、tag_id 値）
+      - 除外タグ：name="exclude_<category_id>"（multiple checkbox）
+      - 演算切替：name="operator_<category_id>"（select、"OR" or "AND"、既定 "OR"）
+      - 横断除外：name="global_exclude_tag_ids"（multiple checkbox）
+    """
+    categories = []
+    seen_cat_ids = set()
+    for key in post.keys():
+        if not key.startswith("include_"):
+            continue
+        cat_id = key[len("include_"):]
+        if cat_id in seen_cat_ids:
+            continue
+        seen_cat_ids.add(cat_id)
+        include_ids = post.getlist(key)
+        exclude_ids = post.getlist(f"exclude_{cat_id}")
+        operator = post.get(f"operator_{cat_id}") or "OR"
+        if operator not in ("OR", "AND"):
+            operator = "OR"
+        categories.append(
+            {
+                "category_id": cat_id,
+                "operator": operator,
+                "include_tag_ids": list(include_ids),
+                "exclude_tag_ids": list(exclude_ids),
+            }
+        )
+    global_exclude_ids = post.getlist("global_exclude_tag_ids")
+    return {
+        "categories": categories,
+        "global_exclude_tag_ids": list(global_exclude_ids),
+    }
+
+
+def _conditions_is_empty(conditions):
+    """[性質] 純関数。conditions が「実質空」かを判定（§3.5 サーバ側保険）。
+
+    有効カテゴリ（include 非空）が 1 つもなく、横断除外も空なら True。
+    """
+    has_effective = any(
+        bool((c or {}).get("include_tag_ids"))
+        for c in (conditions or {}).get("categories", [])
+    )
+    has_global = bool((conditions or {}).get("global_exclude_tag_ids"))
+    return not has_effective and not has_global
+
+
+class NewListMetaView(LoginRequiredMixin, View):
+    """1-B：リスト名・備考入力画面（仕様書 §4.5.2）。
+
+    GET：session を初期化（step='meta'、name/description クリア）してフォーム表示。
+    POST：name 必須検証 → name/description/step='tags' を session 保存 → 1-C へ 302。
+    """
+
+    template_name = "mailings/new_list_meta.html"
+
+    def get(self, request):
+        # 入口：session を初期化（途中放棄後の再入場で新規開始、§4.5.1a）。
+        _new_list_clear(request)
+        _new_list_save(request, step="meta", name="", description="")
+        form = MailingListForm()
+        return self._render(request, form)
+
+    def post(self, request):
+        form = MailingListForm(request.POST)
+        if not form.is_valid():
+            return self._render(request, form, status=400)
+        # リスト名重複は警告のみ、許可（ε.6 と同じ方針、エラーにしない）
+        name = form.cleaned_data["name"]
+        description = form.cleaned_data.get("description", "") or ""
+        if MailingList.objects.filter(name=name, is_archived=False).exists():
+            from django.contrib import messages
+
+            messages.warning(
+                request,
+                f"同名のリスト「{name}」が既に存在します。問題なければそのまま進んでください。",
+            )
+        _new_list_save(
+            request, step="tags", name=name, description=description
+        )
+        return redirect("mailings:new_list_tag_selection")
+
+    def _render(self, request, form, *, status=200):
+        return render(
+            request,
+            self.template_name,
+            {
+                "form": form,
+                "back": BackNavigator(request),
+                "active_app": "mailings",
+                "active_menu": "mailings:mailing_list_list",
+                "list_url": reverse("mailings:mailing_list_list"),
+            },
+            status=status,
+        )
+
+
+class NewListTagSelectionView(LoginRequiredMixin, View):
+    """1-C：タグ選択画面（新規作成モード）（仕様書 §4.5.3 / §4.4）。
+
+    GET：ガード（name 必須）→ session 復元してテンプレ描画。
+    POST：フォームから conditions 抽出 → サーバ側保険（実質空チェック）→
+          extract_persons_by_tag_conditions で snapshot 生成 → session 保存 → 1-D へ 302。
+
+    JS による動的更新（プレビュー AJAX・警告ダイアログ・備考プリセット）は β-2b
+    でコード君B が実装する。β-2a はテンプレ骨格（カテゴリブロック・含む/除外/演算
+    UI の DOM 構造と data-* / id フックポイント）まで完成させる。
+    """
+
+    template_name = "mailings/_tag_selection.html"
+
+    def get(self, request):
+        guard = _new_list_guard(request, required=("name",))
+        if guard is not None:
+            return guard
+        state = _new_list_state(request)
+        return self._render(request, state)
+
+    def post(self, request):
+        guard = _new_list_guard(request, required=("name",))
+        if guard is not None:
+            return guard
+        conditions = _parse_conditions_from_post(request.POST)
+        if _conditions_is_empty(conditions):
+            from django.contrib import messages
+
+            messages.error(
+                request,
+                "タグ条件が指定されていません。1 つ以上の含むタグまたは横断除外タグを指定してください。",
+            )
+            # 入力済み状態を session に書き戻して再描画用に保持
+            state = _new_list_state(request)
+            state["conditions"] = conditions
+            request.session[NEW_LIST_SESSION_KEY] = state
+            request.session.modified = True
+            return self._render(request, state, status=400)
+        # snapshot を生成（§9.2-26、確定時に再抽出しないため必須）
+        qs = extract_persons_by_tag_conditions(conditions)
+        snapshot_ids = [str(pk) for pk in qs.values_list("pk", flat=True)]
+        _new_list_save(
+            request,
+            step="confirm",
+            conditions=conditions,
+            snapshot_person_ids=snapshot_ids,
+        )
+        return redirect("mailings:new_list_confirm")
+
+    def _render(self, request, state, *, status=200):
+        categories = _all_categories_with_tags()
+        global_exclude_tags = _all_active_tags()
+        return render(
+            request,
+            self.template_name,
+            {
+                "mode": "create",
+                "list_name": state.get("name", ""),
+                "list_description": state.get("description", "") or "",
+                "categories": categories,
+                "global_exclude_tags": global_exclude_tags,
+                "current_conditions": state.get("conditions")
+                or {"categories": [], "global_exclude_tag_ids": []},
+                "preview_url": reverse("mailings:mailing_list_preview_v2"),
+                "post_url": reverse("mailings:new_list_tag_selection"),
+                "back_url": reverse("mailings:new_list_meta"),
+                "cancel_url": reverse("mailings:mailing_list_list"),
+                "back": BackNavigator(request),
+                "active_app": "mailings",
+                "active_menu": "mailings:mailing_list_list",
+            },
+            status=status,
+        )
+
+
+class NewListConfirmView(LoginRequiredMixin, View):
+    """1-D：新規作成確認画面（仕様書 §4.5.4、GET 専用）。
+
+    ガード：name かつ snapshot_person_ids が無ければ 1-B / 1-C に 302（§9.2-45）。
+    表示はリスト名・備考 + 「対象 N 件でリストを作成します」のみ（§9.2-42、Person
+    一覧は出さない）。
+    """
+
+    template_name = "mailings/_new_list_confirmation.html"
+
+    def get(self, request):
+        guard = _new_list_guard(
+            request, required=("name", "snapshot_person_ids")
+        )
+        if guard is not None:
+            return guard
+        state = _new_list_state(request)
+        return render(
+            request,
+            self.template_name,
+            {
+                "list_name": state["name"],
+                "list_description": state.get("description", "") or "",
+                "snapshot_count": len(state.get("snapshot_person_ids") or []),
+                "commit_url": reverse("mailings:new_list_commit"),
+                "back_url": reverse("mailings:new_list_tag_selection"),
+                "cancel_url": reverse("mailings:mailing_list_list"),
+                "back": BackNavigator(request),
+                "active_app": "mailings",
+                "active_menu": "mailings:mailing_list_list",
+            },
+        )
+
+
+@method_decorator(require_POST, name="dispatch")
+class NewListCommitView(LoginRequiredMixin, View):
+    """新規作成確定エンドポイント（仕様書 §4.5.4、POST 専用、PRG）。
+
+    snapshot から MailingList + MailingListMember を一括作成し、session を
+    クリアして詳細画面に 302（§9.2-27 PRG パターン）。
+    """
+
+    def post(self, request):
+        guard = _new_list_guard(
+            request, required=("name", "snapshot_person_ids")
+        )
+        if guard is not None:
+            return guard
+        state = _new_list_state(request)
+        name = state["name"]
+        description = state.get("description", "") or ""
+        snapshot_ids = state.get("snapshot_person_ids") or []
+        with transaction.atomic():
+            mailing_list = MailingList.objects.create(
+                name=name, description=description, created_by=request.user
+            )
+            # Person 実体を取り直して MailingListMember を bulk_create
+            # （snapshot から落ちている Person は ignore_conflicts ではなく
+            # filter で自然に消える。snapshot 後に Person が CASCADE 削除されたら
+            # その分だけ件数が減る。1-D 表示件数とのズレは詳細画面の実カウントが正、§9.2-38）。
+            persons = Person.objects.filter(pk__in=snapshot_ids)
+            to_create = [
+                MailingListMember(
+                    mailing_list=mailing_list,
+                    person=p,
+                    added_by=request.user,
+                )
+                for p in persons
+            ]
+            MailingListMember.objects.bulk_create(
+                to_create, ignore_conflicts=True
+            )
+        _new_list_clear(request)
+        return redirect("mailings:mailing_list_detail", pk=mailing_list.pk)
+
+
+# ======================================================================
 # Phase 1c-β-1 新プレビュー API（仕様書 rev5 §4.3）
 # ======================================================================
 #

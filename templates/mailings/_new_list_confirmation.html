@@ -1,0 +1,60 @@
+{% extends "mailings/app_base.html" %}
+{% load back_tags %}
+
+{% comment %}
+新規作成確認画面（仕様書 rev6 §4.5.4、create 専用、§9.2-42）。
+
+§9.2-42 により本テンプレは create 専用。_member_confirmation.html（add/remove）
+とは分離する（混在禁止）。
+表示はリスト名・備考 + 「対象 N 件でリストを作成します」のみ。Person 一覧は出さない。
+{% endcomment %}
+
+{% block title %}リスト作成（3/3 確認）：{{ list_name }} — FreeGroup2{% endblock %}
+
+{% block content %}
+  <div class="app-page-header">
+    <div>
+      <div class="app-breadcrumb">メール配信 / 配信リスト一覧 / 新規作成 / 確認</div>
+      <h1>リスト作成（3/3）確認</h1>
+      <div style="margin-top:4px; color:#475569;">
+        この内容でリストを作成します。対象 Person は直前のタグ選択画面でプレビュー済みです。
+      </div>
+    </div>
+    <div class="app-action-area">
+      <a href="{{ back_url }}" class="app-btn app-btn--secondary">戻る</a>
+    </div>
+  </div>
+
+  {% if messages %}
+    <section class="app-card">
+      {% for message in messages %}
+        <div class="app-message{% if message.tags %} app-message--{{ message.tags }}{% endif %}">{{ message }}</div>
+      {% endfor %}
+    </section>
+  {% endif %}
+
+  <section class="app-card">
+    <h2 style="margin-bottom:12px;">以下の内容でリストを作成します</h2>
+    <dl style="display:grid; grid-template-columns:auto 1fr; gap:8px 16px; margin:0;">
+      <dt style="color:#64748b;">リスト名</dt>
+      <dd style="margin:0;"><strong>{{ list_name }}</strong></dd>
+      <dt style="color:#64748b;">備考</dt>
+      <dd style="margin:0;">{{ list_description|default:"-" }}</dd>
+      <dt style="color:#64748b;">対象件数</dt>
+      <dd style="margin:0;">
+        <span class="app-status-badge app-status-badge--success">対象 {{ snapshot_count }} 件でリストを作成します</span>
+      </dd>
+    </dl>
+  </section>
+
+  <section class="app-card">
+    <form method="post" action="{{ commit_url }}">
+      {% csrf_token %}
+      <div class="app-action-area">
+        <a href="{{ back_url }}" class="app-btn app-btn--secondary">戻る</a>
+        <a href="{{ cancel_url }}" class="app-btn app-btn--secondary">キャンセル</a>
+        <button type="submit" class="app-btn app-btn--primary">リスト作成を確定</button>
+      </div>
+    </form>
+  </section>
+{% endblock %}

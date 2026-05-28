@@ -1,0 +1,212 @@
+{% extends "mailings/app_base.html" %}
+{% load back_tags %}
+
+{% comment %}
+3 mode 共通タグ選択テンプレ（仕様書 rev6 §4.4 / §5.1）。
+
+mode: 'create' / 'add_by_tag' / 'remove_by_tag'
+  create        … 新規作成 1-C（β-2a で実装、本テンプレが対応）
+  add_by_tag    … タグで追加 2A-1（β-3 でコード君A 実装予定）
+  remove_by_tag … タグで除外 2B-1（β-3 でコード君A 実装予定）
+
+β-2a の責務範囲：
+  - create mode の DOM 構造を完成させる
+  - add_by_tag / remove_by_tag mode はスケルトン（{% if %}{% endif %}）で予約のみ
+  - JS フックポイント（id 属性 / data-* / CSS クラス）を予約
+  - JS による動的更新（プレビュー AJAX・警告ダイアログ・備考プリセット等）は
+    β-2b でコード君B が実装する。本テンプレは静的描画まで
+
+JS フック予約：
+  - data-tag-selection-root        … ルート要素
+  - data-mode="{{ mode }}"           … mode 値
+  - data-preview-url="{{ preview_url }}" … preview-v2 API URL
+  - data-list-id（add_by_tag / remove_by_tag のみ） … 対象 list pk
+  - id="js-tag-conditions-form"    … メインフォーム
+  - id="js-preview-container"      … プレビュー結果挿入先
+  - id="js-preview-count"          … 件数表示先
+  - id="js-preview-samples"        … サンプル一覧挿入先
+  - .js-include-checkbox / .js-exclude-checkbox / .js-operator-select / .js-global-exclude-checkbox
+{% endcomment %}
+
+{% block title %}
+{% if mode == 'create' %}リスト作成（2/3 タグで対象を選ぶ）{% else %}タグで対象を選ぶ{% endif %} — FreeGroup2
+{% endblock %}
+
+{% block content %}
+  {# ====================================================================
+     mode 別ヘッダ：create はリスト名・備考表示、add/remove は β-3 で実装
+     ==================================================================== #}
+  {% if mode == 'create' %}
+    <div class="app-page-header">
+      <div>
+        <div class="app-breadcrumb">メール配信 / 配信リスト一覧 / 新規作成 / タグ選択</div>
+        <h1>リスト作成（2/3）タグで対象を選ぶ</h1>
+        <div style="margin-top:4px; color:#475569;">
+          対象 Person をタグ条件で抽出します。条件を組み立てたあと「内容を確認」へ進んでください。
+        </div>
+      </div>
+      <div class="app-action-area">
+        <a href="{{ back_url }}" class="app-btn app-btn--secondary">戻る</a>
+        <a href="{{ cancel_url }}" class="app-btn app-btn--secondary">キャンセル</a>
+      </div>
+    </div>
+
+    <section class="app-card">
+      <h2 style="margin-bottom:8px;">リスト本体</h2>
+      <dl style="display:grid; grid-template-columns:auto 1fr; gap:4px 12px; margin:0;">
+        <dt style="color:#64748b;">リスト名</dt>
+        <dd style="margin:0;"><strong>{{ list_name }}</strong></dd>
+        <dt style="color:#64748b;">備考</dt>
+        <dd style="margin:0;">{{ list_description|default:"-" }}</dd>
+      </dl>
+    </section>
+  {% elif mode == 'add_by_tag' %}
+    {# β-3 でコード君A が実装：対象リスト名 + 緑バナー（「リストに追加します」） #}
+  {% elif mode == 'remove_by_tag' %}
+    {# β-3 でコード君A が実装：対象リスト名 + 赤バナー（「リストから除外します」） #}
+  {% endif %}
+
+  {% if messages %}
+    <section class="app-card">
+      {% for message in messages %}
+        <div class="app-message{% if message.tags %} app-message--{{ message.tags }}{% endif %}">{{ message }}</div>
+      {% endfor %}
+    </section>
+  {% endif %}
+
+  {# ====================================================================
+     条件ビルダー本体（mode 共通の DOM 骨格、JS フック予約済み）
+     ==================================================================== #}
+  <section class="app-card"
+           data-tag-selection-root
+           data-mode="{{ mode }}"
+           data-preview-url="{{ preview_url }}">
+    <h2 style="margin-bottom:12px;">タグ条件</h2>
+
+    <form method="post" action="{{ post_url }}" id="js-tag-conditions-form">
+      {% csrf_token %}
+
+      {% for cat_block in categories %}
+        {% with cat=cat_block.category cat_tags=cat_block.tags %}
+          <details class="app-card js-category-block"
+                   data-category-id="{{ cat.id }}"
+                   style="margin-bottom:8px; padding:12px;"
+                   open>
+            <summary style="cursor:pointer; display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+              <strong>カテゴリ：{{ cat.name }}</strong>
+              <span style="margin-left:auto; display:flex; align-items:center; gap:8px;">
+                <label style="color:#64748b; font-size:0.9em;">演算：</label>
+                <select name="operator_{{ cat.id }}"
+                        class="app-input js-operator-select"
+                        data-category-id="{{ cat.id }}"
+                        style="width:auto;">
+                  <option value="OR">OR（いずれか）</option>
+                  <option value="AND">AND（すべて）</option>
+                </select>
+              </span>
+            </summary>
+            <div style="margin-top:12px;">
+              <div class="app-form__group" style="margin-bottom:12px;">
+                <label class="app-form__label">含むタグ</label>
+                <div style="display:flex; flex-wrap:wrap; gap:8px 16px;">
+                  {% for tag in cat_tags %}
+                    <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+                      <input type="checkbox"
+                             name="include_{{ cat.id }}"
+                             value="{{ tag.id }}"
+                             class="js-include-checkbox"
+                             data-category-id="{{ cat.id }}"
+                             data-tag-id="{{ tag.id }}"
+                             data-tag-name="{{ tag.name }}">
+                      {{ tag.name }}
+                    </label>
+                  {% empty %}
+                    <span class="app-muted">（このカテゴリにタグなし）</span>
+                  {% endfor %}
+                </div>
+              </div>
+              <div class="app-form__group">
+                <label class="app-form__label" style="color:#64748b;">除外タグ（このカテゴリ内）</label>
+                <div style="display:flex; flex-wrap:wrap; gap:8px 16px;">
+                  {% for tag in cat_tags %}
+                    <label style="display:flex; align-items:center; gap:6px; cursor:pointer; color:#475569;">
+                      <input type="checkbox"
+                             name="exclude_{{ cat.id }}"
+                             value="{{ tag.id }}"
+                             class="js-exclude-checkbox"
+                             data-category-id="{{ cat.id }}"
+                             data-tag-id="{{ tag.id }}">
+                      {{ tag.name }}
+                    </label>
+                  {% endfor %}
+                </div>
+              </div>
+            </div>
+          </details>
+        {% endwith %}
+      {% empty %}
+        <p class="app-muted">
+          タグカテゴリがまだ作成されていません。
+          <a href="{% url 'tags:tag_category_list' %}">タグカテゴリ一覧</a>で先に作成してください。
+        </p>
+      {% endfor %}
+
+      {# 全カテゴリ横断除外 #}
+      <hr style="margin:16px 0; border:none; border-top:1px solid #e2e8f0;">
+      <div class="app-card js-global-exclude-block"
+           style="padding:12px; background:#f8fafc;">
+        <h3 style="margin:0 0 8px;">全カテゴリ横断の除外タグ</h3>
+        <p class="app-muted" style="margin-bottom:8px; font-size:0.9em;">
+          ここに指定したタグを 1 つでも持つ Person は、上記のカテゴリ条件にかかわらず除外されます。
+        </p>
+        <div style="display:flex; flex-wrap:wrap; gap:8px 16px; max-height:240px; overflow-y:auto;">
+          {% for tag in global_exclude_tags %}
+            <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+              <input type="checkbox"
+                     name="global_exclude_tag_ids"
+                     value="{{ tag.id }}"
+                     class="js-global-exclude-checkbox"
+                     data-tag-id="{{ tag.id }}"
+                     data-tag-name="{{ tag.name }}">
+              <span style="color:#64748b; font-size:0.85em;">[{{ tag.category.name }}]</span>
+              {{ tag.name }}
+            </label>
+          {% empty %}
+            <span class="app-muted">（タグがまだありません）</span>
+          {% endfor %}
+        </div>
+      </div>
+
+      {# プレビュー欄：JS が AJAX 結果を書き込む。β-2a では静的プレースホルダ #}
+      <div class="app-card" style="margin-top:16px; padding:16px;" id="js-preview-container">
+        <h3 style="margin-bottom:8px;">プレビュー</h3>
+        <div>抽出件数：<strong id="js-preview-count">-</strong></div>
+        <p class="app-muted" style="margin-top:4px; font-size:0.9em;">
+          ※ プレビューは目安です。確認画面で表示される件数・顔ぶれが確定値となります。
+        </p>
+        <div style="margin-top:8px;">
+          <small class="app-muted">サンプル（先頭 10 件、β-2b で JS により表示予定）</small>
+          <div id="js-preview-samples"></div>
+        </div>
+      </div>
+
+      <div class="app-action-area" style="margin-top:16px;">
+        {% if mode == 'create' %}
+          <button type="submit" class="app-btn app-btn--primary js-tag-selection-submit">内容を確認</button>
+        {% elif mode == 'add_by_tag' %}
+          {# β-3 で実装：緑系ボタン「内容を確認」 #}
+        {% elif mode == 'remove_by_tag' %}
+          {# β-3 で実装：赤系ボタン「内容を確認」 #}
+        {% endif %}
+        {% if mode == 'create' %}
+          <a href="{{ back_url }}" class="app-btn app-btn--secondary">戻る</a>
+        {% endif %}
+        <a href="{{ cancel_url }}" class="app-btn app-btn--secondary">キャンセル</a>
+      </div>
+    </form>
+  </section>
+
+  {# β-2a 復元用：current_conditions を JS が読み取るためのデータブロック
+     （JS は β-2b で実装。サーバ側はキーだけ予約、値は JSON 文字列） #}
+  {{ current_conditions|json_script:"js-current-conditions" }}
+{% endblock %}

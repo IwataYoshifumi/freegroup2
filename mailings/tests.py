@@ -1709,3 +1709,402 @@ class LegacyExtractionRegressionTests(_TagExtractionTestBase):
         self.assertTrue(data["ok"])
         self.assertIn("count", data)
         self.assertIn("samples", data)
+
+
+# ======================================================================
+# Phase 1c-β-2a 新規作成ウィザード（仕様書 rev6 §4.5、§10 #17〜#20 #25）
+# ======================================================================
+#
+# 1-B → 1-C → 1-D → 確定 の 4 ステップで MailingList + MailingListMember を
+# snapshot 方式で一括作成する。session 'mailing_list_new_create_state' を
+# 唯一の真実とし、ステップ進行ガード（§4.5.1a）で直叩きから保護。
+#
+# 指示書 §6.2 T1-T14 を網羅。β-2b で実装される JS 動的挙動（プレビュー AJAX・
+# 警告ダイアログ・備考プリセット）はここではテストしない。
+
+NEW_LIST_SESSION_KEY = "mailing_list_new_create_state"
+
+
+class _NewListWizardTestBase(_TagExtractionTestBase):
+    """新規作成ウィザード共通基底：1-B → 1-C → 1-D の URL とヘルパー。"""
+
+    def setUp(self):
+        super().setUp()
+        self.url_meta = reverse("mailings:new_list_meta")
+        self.url_tags = reverse("mailings:new_list_tag_selection")
+        self.url_confirm = reverse("mailings:new_list_confirm")
+        self.url_commit = reverse("mailings:new_list_commit")
+        self.url_list = reverse("mailings:mailing_list_list")
+
+    def _session(self):
+        return self.client.session.get(NEW_LIST_SESSION_KEY) or {}
+
+    def _put_session(self, **patch):
+        session = self.client.session
+        state = session.get(NEW_LIST_SESSION_KEY) or {}
+        state.update(patch)
+        session[NEW_LIST_SESSION_KEY] = state
+        session.save()
+
+    def _build_post_for_tag_selection(self, *, include=(), exclude=(), operator=None, global_exclude=()):
+        """1-C POST 用 form データを組み立てる（テストヘルパー）。"""
+        post = {}
+        cat_id = str(self.cat_role.pk)
+        if include:
+            post[f"include_{cat_id}"] = [str(t.pk) for t in include]
+        if exclude:
+            post[f"exclude_{cat_id}"] = [str(t.pk) for t in exclude]
+        if operator is not None:
+            post[f"operator_{cat_id}"] = operator
+        # 必ず include_<cat_id> キーが POST に存在しないと _parse_conditions_from_post
+        # がカテゴリを認識しないため、空でも空 list を入れる。Django test client は
+        # 空 list を送らないため、include 指定なしの場合は POST 自体に出ないことが
+        # 期待される（カテゴリは無視される、§4.1.4）。
+        if global_exclude:
+            post["global_exclude_tag_ids"] = [str(t.pk) for t in global_exclude]
+        return post
+
+
+class NewListMetaViewTests(_NewListWizardTestBase):
+    def test_get_initializes_session(self):
+        # 既に何か入っていても初期化される
+        self._put_session(name="OldName", description="old", step="confirm")
+        resp = self.client.get(self.url_meta)
+        self.assertEqual(resp.status_code, 200)
+        state = self._session()
+        self.assertEqual(state.get("name", ""), "")
+        self.assertEqual(state.get("description", ""), "")
+        self.assertEqual(state.get("step"), "meta")
+
+    def test_unauthenticated_redirects(self):
+        c = Client()
+        resp = c.get(self.url_meta)
+        self.assertEqual(resp.status_code, 302)
+
+    def test_post_valid_saves_session_and_redirects_to_tags(self):
+        resp = self.client.post(
+            self.url_meta, {"name": "L1", "description": "memo"}
+        )
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn(self.url_tags, resp["Location"])
+        state = self._session()
+        self.assertEqual(state["name"], "L1")
+        self.assertEqual(state["description"], "memo")
+        self.assertEqual(state["step"], "tags")
+
+    def test_post_empty_name_returns_400_and_does_not_save(self):
+        resp = self.client.post(
+            self.url_meta, {"name": "", "description": "memo"}
+        )
+        self.assertEqual(resp.status_code, 400)
+        # session には書き込まれていない（=空 or step=meta のまま）
+        state = self._session()
+        self.assertFalse(state.get("name"))
+
+    def test_post_duplicate_name_is_warning_not_error(self):
+        MailingList.objects.create(name="L1", created_by=self.user)
+        resp = self.client.post(
+            self.url_meta, {"name": "L1", "description": ""}
+        )
+        # 警告のみ、許可 → 302 で 1-C へ
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(self._session()["name"], "L1")
+
+
+class NewListTagSelectionViewTests(_NewListWizardTestBase):
+    def test_get_without_name_redirects_to_meta(self):
+        """1-C 直叩き（session 空）→ 1-B に 302（§4.5.1a / T1）。"""
+        resp = self.client.get(self.url_tags)
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn(self.url_meta, resp["Location"])
+
+    def test_get_with_name_renders(self):
+        self._put_session(name="L1", description="memo", step="tags")
+        resp = self.client.get(self.url_tags)
+        self.assertEqual(resp.status_code, 200)
+        # コンテキスト経由でリスト名・備考が渡っている（T3）
+        self.assertEqual(resp.context["list_name"], "L1")
+        self.assertEqual(resp.context["list_description"], "memo")
+        self.assertEqual(resp.context["mode"], "create")
+
+    def test_get_after_meta_post_preserves_name(self):
+        """1-B POST → 1-C GET で name/description が消えない（T3）。"""
+        self.client.post(
+            self.url_meta, {"name": "Preserved", "description": "kept"}
+        )
+        resp = self.client.get(self.url_tags)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.context["list_name"], "Preserved")
+        self.assertEqual(resp.context["list_description"], "kept")
+
+    def test_get_meta_after_progress_clears_session(self):
+        """1-C に進んだ後 1-B 再 GET → session の name/description クリア（T4）。"""
+        self._put_session(name="WIP", description="wip", step="tags")
+        resp = self.client.get(self.url_meta)
+        self.assertEqual(resp.status_code, 200)
+        state = self._session()
+        self.assertEqual(state.get("name", ""), "")
+
+    def test_post_with_valid_conditions_saves_snapshot_and_redirects_to_confirm(self):
+        p = self._make_person("Alice")
+        self._assign(p, self.t_role_a)
+        self._put_session(name="L1", description="", step="tags")
+        post = self._build_post_for_tag_selection(
+            include=[self.t_role_a], operator="OR"
+        )
+        resp = self.client.post(self.url_tags, post)
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn(self.url_confirm, resp["Location"])
+        state = self._session()
+        self.assertEqual(state["step"], "confirm")
+        self.assertEqual(state["snapshot_person_ids"], [str(p.pk)])
+        self.assertIn("conditions", state)
+
+    def test_post_with_empty_conditions_returns_400(self):
+        """サーバ側保険：実質空 conditions は 400（§3.5）。"""
+        self._put_session(name="L1", description="", step="tags")
+        resp = self.client.post(self.url_tags, {})
+        self.assertEqual(resp.status_code, 400)
+        # snapshot は書かれない
+        state = self._session()
+        self.assertNotIn("snapshot_person_ids", state)
+
+    def test_post_with_and_operator(self):
+        """AND 演算が反映される（T13、β-1 AND 実装の経路確認）。"""
+        p_ab = self._make_person("Both")
+        p_a = self._make_person("AOnly")
+        self._assign(p_ab, self.t_role_a, self.t_role_b)
+        self._assign(p_a, self.t_role_a)
+        self._put_session(name="L1", description="", step="tags")
+        post = self._build_post_for_tag_selection(
+            include=[self.t_role_a, self.t_role_b], operator="AND"
+        )
+        resp = self.client.post(self.url_tags, post)
+        self.assertEqual(resp.status_code, 302)
+        snapshot = self._session()["snapshot_person_ids"]
+        self.assertEqual(snapshot, [str(p_ab.pk)])
+
+    def test_post_with_global_exclude(self):
+        """横断除外が反映される（T13）。"""
+        p_clean = self._make_person("Clean")
+        p_excluded = self._make_person("Excluded")
+        self._assign(p_clean, self.t_role_a)
+        self._assign(p_excluded, self.t_role_a, self.t_area_x)
+        self._put_session(name="L1", description="", step="tags")
+        post = self._build_post_for_tag_selection(
+            include=[self.t_role_a],
+            operator="OR",
+            global_exclude=[self.t_area_x],
+        )
+        resp = self.client.post(self.url_tags, post)
+        self.assertEqual(resp.status_code, 302)
+        snapshot = set(self._session()["snapshot_person_ids"])
+        self.assertEqual(snapshot, {str(p_clean.pk)})
+
+    def test_post_includes_unsubscribed_person_in_snapshot(self):
+        """退会者も snapshot に含まれる（T14、§9.2-30）。"""
+        p_unsub = self._make_person("Unsub", is_unsubscribed=True)
+        self._assign(p_unsub, self.t_role_a)
+        self._put_session(name="L1", description="", step="tags")
+        post = self._build_post_for_tag_selection(
+            include=[self.t_role_a], operator="OR"
+        )
+        resp = self.client.post(self.url_tags, post)
+        self.assertEqual(resp.status_code, 302)
+        snapshot = self._session()["snapshot_person_ids"]
+        self.assertIn(str(p_unsub.pk), snapshot)
+
+
+class NewListConfirmViewTests(_NewListWizardTestBase):
+    def test_get_empty_session_redirects_to_meta(self):
+        """1-D 直叩き（session 完全空）→ 1-B に 302（T2 / T7）。"""
+        resp = self.client.get(self.url_confirm)
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn(self.url_meta, resp["Location"])
+
+    def test_get_with_name_only_redirects_to_tags(self):
+        """1-D 直叩き（name のみ、snapshot 未保存）→ 1-C に 302（T2）。"""
+        self._put_session(name="L1", description="", step="tags")
+        resp = self.client.get(self.url_confirm)
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn(self.url_tags, resp["Location"])
+
+    def test_get_with_all_required_renders(self):
+        p = self._make_person("Alice")
+        self._put_session(
+            name="L1",
+            description="memo",
+            step="confirm",
+            snapshot_person_ids=[str(p.pk)],
+        )
+        resp = self.client.get(self.url_confirm)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.context["list_name"], "L1")
+        self.assertEqual(resp.context["snapshot_count"], 1)
+
+    def test_post_method_returns_405(self):
+        self._put_session(
+            name="L1",
+            description="",
+            step="confirm",
+            snapshot_person_ids=[str(uuid.uuid4())],
+        )
+        # NewListConfirmView は GET のみだが、URL 上 POST すると method not allowed
+        resp = self.client.post(self.url_confirm)
+        self.assertEqual(resp.status_code, 405)
+
+    def test_renders_only_count_no_person_list(self):
+        """1-D は Person 列を表示しない（§4.5.4 / §9.2-42）。"""
+        p = self._make_person("VisibleName")
+        self._put_session(
+            name="L1",
+            description="",
+            step="confirm",
+            snapshot_person_ids=[str(p.pk)],
+        )
+        resp = self.client.get(self.url_confirm)
+        body = resp.content.decode("utf-8")
+        # 件数バッジは出る
+        self.assertIn("対象 1 件でリストを作成します", body)
+        # Person 名は出さない（一覧テーブルがない）
+        self.assertNotIn("VisibleName", body)
+
+
+class NewListCommitViewTests(_NewListWizardTestBase):
+    def test_post_creates_list_and_members_and_redirects_detail(self):
+        p1 = self._make_person("Alice")
+        p2 = self._make_person("Bob")
+        self._put_session(
+            name="L1",
+            description="desc",
+            step="confirm",
+            snapshot_person_ids=[str(p1.pk), str(p2.pk)],
+        )
+        resp = self.client.post(self.url_commit)
+        self.assertEqual(resp.status_code, 302)
+        # 詳細画面リダイレクト → MailingList 1 件と Member 2 件
+        new_list = MailingList.objects.get(name="L1")
+        self.assertEqual(new_list.description, "desc")
+        self.assertIn(
+            reverse("mailings:mailing_list_detail", args=[new_list.pk]),
+            resp["Location"],
+        )
+        self.assertEqual(
+            MailingListMember.objects.filter(mailing_list=new_list).count(), 2
+        )
+        # session クリア
+        self.assertNotIn(NEW_LIST_SESSION_KEY, self.client.session)
+
+    def test_post_get_method_returns_405(self):
+        resp = self.client.get(self.url_commit)
+        self.assertEqual(resp.status_code, 405)
+
+    def test_post_empty_session_redirects_to_meta(self):
+        resp = self.client.post(self.url_commit)
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn(self.url_meta, resp["Location"])
+
+    def test_prg_replay_does_not_double_create(self):
+        """PRG パターン：commit POST 二度目は session クリア済みのため 1-B に差し戻し（T8）。"""
+        p = self._make_person("Alice")
+        self._put_session(
+            name="L1",
+            description="",
+            step="confirm",
+            snapshot_person_ids=[str(p.pk)],
+        )
+        resp1 = self.client.post(self.url_commit)
+        self.assertEqual(resp1.status_code, 302)
+        resp2 = self.client.post(self.url_commit)
+        # 2 回目は session 空のため 1-B へ差し戻し（二重作成されない）
+        self.assertEqual(resp2.status_code, 302)
+        self.assertIn(self.url_meta, resp2["Location"])
+        self.assertEqual(MailingList.objects.filter(name="L1").count(), 1)
+
+    def test_post_duplicate_person_id_in_snapshot_no_error(self):
+        """snapshot に同じ Person ID が重複しても bulk_create + ignore_conflicts でエラーにならない（T9）。"""
+        p = self._make_person("Alice")
+        self._put_session(
+            name="L1",
+            description="",
+            step="confirm",
+            snapshot_person_ids=[str(p.pk), str(p.pk)],
+        )
+        resp = self.client.post(self.url_commit)
+        self.assertEqual(resp.status_code, 302)
+        new_list = MailingList.objects.get(name="L1")
+        # 重複は弾かれて 1 件のみ
+        self.assertEqual(
+            MailingListMember.objects.filter(mailing_list=new_list).count(), 1
+        )
+
+    def test_snapshot_unchanged_by_post_commit_db_mutation(self):
+        """snapshot 方式：1-C POST 後の Person 変更が確定結果に影響しない（T5）。
+
+        1-C POST 時に snapshot ID 集合が固定される。確定までの間に Person のタグが
+        変更されても、snapshot ID で MailingListMember を作成するので顔ぶれは変わらない。
+        """
+        p = self._make_person("Alice")
+        self._assign(p, self.t_role_a)
+        self._put_session(name="L1", description="", step="tags")
+        # 1-C POST で snapshot 確定
+        post = self._build_post_for_tag_selection(
+            include=[self.t_role_a], operator="OR"
+        )
+        self.client.post(self.url_tags, post)
+        # Person のタグを剝がす（抽出条件から外れる）
+        TagAssignment.objects.filter(person=p).delete()
+        # 1-D 確定 → snapshot 通りに p が登録されるはず
+        resp = self.client.post(self.url_commit)
+        self.assertEqual(resp.status_code, 302)
+        new_list = MailingList.objects.get(name="L1")
+        self.assertTrue(
+            MailingListMember.objects.filter(
+                mailing_list=new_list, person=p
+            ).exists()
+        )
+
+    def test_snapshot_archived_person_still_committed(self):
+        """snapshot に含まれる Person を archived 化しても snapshot は維持（T6）。"""
+        p = self._make_person("Alice")
+        self._put_session(
+            name="L1",
+            description="",
+            step="confirm",
+            snapshot_person_ids=[str(p.pk)],
+        )
+        p.status = Person.Status.ARCHIVED
+        p.save(update_fields=["status", "updated_at"])
+        resp = self.client.post(self.url_commit)
+        self.assertEqual(resp.status_code, 302)
+        new_list = MailingList.objects.get(name="L1")
+        # snapshot 通り p が登録される
+        self.assertTrue(
+            MailingListMember.objects.filter(
+                mailing_list=new_list, person=p
+            ).exists()
+        )
+
+
+class NewListCancelTests(_NewListWizardTestBase):
+    def test_cancel_links_in_meta_point_to_list(self):
+        resp = self.client.get(self.url_meta)
+        body = resp.content.decode("utf-8")
+        # キャンセル先はリスト一覧
+        self.assertIn(self.url_list, body)
+
+    def test_meta_get_clears_session_when_called_after_progress(self):
+        """T12 関連：1-B GET（=入口）が session をクリアする → 「キャンセル相当」になる。
+
+        厳密な「キャンセル」ボタンによるクリアではないが、ユーザが 1-B に戻ってきた
+        時点で session が初期化される設計（§4.5.1a）。
+        """
+        self._put_session(
+            name="WIP", description="wip",
+            step="confirm",
+            snapshot_person_ids=[str(uuid.uuid4())],
+        )
+        self.client.get(self.url_meta)
+        state = self._session()
+        self.assertEqual(state.get("name", ""), "")
+        self.assertNotIn("snapshot_person_ids", state)
