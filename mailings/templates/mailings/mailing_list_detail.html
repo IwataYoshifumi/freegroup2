@@ -119,17 +119,26 @@
             <a href="{% append_back_url member_add_by_tag_url back %}" class="app-btn app-btn--success">タグで追加</a>
           {% endif %}
         </div>
-        {# 削除系の行（danger）：個別削除 + （β-3b でタグで除外が入る予定の枠） #}
+        {% comment %}
+          削除系の行（danger）：個別削除 + Phase 1c-β-3b タグで除外。
+          凍結時は disabled + ツールチップ（§6.4 / §6.6）
+        {% endcomment %}
         {% url 'mailings:list_member_remove' pk=mailing_list.id as member_remove_url %}
+        {% url 'mailings:list_member_remove_by_tag' pk=mailing_list.id as member_remove_by_tag_url %}
         <div style="display:flex; gap:8px; align-items:center;">
           {% if mailing_list.is_archived %}
             <span class="app-btn app-btn--danger" style="opacity:0.5; pointer-events:none;" aria-disabled="true"
                   title="アーカイブ済みのため編集できません">メンバーを削除</span>
+            <span class="app-btn app-btn--danger" style="opacity:0.5; pointer-events:none;" aria-disabled="true"
+                  title="アーカイブ済みのため編集できません">タグで除外</span>
           {% elif is_frozen %}
             <span class="app-btn app-btn--danger" style="opacity:0.5; pointer-events:none;" aria-disabled="true"
                   title="凍結中のため編集できません">メンバーを削除</span>
+            <span class="app-btn app-btn--danger" style="opacity:0.5; pointer-events:none;" aria-disabled="true"
+                  title="凍結中のため編集できません">タグで除外</span>
           {% else %}
             <a href="{% append_back_url member_remove_url back %}" class="app-btn app-btn--danger">メンバーを削除</a>
+            <a href="{% append_back_url member_remove_by_tag_url back %}" class="app-btn app-btn--danger">タグで除外</a>
           {% endif %}
         </div>
       </div>

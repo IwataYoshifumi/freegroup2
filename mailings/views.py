@@ -1232,6 +1232,243 @@ class MemberAddByTagCommitView(LoginRequiredMixin, View):
 
 
 # ======================================================================
+# Phase 1c-β-3b タグで除外（仕様書 rev6 §4.6.5 / §10 #27〜#30 #32）
+# ======================================================================
+#
+# 既存リストから「タグで対象を抽出して除外」する 3 ステップフロー：
+#   1-L: MemberRemoveByTagView         GET/POST  /lists/<pk>/members/remove-by-tag/
+#   1-M: MemberRemoveByTagConfirmView  GET       /lists/<pk>/members/remove-by-tag/confirm/
+#   確定: MemberRemoveByTagCommitView  POST      /lists/<pk>/members/confirm-remove-by-tag/
+#
+# session キー：mailing_list_<pk>_remove_by_tag_state
+# snapshot は「抽出 ∩ リスト内」（add とは逆、§3.2 / §4.6.5.2）。退会者は含む。
+# 確定処理は bulk_delete（add の bulk_create と対）。
+# テンプレ：_tag_selection.html / _member_confirmation.html（mode='remove_by_tag'）
+#
+# UI 誤操作防止（§4.6.5.4、§3.5）：①入口分離 ②赤バナー ③タブタイトル ④「除外対象 N 件」
+# 赤太字 ⑤「外します」強調 ⑥「-N 件」赤マイナス ⑦「除外を確定」赤系 ⑧二重確認ダイアログ。
+
+REMOVE_BY_TAG_SESSION_PREFIX = "mailing_list_"
+REMOVE_BY_TAG_SESSION_SUFFIX = "_remove_by_tag_state"
+
+
+def _remove_by_tag_session_key(mailing_list_pk):
+    """[性質] 純関数。1-L / 1-M / commit で共有する session キー名を返す。"""
+    return f"{REMOVE_BY_TAG_SESSION_PREFIX}{mailing_list_pk}{REMOVE_BY_TAG_SESSION_SUFFIX}"
+
+
+class MemberRemoveByTagView(LoginRequiredMixin, View):
+    """1-L：タグで除外 画面（仕様書 §4.6.5.2）。
+
+    GET：current_conditions を session から復元してテンプレ描画
+         （初回 GET で session pop しない＝戻り時に状態保持、§7.1）。
+    POST：conditions を受け取り extract_persons_by_tag_conditions で抽出 →
+          リスト内メンバーと積集合をとって snapshot 生成 → session 保存 → 1-M。
+
+    snapshot は「抽出 ∩ リスト内」（§3.2、add_by_tag の「抽出 − 既登録」と逆）。
+    退会者も snapshot に含める（個別削除と整合、§9.2-30）。archived Person は
+    preview-v2 が active のみ抽出するため、結果として snapshot に入らない
+    （タグ経由では外せない、個別削除で対応、§4.6.5.5）。
+    """
+
+    template_name = "mailings/_tag_selection.html"
+
+    def get(self, request, pk):
+        mailing_list = get_object_or_404(MailingList, pk=pk)
+        guard = _guard_member_edit(request, mailing_list)
+        if guard is not None:
+            return guard
+        state = request.session.get(_remove_by_tag_session_key(mailing_list.pk)) or {}
+        current_conditions = state.get("conditions") or {
+            "categories": [],
+            "global_exclude_tag_ids": [],
+        }
+        return self._render(request, mailing_list, current_conditions)
+
+    def post(self, request, pk):
+        from django.contrib import messages
+
+        mailing_list = get_object_or_404(MailingList, pk=pk)
+        guard = _guard_member_edit(request, mailing_list)
+        if guard is not None:
+            return guard
+        conditions = _parse_conditions_from_post(request.POST)
+        if _conditions_is_empty(conditions):
+            messages.error(
+                request,
+                "タグ条件が指定されていません。1 つ以上の含むタグまたは横断除外タグを指定してください。",
+            )
+            return self._render(request, mailing_list, conditions, status=400)
+        # 抽出（active のみ、is_unsubscribed 不問）
+        extracted_qs = extract_persons_by_tag_conditions(conditions)
+        extracted_ids = set(str(pid) for pid in extracted_qs.values_list("pk", flat=True))
+        # リスト内メンバーとの積集合 → 除外対象（§3.2、add とは逆）
+        member_ids = set(
+            str(pid)
+            for pid in MailingListMember.objects.filter(
+                mailing_list=mailing_list
+            ).values_list("person_id", flat=True)
+        )
+        snapshot_ids = sorted(extracted_ids & member_ids)
+        out_of_list_count = len(extracted_ids) - len(snapshot_ids)
+        request.session[_remove_by_tag_session_key(mailing_list.pk)] = {
+            "conditions": conditions,
+            "snapshot_person_ids": snapshot_ids,
+            "total_extracted": len(extracted_ids),
+            "out_of_list_count": out_of_list_count,
+        }
+        request.session.modified = True
+        target = reverse(
+            "mailings:list_member_remove_by_tag_confirm", args=[mailing_list.pk]
+        )
+        back = BackNavigator(request)
+        if back.back_stack:
+            target = back.append_url(target)
+        return redirect(target)
+
+    def _render(self, request, mailing_list, current_conditions, *, status=200):
+        categories = _all_categories_with_tags()
+        global_exclude_tags = _all_active_tags()
+        current_member_count = MailingListMember.objects.filter(
+            mailing_list=mailing_list
+        ).count()
+        return render(
+            request,
+            self.template_name,
+            {
+                "mode": "remove_by_tag",
+                "mailing_list": mailing_list,
+                "current_member_count": current_member_count,
+                "categories": categories,
+                "global_exclude_tags": global_exclude_tags,
+                "current_conditions": current_conditions,
+                "preview_url": reverse("mailings:mailing_list_preview_v2"),
+                "post_url": reverse(
+                    "mailings:list_member_remove_by_tag", args=[mailing_list.pk]
+                ),
+                "cancel_url": reverse(
+                    "mailings:mailing_list_detail", args=[mailing_list.pk]
+                ),
+                "back": BackNavigator(request),
+                "active_app": "mailings",
+                "active_menu": "mailings:mailing_list_list",
+            },
+            status=status,
+        )
+
+
+class MemberRemoveByTagConfirmView(LoginRequiredMixin, View):
+    """1-M：タグで除外 確認画面（仕様書 §4.6.5.3、GET 専用）。
+
+    session が空なら 1-L に 302 差し戻し（§9.2-45）。
+    snapshot の Person を一覧描画 + Before/After「-N 件」+ 範囲説明。
+    確定ボタン押下時の二重確認ダイアログは _member_confirmation.html 側で
+    submit 時に confirm() を出す（§4.6.5.4-8）。
+    """
+
+    template_name = "mailings/_member_confirmation.html"
+
+    def get(self, request, pk):
+        from django.contrib import messages
+
+        mailing_list = get_object_or_404(MailingList, pk=pk)
+        guard = _guard_member_edit(request, mailing_list)
+        if guard is not None:
+            return guard
+        state = request.session.get(_remove_by_tag_session_key(mailing_list.pk)) or {}
+        snapshot_ids = state.get("snapshot_person_ids") or []
+        if not state.get("conditions"):
+            messages.info(
+                request, "選択がリセットされました。もう一度タグを選択してください。"
+            )
+            return redirect(
+                "mailings:list_member_remove_by_tag", pk=mailing_list.pk
+            )
+        persons_qs = Person.objects.filter(pk__in=snapshot_ids).select_related(
+            "primary_contact"
+        )
+        persons = list(_apply_sort_to_persons(persons_qs, request.GET))
+        sort_key, sort_dir = _resolve_sort(request.GET)
+        current_member_count = MailingListMember.objects.filter(
+            mailing_list=mailing_list
+        ).count()
+        back = BackNavigator(request)
+        back_to_selection = reverse(
+            "mailings:list_member_remove_by_tag", args=[mailing_list.pk]
+        )
+        if back.back_stack:
+            back_to_selection = back.append_url(back_to_selection)
+        commit_url = reverse(
+            "mailings:list_member_commit_remove_by_tag", args=[mailing_list.pk]
+        )
+        removed_count = len(snapshot_ids)
+        return render(
+            request,
+            self.template_name,
+            {
+                "mailing_list": mailing_list,
+                "mode": "remove_by_tag",
+                "mode_label": "タグで除外",
+                "persons": persons,
+                "total_count": len(persons),
+                "display_limit": 50,
+                "current_sort": sort_key,
+                "current_dir": sort_dir,
+                # remove_by_tag 固有：抽出 / リスト外 / 除外対象 と Before/After
+                "total_extracted": state.get("total_extracted", 0),
+                "out_of_list_count": state.get("out_of_list_count", 0),
+                "removed_count": removed_count,
+                "current_member_count": current_member_count,
+                "after_count": current_member_count - removed_count,
+                "back": back,
+                "active_app": "mailings",
+                "active_menu": "mailings:mailing_list_list",
+                "back_to_selection_url": back_to_selection,
+                "commit_url": commit_url,
+            },
+        )
+
+
+@method_decorator(require_POST, name="dispatch")
+class MemberRemoveByTagCommitView(LoginRequiredMixin, View):
+    """タグで除外 確定エンドポイント（仕様書 §4.6.5.3、POST 専用、PRG）。
+
+    session の snapshot を bulk_delete で一括除外（add の bulk_create と対）。
+    確定後 session クリア → 詳細画面に 302。
+    """
+
+    def post(self, request, pk):
+        from django.contrib import messages
+
+        mailing_list = get_object_or_404(MailingList, pk=pk)
+        guard = _guard_member_edit(request, mailing_list)
+        if guard is not None:
+            return guard
+        key = _remove_by_tag_session_key(mailing_list.pk)
+        state = request.session.get(key) or {}
+        snapshot_ids = state.get("snapshot_person_ids") or []
+        if not state.get("conditions"):
+            messages.warning(
+                request, "セッションが切れています。もう一度タグを選択してください。"
+            )
+            return redirect(
+                "mailings:list_member_remove_by_tag", pk=mailing_list.pk
+            )
+        with transaction.atomic():
+            if snapshot_ids:
+                MailingListMember.objects.filter(
+                    mailing_list=mailing_list, person_id__in=snapshot_ids
+                ).delete()
+        request.session.pop(key, None)
+        request.session.modified = True
+        target = reverse("mailings:mailing_list_detail", args=[mailing_list.pk])
+        back = BackNavigator(request)
+        if back.back_stack:
+            target = back.append_url(target)
+        return redirect(target)
+
+
+# ======================================================================
 # Phase 1c-β-2a 新規作成ウィザード（仕様書 rev6 §4.5、§10 #17〜#20 #25）
 # ======================================================================
 #

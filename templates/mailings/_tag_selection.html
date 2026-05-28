@@ -29,7 +29,7 @@ JS フック予約：
 {% endcomment %}
 
 {% block title %}
-{% if mode == 'create' %}リスト作成（2/3 タグで対象を選ぶ）{% elif mode == 'add_by_tag' %}タグで追加：{{ mailing_list.name }}{% else %}タグで対象を選ぶ{% endif %} — FreeGroup2
+{% if mode == 'create' %}リスト作成（2/3 タグで対象を選ぶ）{% elif mode == 'add_by_tag' %}タグで追加 - {{ mailing_list.name }}{% elif mode == 'remove_by_tag' %}タグで除外 - {{ mailing_list.name }}{% else %}タグで対象を選ぶ{% endif %} — FreeGroup2
 {% endblock %}
 
 {% block content %}
@@ -75,7 +75,19 @@ JS フック予約：
       </div>
     </div>
   {% elif mode == 'remove_by_tag' %}
-    {# β-3b でコード君A が実装：対象リスト名 + 赤バナー（「リストから除外します」） #}
+    <div class="app-page-header">
+      <div>
+        <div class="app-breadcrumb">メール配信 / 配信リスト一覧 / 詳細 / タグで除外</div>
+        <h1>タグで除外：{{ mailing_list.name }}（現在 {{ current_member_count }} 件）</h1>
+        <div class="app-message app-message--error" style="margin-top:8px;">
+          <i class="bi bi-dash-circle" style="margin-right:6px;"></i>
+          <strong>タグで除外：{{ mailing_list.name }}</strong> から対象を外します。
+        </div>
+      </div>
+      <div class="app-action-area">
+        <a href="{{ cancel_url }}" class="app-btn app-btn--secondary">キャンセル</a>
+      </div>
+    </div>
   {% endif %}
 
   {% if messages %}
@@ -229,7 +241,7 @@ JS フック予約：
         {% elif mode == 'add_by_tag' %}
           <button type="submit" class="app-btn app-btn--success js-tag-selection-submit">内容を確認</button>
         {% elif mode == 'remove_by_tag' %}
-          {# β-3b で実装：赤系ボタン「内容を確認」 #}
+          <button type="submit" class="app-btn app-btn--danger js-tag-selection-submit">内容を確認</button>
         {% endif %}
         {% if mode == 'create' %}
           <a href="{{ back_url }}" class="app-btn app-btn--secondary">戻る</a>

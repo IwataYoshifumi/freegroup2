@@ -681,6 +681,7 @@
   let debounceTimer = null;
   let lastPreviewCount = null;
   let lastPreviewNewCount = null;
+  let lastPreviewInListCount = null;
   let inflightController = null;
 
   /* ---------- ヘルパー ---------- */
@@ -959,6 +960,18 @@
           '新規追加対象 <strong>' + newC + '</strong> 件 ' +
           '<span style="color:#64748b; font-size:0.9em;">' +
           '（抽出 ' + total + ' 件 / 既登録 ' + already + ' 件）</span>';
+      } else if (mode === 'remove_by_tag') {
+        /* 除外モード（§4.6.5.2）：除外対象 N / 抽出 X / リスト外 Y。
+           中立別名 in_list_count（=除外対象）/ out_of_list_count（=リスト外）を読む
+           （§3.1 / §9.2-46〜48、new_count/already_in_list と値は同じだが命名で
+           用途を明示することで配線ミスを構造的に防ぐ）。
+           「除外対象 N 件」は赤太字で強調（§4.6.5.4-4）。 */
+        const inList = (typeof data.in_list_count === 'number') ? data.in_list_count : 0;
+        const outList = (typeof data.out_of_list_count === 'number') ? data.out_of_list_count : 0;
+        previewCountEl.innerHTML =
+          '除外対象 <strong style="color:#991b1b;">' + inList + '</strong> 件 ' +
+          '<span style="color:#64748b; font-size:0.9em;">' +
+          '（抽出 ' + total + ' 件 / リスト外 ' + outList + ' 件）</span>';
       } else {
         previewCountEl.textContent = '抽出 ' + total + ' 件';
       }
@@ -1036,11 +1049,15 @@
           }
           lastPreviewCount = null;
           lastPreviewNewCount = null;
+          lastPreviewInListCount = null;
         } else {
           lastPreviewCount = (typeof data.total_count === 'number') ? data.total_count : null;
-          /* add_by_tag 用：警告ダイアログが「対象 0 人？」を判定するときに使う件数は
-             total_count ではなく new_count（新規追加対象）。mode 別に保持。 */
+          /* mode 別に警告ダイアログの参照件数を保存：
+             - add_by_tag：new_count（新規追加対象、既登録は重複除外、§4.6.1）
+             - remove_by_tag：in_list_count（除外対象＝抽出 ∩ リスト内、§4.6.5.2）
+                              中立別名を読む。new_count と in_list_count は別物として扱う。 */
           lastPreviewNewCount = (typeof data.new_count === 'number') ? data.new_count : null;
+          lastPreviewInListCount = (typeof data.in_list_count === 'number') ? data.in_list_count : null;
           renderPreview(data);
         }
         updateSubmitDisabledState();
@@ -1054,6 +1071,7 @@
       }
       lastPreviewCount = null;
       lastPreviewNewCount = null;
+      lastPreviewInListCount = null;
     });
   }
 
@@ -1085,13 +1103,18 @@
     /* §4.4.2 警告ダイアログ 4 条件。mode により参照件数と文言が変わる：
        - create：lastPreviewCount（total_count）= 抽出件数
        - add_by_tag：lastPreviewNewCount（new_count）= 新規追加対象（既登録は重複除外、§4.6.1）
+       - remove_by_tag：lastPreviewInListCount（in_list_count）= 除外対象（抽出 ∩ リスト内、§4.6.5.2）
+       「除外を確定」押下時の二重確認ダイアログは _member_confirmation.html 側で
+       別途 submit イベントに confirm() を仕掛ける（§4.6.5.4-8、本処理は 1-L 側）。
     */
     const includeOn = hasAnyInclude();
     const globalOn = hasAnyGlobalExclude();
     const isAddByTag = (mode === 'add_by_tag');
-    const targetCount = isAddByTag
-      ? lastPreviewNewCount
-      : lastPreviewCount;
+    const isRemoveByTag = (mode === 'remove_by_tag');
+    let targetCount;
+    if (isAddByTag) targetCount = lastPreviewNewCount;
+    else if (isRemoveByTag) targetCount = lastPreviewInListCount;
+    else targetCount = lastPreviewCount;
     const n = (typeof targetCount === 'number') ? targetCount : '?';
     if (!includeOn && !globalOn) {
       /* disabled で来ないはずだが保険 */
@@ -1099,16 +1122,26 @@
       return;
     }
     if (!includeOn && globalOn) {
-      const msg = isAddByTag
-        ? '全 Person から除外条件を適用します（新規追加対象 ' + n + ' 件）。続けますか？'
-        : '全 Person から除外条件を適用します（対象 ' + n + ' 件）。続けますか？';
+      let msg;
+      if (isAddByTag) {
+        msg = '全 Person から除外条件を適用します（新規追加対象 ' + n + ' 件）。続けますか？';
+      } else if (isRemoveByTag) {
+        msg = '全 Person から除外条件を適用します（除外対象 ' + n + ' 件）。続けますか？';
+      } else {
+        msg = '全 Person から除外条件を適用します（対象 ' + n + ' 件）。続けますか？';
+      }
       if (!window.confirm(msg)) { event.preventDefault(); return; }
       return;
     }
     if (includeOn && targetCount === 0) {
-      const msg = isAddByTag
-        ? '新規追加対象が 0 人です（抽出結果はすべて既登録、または抽出 0 件）。続けますか？'
-        : '対象 Person が 0 人です。続けますか？';
+      let msg;
+      if (isAddByTag) {
+        msg = '新規追加対象が 0 人です（抽出結果はすべて既登録、または抽出 0 件）。続けますか？';
+      } else if (isRemoveByTag) {
+        msg = '除外対象が 0 人です（抽出結果はすべてリスト外、または抽出 0 件）。続けますか？';
+      } else {
+        msg = '対象 Person が 0 人です。続けますか？';
+      }
       if (!window.confirm(msg)) {
         event.preventDefault();
         return;

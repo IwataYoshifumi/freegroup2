@@ -2135,8 +2135,8 @@ class _AddByTagTestBase(_TagExtractionTestBase):
             name="L1", created_by=self.user
         )
 
-    def _make_list_person(self, full_name, *, is_unsubscribed=False, in_list=False):
-        p = self._make_person(full_name, is_unsubscribed=is_unsubscribed)
+    def _make_list_person(self, full_name, *, is_unsubscribed=False, in_list=False, status="active"):
+        p = self._make_person(full_name, is_unsubscribed=is_unsubscribed, status=status)
         if in_list:
             MailingListMember.objects.create(
                 mailing_list=self.mailing_list, person=p, added_by=self.user
@@ -2553,3 +2553,530 @@ class DetailViewAddByTagButtonTests(_AddByTagTestBase):
         )
         self.assertIn(">タグで追加</span>", body)
         self.assertIn("凍結中のため編集できません", body)
+
+
+# ======================================================================
+# Phase 1c-β-3b タグで除外（仕様書 rev6 §4.6.5 / §10 #27〜#30 #32）
+# ======================================================================
+#
+# 既存リストから「タグで対象を抽出して外す」フロー 1-L → 1-M → 確定 を検証する。
+# snapshot は「抽出 ∩ リスト内」（add の「抽出 − 既登録」と逆、§3.2）、退会者含む。
+# bulk_delete で確定、PRG で詳細画面へ。session キー mailing_list_<pk>_remove_by_tag_state。
+#
+# in_list_count（=除外対象）/ out_of_list_count（=リスト外）の中立別名を読むこと、
+# archived Person はタグ経由では外れないこと、UI 誤操作防止 8 項目（特に二重確認）
+# も検証。タグで追加（β-3a）と独立に動くことも確認。
+
+
+def _remove_by_tag_session_key(mailing_list_pk):
+    return f"mailing_list_{mailing_list_pk}_remove_by_tag_state"
+
+
+class _RemoveByTagTestBase(_AddByTagTestBase):
+    """β-3a の _AddByTagTestBase を継承（同じ mailing_list / cat / tag セットを使う）。"""
+
+    def _post_conditions(self, *, include=(), operator="OR"):
+        post = {}
+        cat_id = str(self.cat_role.pk)
+        if include:
+            post[f"include_{cat_id}"] = [str(t.pk) for t in include]
+            post[f"operator_{cat_id}"] = operator
+        return post
+
+    def _put_remove_state(self, **state):
+        session = self.client.session
+        session[_remove_by_tag_session_key(self.mailing_list.pk)] = state
+        session.save()
+
+    def _remove_state(self):
+        return self.client.session.get(
+            _remove_by_tag_session_key(self.mailing_list.pk)
+        ) or {}
+
+
+class MemberRemoveByTagViewGetTests(_RemoveByTagTestBase):
+    def test_get_200_renders_red_banner(self):
+        url = reverse(
+            "mailings:list_member_remove_by_tag", args=[self.mailing_list.pk]
+        )
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 200)
+        body = resp.content.decode("utf-8")
+        # 赤バナー（app-message--error）+ タブタイトル + 「除外」文言
+        self.assertIn("タグで除外：L1", body)
+        self.assertIn("app-message--error", body)
+        # タブタイトル「タグで除外 - ◯◯リスト」（§4.6.5.4-3）
+        # {% block title %} 内に改行が含まれるため <title> 直後一致ではなく
+        # 「タグで除外 - L1 — FreeGroup2」のフレーズ単位で検証する。
+        self.assertIn("タグで除外 - L1 — FreeGroup2", body)
+
+    def test_get_frozen_returns_409(self):
+        self.mailing_list.members_frozen_at = timezone.now()
+        self.mailing_list.save(update_fields=["members_frozen_at", "updated_at"])
+        url = reverse(
+            "mailings:list_member_remove_by_tag", args=[self.mailing_list.pk]
+        )
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 409)
+
+    def test_get_archived_returns_404(self):
+        self.mailing_list.is_archived = True
+        self.mailing_list.save(update_fields=["is_archived", "updated_at"])
+        url = reverse(
+            "mailings:list_member_remove_by_tag", args=[self.mailing_list.pk]
+        )
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 404)
+
+    def test_template_has_list_id_data_attribute(self):
+        """JS が dataset.listId で読むため、data-list-id 出力必須。"""
+        url = reverse(
+            "mailings:list_member_remove_by_tag", args=[self.mailing_list.pk]
+        )
+        resp = self.client.get(url)
+        body = resp.content.decode("utf-8")
+        self.assertIn(f'data-list-id="{self.mailing_list.pk}"', body)
+
+
+class MemberRemoveByTagViewPostTests(_RemoveByTagTestBase):
+    def test_post_snapshot_is_intersection_of_extracted_and_in_list(self):
+        """snapshot は「抽出 ∩ リスト内」（§3.2、add の『抽出 − 既登録』と逆）。"""
+        p_in_extracted = self._make_list_person("InAndExtracted", in_list=True)
+        p_in_not_extracted = self._make_list_person("InOnly", in_list=True)
+        p_extracted_not_in = self._make_list_person("ExtractedOnly")
+        self._assign(p_in_extracted, self.t_role_a)
+        self._assign(p_extracted_not_in, self.t_role_a)
+        # p_in_not_extracted はリスト内だがタグ無し → 抽出されない
+        url = reverse(
+            "mailings:list_member_remove_by_tag", args=[self.mailing_list.pk]
+        )
+        resp = self.client.post(
+            url, self._post_conditions(include=[self.t_role_a])
+        )
+        self.assertEqual(resp.status_code, 302)
+        state = self._remove_state()
+        self.assertEqual(state["snapshot_person_ids"], [str(p_in_extracted.pk)])
+        self.assertEqual(state["total_extracted"], 2)  # 抽出 = 2 件
+        self.assertEqual(state["out_of_list_count"], 1)  # リスト外 = 1 件
+
+    def test_post_snapshot_does_not_include_out_of_list(self):
+        """リスト外（リストに居ない Person）は snapshot に入らない（§3.2）。"""
+        p_out = self._make_list_person("Out")  # リスト外
+        self._assign(p_out, self.t_role_a)
+        url = reverse(
+            "mailings:list_member_remove_by_tag", args=[self.mailing_list.pk]
+        )
+        resp = self.client.post(
+            url, self._post_conditions(include=[self.t_role_a])
+        )
+        self.assertEqual(resp.status_code, 302)
+        state = self._remove_state()
+        # snapshot 空（除外対象 0、リスト外 1）
+        self.assertEqual(state["snapshot_person_ids"], [])
+        self.assertEqual(state["total_extracted"], 1)
+        self.assertEqual(state["out_of_list_count"], 1)
+
+    def test_post_snapshot_includes_unsubscribed_member(self):
+        """退会者もリスト内かつ抽出されれば snapshot に含む（個別削除と整合、§9.2-30）。"""
+        p = self._make_list_person("Unsub", is_unsubscribed=True, in_list=True)
+        self._assign(p, self.t_role_a)
+        url = reverse(
+            "mailings:list_member_remove_by_tag", args=[self.mailing_list.pk]
+        )
+        resp = self.client.post(
+            url, self._post_conditions(include=[self.t_role_a])
+        )
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(
+            self._remove_state()["snapshot_person_ids"], [str(p.pk)]
+        )
+
+    def test_post_archived_person_in_list_not_extracted(self):
+        """archived Person はリスト内に居てもタグ経由で外せない（§3.6 / §4.6.5.5）。
+
+        preview-v2 が active のみ抽出 → 抽出 ∩ リスト内に archived は入らない。
+        """
+        p_arch = self._make_list_person("Arch", status="archived", in_list=True)
+        self._assign(p_arch, self.t_role_a)
+        url = reverse(
+            "mailings:list_member_remove_by_tag", args=[self.mailing_list.pk]
+        )
+        resp = self.client.post(
+            url, self._post_conditions(include=[self.t_role_a])
+        )
+        self.assertEqual(resp.status_code, 302)
+        state = self._remove_state()
+        self.assertEqual(state["snapshot_person_ids"], [])
+        self.assertEqual(state["total_extracted"], 0)
+
+    def test_post_empty_conditions_returns_400(self):
+        url = reverse(
+            "mailings:list_member_remove_by_tag", args=[self.mailing_list.pk]
+        )
+        resp = self.client.post(url, {})
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(self._remove_state(), {})
+
+    def test_post_frozen_returns_409(self):
+        self.mailing_list.members_frozen_at = timezone.now()
+        self.mailing_list.save(update_fields=["members_frozen_at", "updated_at"])
+        p = self._make_list_person("Alice", in_list=True)
+        self._assign(p, self.t_role_a)
+        url = reverse(
+            "mailings:list_member_remove_by_tag", args=[self.mailing_list.pk]
+        )
+        resp = self.client.post(
+            url, self._post_conditions(include=[self.t_role_a])
+        )
+        self.assertEqual(resp.status_code, 409)
+
+    def test_post_redirects_to_confirm(self):
+        p = self._make_list_person("Alice", in_list=True)
+        self._assign(p, self.t_role_a)
+        url = reverse(
+            "mailings:list_member_remove_by_tag", args=[self.mailing_list.pk]
+        )
+        confirm_url = reverse(
+            "mailings:list_member_remove_by_tag_confirm",
+            args=[self.mailing_list.pk],
+        )
+        resp = self.client.post(
+            url, self._post_conditions(include=[self.t_role_a])
+        )
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn(confirm_url, resp["Location"])
+
+    def test_remove_and_add_sessions_are_independent(self):
+        """remove_by_tag と add_by_tag の session キーが衝突しない（§3.4）。"""
+        # add の state を入れる
+        session = self.client.session
+        session[_add_by_tag_session_key(self.mailing_list.pk)] = {
+            "conditions": {"categories": [], "global_exclude_tag_ids": []},
+            "snapshot_person_ids": [str(uuid.uuid4())],
+            "total_extracted": 1,
+            "already_in_list_count": 0,
+        }
+        session.save()
+        # remove 側で POST しても add の state を上書きしない
+        p = self._make_list_person("Alice", in_list=True)
+        self._assign(p, self.t_role_a)
+        url = reverse(
+            "mailings:list_member_remove_by_tag", args=[self.mailing_list.pk]
+        )
+        self.client.post(url, self._post_conditions(include=[self.t_role_a]))
+        # add の state は保持
+        add_state = self.client.session.get(
+            _add_by_tag_session_key(self.mailing_list.pk)
+        )
+        self.assertIsNotNone(add_state)
+        self.assertEqual(len(add_state["snapshot_person_ids"]), 1)
+        # remove の state も別キーで保存される
+        self.assertIn(str(p.pk), self._remove_state()["snapshot_person_ids"])
+
+
+class MemberRemoveByTagConfirmViewTests(_RemoveByTagTestBase):
+    def test_empty_session_redirects_to_selection(self):
+        """session 空（conditions なし）→ 1-L に 302（§9.2-45）。"""
+        url = reverse(
+            "mailings:list_member_remove_by_tag_confirm",
+            args=[self.mailing_list.pk],
+        )
+        sel = reverse(
+            "mailings:list_member_remove_by_tag", args=[self.mailing_list.pk]
+        )
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn(sel, resp["Location"])
+
+    def test_renders_after_count_with_minus(self):
+        p_in = self._make_list_person("Alice", in_list=True)
+        # 既登録の追加メンバー（snapshot 外、現在件数を増やすため）
+        p_other = self._make_list_person("Bob", in_list=True)
+        self._put_remove_state(
+            conditions={"categories": [], "global_exclude_tag_ids": []},
+            snapshot_person_ids=[str(p_in.pk)],
+            total_extracted=1,
+            out_of_list_count=0,
+        )
+        url = reverse(
+            "mailings:list_member_remove_by_tag_confirm",
+            args=[self.mailing_list.pk],
+        )
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 200)
+        ctx = resp.context
+        self.assertEqual(ctx["removed_count"], 1)
+        self.assertEqual(ctx["current_member_count"], 2)
+        self.assertEqual(ctx["after_count"], 1)
+        body = resp.content.decode("utf-8")
+        # 「-N 件」赤マイナス表示（§4.6.5.4-6）
+        self.assertIn("→ -1 件", body)
+        # 「外します」強調（§4.6.5.4-5）
+        self.assertIn("<strong>外します</strong>", body)
+        # 「除外を確定」赤ボタン（§4.6.5.4-7）
+        self.assertIn(">除外を確定</button>", body)
+        # 二重確認ダイアログのメッセージ属性（§4.6.5.4-8）
+        self.assertIn('data-confirm-message="1 件をリストから除外します。', body)
+
+    def test_renders_unsubscribed_badge(self):
+        p = self._make_list_person("Unsub", is_unsubscribed=True, in_list=True)
+        self._put_remove_state(
+            conditions={"categories": [], "global_exclude_tag_ids": []},
+            snapshot_person_ids=[str(p.pk)],
+            total_extracted=1,
+            out_of_list_count=0,
+        )
+        url = reverse(
+            "mailings:list_member_remove_by_tag_confirm",
+            args=[self.mailing_list.pk],
+        )
+        resp = self.client.get(url)
+        self.assertIn("js-unsubscribed-badge", resp.content.decode("utf-8"))
+
+    def test_frozen_returns_409(self):
+        self.mailing_list.members_frozen_at = timezone.now()
+        self.mailing_list.save(update_fields=["members_frozen_at", "updated_at"])
+        self._put_remove_state(
+            conditions={"categories": [], "global_exclude_tag_ids": []},
+            snapshot_person_ids=[str(uuid.uuid4())],
+            total_extracted=1,
+            out_of_list_count=0,
+        )
+        url = reverse(
+            "mailings:list_member_remove_by_tag_confirm",
+            args=[self.mailing_list.pk],
+        )
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 409)
+
+    def test_post_method_returns_405(self):
+        url = reverse(
+            "mailings:list_member_remove_by_tag_confirm",
+            args=[self.mailing_list.pk],
+        )
+        resp = self.client.post(url)
+        self.assertEqual(resp.status_code, 405)
+
+
+class MemberRemoveByTagCommitViewTests(_RemoveByTagTestBase):
+    def test_commit_deletes_only_snapshot_members(self):
+        """bulk_delete は snapshot の Person のみ削除（リスト内の他は残る）。"""
+        p_remove = self._make_list_person("Remove", in_list=True)
+        p_stay = self._make_list_person("Stay", in_list=True)
+        self._put_remove_state(
+            conditions={"categories": [], "global_exclude_tag_ids": []},
+            snapshot_person_ids=[str(p_remove.pk)],
+            total_extracted=1,
+            out_of_list_count=0,
+        )
+        url = reverse(
+            "mailings:list_member_commit_remove_by_tag",
+            args=[self.mailing_list.pk],
+        )
+        resp = self.client.post(url)
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn(
+            reverse(
+                "mailings:mailing_list_detail", args=[self.mailing_list.pk]
+            ),
+            resp["Location"],
+        )
+        # snapshot の Person は削除、他は残る
+        self.assertFalse(
+            MailingListMember.objects.filter(
+                mailing_list=self.mailing_list, person=p_remove
+            ).exists()
+        )
+        self.assertTrue(
+            MailingListMember.objects.filter(
+                mailing_list=self.mailing_list, person=p_stay
+            ).exists()
+        )
+        # session クリア
+        self.assertEqual(self._remove_state(), {})
+
+    def test_commit_does_not_affect_other_lists(self):
+        """同じ Person が他リストに居ても、対象リストのメンバーシップのみ削除。"""
+        other = MailingList.objects.create(name="OtherList", created_by=self.user)
+        p = self._make_list_person("Shared", in_list=True)
+        MailingListMember.objects.create(
+            mailing_list=other, person=p, added_by=self.user
+        )
+        self._put_remove_state(
+            conditions={"categories": [], "global_exclude_tag_ids": []},
+            snapshot_person_ids=[str(p.pk)],
+            total_extracted=1,
+            out_of_list_count=0,
+        )
+        url = reverse(
+            "mailings:list_member_commit_remove_by_tag",
+            args=[self.mailing_list.pk],
+        )
+        self.client.post(url)
+        self.assertFalse(
+            MailingListMember.objects.filter(
+                mailing_list=self.mailing_list, person=p
+            ).exists()
+        )
+        self.assertTrue(
+            MailingListMember.objects.filter(
+                mailing_list=other, person=p
+            ).exists()
+        )
+
+    def test_commit_empty_session_redirects_to_selection(self):
+        url = reverse(
+            "mailings:list_member_commit_remove_by_tag",
+            args=[self.mailing_list.pk],
+        )
+        sel = reverse(
+            "mailings:list_member_remove_by_tag", args=[self.mailing_list.pk]
+        )
+        resp = self.client.post(url)
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn(sel, resp["Location"])
+
+    def test_commit_get_method_returns_405(self):
+        url = reverse(
+            "mailings:list_member_commit_remove_by_tag",
+            args=[self.mailing_list.pk],
+        )
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 405)
+
+    def test_commit_frozen_returns_409(self):
+        self.mailing_list.members_frozen_at = timezone.now()
+        self.mailing_list.save(update_fields=["members_frozen_at", "updated_at"])
+        p = self._make_list_person("Alice", in_list=True)
+        self._put_remove_state(
+            conditions={"categories": [], "global_exclude_tag_ids": []},
+            snapshot_person_ids=[str(p.pk)],
+            total_extracted=1,
+            out_of_list_count=0,
+        )
+        url = reverse(
+            "mailings:list_member_commit_remove_by_tag",
+            args=[self.mailing_list.pk],
+        )
+        resp = self.client.post(url)
+        self.assertEqual(resp.status_code, 409)
+
+    def test_commit_snapshot_unchanged_by_db_mutation(self):
+        """snapshot 方式：POST 後の Person タグ変更が確定結果に影響しない（§9.2-26）。"""
+        p = self._make_list_person("Alice", in_list=True)
+        self._assign(p, self.t_role_a)
+        post_url = reverse(
+            "mailings:list_member_remove_by_tag", args=[self.mailing_list.pk]
+        )
+        self.client.post(
+            post_url, self._post_conditions(include=[self.t_role_a])
+        )
+        # snapshot 確定後にタグを剝がしても、commit は snapshot ID で進む
+        TagAssignment.objects.filter(person=p).delete()
+        commit_url = reverse(
+            "mailings:list_member_commit_remove_by_tag",
+            args=[self.mailing_list.pk],
+        )
+        resp = self.client.post(commit_url)
+        self.assertEqual(resp.status_code, 302)
+        # snapshot 通り p が削除される
+        self.assertFalse(
+            MailingListMember.objects.filter(
+                mailing_list=self.mailing_list, person=p
+            ).exists()
+        )
+
+    def test_prg_replay_does_not_double_delete(self):
+        """PRG：commit 2 回目は session クリア済みで 1-L に差し戻し（二重削除なし）。"""
+        p = self._make_list_person("Alice", in_list=True)
+        self._put_remove_state(
+            conditions={"categories": [], "global_exclude_tag_ids": []},
+            snapshot_person_ids=[str(p.pk)],
+            total_extracted=1,
+            out_of_list_count=0,
+        )
+        commit_url = reverse(
+            "mailings:list_member_commit_remove_by_tag",
+            args=[self.mailing_list.pk],
+        )
+        resp1 = self.client.post(commit_url)
+        self.assertEqual(resp1.status_code, 302)
+        # 2 回目：session クリア済み、削除済み Person 自体も既に存在しない
+        resp2 = self.client.post(commit_url)
+        self.assertEqual(resp2.status_code, 302)
+        self.assertIn(
+            reverse(
+                "mailings:list_member_remove_by_tag",
+                args=[self.mailing_list.pk],
+            ),
+            resp2["Location"],
+        )
+
+
+class DetailViewRemoveByTagButtonTests(_RemoveByTagTestBase):
+    def test_detail_shows_remove_by_tag_button_active(self):
+        url = reverse(
+            "mailings:mailing_list_detail", args=[self.mailing_list.pk]
+        )
+        resp = self.client.get(url)
+        body = resp.content.decode("utf-8")
+        remove_by_tag_url = reverse(
+            "mailings:list_member_remove_by_tag", args=[self.mailing_list.pk]
+        )
+        self.assertIn(remove_by_tag_url, body)
+        self.assertIn(">タグで除外</a>", body)
+        # 削除系の行＝赤ボタン
+        # 削除系の行は <a ... class="app-btn app-btn--danger">タグで除外</a>
+        self.assertIn('class="app-btn app-btn--danger">タグで除外</a>', body)
+
+    def test_detail_frozen_disables_remove_by_tag_button(self):
+        self.mailing_list.members_frozen_at = timezone.now()
+        self.mailing_list.save(update_fields=["members_frozen_at", "updated_at"])
+        url = reverse(
+            "mailings:mailing_list_detail", args=[self.mailing_list.pk]
+        )
+        resp = self.client.get(url)
+        body = resp.content.decode("utf-8")
+        self.assertNotIn(
+            f'href="{reverse("mailings:list_member_remove_by_tag", args=[self.mailing_list.pk])}',
+            body,
+        )
+        self.assertIn(">タグで除外</span>", body)
+
+
+class PreviewV2NeutralAliasIntegrationTests(_RemoveByTagTestBase):
+    """preview-v2 が in_list_count == already_in_list、out_of_list_count == new_count
+    のエイリアス関係を保つことを再検証（§3.1 配線ミス防止の構造的根拠）。
+    """
+
+    def test_aliases_match_in_real_response(self):
+        p_in = self._make_list_person("InList", in_list=True)
+        p_out = self._make_list_person("OutList")
+        self._assign(p_in, self.t_role_a)
+        self._assign(p_out, self.t_role_a)
+        body = {
+            "list_id": str(self.mailing_list.pk),
+            "conditions": {
+                "categories": [
+                    {
+                        "category_id": str(self.cat_role.pk),
+                        "operator": "OR",
+                        "include_tag_ids": [str(self.t_role_a.pk)],
+                        "exclude_tag_ids": [],
+                    }
+                ],
+                "global_exclude_tag_ids": [],
+            },
+        }
+        resp = self.client.post(
+            reverse("mailings:mailing_list_preview_v2"),
+            data=json.dumps(body),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["total_count"], 2)
+        self.assertEqual(data["in_list_count"], data["already_in_list"])
+        self.assertEqual(data["out_of_list_count"], data["new_count"])
+        self.assertEqual(data["in_list_count"], 1)
+        self.assertEqual(data["out_of_list_count"], 1)
