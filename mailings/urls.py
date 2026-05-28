@@ -51,6 +51,12 @@ urlpatterns = [
         views.MailingListPreviewView.as_view(),
         name="mailing_list_preview",
     ),
+    # Phase 1c-β-1（仕様書 rev5 §4.3 / §12.8）：拡張集合演算対応の新プレビュー API
+    path(
+        "lists/preview-v2/",
+        views.PreviewV2View.as_view(),
+        name="mailing_list_preview_v2",
+    ),
     path(
         "lists/member/remove/",
         views.MailingListMemberRemoveView.as_view(),

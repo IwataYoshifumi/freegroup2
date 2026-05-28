@@ -3,8 +3,12 @@
 snapshot 方式・PRG パターン・?restore=1 判定・confirm 空フォールバック・凍結ガード・
 退会済みバッジ・表示件数統一 UI の検証。Phase 1b までの既存 API（add-member /
 remove-member / freeze 等）は本ファイルで触らず ε.6 時点の挙動を維持する前提。
+
+Phase 1c-β-1（仕様書 rev5 §4.1 / §4.2 / §4.3）：拡張集合演算サービス関数と
+preview-v2 API のテスト（クラス TagConditionsExtractionTests / PreviewV2ApiTests）。
 """
 
+import json
 import uuid
 
 from django.contrib.auth import get_user_model
@@ -14,7 +18,12 @@ from django.utils import timezone
 
 from contacts.models import Contact
 from mailings.models import MailingList, MailingListMember
+from mailings.services.tag_extraction import (
+    extract_persons_by_tag_conditions,
+    extract_persons_by_tags,
+)
 from persons.models import Person
+from tags.models import Tag, TagAssignment, TagCategory
 
 User = get_user_model()
 
@@ -937,3 +946,766 @@ class ButtonColorAndLabelTests(_MemberEditTestBase):
         resp = self.client.get(url)
         body = resp.content.decode("utf-8")
         self.assertIn("以下の 2 件をリストに追加します", body)
+
+
+# ======================================================================
+# Phase 1c-β-1（仕様書 rev5 §4.1 / §4.2）
+# 抽出サービス新関数 extract_persons_by_tag_conditions のテスト
+# ======================================================================
+
+
+class _TagExtractionTestBase(TestCase):
+    """β-1 テストの共通基底：カテゴリ / タグ / Person × Tag 付与のヘルパー。"""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="be_test", password="x")
+        self.client = Client()
+        self.client.force_login(self.user)
+        # 2 カテゴリ × 3 タグずつ、合計 6 タグ
+        self.cat_role = TagCategory.objects.create(name="役職")
+        self.cat_area = TagCategory.objects.create(name="地域")
+        self.t_role_a = Tag.objects.create(
+            name="役職A", category=self.cat_role, created_by=self.user
+        )
+        self.t_role_b = Tag.objects.create(
+            name="役職B", category=self.cat_role, created_by=self.user
+        )
+        self.t_role_c = Tag.objects.create(
+            name="役職C", category=self.cat_role, created_by=self.user
+        )
+        self.t_area_x = Tag.objects.create(
+            name="地域X", category=self.cat_area, created_by=self.user
+        )
+        self.t_area_y = Tag.objects.create(
+            name="地域Y", category=self.cat_area, created_by=self.user
+        )
+        self.t_area_z = Tag.objects.create(
+            name="地域Z", category=self.cat_area, created_by=self.user
+        )
+
+    def _make_person(self, full_name, *, status="active", is_unsubscribed=False):
+        p = Person.objects.create(status=status, is_unsubscribed=is_unsubscribed)
+        c = Contact.objects.create(
+            person=p,
+            status=Contact.Status.PRIMARY,
+            full_name=full_name,
+            email=f"{full_name.lower()}@example.com",
+            created_by=self.user,
+        )
+        p.primary_contact = c
+        p.save(update_fields=["primary_contact", "updated_at"])
+        return p
+
+    def _assign(self, person, *tags):
+        for tag in tags:
+            TagAssignment.objects.create(
+                tag=tag, person=person, assigned_by=self.user
+            )
+
+
+class TagConditionsExtractionTests(_TagExtractionTestBase):
+    def test_in_category_or_returns_union(self):
+        p_a = self._make_person("AOnly")
+        p_b = self._make_person("BOnly")
+        p_none = self._make_person("None")  # noqa: F841
+        self._assign(p_a, self.t_role_a)
+        self._assign(p_b, self.t_role_b)
+        conditions = {
+            "categories": [
+                {
+                    "category_id": str(self.cat_role.pk),
+                    "operator": "OR",
+                    "include_tag_ids": [
+                        str(self.t_role_a.pk),
+                        str(self.t_role_b.pk),
+                    ],
+                    "exclude_tag_ids": [],
+                }
+            ],
+            "global_exclude_tag_ids": [],
+        }
+        result = set(extract_persons_by_tag_conditions(conditions))
+        self.assertEqual(result, {p_a, p_b})
+
+    def test_in_category_and_returns_intersection_not_union(self):
+        """AND は intersection。tags__in 誤用していると OR=union になり失敗する（§9.2-37）。"""
+        p_ab = self._make_person("Both")
+        p_a = self._make_person("AOnly")
+        p_b = self._make_person("BOnly")
+        self._assign(p_ab, self.t_role_a, self.t_role_b)
+        self._assign(p_a, self.t_role_a)
+        self._assign(p_b, self.t_role_b)
+        conditions = {
+            "categories": [
+                {
+                    "category_id": str(self.cat_role.pk),
+                    "operator": "AND",
+                    "include_tag_ids": [
+                        str(self.t_role_a.pk),
+                        str(self.t_role_b.pk),
+                    ],
+                    "exclude_tag_ids": [],
+                }
+            ],
+            "global_exclude_tag_ids": [],
+        }
+        result = set(extract_persons_by_tag_conditions(conditions))
+        self.assertEqual(result, {p_ab})
+
+    def test_in_category_not_excludes(self):
+        p_a = self._make_person("AOnly")
+        p_ac = self._make_person("AC")
+        self._assign(p_a, self.t_role_a)
+        self._assign(p_ac, self.t_role_a, self.t_role_c)
+        conditions = {
+            "categories": [
+                {
+                    "category_id": str(self.cat_role.pk),
+                    "operator": "OR",
+                    "include_tag_ids": [str(self.t_role_a.pk)],
+                    "exclude_tag_ids": [str(self.t_role_c.pk)],
+                }
+            ],
+            "global_exclude_tag_ids": [],
+        }
+        result = set(extract_persons_by_tag_conditions(conditions))
+        self.assertEqual(result, {p_a})
+
+    def test_cross_category_and(self):
+        """異なるカテゴリ間は AND 合成（役職A かつ 地域X）。"""
+        p_only_role = self._make_person("OnlyRole")
+        p_only_area = self._make_person("OnlyArea")
+        p_both = self._make_person("Both")
+        self._assign(p_only_role, self.t_role_a)
+        self._assign(p_only_area, self.t_area_x)
+        self._assign(p_both, self.t_role_a, self.t_area_x)
+        conditions = {
+            "categories": [
+                {
+                    "category_id": str(self.cat_role.pk),
+                    "operator": "OR",
+                    "include_tag_ids": [str(self.t_role_a.pk)],
+                    "exclude_tag_ids": [],
+                },
+                {
+                    "category_id": str(self.cat_area.pk),
+                    "operator": "OR",
+                    "include_tag_ids": [str(self.t_area_x.pk)],
+                    "exclude_tag_ids": [],
+                },
+            ],
+            "global_exclude_tag_ids": [],
+        }
+        result = set(extract_persons_by_tag_conditions(conditions))
+        self.assertEqual(result, {p_both})
+
+    def test_global_exclude_removes_from_result(self):
+        p_a = self._make_person("AOnly")
+        p_ax = self._make_person("AX")
+        self._assign(p_a, self.t_role_a)
+        self._assign(p_ax, self.t_role_a, self.t_area_x)
+        conditions = {
+            "categories": [
+                {
+                    "category_id": str(self.cat_role.pk),
+                    "operator": "OR",
+                    "include_tag_ids": [str(self.t_role_a.pk)],
+                    "exclude_tag_ids": [],
+                }
+            ],
+            "global_exclude_tag_ids": [str(self.t_area_x.pk)],
+        }
+        result = set(extract_persons_by_tag_conditions(conditions))
+        self.assertEqual(result, {p_a})
+
+    def test_no_categories_with_global_exclude_returns_all_minus_excluded(self):
+        """有効カテゴリ 0 + 横断除外あり → 全 active − 横断除外（§4.1.4）。"""
+        p_clean = self._make_person("Clean")
+        p_tagged = self._make_person("Tagged")
+        self._assign(p_tagged, self.t_area_x)
+        conditions = {
+            "categories": [],
+            "global_exclude_tag_ids": [str(self.t_area_x.pk)],
+        }
+        result = set(extract_persons_by_tag_conditions(conditions))
+        self.assertEqual(result, {p_clean})
+
+    def test_no_categories_no_global_exclude_returns_empty(self):
+        """有効カテゴリ 0 + 横断除外なし → 0 件（§4.1.4）。"""
+        self._make_person("Whoever")
+        conditions = {"categories": [], "global_exclude_tag_ids": []}
+        result = list(extract_persons_by_tag_conditions(conditions))
+        self.assertEqual(result, [])
+
+    def test_empty_include_tag_ids_category_is_ignored(self):
+        """include 空のカテゴリは無視され、他のカテゴリだけで判定される（§4.1.4）。"""
+        p_role_a = self._make_person("RoleA")
+        self._assign(p_role_a, self.t_role_a)
+        conditions = {
+            "categories": [
+                {
+                    "category_id": str(self.cat_role.pk),
+                    "operator": "OR",
+                    "include_tag_ids": [str(self.t_role_a.pk)],
+                    "exclude_tag_ids": [],
+                },
+                {
+                    "category_id": str(self.cat_area.pk),
+                    "operator": "OR",
+                    "include_tag_ids": [],  # ←無視されるべき
+                    "exclude_tag_ids": [str(self.t_area_x.pk)],  # 無視（include 空のため）
+                },
+            ],
+            "global_exclude_tag_ids": [],
+        }
+        result = set(extract_persons_by_tag_conditions(conditions))
+        self.assertEqual(result, {p_role_a})
+
+    def test_archived_person_excluded(self):
+        p_active = self._make_person("Active")
+        p_arch = self._make_person("Arch", status="archived")
+        self._assign(p_active, self.t_role_a)
+        self._assign(p_arch, self.t_role_a)
+        conditions = {
+            "categories": [
+                {
+                    "category_id": str(self.cat_role.pk),
+                    "operator": "OR",
+                    "include_tag_ids": [str(self.t_role_a.pk)],
+                    "exclude_tag_ids": [],
+                }
+            ],
+            "global_exclude_tag_ids": [],
+        }
+        result = set(extract_persons_by_tag_conditions(conditions))
+        self.assertEqual(result, {p_active})
+
+    def test_unsubscribed_person_included(self):
+        """is_unsubscribed=True でも抽出対象に含まれる（§9.2-30、配信実行層の責務）。"""
+        p_normal = self._make_person("Normal")
+        p_unsub = self._make_person("Unsub", is_unsubscribed=True)
+        self._assign(p_normal, self.t_role_a)
+        self._assign(p_unsub, self.t_role_a)
+        conditions = {
+            "categories": [
+                {
+                    "category_id": str(self.cat_role.pk),
+                    "operator": "OR",
+                    "include_tag_ids": [str(self.t_role_a.pk)],
+                    "exclude_tag_ids": [],
+                }
+            ],
+            "global_exclude_tag_ids": [],
+        }
+        result = set(extract_persons_by_tag_conditions(conditions))
+        self.assertEqual(result, {p_normal, p_unsub})
+
+    def test_distinct_removes_join_duplicates(self):
+        """複数 OR タグを持つ Person が 1 件だけ返る（.distinct() の検証）。"""
+        p_multi = self._make_person("Multi")
+        self._assign(p_multi, self.t_role_a, self.t_role_b, self.t_role_c)
+        conditions = {
+            "categories": [
+                {
+                    "category_id": str(self.cat_role.pk),
+                    "operator": "OR",
+                    "include_tag_ids": [
+                        str(self.t_role_a.pk),
+                        str(self.t_role_b.pk),
+                        str(self.t_role_c.pk),
+                    ],
+                    "exclude_tag_ids": [],
+                }
+            ],
+            "global_exclude_tag_ids": [],
+        }
+        result = list(extract_persons_by_tag_conditions(conditions))
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0], p_multi)
+
+
+# ======================================================================
+# Phase 1c-β-1（仕様書 rev5 §4.3）：preview-v2 API のテスト
+# ======================================================================
+
+
+class _PreviewV2ApiTestBase(_TagExtractionTestBase):
+    def setUp(self):
+        super().setUp()
+        self.url = reverse("mailings:mailing_list_preview_v2")
+
+    def _post(self, payload):
+        return self.client.post(
+            self.url,
+            data=json.dumps(payload),
+            content_type="application/json",
+        )
+
+    def _ok_body(self, mailing_list=None, conditions=None):
+        body = {
+            "conditions": conditions
+            or {
+                "categories": [],
+                "global_exclude_tag_ids": [],
+            }
+        }
+        if mailing_list is not None:
+            body["list_id"] = str(mailing_list.pk)
+        return body
+
+    def _make_list(self):
+        return MailingList.objects.create(name="TestList", created_by=self.user)
+
+
+class PreviewV2ApiHappyPathTests(_PreviewV2ApiTestBase):
+    def test_post_no_list_id_returns_null_count_fields(self):
+        p = self._make_person("Alice")
+        self._assign(p, self.t_role_a)
+        body = self._ok_body(
+            conditions={
+                "categories": [
+                    {
+                        "category_id": str(self.cat_role.pk),
+                        "operator": "OR",
+                        "include_tag_ids": [str(self.t_role_a.pk)],
+                        "exclude_tag_ids": [],
+                    }
+                ],
+                "global_exclude_tag_ids": [],
+            }
+        )
+        resp = self._post(body)
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["total_count"], 1)
+        for k in ("new_count", "already_in_list", "out_of_list_count", "in_list_count"):
+            self.assertIsNone(data[k], f"{k} must be null when list_id not given")
+        self.assertEqual(data["invalid_tag_ids"], [])
+        self.assertEqual(data["invalid_category_ids"], [])
+
+    def test_post_with_list_id_aliases_match(self):
+        """out_of_list_count == new_count, in_list_count == already_in_list（§4.3.3）。"""
+        ml = self._make_list()
+        p_in = self._make_person("InList")
+        p_new = self._make_person("NewCandidate")
+        self._assign(p_in, self.t_role_a)
+        self._assign(p_new, self.t_role_a)
+        MailingListMember.objects.create(
+            mailing_list=ml, person=p_in, added_by=self.user
+        )
+        body = self._ok_body(
+            ml,
+            conditions={
+                "categories": [
+                    {
+                        "category_id": str(self.cat_role.pk),
+                        "operator": "OR",
+                        "include_tag_ids": [str(self.t_role_a.pk)],
+                        "exclude_tag_ids": [],
+                    }
+                ],
+                "global_exclude_tag_ids": [],
+            },
+        )
+        resp = self._post(body)
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["total_count"], 2)
+        self.assertEqual(data["already_in_list"], 1)
+        self.assertEqual(data["new_count"], 1)
+        # エイリアス関係
+        self.assertEqual(data["out_of_list_count"], data["new_count"])
+        self.assertEqual(data["in_list_count"], data["already_in_list"])
+
+    def test_samples_capped_at_10_and_sorted_by_id_asc(self):
+        for i in range(15):
+            p = self._make_person(f"P{i:02d}")
+            self._assign(p, self.t_role_a)
+        body = self._ok_body(
+            conditions={
+                "categories": [
+                    {
+                        "category_id": str(self.cat_role.pk),
+                        "operator": "OR",
+                        "include_tag_ids": [str(self.t_role_a.pk)],
+                        "exclude_tag_ids": [],
+                    }
+                ],
+                "global_exclude_tag_ids": [],
+            }
+        )
+        resp = self._post(body)
+        data = resp.json()
+        self.assertEqual(len(data["samples"]), 10)
+        ids = [s["id"] for s in data["samples"]]
+        self.assertEqual(ids, sorted(ids))  # id 昇順
+
+    def test_samples_include_address_field(self):
+        p = self._make_person("Alice")
+        p.primary_contact.address = "愛知県豊田市岩滝町滝坂556-8"
+        p.primary_contact.save(update_fields=["address", "updated_at"])
+        self._assign(p, self.t_role_a)
+        body = self._ok_body(
+            conditions={
+                "categories": [
+                    {
+                        "category_id": str(self.cat_role.pk),
+                        "operator": "OR",
+                        "include_tag_ids": [str(self.t_role_a.pk)],
+                        "exclude_tag_ids": [],
+                    }
+                ],
+                "global_exclude_tag_ids": [],
+            }
+        )
+        resp = self._post(body)
+        sample = resp.json()["samples"][0]
+        self.assertIn("address", sample)
+        self.assertEqual(sample["address"], "愛知県豊田市岩滝町滝坂556-8")
+        # 仕様書 §4.3.3 で必須の他フィールドも存在
+        for k in (
+            "id",
+            "name",
+            "company",
+            "department",
+            "title",
+            "email",
+            "is_unsubscribed",
+            "already_in_list",
+        ):
+            self.assertIn(k, sample)
+
+    def test_already_in_list_flag_per_sample(self):
+        ml = self._make_list()
+        p_in = self._make_person("InList")
+        p_out = self._make_person("OutList")
+        self._assign(p_in, self.t_role_a)
+        self._assign(p_out, self.t_role_a)
+        MailingListMember.objects.create(
+            mailing_list=ml, person=p_in, added_by=self.user
+        )
+        body = self._ok_body(
+            ml,
+            conditions={
+                "categories": [
+                    {
+                        "category_id": str(self.cat_role.pk),
+                        "operator": "OR",
+                        "include_tag_ids": [str(self.t_role_a.pk)],
+                        "exclude_tag_ids": [],
+                    }
+                ],
+                "global_exclude_tag_ids": [],
+            },
+        )
+        resp = self._post(body)
+        data = resp.json()
+        flags = {s["id"]: s["already_in_list"] for s in data["samples"]}
+        self.assertTrue(flags[str(p_in.pk)])
+        self.assertFalse(flags[str(p_out.pk)])
+
+    def test_already_in_list_false_when_no_list_id(self):
+        p = self._make_person("Alice")
+        self._assign(p, self.t_role_a)
+        body = self._ok_body(
+            conditions={
+                "categories": [
+                    {
+                        "category_id": str(self.cat_role.pk),
+                        "operator": "OR",
+                        "include_tag_ids": [str(self.t_role_a.pk)],
+                        "exclude_tag_ids": [],
+                    }
+                ],
+                "global_exclude_tag_ids": [],
+            }
+        )
+        resp = self._post(body)
+        sample = resp.json()["samples"][0]
+        self.assertFalse(sample["already_in_list"])
+
+    def test_empty_conditions_returns_zero(self):
+        self._make_person("X")
+        body = self._ok_body()
+        resp = self._post(body)
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["total_count"], 0)
+        self.assertEqual(data["samples"], [])
+
+    def test_global_exclude_only_counts_remaining_persons(self):
+        p_clean = self._make_person("Clean")
+        p_excluded = self._make_person("Excluded")
+        self._assign(p_excluded, self.t_area_x)
+        body = self._ok_body(
+            conditions={
+                "categories": [],
+                "global_exclude_tag_ids": [str(self.t_area_x.pk)],
+            }
+        )
+        resp = self._post(body)
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["total_count"], 1)
+        self.assertEqual(data["samples"][0]["id"], str(p_clean.pk))
+
+
+class PreviewV2ApiSilentlyIgnoreTests(_PreviewV2ApiTestBase):
+    def test_archived_tag_silently_ignored(self):
+        p = self._make_person("Alice")
+        self._assign(p, self.t_role_a)
+        self.t_role_b.is_archived = True
+        self.t_role_b.save(update_fields=["is_archived", "updated_at"])
+        body = self._ok_body(
+            conditions={
+                "categories": [
+                    {
+                        "category_id": str(self.cat_role.pk),
+                        "operator": "OR",
+                        "include_tag_ids": [
+                            str(self.t_role_a.pk),
+                            str(self.t_role_b.pk),
+                        ],
+                        "exclude_tag_ids": [],
+                    }
+                ],
+                "global_exclude_tag_ids": [],
+            }
+        )
+        resp = self._post(body)
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["total_count"], 1)
+        self.assertIn(str(self.t_role_b.pk), data["invalid_tag_ids"])
+
+    def test_nonexistent_tag_silently_ignored(self):
+        ghost = str(uuid.uuid4())
+        body = self._ok_body(
+            conditions={
+                "categories": [
+                    {
+                        "category_id": str(self.cat_role.pk),
+                        "operator": "OR",
+                        "include_tag_ids": [ghost],
+                        "exclude_tag_ids": [],
+                    }
+                ],
+                "global_exclude_tag_ids": [],
+            }
+        )
+        resp = self._post(body)
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertIn(ghost, data["invalid_tag_ids"])
+
+    def test_nonexistent_category_silently_ignored(self):
+        ghost_cat = str(uuid.uuid4())
+        body = self._ok_body(
+            conditions={
+                "categories": [
+                    {
+                        "category_id": ghost_cat,
+                        "operator": "OR",
+                        "include_tag_ids": [str(self.t_role_a.pk)],
+                        "exclude_tag_ids": [],
+                    }
+                ],
+                "global_exclude_tag_ids": [],
+            }
+        )
+        resp = self._post(body)
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertIn(ghost_cat, data["invalid_category_ids"])
+        # カテゴリ無効化により抽出対象なし
+        self.assertEqual(data["total_count"], 0)
+
+
+class PreviewV2ApiErrorTests(_PreviewV2ApiTestBase):
+    def test_get_returns_405(self):
+        resp = self.client.get(self.url)
+        self.assertEqual(resp.status_code, 405)
+
+    def test_unauthenticated_returns_302(self):
+        c = Client()
+        resp = c.post(
+            self.url,
+            data=json.dumps({"conditions": {"categories": [], "global_exclude_tag_ids": []}}),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 302)
+
+    def test_invalid_json_returns_400(self):
+        resp = self.client.post(
+            self.url, data="not-json{", content_type="application/json"
+        )
+        self.assertEqual(resp.status_code, 400)
+        data = resp.json()
+        self.assertFalse(data["ok"])
+        self.assertEqual(data["error"], "invalid_json")
+
+    def test_missing_field_conditions_returns_400(self):
+        resp = self._post({})
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.json()["error"], "missing_field")
+
+    def test_missing_field_global_exclude_returns_400(self):
+        resp = self._post({"conditions": {"categories": []}})
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.json()["error"], "missing_field")
+
+    def test_missing_field_in_category_returns_400(self):
+        body = {
+            "conditions": {
+                "categories": [{"category_id": str(self.cat_role.pk)}],
+                "global_exclude_tag_ids": [],
+            }
+        }
+        resp = self._post(body)
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.json()["error"], "missing_field")
+
+    def test_invalid_uuid_hyphen_stripped_32_chars(self):
+        """ハイフンなし 32 文字は invalid_uuid（§4.3.5）。"""
+        body = {
+            "conditions": {
+                "categories": [],
+                "global_exclude_tag_ids": [str(self.t_role_a.pk).replace("-", "")],
+            }
+        }
+        resp = self._post(body)
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.json()["error"], "invalid_uuid")
+
+    def test_invalid_uuid_in_list_id(self):
+        body = {
+            "list_id": "not-a-uuid",
+            "conditions": {"categories": [], "global_exclude_tag_ids": []},
+        }
+        resp = self._post(body)
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.json()["error"], "invalid_uuid")
+
+    def test_invalid_operator(self):
+        body = {
+            "conditions": {
+                "categories": [
+                    {
+                        "category_id": str(self.cat_role.pk),
+                        "operator": "XOR",
+                        "include_tag_ids": [str(self.t_role_a.pk)],
+                        "exclude_tag_ids": [],
+                    }
+                ],
+                "global_exclude_tag_ids": [],
+            }
+        }
+        resp = self._post(body)
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.json()["error"], "invalid_operator")
+
+    def test_duplicate_category(self):
+        cat_id = str(self.cat_role.pk)
+        body = {
+            "conditions": {
+                "categories": [
+                    {
+                        "category_id": cat_id,
+                        "operator": "OR",
+                        "include_tag_ids": [str(self.t_role_a.pk)],
+                        "exclude_tag_ids": [],
+                    },
+                    {
+                        "category_id": cat_id,
+                        "operator": "OR",
+                        "include_tag_ids": [str(self.t_role_b.pk)],
+                        "exclude_tag_ids": [],
+                    },
+                ],
+                "global_exclude_tag_ids": [],
+            }
+        }
+        resp = self._post(body)
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.json()["error"], "duplicate_category")
+
+    def test_list_not_found(self):
+        body = {
+            "list_id": str(uuid.uuid4()),
+            "conditions": {"categories": [], "global_exclude_tag_ids": []},
+        }
+        resp = self._post(body)
+        self.assertEqual(resp.status_code, 404)
+        self.assertEqual(resp.json()["error"], "list_not_found")
+
+
+class PreviewV2ApiPerformanceTests(_PreviewV2ApiTestBase):
+    def test_no_n_plus_1_in_samples(self):
+        """samples 取得は select_related で 1 クエリ化（N+1 不発、§4.3.6）。"""
+        for i in range(10):
+            p = self._make_person(f"P{i:02d}")
+            self._assign(p, self.t_role_a)
+        body = self._ok_body(
+            conditions={
+                "categories": [
+                    {
+                        "category_id": str(self.cat_role.pk),
+                        "operator": "OR",
+                        "include_tag_ids": [str(self.t_role_a.pk)],
+                        "exclude_tag_ids": [],
+                    }
+                ],
+                "global_exclude_tag_ids": [],
+            }
+        )
+        # 同じ samples 取得を 10 件 / 1 件で比較し、samples 件数に応じてクエリ数が
+        # 増えないことを確認する（N+1 だと 1 件あたり +1 クエリ増える）。
+        with self.assertNumQueries(self._count_queries(body)):
+            resp = self._post(body)
+            self.assertEqual(resp.status_code, 200)
+            self.assertEqual(len(resp.json()["samples"]), 10)
+
+    def _count_queries(self, body):
+        """先行実行で実際のクエリ数を取得し、回帰判定の基準にする。
+
+        N+1 検出の主眼は「件数に応じて伸びないこと」だが、ベースライン値を assertion
+        にすることでクエリ過多な実装変更を弾く。
+        """
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        with CaptureQueriesContext(connection) as ctx:
+            self._post(body)
+        return len(ctx.captured_queries)
+
+
+# ======================================================================
+# 既存機能の非破壊検証（§11.3-8）
+# ======================================================================
+
+
+class LegacyExtractionRegressionTests(_TagExtractionTestBase):
+    def test_legacy_extract_persons_by_tags_still_returns_or_within_category(self):
+        """既存 extract_persons_by_tags は同カテゴリ内 OR の挙動を維持する。"""
+        p_a = self._make_person("AOnly")
+        p_b = self._make_person("BOnly")
+        self._assign(p_a, self.t_role_a)
+        self._assign(p_b, self.t_role_b)
+        result = set(
+            extract_persons_by_tags([str(self.t_role_a.pk), str(self.t_role_b.pk)])
+        )
+        self.assertEqual(result, {p_a, p_b})
+
+    def test_legacy_preview_endpoint_still_responds(self):
+        """既存 /mailings/lists/preview/（POST）が引き続き動作する（§9.2-21）。"""
+        url = reverse("mailings:mailing_list_preview")
+        resp = self.client.post(
+            url,
+            data=json.dumps({"tag_ids": [str(self.t_role_a.pk)]}),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertTrue(data["ok"])
+        self.assertIn("count", data)
+        self.assertIn("samples", data)

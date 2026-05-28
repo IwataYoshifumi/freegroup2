@@ -31,7 +31,7 @@ from django.views.generic import (
 
 from back_navigator.back_navigator import BackNavigator
 from persons.models import Person
-from tags.models import TagCategory
+from tags.models import Tag, TagCategory
 
 from persons.services.person_search import SEARCH_PARAMS, search_persons
 
@@ -41,7 +41,11 @@ from .services.list_freeze import (
     freeze_members,
     get_or_create_singleton_mailing_config,
 )
-from .services.tag_extraction import count_persons_by_tags, extract_persons_by_tags
+from .services.tag_extraction import (
+    count_persons_by_tags,
+    extract_persons_by_tag_conditions,
+    extract_persons_by_tags,
+)
 
 
 def _archived_only(request):
@@ -989,6 +993,323 @@ class MemberAddCommitView(_MemberCommitView):
 
 class MemberRemoveCommitView(_MemberCommitView):
     mode = "remove"
+
+
+# ======================================================================
+# Phase 1c-β-1 新プレビュー API（仕様書 rev5 §4.3）
+# ======================================================================
+#
+# POST /mailings/lists/preview-v2/
+# 拡張集合演算（カテゴリ内 OR/AND/NOT + カテゴリ間 AND/NOT）に対応した
+# プレビュー API。既存 /mailings/lists/preview/（POST）は β で呼び出し元が
+# 消えるが、v1.7+ まで残置（§9.2-21）。
+#
+# エラー形式：既存 AJAX（update-meta / add-member / remove-member）に揃え
+# {"ok": false, "error": "<code>", "message": "..."} 形式を採用。
+# 仕様書 §4.3.5 の {"code": ..., "message": ...} から code → error に変更。
+
+_PREVIEW_V2_SAMPLE_LIMIT = 10
+
+
+def _normalize_uuid_str(value):
+    """[性質] 純関数。UUID 文字列を 36 文字ハイフン有り正規形に正規化。
+
+    ハイフンなし 32 文字や bytes は受け付けない（§4.3.5、invalid_uuid 扱い）。
+    None / 空文字は ValueError、不正形式も ValueError。
+    """
+    if not isinstance(value, str):
+        raise ValueError("not a string")
+    # ハイフンなし 32 文字を弾く（仕様書 §4.3.5 で明示）。
+    if "-" not in value or len(value) != 36:
+        raise ValueError("must be 36-char hyphenated UUID")
+    return str(uuid.UUID(value))
+
+
+def _validate_uuid_list(values, *, field_name):
+    """[性質] 純関数。UUID 文字列リストを検証し、正規化済みリストを返す。
+
+    [例外] ValueError（invalid_uuid 扱い、message に field_name を含む）
+    """
+    if not isinstance(values, list):
+        raise ValueError(f"{field_name} must be a list")
+    out = []
+    for v in values:
+        try:
+            out.append(_normalize_uuid_str(v))
+        except (ValueError, AttributeError, TypeError):
+            raise ValueError(f"{field_name} contains invalid uuid: {v!r}")
+    return out
+
+
+def _preview_v2_error(error_code, message, *, status):
+    """[性質] 副作用あり（JsonResponse 返却）。既存 AJAX 形式のエラーを返す。"""
+    return JsonResponse(
+        {"ok": False, "error": error_code, "message": message},
+        status=status,
+    )
+
+
+@method_decorator(require_POST, name="dispatch")
+class PreviewV2View(LoginRequiredMixin, View):
+    """新プレビュー API（仕様書 §4.3、Phase 1c-β-1）。
+
+    POST /mailings/lists/preview-v2/（application/json）
+
+    リクエスト：仕様書 §4.3.2 参照（list_id 任意、conditions 必須）。
+    レスポンス：仕様書 §4.3.3 参照。
+      total_count / new_count / already_in_list と、
+      中立別名 out_of_list_count (== new_count) / in_list_count (== already_in_list) を
+      同じ計算結果から組み立てて返す（§4.3.3 二重計算禁止）。
+    samples：10 件固定、id 昇順、address 含む。
+
+    存在しない / archived な tag_id / category_id は silently ignore し、
+    レスポンスの invalid_tag_ids / invalid_category_ids で通知（§4.3.5）。
+    """
+
+    def post(self, request):
+        # ---------- リクエスト body 解析 ----------
+        if not request.body:
+            return _preview_v2_error(
+                "invalid_json", "リクエスト body が空です。", status=400
+            )
+        try:
+            payload = json.loads(request.body.decode("utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return _preview_v2_error(
+                "invalid_json",
+                "リクエスト body が JSON として不正です。",
+                status=400,
+            )
+        if not isinstance(payload, dict):
+            return _preview_v2_error(
+                "invalid_json",
+                "リクエスト body は JSON オブジェクトである必要があります。",
+                status=400,
+            )
+
+        # ---------- list_id 検証 ----------
+        list_id_raw = payload.get("list_id", None)
+        mailing_list = None
+        if list_id_raw is not None:
+            try:
+                list_id = _normalize_uuid_str(list_id_raw)
+            except (ValueError, AttributeError, TypeError):
+                return _preview_v2_error(
+                    "invalid_uuid",
+                    "list_id は 36 文字ハイフン有り UUID 形式である必要があります。",
+                    status=400,
+                )
+            try:
+                mailing_list = MailingList.objects.get(pk=list_id)
+            except MailingList.DoesNotExist:
+                return _preview_v2_error(
+                    "list_not_found",
+                    "指定された list_id の MailingList が存在しません。",
+                    status=404,
+                )
+
+        # ---------- conditions 検証 ----------
+        conditions = payload.get("conditions")
+        if not isinstance(conditions, dict):
+            return _preview_v2_error(
+                "missing_field",
+                "conditions は object である必要があります。",
+                status=400,
+            )
+        if "categories" not in conditions:
+            return _preview_v2_error(
+                "missing_field",
+                "conditions.categories は必須です。",
+                status=400,
+            )
+        if "global_exclude_tag_ids" not in conditions:
+            return _preview_v2_error(
+                "missing_field",
+                "conditions.global_exclude_tag_ids は必須です（空配列で表現してください）。",
+                status=400,
+            )
+        categories_raw = conditions["categories"]
+        if not isinstance(categories_raw, list):
+            return _preview_v2_error(
+                "missing_field",
+                "conditions.categories は配列である必要があります。",
+                status=400,
+            )
+
+        # global_exclude_tag_ids 検証
+        try:
+            global_exclude_raw = _validate_uuid_list(
+                conditions["global_exclude_tag_ids"],
+                field_name="conditions.global_exclude_tag_ids",
+            )
+        except ValueError as e:
+            return _preview_v2_error("invalid_uuid", str(e), status=400)
+
+        # categories 各要素の検証
+        seen_category_ids = set()
+        category_specs = []
+        for i, cat in enumerate(categories_raw):
+            if not isinstance(cat, dict):
+                return _preview_v2_error(
+                    "missing_field",
+                    f"conditions.categories[{i}] は object である必要があります。",
+                    status=400,
+                )
+            for key in ("category_id", "include_tag_ids", "exclude_tag_ids"):
+                if key not in cat:
+                    return _preview_v2_error(
+                        "missing_field",
+                        f"conditions.categories[{i}].{key} は必須です。",
+                        status=400,
+                    )
+            try:
+                cat_id = _normalize_uuid_str(cat["category_id"])
+            except (ValueError, AttributeError, TypeError):
+                return _preview_v2_error(
+                    "invalid_uuid",
+                    f"conditions.categories[{i}].category_id は 36 文字ハイフン有り UUID 形式である必要があります。",
+                    status=400,
+                )
+            if cat_id in seen_category_ids:
+                return _preview_v2_error(
+                    "duplicate_category",
+                    f"category_id {cat_id} が categories 配列内で重複しています。",
+                    status=400,
+                )
+            seen_category_ids.add(cat_id)
+            operator = cat.get("operator", "OR")
+            if operator not in ("OR", "AND"):
+                return _preview_v2_error(
+                    "invalid_operator",
+                    f"conditions.categories[{i}].operator は 'OR' または 'AND' である必要があります。",
+                    status=400,
+                )
+            try:
+                include_ids_raw = _validate_uuid_list(
+                    cat["include_tag_ids"],
+                    field_name=f"conditions.categories[{i}].include_tag_ids",
+                )
+                exclude_ids_raw = _validate_uuid_list(
+                    cat["exclude_tag_ids"],
+                    field_name=f"conditions.categories[{i}].exclude_tag_ids",
+                )
+            except ValueError as e:
+                return _preview_v2_error("invalid_uuid", str(e), status=400)
+            category_specs.append(
+                {
+                    "category_id": cat_id,
+                    "operator": operator,
+                    "include_tag_ids": include_ids_raw,
+                    "exclude_tag_ids": exclude_ids_raw,
+                }
+            )
+
+        # ---------- silently ignore：存在 / archived チェック ----------
+        all_tag_ids = set()
+        for spec in category_specs:
+            all_tag_ids.update(spec["include_tag_ids"])
+            all_tag_ids.update(spec["exclude_tag_ids"])
+        all_tag_ids.update(global_exclude_raw)
+        valid_tag_ids = set(
+            str(t) for t in Tag.objects.filter(
+                pk__in=all_tag_ids, is_archived=False
+            ).values_list("pk", flat=True)
+        )
+        invalid_tag_ids = sorted(all_tag_ids - valid_tag_ids)
+
+        all_category_ids = set(spec["category_id"] for spec in category_specs)
+        valid_category_ids = set(
+            str(c) for c in TagCategory.objects.filter(
+                pk__in=all_category_ids, is_archived=False
+            ).values_list("pk", flat=True)
+        )
+        invalid_category_ids = sorted(all_category_ids - valid_category_ids)
+
+        # 不正カテゴリは丸ごと無視、不正タグは個別に剝がす（残った include_tag_ids が空に
+        # なれば、そのカテゴリは判定ルール §4.1.4 で「無視」される自然帰結）。
+        filtered_specs = []
+        for spec in category_specs:
+            if spec["category_id"] not in valid_category_ids:
+                continue
+            filtered_specs.append(
+                {
+                    "category_id": spec["category_id"],
+                    "operator": spec["operator"],
+                    "include_tag_ids": [
+                        t for t in spec["include_tag_ids"] if t in valid_tag_ids
+                    ],
+                    "exclude_tag_ids": [
+                        t for t in spec["exclude_tag_ids"] if t in valid_tag_ids
+                    ],
+                }
+            )
+        filtered_global_exclude = [
+            t for t in global_exclude_raw if t in valid_tag_ids
+        ]
+
+        # ---------- 抽出 + count 計算（1 回だけ） ----------
+        qs = extract_persons_by_tag_conditions(
+            {
+                "categories": filtered_specs,
+                "global_exclude_tag_ids": filtered_global_exclude,
+            }
+        )
+        total_count = qs.count()
+
+        new_count = None
+        already_in_list_count = None
+        if mailing_list is not None:
+            member_person_ids = MailingListMember.objects.filter(
+                mailing_list=mailing_list
+            ).values("person_id")
+            already_in_list_count = qs.filter(pk__in=member_person_ids).count()
+            new_count = total_count - already_in_list_count
+            member_person_id_set = set(
+                str(p) for p in MailingListMember.objects.filter(
+                    mailing_list=mailing_list
+                ).values_list("person_id", flat=True)
+            )
+        else:
+            member_person_id_set = set()
+
+        # ---------- samples（10 件、id 昇順、address 含む、N+1 回避） ----------
+        sample_qs = qs.select_related("primary_contact").order_by("pk")[
+            :_PREVIEW_V2_SAMPLE_LIMIT
+        ]
+        samples = []
+        for person in sample_qs:
+            primary = person.primary_contact
+            samples.append(
+                {
+                    "id": str(person.id),
+                    "name": (primary.full_name if primary else "") or "(氏名なし)",
+                    "company": (primary.organization if primary else "") or "",
+                    "department": (primary.department if primary else "") or "",
+                    "title": (primary.title if primary else "") or "",
+                    "address": (primary.address if primary else "") or "",
+                    "email": (primary.email if primary else "") or "",
+                    "is_unsubscribed": bool(person.is_unsubscribed),
+                    "already_in_list": (
+                        str(person.id) in member_person_id_set
+                        if mailing_list is not None
+                        else False
+                    ),
+                }
+            )
+
+        # ---------- レスポンス組み立て（エイリアスは同じ値を別名で詰めるだけ） ----------
+        return JsonResponse(
+            {
+                "total_count": total_count,
+                "new_count": new_count,
+                "already_in_list": already_in_list_count,
+                "out_of_list_count": new_count,
+                "in_list_count": already_in_list_count,
+                "invalid_tag_ids": invalid_tag_ids,
+                "invalid_category_ids": invalid_category_ids,
+                "samples": samples,
+            }
+        )
 
 
 # ======================================================================

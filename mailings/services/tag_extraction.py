@@ -89,3 +89,77 @@ def count_persons_by_tags(tag_ids, *, search_conditions=None):
     return extract_persons_by_tags(
         tag_ids, search_conditions=search_conditions
     ).count()
+
+
+# ======================================================================
+# Phase 1c-β 新関数（仕様書 rev5 §4.1 / §4.2、集合演算の拡張）
+# ======================================================================
+
+
+def extract_persons_by_tag_conditions(conditions):
+    """conditions dict から拡張集合演算で active な Person QuerySet を返す（§4.2）。
+
+    [性質] 準関数（DB 読み取りのみ、副作用なし）
+    [入力] conditions: dict
+        {
+          'categories': [
+            {
+              'category_id': UUID,
+              'operator': 'OR' or 'AND',
+              'include_tag_ids': [UUID, ...],
+              'exclude_tag_ids': [UUID, ...],
+            },
+            ...
+          ],
+          'global_exclude_tag_ids': [UUID, ...],
+        }
+    [出力] QuerySet[Person]（status='active' のみ、distinct 済み）
+
+    判定ルール（§4.1.4）：
+      - include_tag_ids が空のカテゴリは抽出条件に含めない
+      - 有効カテゴリが 1 つもなく global_exclude も空 → 0 件
+      - 有効カテゴリが 1 つもなく global_exclude あり → 全 Person − 横断除外
+      - category_id 重複は呼び出し側（preview-v2 view）でガード済み前提
+
+    is_unsubscribed は抽出層で除外しない（§4.2.1 / §9.2-30、配信実行層の責務）。
+
+    ORM 実装方針（§4.2.1 / §9.2-37、最大の事故ポイント）：
+      - カテゴリ内 AND は filter チェーンで実装（`tag_assignments__tag__in` は OR 動作になるため厳禁）
+      - カテゴリ内 OR は `tag_assignments__tag__in=[...]`
+      - カテゴリ内 NOT / カテゴリ間 NOT は `.exclude(tag_assignments__tag__in=[...])`
+      - 複数 join による重複行は最終 .distinct() で除く
+    """
+    qs = Person.objects.filter(status=Person.Status.ACTIVE)
+
+    categories = (conditions or {}).get("categories") or []
+    global_exclude = list((conditions or {}).get("global_exclude_tag_ids") or [])
+
+    # 有効カテゴリ（include_tag_ids が非空）のみを評価対象に絞る（§4.1.4）。
+    effective_categories = [
+        cat for cat in categories if cat.get("include_tag_ids")
+    ]
+
+    if not effective_categories and not global_exclude:
+        # 有効カテゴリも横断除外もない → 抽出 0 件（§4.1.4）。
+        return Person.objects.none()
+
+    for cat in effective_categories:
+        include_ids = list(cat.get("include_tag_ids") or [])
+        exclude_ids = list(cat.get("exclude_tag_ids") or [])
+        operator = cat.get("operator") or "OR"
+        if operator == "AND":
+            # AND：タグ 1 件ごとに .filter() を重ねる（§9.2-37、tag_assignments__tag__in は使わない）。
+            for tag_id in include_ids:
+                qs = qs.filter(tag_assignments__tag_id=tag_id)
+        else:
+            # OR：同カテゴリ内のいずれかを持つ。
+            qs = qs.filter(tag_assignments__tag_id__in=include_ids)
+        if exclude_ids:
+            # カテゴリ内 NOT：同カテゴリ内の除外タグを持つ Person を除外。
+            qs = qs.exclude(tag_assignments__tag_id__in=exclude_ids)
+
+    if global_exclude:
+        # カテゴリ間 NOT：横断除外タグを 1 つでも持つ Person を全体から除外。
+        qs = qs.exclude(tag_assignments__tag_id__in=global_exclude)
+
+    return qs.distinct()
