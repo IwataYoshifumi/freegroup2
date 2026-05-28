@@ -996,6 +996,242 @@ class MemberRemoveCommitView(_MemberCommitView):
 
 
 # ======================================================================
+# Phase 1c-β-3a タグで追加（仕様書 rev6 §4.6.1 / §4.6.2 / §10 #21〜#24）
+# ======================================================================
+#
+# 既存リストに「タグで対象を抽出して追加」する 3 ステップフロー：
+#   1-H: MemberAddByTagView         GET/POST  /lists/<pk>/members/add-by-tag/
+#   1-K: MemberAddByTagConfirmView  GET       /lists/<pk>/members/add-by-tag/confirm/
+#   確定: MemberAddByTagCommitView  POST      /lists/<pk>/members/confirm-add-by-tag/
+#
+# session キー：mailing_list_<pk>_add_by_tag_state（snapshot は新規追加対象のみ）
+# snapshot は「抽出 − 既登録」（指示書 §2.2、退会者は含む）
+# テンプレ：_tag_selection.html（mode='add_by_tag'）/ _member_confirmation.html（mode='add_by_tag'）
+#
+# 凍結チェックは既存 _guard_member_edit() を流用（409 + エラーページ、§6.2）。
+# bulk_create + ignore_conflicts は個別追加 confirm-add と同じ作法（§3.6）。
+
+ADD_BY_TAG_SESSION_PREFIX = "mailing_list_"
+ADD_BY_TAG_SESSION_SUFFIX = "_add_by_tag_state"
+
+
+def _add_by_tag_session_key(mailing_list_pk):
+    """[性質] 純関数。1-H / 1-K / commit で共有する session キー名を返す。"""
+    return f"{ADD_BY_TAG_SESSION_PREFIX}{mailing_list_pk}{ADD_BY_TAG_SESSION_SUFFIX}"
+
+
+class MemberAddByTagView(LoginRequiredMixin, View):
+    """1-H：タグで追加 画面（仕様書 §4.6.1）。
+
+    GET：current_conditions を session から復元してテンプレ描画
+         （初回 GET で session pop しない＝戻り時に状態保持、§7.1）。
+    POST：conditions を受け取り extract_persons_by_tag_conditions で抽出 → 既登録
+          を除外して snapshot 生成 → session 保存 → 1-K へ 302（PRG）。
+
+    snapshot は「抽出 − 既登録」のみ。退会者は含める（is_unsubscribed フィルタは
+    抽出層・本層で適用しない、§9.2-30）。
+    """
+
+    template_name = "mailings/_tag_selection.html"
+
+    def get(self, request, pk):
+        mailing_list = get_object_or_404(MailingList, pk=pk)
+        guard = _guard_member_edit(request, mailing_list)
+        if guard is not None:
+            return guard
+        state = request.session.get(_add_by_tag_session_key(mailing_list.pk)) or {}
+        current_conditions = state.get("conditions") or {
+            "categories": [],
+            "global_exclude_tag_ids": [],
+        }
+        return self._render(request, mailing_list, current_conditions)
+
+    def post(self, request, pk):
+        from django.contrib import messages
+
+        mailing_list = get_object_or_404(MailingList, pk=pk)
+        guard = _guard_member_edit(request, mailing_list)
+        if guard is not None:
+            return guard
+        conditions = _parse_conditions_from_post(request.POST)
+        if _conditions_is_empty(conditions):
+            messages.error(
+                request,
+                "タグ条件が指定されていません。1 つ以上の含むタグまたは横断除外タグを指定してください。",
+            )
+            return self._render(request, mailing_list, conditions, status=400)
+        # 抽出（active のみ、is_unsubscribed 不問）
+        extracted_qs = extract_persons_by_tag_conditions(conditions)
+        extracted_ids = list(extracted_qs.values_list("pk", flat=True))
+        # 既登録（同リストの現メンバー）を除外して「新規追加対象」を snapshot
+        existing_ids = set(
+            MailingListMember.objects.filter(
+                mailing_list=mailing_list
+            ).values_list("person_id", flat=True)
+        )
+        snapshot_ids = [str(pid) for pid in extracted_ids if pid not in existing_ids]
+        request.session[_add_by_tag_session_key(mailing_list.pk)] = {
+            "conditions": conditions,
+            "snapshot_person_ids": snapshot_ids,
+            "total_extracted": len(extracted_ids),
+            "already_in_list_count": len(extracted_ids) - len(snapshot_ids),
+        }
+        request.session.modified = True
+        target = reverse(
+            "mailings:list_member_add_by_tag_confirm", args=[mailing_list.pk]
+        )
+        back = BackNavigator(request)
+        if back.back_stack:
+            target = back.append_url(target)
+        return redirect(target)
+
+    def _render(self, request, mailing_list, current_conditions, *, status=200):
+        categories = _all_categories_with_tags()
+        global_exclude_tags = _all_active_tags()
+        current_member_count = MailingListMember.objects.filter(
+            mailing_list=mailing_list
+        ).count()
+        return render(
+            request,
+            self.template_name,
+            {
+                "mode": "add_by_tag",
+                "mailing_list": mailing_list,
+                "current_member_count": current_member_count,
+                "categories": categories,
+                "global_exclude_tags": global_exclude_tags,
+                "current_conditions": current_conditions,
+                "preview_url": reverse("mailings:mailing_list_preview_v2"),
+                "post_url": reverse(
+                    "mailings:list_member_add_by_tag", args=[mailing_list.pk]
+                ),
+                "cancel_url": reverse(
+                    "mailings:mailing_list_detail", args=[mailing_list.pk]
+                ),
+                "back": BackNavigator(request),
+                "active_app": "mailings",
+                "active_menu": "mailings:mailing_list_list",
+            },
+            status=status,
+        )
+
+
+class MemberAddByTagConfirmView(LoginRequiredMixin, View):
+    """1-K：タグで追加 確認画面（仕様書 §4.6.2、GET 専用）。
+
+    session が空なら 1-H に 302 差し戻し（§9.2-45）。
+    snapshot の Person を一覧描画 + Before/After 件数 + 重複除外説明。
+    """
+
+    template_name = "mailings/_member_confirmation.html"
+
+    def get(self, request, pk):
+        from django.contrib import messages
+
+        mailing_list = get_object_or_404(MailingList, pk=pk)
+        guard = _guard_member_edit(request, mailing_list)
+        if guard is not None:
+            return guard
+        state = request.session.get(_add_by_tag_session_key(mailing_list.pk)) or {}
+        snapshot_ids = state.get("snapshot_person_ids") or []
+        # snapshot 自体は空でも合法（抽出 0 件 or 全件既登録）。conditions が無ければ
+        # ウィザード未開始 → 1-H に差し戻し。snapshot 空時は確認画面で 0 件表示する。
+        if not state.get("conditions"):
+            messages.info(
+                request, "選択がリセットされました。もう一度タグを選択してください。"
+            )
+            return redirect(
+                "mailings:list_member_add_by_tag", pk=mailing_list.pk
+            )
+        persons_qs = Person.objects.filter(pk__in=snapshot_ids).select_related(
+            "primary_contact"
+        )
+        persons = list(_apply_sort_to_persons(persons_qs, request.GET))
+        sort_key, sort_dir = _resolve_sort(request.GET)
+        current_member_count = MailingListMember.objects.filter(
+            mailing_list=mailing_list
+        ).count()
+        back = BackNavigator(request)
+        back_to_selection = reverse(
+            "mailings:list_member_add_by_tag", args=[mailing_list.pk]
+        )
+        if back.back_stack:
+            back_to_selection = back.append_url(back_to_selection)
+        commit_url = reverse(
+            "mailings:list_member_commit_add_by_tag", args=[mailing_list.pk]
+        )
+        return render(
+            request,
+            self.template_name,
+            {
+                "mailing_list": mailing_list,
+                "mode": "add_by_tag",
+                "mode_label": "タグで追加",
+                "persons": persons,
+                "total_count": len(persons),
+                "display_limit": 50,
+                "current_sort": sort_key,
+                "current_dir": sort_dir,
+                # add_by_tag 固有：抽出 / 既登録 / 新規追加 と Before/After
+                "total_extracted": state.get("total_extracted", 0),
+                "already_in_list_count": state.get("already_in_list_count", 0),
+                "new_count": len(snapshot_ids),
+                "current_member_count": current_member_count,
+                "after_count": current_member_count + len(snapshot_ids),
+                "back": back,
+                "active_app": "mailings",
+                "active_menu": "mailings:mailing_list_list",
+                "back_to_selection_url": back_to_selection,
+                "commit_url": commit_url,
+            },
+        )
+
+
+@method_decorator(require_POST, name="dispatch")
+class MemberAddByTagCommitView(LoginRequiredMixin, View):
+    """タグで追加 確定エンドポイント（仕様書 §4.6.2、POST 専用、PRG）。
+
+    session の snapshot を bulk_create + ignore_conflicts で一括登録（個別追加
+    confirm-add と同じ作法、§3.6）。確定後 session クリア → 詳細画面に 302。
+    """
+
+    def post(self, request, pk):
+        from django.contrib import messages
+
+        mailing_list = get_object_or_404(MailingList, pk=pk)
+        guard = _guard_member_edit(request, mailing_list)
+        if guard is not None:
+            return guard
+        key = _add_by_tag_session_key(mailing_list.pk)
+        state = request.session.get(key) or {}
+        snapshot_ids = state.get("snapshot_person_ids") or []
+        if not state.get("conditions"):
+            messages.warning(
+                request, "セッションが切れています。もう一度タグを選択してください。"
+            )
+            return redirect("mailings:list_member_add_by_tag", pk=mailing_list.pk)
+        with transaction.atomic():
+            persons = list(Person.objects.filter(pk__in=snapshot_ids))
+            to_create = [
+                MailingListMember(
+                    mailing_list=mailing_list, person=p, added_by=request.user
+                )
+                for p in persons
+            ]
+            if to_create:
+                MailingListMember.objects.bulk_create(
+                    to_create, ignore_conflicts=True
+                )
+        request.session.pop(key, None)
+        request.session.modified = True
+        target = reverse("mailings:mailing_list_detail", args=[mailing_list.pk])
+        back = BackNavigator(request)
+        if back.back_stack:
+            target = back.append_url(target)
+        return redirect(target)
+
+
+# ======================================================================
 # Phase 1c-β-2a 新規作成ウィザード（仕様書 rev6 §4.5、§10 #17〜#20 #25）
 # ======================================================================
 #

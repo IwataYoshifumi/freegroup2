@@ -25,9 +25,11 @@
     </div>
   </div>
 
-  {# Step 1: リスト本体（name / description）の編集
-     - is_create=True：通常 form 送信（作成して次へ）
-     - is_create=False：AJAX 自動保存（focusout、凍結時も動作可、rev14.1 §11.3.6） #}
+  {% comment %}
+    Step 1: リスト本体（name / description）の編集
+      - is_create=True：通常 form 送信（作成して次へ）
+      - is_create=False：AJAX 自動保存（focusout、凍結時も動作可、rev14.1 §11.3.6）
+  {% endcomment %}
   <section class="app-card">
     <h2 style="margin-bottom:12px;">Step 1：リスト本体</h2>
     {% if is_create %}
@@ -450,8 +452,10 @@
         </script>
       </section>
     {% else %}
-      {# 凍結後：注意メッセージ + メンバー一覧（閲覧のみ、rev14.1 §11.3.6 / §11.4.3）
-         本体（Step 1）は AJAX 自動保存で凍結時も編集可能（修正 4）#}
+      {% comment %}
+        凍結後：注意メッセージ + メンバー一覧（閲覧のみ、rev14.1 §11.3.6 / §11.4.3）
+        本体（Step 1）は AJAX 自動保存で凍結時も編集可能（修正 4）
+      {% endcomment %}
       <section class="app-card">
         <h2 style="margin-bottom:12px;">
           <i class="bi bi-lock-fill" style="color:#64748b; margin-right:6px;"></i>凍結メンバー一覧（{{ members|length }} 件）

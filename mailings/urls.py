@@ -138,6 +138,22 @@ urlpatterns = [
         views.MemberRemoveCommitView.as_view(),
         name="list_member_commit_remove",
     ),
+    # Phase 1c-β-3a（仕様書 rev6 §4.6 / §12.8）：タグで追加
+    path(
+        "lists/<uuid:pk>/members/add-by-tag/",
+        views.MemberAddByTagView.as_view(),
+        name="list_member_add_by_tag",
+    ),
+    path(
+        "lists/<uuid:pk>/members/add-by-tag/confirm/",
+        views.MemberAddByTagConfirmView.as_view(),
+        name="list_member_add_by_tag_confirm",
+    ),
+    path(
+        "lists/<uuid:pk>/members/confirm-add-by-tag/",
+        views.MemberAddByTagCommitView.as_view(),
+        name="list_member_commit_add_by_tag",
+    ),
     # MailingConfig 編集（§5.1 No.38 改 / §4.13 シングルトン）
     path("config/", views.MailingConfigEditView.as_view(), name="config_edit"),
 ]

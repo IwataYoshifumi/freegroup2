@@ -95,25 +95,43 @@
       {% if members|length > 50 %}
         <span class="app-status-badge app-status-badge--muted">先頭 50 件を表示</span>
       {% endif %}
-      <div style="margin-left:auto; display:flex; gap:8px; align-items:center;">
+      <div style="margin-left:auto; display:flex; flex-direction:column; gap:6px; align-items:flex-end;">
         {% include "mailings/_column_toggle.html" with storage_key="mailing_list_visible_columns_detail" %}
-        {# Phase 1c-α #1：個別追加・個別削除ボタン。凍結時は disabled + ツールチップ（§6.6）#}
+        {% comment %}
+          追加系の行（緑系）：Phase 1c-α 個別追加 + Phase 1c-β-3a タグで追加。
+          凍結時は disabled + ツールチップ（§6.4 / §6.6）
+        {% endcomment %}
         {% url 'mailings:list_member_add' pk=mailing_list.id as member_add_url %}
+        {% url 'mailings:list_member_add_by_tag' pk=mailing_list.id as member_add_by_tag_url %}
+        <div style="display:flex; gap:8px; align-items:center;">
+          {% if mailing_list.is_archived %}
+            <span class="app-btn app-btn--primary" style="opacity:0.5; pointer-events:none;" aria-disabled="true"
+                  title="アーカイブ済みのため編集できません">メンバーを追加</span>
+            <span class="app-btn app-btn--success" style="opacity:0.5; pointer-events:none;" aria-disabled="true"
+                  title="アーカイブ済みのため編集できません">タグで追加</span>
+          {% elif is_frozen %}
+            <span class="app-btn app-btn--primary" style="opacity:0.5; pointer-events:none;" aria-disabled="true"
+                  title="凍結中のため編集できません">メンバーを追加</span>
+            <span class="app-btn app-btn--success" style="opacity:0.5; pointer-events:none;" aria-disabled="true"
+                  title="凍結中のため編集できません">タグで追加</span>
+          {% else %}
+            <a href="{% append_back_url member_add_url back %}" class="app-btn app-btn--primary">メンバーを追加</a>
+            <a href="{% append_back_url member_add_by_tag_url back %}" class="app-btn app-btn--success">タグで追加</a>
+          {% endif %}
+        </div>
+        {# 削除系の行（danger）：個別削除 + （β-3b でタグで除外が入る予定の枠） #}
         {% url 'mailings:list_member_remove' pk=mailing_list.id as member_remove_url %}
-        {% if mailing_list.is_archived %}
-          <span class="app-btn app-btn--primary" style="opacity:0.5; pointer-events:none;" aria-disabled="true"
-                title="アーカイブ済みのため編集できません">メンバーを追加</span>
-          <span class="app-btn app-btn--danger" style="opacity:0.5; pointer-events:none;" aria-disabled="true"
-                title="アーカイブ済みのため編集できません">メンバーを削除</span>
-        {% elif is_frozen %}
-          <span class="app-btn app-btn--primary" style="opacity:0.5; pointer-events:none;" aria-disabled="true"
-                title="凍結中のため編集できません">メンバーを追加</span>
-          <span class="app-btn app-btn--danger" style="opacity:0.5; pointer-events:none;" aria-disabled="true"
-                title="凍結中のため編集できません">メンバーを削除</span>
-        {% else %}
-          <a href="{% append_back_url member_add_url back %}" class="app-btn app-btn--primary">メンバーを追加</a>
-          <a href="{% append_back_url member_remove_url back %}" class="app-btn app-btn--danger">メンバーを削除</a>
-        {% endif %}
+        <div style="display:flex; gap:8px; align-items:center;">
+          {% if mailing_list.is_archived %}
+            <span class="app-btn app-btn--danger" style="opacity:0.5; pointer-events:none;" aria-disabled="true"
+                  title="アーカイブ済みのため編集できません">メンバーを削除</span>
+          {% elif is_frozen %}
+            <span class="app-btn app-btn--danger" style="opacity:0.5; pointer-events:none;" aria-disabled="true"
+                  title="凍結中のため編集できません">メンバーを削除</span>
+          {% else %}
+            <a href="{% append_back_url member_remove_url back %}" class="app-btn app-btn--danger">メンバーを削除</a>
+          {% endif %}
+        </div>
       </div>
     </div>
     {% if members %}

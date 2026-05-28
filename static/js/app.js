@@ -680,6 +680,7 @@
 
   let debounceTimer = null;
   let lastPreviewCount = null;
+  let lastPreviewNewCount = null;
   let inflightController = null;
 
   /* ---------- ヘルパー ---------- */
@@ -757,7 +758,14 @@
     });
   }
 
-  /* ---------- アコーディオン初期化 + 選択数バッジ更新 ---------- */
+  /* ---------- アコーディオン初期化 + 選択数バッジ更新 ----------
+     注：`.app-status-badge` は CSS で `display: inline-flex` を持つため、
+     HTML5 の `hidden` 属性（暗黙 `display: none`）は CSS に上書きされる。
+     さらに `.app-status-badge[hidden] { display: none }` を CSS に追加して
+     `[hidden]` 属性を効かせている都合、show パスでは textContent と
+     `style.display` の更新だけでは足りず、`removeAttribute('hidden')` で
+     CSS の `[hidden]` セレクタも解除する必要がある。
+  */
   function refreshCategoryBadge(block) {
     const catId = block.dataset.categoryId;
     const total = parseInt(block.dataset.totalTags || '0', 10);
@@ -766,9 +774,12 @@
     if (!badge) return;
     if (includeCount > 0) {
       badge.textContent = '選択 ' + includeCount + ' / ' + total;
-      badge.hidden = false;
+      badge.removeAttribute('hidden');
+      badge.style.display = '';
     } else {
-      badge.hidden = true;
+      badge.textContent = '';
+      badge.setAttribute('hidden', '');
+      badge.style.display = 'none';
     }
   }
 
@@ -938,8 +949,19 @@
 
   function renderPreview(data) {
     if (previewCountEl) {
-      const n = (typeof data.total_count === 'number') ? data.total_count : 0;
-      previewCountEl.textContent = '抽出 ' + n + ' 件';
+      const total = (typeof data.total_count === 'number') ? data.total_count : 0;
+      if (mode === 'add_by_tag') {
+        /* 追加モード（§4.6.1）：新規追加対象 N / 抽出 X / 既登録 Y。
+           list_id 指定時は new_count / already_in_list が数値で返る（β-1 §4.3.3）。 */
+        const newC = (typeof data.new_count === 'number') ? data.new_count : 0;
+        const already = (typeof data.already_in_list === 'number') ? data.already_in_list : 0;
+        previewCountEl.innerHTML =
+          '新規追加対象 <strong>' + newC + '</strong> 件 ' +
+          '<span style="color:#64748b; font-size:0.9em;">' +
+          '（抽出 ' + total + ' 件 / 既登録 ' + already + ' 件）</span>';
+      } else {
+        previewCountEl.textContent = '抽出 ' + total + ' 件';
+      }
     }
     if (!previewSamplesEl) return;
     previewSamplesEl.innerHTML = '';
@@ -1013,8 +1035,12 @@
               '</div>';
           }
           lastPreviewCount = null;
+          lastPreviewNewCount = null;
         } else {
           lastPreviewCount = (typeof data.total_count === 'number') ? data.total_count : null;
+          /* add_by_tag 用：警告ダイアログが「対象 0 人？」を判定するときに使う件数は
+             total_count ではなく new_count（新規追加対象）。mode 別に保持。 */
+          lastPreviewNewCount = (typeof data.new_count === 'number') ? data.new_count : null;
           renderPreview(data);
         }
         updateSubmitDisabledState();
@@ -1027,6 +1053,7 @@
           '<div class="app-message app-message--error" style="margin-top:4px;">通信エラーが発生しました。</div>';
       }
       lastPreviewCount = null;
+      lastPreviewNewCount = null;
     });
   }
 
@@ -1055,22 +1082,34 @@
   }
 
   function handleSubmit(event) {
-    /* §4.4.2 警告ダイアログ 4 条件 */
+    /* §4.4.2 警告ダイアログ 4 条件。mode により参照件数と文言が変わる：
+       - create：lastPreviewCount（total_count）= 抽出件数
+       - add_by_tag：lastPreviewNewCount（new_count）= 新規追加対象（既登録は重複除外、§4.6.1）
+    */
     const includeOn = hasAnyInclude();
     const globalOn = hasAnyGlobalExclude();
-    const n = (typeof lastPreviewCount === 'number') ? lastPreviewCount : '?';
+    const isAddByTag = (mode === 'add_by_tag');
+    const targetCount = isAddByTag
+      ? lastPreviewNewCount
+      : lastPreviewCount;
+    const n = (typeof targetCount === 'number') ? targetCount : '?';
     if (!includeOn && !globalOn) {
       /* disabled で来ないはずだが保険 */
       event.preventDefault();
       return;
     }
     if (!includeOn && globalOn) {
-      const msg = '全 Person から除外条件を適用します（対象 ' + n + ' 件）。続けますか？';
+      const msg = isAddByTag
+        ? '全 Person から除外条件を適用します（新規追加対象 ' + n + ' 件）。続けますか？'
+        : '全 Person から除外条件を適用します（対象 ' + n + ' 件）。続けますか？';
       if (!window.confirm(msg)) { event.preventDefault(); return; }
       return;
     }
-    if (includeOn && lastPreviewCount === 0) {
-      if (!window.confirm('対象 Person が 0 人です。続けますか？')) {
+    if (includeOn && targetCount === 0) {
+      const msg = isAddByTag
+        ? '新規追加対象が 0 人です（抽出結果はすべて既登録、または抽出 0 件）。続けますか？'
+        : '対象 Person が 0 人です。続けますか？';
+      if (!window.confirm(msg)) {
         event.preventDefault();
         return;
       }

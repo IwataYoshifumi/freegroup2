@@ -2108,3 +2108,448 @@ class NewListCancelTests(_NewListWizardTestBase):
         state = self._session()
         self.assertEqual(state.get("name", ""), "")
         self.assertNotIn("snapshot_person_ids", state)
+
+
+# ======================================================================
+# Phase 1c-β-3a タグで追加（仕様書 rev6 §4.6 / §10 #21〜#24）
+# ======================================================================
+#
+# 既存リストに対する「タグで追加」フロー 1-H → 1-K → 確定 を検証する。
+# snapshot は「抽出 − 既登録」のみ、退会者は含む。bulk_create + ignore_conflicts
+# で確定、PRG で詳細画面へ。session キー mailing_list_<pk>_add_by_tag_state。
+#
+# tag_selection.html の add_by_tag mode 描画 + リスト詳細「タグで追加」ボタンの
+# 配置（追加系の行）も検証。タグで除外（remove_by_tag）は β-3b 範囲、本ファイルでは
+# 触らない。
+
+
+def _add_by_tag_session_key(mailing_list_pk):
+    return f"mailing_list_{mailing_list_pk}_add_by_tag_state"
+
+
+class _AddByTagTestBase(_TagExtractionTestBase):
+    def setUp(self):
+        super().setUp()
+        self.user = self.user  # _TagExtractionTestBase が作る
+        self.mailing_list = MailingList.objects.create(
+            name="L1", created_by=self.user
+        )
+
+    def _make_list_person(self, full_name, *, is_unsubscribed=False, in_list=False):
+        p = self._make_person(full_name, is_unsubscribed=is_unsubscribed)
+        if in_list:
+            MailingListMember.objects.create(
+                mailing_list=self.mailing_list, person=p, added_by=self.user
+            )
+        return p
+
+    def _post_conditions(self, *, include=(), operator="OR"):
+        post = {}
+        cat_id = str(self.cat_role.pk)
+        if include:
+            post[f"include_{cat_id}"] = [str(t.pk) for t in include]
+            post[f"operator_{cat_id}"] = operator
+        return post
+
+    def _put_state(self, **state):
+        session = self.client.session
+        session[_add_by_tag_session_key(self.mailing_list.pk)] = state
+        session.save()
+
+    def _state(self):
+        return self.client.session.get(
+            _add_by_tag_session_key(self.mailing_list.pk)
+        ) or {}
+
+
+class MemberAddByTagViewGetTests(_AddByTagTestBase):
+    def test_get_200(self):
+        url = reverse(
+            "mailings:list_member_add_by_tag", args=[self.mailing_list.pk]
+        )
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 200)
+        # add_by_tag mode のコンテキストと緑バナー文言を確認
+        body = resp.content.decode("utf-8")
+        self.assertIn("タグで追加：L1", body)
+        self.assertIn("app-message--success", body)
+
+    def test_get_frozen_returns_409(self):
+        self.mailing_list.members_frozen_at = timezone.now()
+        self.mailing_list.save(update_fields=["members_frozen_at", "updated_at"])
+        url = reverse(
+            "mailings:list_member_add_by_tag", args=[self.mailing_list.pk]
+        )
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 409)
+
+    def test_get_archived_returns_404(self):
+        self.mailing_list.is_archived = True
+        self.mailing_list.save(update_fields=["is_archived", "updated_at"])
+        url = reverse(
+            "mailings:list_member_add_by_tag", args=[self.mailing_list.pk]
+        )
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 404)
+
+    def test_template_has_list_id_data_attribute(self):
+        """JS が dataset.listId で読むため、テンプレに data-list-id 出力必須。"""
+        url = reverse(
+            "mailings:list_member_add_by_tag", args=[self.mailing_list.pk]
+        )
+        resp = self.client.get(url)
+        body = resp.content.decode("utf-8")
+        self.assertIn(f'data-list-id="{self.mailing_list.pk}"', body)
+
+
+class MemberAddByTagViewPostTests(_AddByTagTestBase):
+    def test_post_snapshot_excludes_already_in_list(self):
+        """snapshot は「抽出 − 既登録」のみ（§4.6.1）。"""
+        p_in = self._make_list_person("Alice", in_list=True)  # 既登録
+        p_new = self._make_list_person("Bob")  # 未登録
+        self._assign(p_in, self.t_role_a)
+        self._assign(p_new, self.t_role_a)
+        url = reverse(
+            "mailings:list_member_add_by_tag", args=[self.mailing_list.pk]
+        )
+        resp = self.client.post(
+            url, self._post_conditions(include=[self.t_role_a])
+        )
+        self.assertEqual(resp.status_code, 302)
+        state = self._state()
+        self.assertEqual(state["snapshot_person_ids"], [str(p_new.pk)])
+        self.assertEqual(state["total_extracted"], 2)
+        self.assertEqual(state["already_in_list_count"], 1)
+
+    def test_post_snapshot_includes_unsubscribed(self):
+        """退会者は snapshot に含まれる（§9.2-30）。"""
+        p_unsub = self._make_list_person("Unsub", is_unsubscribed=True)
+        self._assign(p_unsub, self.t_role_a)
+        url = reverse(
+            "mailings:list_member_add_by_tag", args=[self.mailing_list.pk]
+        )
+        resp = self.client.post(
+            url, self._post_conditions(include=[self.t_role_a])
+        )
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(self._state()["snapshot_person_ids"], [str(p_unsub.pk)])
+
+    def test_post_empty_conditions_returns_400(self):
+        url = reverse(
+            "mailings:list_member_add_by_tag", args=[self.mailing_list.pk]
+        )
+        resp = self.client.post(url, {})
+        self.assertEqual(resp.status_code, 400)
+        # snapshot は保存されない
+        self.assertEqual(self._state(), {})
+
+    def test_post_frozen_returns_409(self):
+        self.mailing_list.members_frozen_at = timezone.now()
+        self.mailing_list.save(update_fields=["members_frozen_at", "updated_at"])
+        p = self._make_list_person("Alice")
+        self._assign(p, self.t_role_a)
+        url = reverse(
+            "mailings:list_member_add_by_tag", args=[self.mailing_list.pk]
+        )
+        resp = self.client.post(
+            url, self._post_conditions(include=[self.t_role_a])
+        )
+        self.assertEqual(resp.status_code, 409)
+
+    def test_post_redirects_to_confirm(self):
+        p = self._make_list_person("Alice")
+        self._assign(p, self.t_role_a)
+        url = reverse(
+            "mailings:list_member_add_by_tag", args=[self.mailing_list.pk]
+        )
+        confirm_url = reverse(
+            "mailings:list_member_add_by_tag_confirm",
+            args=[self.mailing_list.pk],
+        )
+        resp = self.client.post(
+            url, self._post_conditions(include=[self.t_role_a])
+        )
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn(confirm_url, resp["Location"])
+
+    def test_get_after_post_restores_conditions(self):
+        """戻り時の状態復元（§7.1）：POST 後の GET で current_conditions が復元される。"""
+        p = self._make_list_person("Alice")
+        self._assign(p, self.t_role_a)
+        post_url = reverse(
+            "mailings:list_member_add_by_tag", args=[self.mailing_list.pk]
+        )
+        self.client.post(
+            post_url, self._post_conditions(include=[self.t_role_a])
+        )
+        resp = self.client.get(post_url)
+        self.assertEqual(resp.status_code, 200)
+        ctx_conditions = resp.context["current_conditions"]
+        self.assertEqual(len(ctx_conditions["categories"]), 1)
+        self.assertIn(
+            str(self.t_role_a.pk),
+            ctx_conditions["categories"][0]["include_tag_ids"],
+        )
+
+
+class MemberAddByTagConfirmViewTests(_AddByTagTestBase):
+    def test_empty_session_redirects_to_selection(self):
+        """session 空（conditions なし）→ 1-H に 302（§9.2-45）。"""
+        url = reverse(
+            "mailings:list_member_add_by_tag_confirm",
+            args=[self.mailing_list.pk],
+        )
+        sel = reverse(
+            "mailings:list_member_add_by_tag", args=[self.mailing_list.pk]
+        )
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn(sel, resp["Location"])
+
+    def test_renders_snapshot_persons_and_diff_count(self):
+        p1 = self._make_list_person("Alice")
+        p2 = self._make_list_person("Bob")
+        # 既登録 1 件（snapshot 外）
+        p_existing = self._make_list_person("Existing", in_list=True)
+        self._put_state(
+            conditions={"categories": [], "global_exclude_tag_ids": []},
+            snapshot_person_ids=[str(p1.pk), str(p2.pk)],
+            total_extracted=3,
+            already_in_list_count=1,
+        )
+        url = reverse(
+            "mailings:list_member_add_by_tag_confirm",
+            args=[self.mailing_list.pk],
+        )
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 200)
+        ctx = resp.context
+        self.assertEqual(ctx["new_count"], 2)
+        self.assertEqual(ctx["total_extracted"], 3)
+        self.assertEqual(ctx["already_in_list_count"], 1)
+        self.assertEqual(ctx["current_member_count"], 1)
+        self.assertEqual(ctx["after_count"], 3)
+        body = resp.content.decode("utf-8")
+        # 重複除外の説明文 + Before/After
+        self.assertIn("抽出 <strong>3 件</strong>", body)
+        self.assertIn("既にリストに登録されています", body)
+        self.assertIn("→ +2 件", body)
+
+    def test_renders_unsubscribed_badge_in_snapshot(self):
+        p_unsub = self._make_list_person("Unsub", is_unsubscribed=True)
+        self._put_state(
+            conditions={"categories": [], "global_exclude_tag_ids": []},
+            snapshot_person_ids=[str(p_unsub.pk)],
+            total_extracted=1,
+            already_in_list_count=0,
+        )
+        url = reverse(
+            "mailings:list_member_add_by_tag_confirm",
+            args=[self.mailing_list.pk],
+        )
+        resp = self.client.get(url)
+        self.assertIn("js-unsubscribed-badge", resp.content.decode("utf-8"))
+
+    def test_frozen_returns_409(self):
+        self.mailing_list.members_frozen_at = timezone.now()
+        self.mailing_list.save(update_fields=["members_frozen_at", "updated_at"])
+        self._put_state(
+            conditions={"categories": [], "global_exclude_tag_ids": []},
+            snapshot_person_ids=[str(uuid.uuid4())],
+            total_extracted=1,
+            already_in_list_count=0,
+        )
+        url = reverse(
+            "mailings:list_member_add_by_tag_confirm",
+            args=[self.mailing_list.pk],
+        )
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 409)
+
+    def test_post_method_returns_405(self):
+        url = reverse(
+            "mailings:list_member_add_by_tag_confirm",
+            args=[self.mailing_list.pk],
+        )
+        resp = self.client.post(url)
+        self.assertEqual(resp.status_code, 405)
+
+
+class MemberAddByTagCommitViewTests(_AddByTagTestBase):
+    def test_commit_creates_members_and_redirects_to_detail(self):
+        p1 = self._make_list_person("Alice")
+        p2 = self._make_list_person("Bob")
+        self._put_state(
+            conditions={"categories": [], "global_exclude_tag_ids": []},
+            snapshot_person_ids=[str(p1.pk), str(p2.pk)],
+            total_extracted=2,
+            already_in_list_count=0,
+        )
+        url = reverse(
+            "mailings:list_member_commit_add_by_tag",
+            args=[self.mailing_list.pk],
+        )
+        resp = self.client.post(url)
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn(
+            reverse(
+                "mailings:mailing_list_detail", args=[self.mailing_list.pk]
+            ),
+            resp["Location"],
+        )
+        self.assertEqual(
+            MailingListMember.objects.filter(
+                mailing_list=self.mailing_list
+            ).count(),
+            2,
+        )
+        # session クリア
+        self.assertEqual(self._state(), {})
+
+    def test_commit_ignore_conflicts_existing_member(self):
+        """既登録 Person を snapshot に含めても ignore_conflicts でエラー無し。"""
+        p_existing = self._make_list_person("Existing", in_list=True)
+        p_new = self._make_list_person("New")
+        # snapshot は通常「抽出 − 既登録」だが、レースで既登録になった場合も想定
+        self._put_state(
+            conditions={"categories": [], "global_exclude_tag_ids": []},
+            snapshot_person_ids=[str(p_existing.pk), str(p_new.pk)],
+            total_extracted=2,
+            already_in_list_count=0,
+        )
+        url = reverse(
+            "mailings:list_member_commit_add_by_tag",
+            args=[self.mailing_list.pk],
+        )
+        resp = self.client.post(url)
+        self.assertEqual(resp.status_code, 302)
+        # 既存 1 + 新規 1 = 計 2 件
+        self.assertEqual(
+            MailingListMember.objects.filter(
+                mailing_list=self.mailing_list
+            ).count(),
+            2,
+        )
+
+    def test_commit_empty_session_redirects_to_selection(self):
+        url = reverse(
+            "mailings:list_member_commit_add_by_tag",
+            args=[self.mailing_list.pk],
+        )
+        sel = reverse(
+            "mailings:list_member_add_by_tag", args=[self.mailing_list.pk]
+        )
+        resp = self.client.post(url)
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn(sel, resp["Location"])
+
+    def test_commit_get_method_returns_405(self):
+        url = reverse(
+            "mailings:list_member_commit_add_by_tag",
+            args=[self.mailing_list.pk],
+        )
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 405)
+
+    def test_commit_frozen_returns_409(self):
+        self.mailing_list.members_frozen_at = timezone.now()
+        self.mailing_list.save(update_fields=["members_frozen_at", "updated_at"])
+        p = self._make_list_person("Alice")
+        self._put_state(
+            conditions={"categories": [], "global_exclude_tag_ids": []},
+            snapshot_person_ids=[str(p.pk)],
+            total_extracted=1,
+            already_in_list_count=0,
+        )
+        url = reverse(
+            "mailings:list_member_commit_add_by_tag",
+            args=[self.mailing_list.pk],
+        )
+        resp = self.client.post(url)
+        self.assertEqual(resp.status_code, 409)
+
+    def test_commit_snapshot_unchanged_by_db_mutation(self):
+        """snapshot 方式：POST 後の Person タグ変更が確定結果に影響しない（§9.2-26）。"""
+        p = self._make_list_person("Alice")
+        self._assign(p, self.t_role_a)
+        post_url = reverse(
+            "mailings:list_member_add_by_tag", args=[self.mailing_list.pk]
+        )
+        self.client.post(
+            post_url, self._post_conditions(include=[self.t_role_a])
+        )
+        # snapshot 確定後にタグを剥がしても、commit は snapshot ID で進む
+        TagAssignment.objects.filter(person=p).delete()
+        commit_url = reverse(
+            "mailings:list_member_commit_add_by_tag",
+            args=[self.mailing_list.pk],
+        )
+        resp = self.client.post(commit_url)
+        self.assertEqual(resp.status_code, 302)
+        self.assertTrue(
+            MailingListMember.objects.filter(
+                mailing_list=self.mailing_list, person=p
+            ).exists()
+        )
+
+    def test_prg_replay_does_not_double_add(self):
+        """PRG：commit 2 回目は session クリア済みで 1-H に差し戻し（二重追加なし）。"""
+        p = self._make_list_person("Alice")
+        self._put_state(
+            conditions={"categories": [], "global_exclude_tag_ids": []},
+            snapshot_person_ids=[str(p.pk)],
+            total_extracted=1,
+            already_in_list_count=0,
+        )
+        commit_url = reverse(
+            "mailings:list_member_commit_add_by_tag",
+            args=[self.mailing_list.pk],
+        )
+        resp1 = self.client.post(commit_url)
+        self.assertEqual(resp1.status_code, 302)
+        resp2 = self.client.post(commit_url)
+        self.assertEqual(resp2.status_code, 302)
+        self.assertIn(
+            reverse(
+                "mailings:list_member_add_by_tag", args=[self.mailing_list.pk]
+            ),
+            resp2["Location"],
+        )
+        self.assertEqual(
+            MailingListMember.objects.filter(
+                mailing_list=self.mailing_list, person=p
+            ).count(),
+            1,
+        )
+
+
+class DetailViewAddByTagButtonTests(_AddByTagTestBase):
+    def test_detail_shows_add_by_tag_button_active(self):
+        url = reverse(
+            "mailings:mailing_list_detail", args=[self.mailing_list.pk]
+        )
+        resp = self.client.get(url)
+        body = resp.content.decode("utf-8")
+        add_by_tag_url = reverse(
+            "mailings:list_member_add_by_tag", args=[self.mailing_list.pk]
+        )
+        self.assertIn(add_by_tag_url, body)
+        # 追加系 = success カラーのリンク
+        self.assertIn(">タグで追加</a>", body)
+        self.assertIn("app-btn--success", body)
+
+    def test_detail_frozen_disables_add_by_tag_button(self):
+        self.mailing_list.members_frozen_at = timezone.now()
+        self.mailing_list.save(update_fields=["members_frozen_at", "updated_at"])
+        url = reverse(
+            "mailings:mailing_list_detail", args=[self.mailing_list.pk]
+        )
+        resp = self.client.get(url)
+        body = resp.content.decode("utf-8")
+        # disabled span（リンクでない）
+        self.assertNotIn(
+            f'href="{reverse("mailings:list_member_add_by_tag", args=[self.mailing_list.pk])}',
+            body,
+        )
+        self.assertIn(">タグで追加</span>", body)
+        self.assertIn("凍結中のため編集できません", body)

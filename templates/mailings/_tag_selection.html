@@ -29,13 +29,13 @@ JS フック予約：
 {% endcomment %}
 
 {% block title %}
-{% if mode == 'create' %}リスト作成（2/3 タグで対象を選ぶ）{% else %}タグで対象を選ぶ{% endif %} — FreeGroup2
+{% if mode == 'create' %}リスト作成（2/3 タグで対象を選ぶ）{% elif mode == 'add_by_tag' %}タグで追加：{{ mailing_list.name }}{% else %}タグで対象を選ぶ{% endif %} — FreeGroup2
 {% endblock %}
 
 {% block content %}
-  {# ====================================================================
-     mode 別ヘッダ：create はリスト名・備考表示、add/remove は β-3 で実装
-     ==================================================================== #}
+  {% comment %}
+    mode 別ヘッダ：create はリスト名・備考表示、add_by_tag は緑バナー、remove_by_tag は β-3b で実装
+  {% endcomment %}
   {% if mode == 'create' %}
     <div class="app-page-header">
       <div>
@@ -61,9 +61,21 @@ JS フック予約：
       </dl>
     </section>
   {% elif mode == 'add_by_tag' %}
-    {# β-3 でコード君A が実装：対象リスト名 + 緑バナー（「リストに追加します」） #}
+    <div class="app-page-header">
+      <div>
+        <div class="app-breadcrumb">メール配信 / 配信リスト一覧 / 詳細 / タグで追加</div>
+        <h1>タグで追加：{{ mailing_list.name }}（現在 {{ current_member_count }} 件）</h1>
+        <div class="app-message app-message--success" style="margin-top:8px;">
+          <i class="bi bi-plus-circle" style="margin-right:6px;"></i>
+          <strong>タグで追加：{{ mailing_list.name }}</strong> に対象を追加します。
+        </div>
+      </div>
+      <div class="app-action-area">
+        <a href="{{ cancel_url }}" class="app-btn app-btn--secondary">キャンセル</a>
+      </div>
+    </div>
   {% elif mode == 'remove_by_tag' %}
-    {# β-3 でコード君A が実装：対象リスト名 + 赤バナー（「リストから除外します」） #}
+    {# β-3b でコード君A が実装：対象リスト名 + 赤バナー（「リストから除外します」） #}
   {% endif %}
 
   {% if messages %}
@@ -74,13 +86,14 @@ JS フック予約：
     </section>
   {% endif %}
 
-  {# ====================================================================
-     条件ビルダー本体（mode 共通の DOM 骨格、JS フック予約済み）
-     ==================================================================== #}
+  {% comment %}
+    条件ビルダー本体（mode 共通の DOM 骨格、JS フック予約済み）
+  {% endcomment %}
   <section class="app-card"
            data-tag-selection-root
            data-mode="{{ mode }}"
-           data-preview-url="{{ preview_url }}">
+           data-preview-url="{{ preview_url }}"
+           {% if mode != 'create' and mailing_list %}data-list-id="{{ mailing_list.pk }}"{% endif %}>
     <h2 style="margin-bottom:12px;">タグ条件</h2>
 
     <form method="post" action="{{ post_url }}" id="js-tag-conditions-form">
@@ -197,7 +210,7 @@ JS フック予約：
         </details>
       </div>
 
-      {# プレビュー欄：JS が AJAX 結果を書き込む。β-2a では静的プレースホルダ #}
+      {# プレビュー欄：JS が AJAX 結果を書き込む（id 等は JS フック） #}
       <div class="app-card" style="margin-top:16px; padding:16px;" id="js-preview-container">
         <h3 style="margin-bottom:8px;">プレビュー</h3>
         <div>抽出件数：<strong id="js-preview-count">-</strong></div>
@@ -205,7 +218,7 @@ JS フック予約：
           ※ プレビューは目安です。確認画面で表示される件数・顔ぶれが確定値となります。
         </p>
         <div style="margin-top:8px;">
-          <small class="app-muted">サンプル（先頭 10 件、β-2b で JS により表示予定）</small>
+          <small class="app-muted">サンプル（先頭 10 件）</small>
           <div id="js-preview-samples"></div>
         </div>
       </div>
@@ -214,9 +227,9 @@ JS フック予約：
         {% if mode == 'create' %}
           <button type="submit" class="app-btn app-btn--primary js-tag-selection-submit">内容を確認</button>
         {% elif mode == 'add_by_tag' %}
-          {# β-3 で実装：緑系ボタン「内容を確認」 #}
+          <button type="submit" class="app-btn app-btn--success js-tag-selection-submit">内容を確認</button>
         {% elif mode == 'remove_by_tag' %}
-          {# β-3 で実装：赤系ボタン「内容を確認」 #}
+          {# β-3b で実装：赤系ボタン「内容を確認」 #}
         {% endif %}
         {% if mode == 'create' %}
           <a href="{{ back_url }}" class="app-btn app-btn--secondary">戻る</a>
@@ -226,13 +239,15 @@ JS フック予約：
     </form>
   </section>
 
-  {# β-2a 復元用：current_conditions を JS が読み取るためのデータブロック
-     （JS は β-2b で実装。サーバ側はキーだけ予約、値は JSON 文字列） #}
+  {% comment %}
+    current_conditions を JS が読み取るためのデータブロック（β-2a 〜 β-3a で利用）。
+  {% endcomment %}
   {{ current_conditions|json_script:"js-current-conditions" }}
 
-  {# 横断除外モーダル（β-2b 追加、§3.5 / §4.4.2）。
-     既存 app-modal 機構（data-action="open-modal" / "close-modal"）を流用。
-     base.html には backdrop が無いため本画面に個別配置する。 #}
+  {% comment %}
+    横断除外モーダル（§3.5 / §4.4.2）。既存 app-modal 機構（data-action="open-modal" /
+    "close-modal"）を流用。base.html には backdrop が無いため本画面に個別配置する。
+  {% endcomment %}
   <div class="app-modal-backdrop" hidden></div>
   <div id="globalExcludeModal" class="app-modal" hidden role="dialog" aria-modal="true"
        aria-labelledby="globalExcludeModalTitle">

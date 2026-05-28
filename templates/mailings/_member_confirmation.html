@@ -13,7 +13,9 @@
       <div style="margin-top:4px; color:#475569;">
         {% if mode == "add" %}
           以下の {{ total_count }} 件をリストに追加します。確認のうえ「追加を確定」を押してください。
-        {% else %}
+        {% elif mode == "add_by_tag" %}
+          タグで抽出した新規追加対象 <strong>{{ new_count }} 件</strong>をリストに<strong>追加</strong>します。確認のうえ「追加を確定」を押してください。
+        {% elif mode == "remove" %}
           以下の {{ total_count }} 件をリストから削除します。確認のうえ「削除を確定」を押してください。
         {% endif %}
       </div>
@@ -31,12 +33,28 @@
     </section>
   {% endif %}
 
+  {% if mode == "add_by_tag" %}
+    {# add_by_tag 専用：重複除外の説明 + Before/After 件数バナー（仕様書 §4.6.2 / §4.6.5.4-6） #}
+    <section class="app-card">
+      <div style="margin-bottom:12px;">
+        抽出 <strong>{{ total_extracted }} 件</strong>のうち、
+        <strong>{{ already_in_list_count }} 件</strong>は既にリストに登録されています。
+        新規追加対象は <strong>{{ new_count }} 件</strong>です。
+      </div>
+      <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+        <span>現在 <strong>{{ current_member_count }}</strong> 件</span>
+        <span style="color:#166534; font-weight:bold;">→ +{{ new_count }} 件</span>
+        <span>→ 合計 <strong>{{ after_count }}</strong> 件</span>
+      </div>
+    </section>
+  {% endif %}
+
   <section class="app-card">
     <div class="app-section__header" style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
       <h2 style="margin:0;">
-        {% if mode == "add" %}追加対象{% else %}削除対象{% endif %}
+        {% if mode == "add" %}追加対象{% elif mode == "add_by_tag" %}新規追加対象{% elif mode == "remove" %}削除対象{% endif %}
       </h2>
-      <span class="app-status-badge {% if mode == 'add' %}app-status-badge--success{% else %}app-status-badge--warning{% endif %}">
+      <span class="app-status-badge {% if mode == 'add' or mode == 'add_by_tag' %}app-status-badge--success{% else %}app-status-badge--warning{% endif %}">
         全 {{ total_count }} 件
       </span>
       {% if total_count > display_limit %}
@@ -96,7 +114,9 @@
         <a href="{{ back_to_selection_url }}" class="app-btn app-btn--secondary">戻って修正</a>
         {% if mode == "add" %}
           <button type="submit" class="app-btn app-btn--primary">追加を確定</button>
-        {% else %}
+        {% elif mode == "add_by_tag" %}
+          <button type="submit" class="app-btn app-btn--success">追加を確定</button>
+        {% elif mode == "remove" %}
           <button type="submit" class="app-btn app-btn--danger">削除を確定</button>
         {% endif %}
       </div>
