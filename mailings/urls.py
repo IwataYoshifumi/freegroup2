@@ -285,4 +285,15 @@ urlpatterns = [
     ),
     # MailingConfig 編集（§5.1 No.38 改 / §4.13 シングルトン）
     path("mailings/config/", views.MailingConfigEditView.as_view(), name="config_edit"),
+    # (c) EmailTemplate 編集 + プレビュー View（URL一覧表 rev17 No.44 / No.82）
+    path(
+        "mailings/templates/<uuid:pk>/update/",
+        views.EmailTemplateUpdateView.as_view(),
+        name="template_update",
+    ),
+    path(
+        "mailings/campaigns/<uuid:pk>/preview/<uuid:person_id>/",
+        views.CampaignPreviewView.as_view(),
+        name="campaign_preview",
+    ),
 ]

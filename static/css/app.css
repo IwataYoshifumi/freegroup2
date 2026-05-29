@@ -1831,3 +1831,17 @@ form:has(.js-decision-additional_role:checked) .app-merge-survivor__label--prima
   overflow: auto;
   margin-top: var(--app-space-sm);
 }
+
+/* (c) EmailTemplate プレビュー：差し込み未展開 {{...}} の警告色（仕様書 §7.7.1.3）。
+   prepare 出力には触らず、View 層で <span class="app-preview__missing">…</span> wrap。 */
+.app-preview__missing {
+  background-color: #fff3cd;
+  color: #c00;
+  padding: 0 0.2em;
+  border-radius: 0.2em;
+  font-weight: 600;
+}
+.app-preview__body {
+  white-space: normal;
+  line-height: 1.5;
+}

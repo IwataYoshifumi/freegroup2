@@ -1,0 +1,18 @@
+{# プレビュー View が返す HTML 断片（仕様書 §7.7.1、URL一覧 rev17 No.82）。 #}
+{# 既存 app.js openPreviewModal が #previewModal .app-modal__body に流し込む内容。 #}
+{# 記法残存 {{...}} は View 側で <span class="app-preview__missing">…</span> に wrap 済み。 #}
+<div class="app-preview">
+  <dl class="app-form-grid" style="grid-template-columns: 120px 1fr; gap:4px 12px;">
+    <dt>From</dt>
+    <dd>{% if from_name %}{{ from_name }} &lt;{{ from_email }}&gt;{% else %}{{ from_email }}{% endif %}</dd>
+    <dt>To</dt>
+    <dd>{{ to_email|default:"—" }}</dd>
+    <dt>件名</dt>
+    <dd>{{ subject_html }}</dd>
+  </dl>
+  <hr>
+  <div class="app-preview__body">{{ body_html }}</div>
+  <p class="app-muted" style="margin-top:12px;">
+    プレビューは送信を伴いません。<code>{% verbatim %}{{...}}{% endverbatim %}</code> がそのまま残っている箇所（警告色）は、配信時にも記法のまま受信者に届きます。
+  </p>
+</div>

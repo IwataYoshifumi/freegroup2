@@ -6489,3 +6489,216 @@ class CampaignReportCSVViewTests(_Phase6TestBase):
             data={"fields": [CSV_FIELD_EMAIL]},
         )
         self.assertEqual(response.status_code, 403)
+
+
+# ======================================================================
+# (c) EmailTemplate 編集画面 + プレビュー View（指示書 (c)、仕様書 §4.3 / §6.1 No.44
+# / §6.2.1.1 / §7.4 / §7.7.1 / §12.2 / §12.3、URL一覧 rev17 No.44 / No.82）
+# rev17/rev18 で 1:1 運用確定、OneToOne で DB 制約レベル保証（emailtemplate.campaign 逆引き）。
+# ======================================================================
+
+
+from mailings.forms import EmailTemplateForm
+from mailings.views import _highlight_unrendered_merge_tags
+
+
+class HighlightUnrenderedMergeTagsTests(TestCase):
+    """[性質] 純関数テスト。`_highlight_unrendered_merge_tags`（views.py）。"""
+
+    def test_wraps_unrendered_tag(self):
+        out = _highlight_unrendered_merge_tags("Hello {{会社名}}!")
+        self.assertIn('<span class="app-preview__missing">', out)
+        self.assertIn("{{会社名}}", out)
+        self.assertTrue(out.endswith("!"))
+
+    def test_no_tag_returns_unchanged(self):
+        self.assertEqual(_highlight_unrendered_merge_tags("plain text"), "plain text")
+
+    def test_multiple_tags_all_wrapped(self):
+        out = _highlight_unrendered_merge_tags("{{a}} and {{b}}")
+        self.assertEqual(out.count('<span class="app-preview__missing">'), 2)
+
+    def test_escapes_inside_wrap(self):
+        # `<` を含む記法（極端だが防御確認）。
+        out = _highlight_unrendered_merge_tags("{{x<y}}")
+        # `<` が `&lt;` にエスケープされる
+        self.assertIn("&lt;", out)
+
+
+class EmailTemplateFormTests(TestCase):
+    """指示書 (c) §3.1：name は編集画面から除外。"""
+
+    def test_name_field_excluded(self):
+        form = EmailTemplateForm()
+        self.assertNotIn("name", form.fields)
+        # 4 つだけ：subject / body / body_text / body_text_is_manual
+        self.assertEqual(
+            set(form.fields.keys()),
+            {"subject", "body", "body_text", "body_text_is_manual"},
+        )
+
+
+class _PhaseCTestBase(_Phase3TestBase):
+    """(c) 編集 + プレビュー テストの共通基底。_Phase3TestBase の fixture を流用しつつ
+    OneToOne 制約に従って self.template を確実に Campaign に紐付ける Campaign を 1 件用意。"""
+
+    def setUp(self):
+        super().setUp()
+        self.client.force_login(self.user)
+        # _Phase3TestBase.setUp が self.template / self.mailing_list / self.config / self.user を作る。
+        # _make_campaign を呼ぶと別の template が生成されるため、self.template を直接紐付ける
+        # ために Campaign を自前生成する（rev18 OneToOne の逆引きを self.template.campaign で
+        # 取れる状態を作る）。
+        self.campaign = Campaign.objects.create(
+            name="EditTest",
+            template=self.template,
+            mailing_list=self.mailing_list,
+            created_by=self.user,
+        )
+        # 代表 Person 抽出のため宛先を 1 件登録
+        self.person = self._make_person("Alice")
+        self._add_member(self.mailing_list, self.person)
+
+    def _update_url(self):
+        return f"/mailings/templates/{self.template.pk}/update/"
+
+    def _preview_url(self, person=None):
+        p = person or self.person
+        return f"/mailings/campaigns/{self.campaign.pk}/preview/{p.pk}/"
+
+
+class EmailTemplateUpdateViewTests(_PhaseCTestBase):
+    def test_get_unauthenticated_redirects_to_login(self):
+        self.client.logout()
+        response = self.client.get(self._update_url())
+        # LoginRequiredMixin のリダイレクト（302 → login）
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/login/", response.url)
+
+    def test_get_authenticated_renders_form_without_name(self):
+        response = self.client.get(self._update_url())
+        self.assertEqual(response.status_code, 200)
+        body = response.content.decode("utf-8")
+        # name フィールドのラベル「テンプレート名」「name=」は画面に存在しない
+        # （form.fields に含まれていないので type=text の name="name" は出ない）
+        self.assertNotIn('name="name"', body)
+        # 件名・本文・代替テキストの3要素は存在する
+        self.assertIn('name="subject"', body)
+        self.assertIn('name="body"', body)
+        self.assertIn('name="body_text"', body)
+        # アクションボタン（2 種類）
+        self.assertIn('value="save_return"', body)
+        self.assertIn('value="preview"', body)
+
+    def test_post_save_return_updates_db_and_redirects_to_campaign_list(self):
+        # 暫定 fallback：Campaign 詳細画面（mailings:campaign_detail）が (b) で未実装のため一覧へ。
+        # (b) 実装後にこのテストは campaign_detail への遷移確認に差し替える（TODO(b)）。
+        response = self.client.post(
+            self._update_url(),
+            data={
+                "subject": "更新後の件名",
+                "body": "更新後の本文 {{会社名}}",
+                "body_text": "",
+                "body_text_is_manual": "",
+                "action": "save_return",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, "/mailings/campaigns/")
+        self.template.refresh_from_db()
+        self.assertEqual(self.template.subject, "更新後の件名")
+        self.assertIn("更新後の本文", self.template.body)
+
+    def test_post_preview_updates_db_and_redirects_with_preview_query(self):
+        response = self.client.post(
+            self._update_url(),
+            data={
+                "subject": "プレビュー直前の件名",
+                "body": "プレビュー直前の本文",
+                "body_text": "",
+                "body_text_is_manual": "",
+                "action": "preview",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, f"{self._update_url()}?preview=1")
+        self.template.refresh_from_db()
+        self.assertEqual(self.template.subject, "プレビュー直前の件名")
+
+    def test_get_with_preview_query_passes_context_flag(self):
+        response = self.client.get(self._update_url() + "?preview=1")
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context["preview_requested"])
+        # 代表 Person が居れば preview_person_id が context にセットされる
+        self.assertEqual(response.context["preview_person_id"], str(self.person.pk))
+
+    def test_get_without_candidate_person_sets_preview_person_id_none(self):
+        # 配信対象 Person を全て外す
+        MailingListMember.objects.filter(mailing_list=self.mailing_list).delete()
+        response = self.client.get(self._update_url() + "?preview=1")
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.context["preview_person_id"])
+
+
+class CampaignPreviewViewTests(_PhaseCTestBase):
+    def test_get_unauthenticated_redirects_to_login(self):
+        self.client.logout()
+        response = self.client.get(self._preview_url())
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/login/", response.url)
+
+    def test_get_authenticated_returns_html_fragment(self):
+        response = self.client.get(self._preview_url())
+        self.assertEqual(response.status_code, 200)
+        body = response.content.decode("utf-8")
+        # HTML 断片（モーダル本体）の特徴要素：From / To / 件名 表示
+        self.assertIn("From", body)
+        self.assertIn("件名", body)
+        # context にも from_name / to_email が渡る（モーダル本体に表示される）
+        self.assertEqual(response.context["from_email"], self.user.email)
+
+    def test_unrendered_merge_tag_highlighted_with_warning_class(self):
+        # 値が空のフィールドを使う差し込み変数 {{支店}} 等は値あり/なしで挙動が分かれる。
+        # 確実に空にするため Person.primary_contact.branch を空にして {{支店}} 残存を作る。
+        self.person.primary_contact.branch = ""
+        self.person.primary_contact.save(update_fields=["branch"])
+        # テンプレ本文に {{支店}} を入れる
+        self.template.body = "支店：{{支店}} です"
+        self.template.save(update_fields=["body"])
+        response = self.client.get(self._preview_url())
+        self.assertEqual(response.status_code, 200)
+        body = response.content.decode("utf-8")
+        # 警告色 wrap が出力される
+        self.assertIn('<span class="app-preview__missing">', body)
+        self.assertIn("{{支店}}", body)
+
+    def test_preview_does_not_persist_tracking_or_unsubscribe_links(self):
+        """プレビューは mode=PREVIEW で build を呼ばず、TrackingLink/UnsubscribeLink を DB 保存しない
+        （仕様書 §7.4.6.4 / §7.7.1.5）。送信や 3 処理単位は通らない（仕様書 §7.7.1.1）。"""
+        # 本文にカスタムタグを入れて prepare 経由で評価
+        self.template.body = (
+            "詳細は {% tracked_link %}https://example.com/{% endtracked_link %}\n"
+            "{% unsubscribe_link %}"
+        )
+        self.template.save(update_fields=["body"])
+        # 事前に該当 Campaign に紐づく TrackingLink/UnsubscribeLink は無い
+        from mailings.models import TrackingLink, UnsubscribeLink
+
+        before_t = TrackingLink.objects.filter(campaign=self.campaign).count()
+        before_u = UnsubscribeLink.objects.filter(campaign=self.campaign).count()
+        response = self.client.get(self._preview_url())
+        self.assertEqual(response.status_code, 200)
+        # 件数増えていない（PREVIEW モードで build / bulk_create は走らない）
+        self.assertEqual(
+            TrackingLink.objects.filter(campaign=self.campaign).count(), before_t
+        )
+        self.assertEqual(
+            UnsubscribeLink.objects.filter(campaign=self.campaign).count(), before_u
+        )
+
+    def test_get_404_when_person_id_unknown(self):
+        # 存在しない person_id でアクセス → 404
+        bogus_uuid = "00000000-0000-0000-0000-000000000000"
+        url = f"/mailings/campaigns/{self.campaign.pk}/preview/{bogus_uuid}/"
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 404)

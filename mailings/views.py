@@ -35,8 +35,8 @@ from tags.models import Tag, TagCategory
 
 from persons.services.person_search import SEARCH_PARAMS, search_persons
 
-from .forms import MailingConfigForm, MailingListForm
-from .models import MailingList, MailingListMember
+from .forms import EmailTemplateForm, MailingConfigForm, MailingListForm
+from .models import EmailTemplate, MailingList, MailingListMember
 from .services.list_freeze import (
     freeze_members,
     get_or_create_singleton_mailing_config,
@@ -2999,3 +2999,148 @@ class CampaignReportCSVView(LoginRequiredMixin, View):
         filename = f"campaign_report_{campaign.pk}.csv"
         response["Content-Disposition"] = f'attachment; filename="{filename}"'
         return response
+
+
+# ======================================================================
+# (c) EmailTemplate 編集画面 + プレビュー View
+# 仕様書 §4.3 / §6.1 No.44 / §6.2.1.1 / §7.4 / §7.7.1 / §12.2 / §12.3、
+# URL一覧表 rev17 No.44 / No.82。
+# rev17 で 1:1 運用確定（Campaign 1 つに EmailTemplate 1 つ）、rev18 で
+# OneToOneField により DB レベル 1:1 を担保（emailtemplate.campaign 逆引き可能）。
+# ======================================================================
+
+
+def _highlight_unrendered_merge_tags(html_text):
+    """[性質] 純関数（DB なし・副作用なし）。
+
+    プレビュー HTML 内の差し込み未展開 {{...}} を警告色用 span で wrap する。
+    差し込みが失敗した（=値が空で記法が残った、§7.4.5 Sansan 互換）箇所だけを
+    表示層で目立たせる、仕様書 §7.7.1.3 確定の「表示層が記法残存を拾って色付け」。
+    prepare の出力自体には手を入れない（§7.7.1.3）。
+
+    [入力] html_text: str（prepare 出力の subject_rendered または body_html）
+    [出力] str（{{...}} 残存箇所が <span class="app-preview__missing">{{...}}</span>
+            に置換された HTML 安全文字列。呼び出し側は mark_safe を付けてテンプレに渡す）
+    """
+    import html as _html
+    import re
+
+    def _wrap(m):
+        return (
+            '<span class="app-preview__missing">'
+            + _html.escape(m.group(0))
+            + "</span>"
+        )
+
+    # `{{` `}}` 自体は HTML 特殊文字ではないため、body_html（既に escape 済み）
+    # にもそのまま残っている。subject_rendered（escape 未適用、プレーン）にも
+    # 同じ正規表現が効く。
+    return re.sub(r"\{\{[^}]+\}\}", _wrap, html_text)
+
+
+class EmailTemplateUpdateView(LoginRequiredMixin, UpdateView):
+    """EmailTemplate 編集画面（仕様書 §4.3 / §6.1 No.44 / §12.2、URL一覧 rev17 No.44）。
+
+    指示書 (c) §3.2 で確定した 2 ボタン方式：
+      - 「保存して戻る」（name="action" value="save_return"）→ DB 保存 →
+        Campaign 詳細画面へリダイレクト（TODO(b) 暫定 fallback）
+      - 「プレビュー」（name="action" value="preview"）→ DB 保存 →
+        編集画面に `?preview=1` 付きでリダイレクト → テンプレ JS が既存
+        `openPreviewModal` 機構（app.js）を起動して No.82 プレビュー View
+        の HTML 断片を Ajax 取得・モーダル表示。POST プレビュー API は作らない
+        （指示書 §3.2 / §7、prepare に文字列直渡しを禁止）
+
+    Campaign の特定：rev18 OneToOneField の逆引き `self.object.campaign` で取得。
+
+    TODO(Phase 7): `mailings.manage_template` Permission と所有者判定（紐付く
+        Campaign の所有者か `view_all_campaigns` 持ちか）を追加する（指示書 §3.3 / §7）。
+    """
+
+    model = EmailTemplate
+    form_class = EmailTemplateForm
+    template_name = "mailings/email_template_update.html"
+
+    def form_valid(self, form):
+        # ModelForm の save をまず実行（updated_at 含めて DB 反映）。
+        self.object = form.save()
+        action = self.request.POST.get("action", "save_return")
+        if action == "preview":
+            # ?preview=1 リダイレクト → 再描画した編集画面の JS が openPreviewModal を起動
+            return redirect(
+                reverse("mailings:template_update", kwargs={"pk": self.object.pk})
+                + "?preview=1"
+            )
+        # save_return（既定）：Campaign 詳細へ戻す。
+        # TODO(b): Campaign UI 実装後 `mailings:campaign_detail` に差し替え、
+        # テストもあわせて更新する。現状は (b) 未実装のため一覧 fallback。
+        return redirect("mailings:campaign_list")
+
+    def get_success_url(self):
+        # form_valid 内で明示 redirect を返すため通常到達しないが、
+        # Django UpdateView の規約上未定義だと SuspiciousOperation になり得るためフォールバック。
+        return reverse("mailings:campaign_list")
+
+    def get_context_data(self, **kwargs):
+        from .services.recipient_extraction import extract_recipients
+
+        context = super().get_context_data(**kwargs)
+        campaign = self.object.campaign  # rev18 OneToOne 逆引き（related_name="campaign"）
+        # プレビュー対象 = 抽出済み配信対象集合の代表 Person（仕様書 §7.7.1.2、
+        # §7.7 テスト配信と同思想）。先頭 1 件を採用。空集合なら None。
+        preview_person = extract_recipients(campaign).first()
+        context.update(
+            {
+                "campaign": campaign,
+                "preview_person_id": (
+                    str(preview_person.id) if preview_person else None
+                ),
+                "preview_requested": self.request.GET.get("preview") == "1",
+                "back": BackNavigator(self.request),
+                "active_app": "mailings",
+            }
+        )
+        return context
+
+
+class CampaignPreviewView(LoginRequiredMixin, View):
+    """キャンペーンプレビュー View（仕様書 §7.7.1、URL一覧 rev17 No.82）。
+
+    Ajax モーダルに差し込む HTML 断片を返す。`EmailContext.prepare(mode=PREVIEW)`
+    を直接呼び、3 処理単位（cron 入口・オーケストレーション・1 受信者処理）を
+    通らない。送信も DB 書き込みも行わない（TrackingLink/UnsubscribeLink の
+    bulk_create は PRODUCTION モードでのみ走る、mode 分岐は email_context.py 側）。
+
+    色付けは表示層責務（§7.7.1.3）：subject_rendered / body_html を
+    `_highlight_unrendered_merge_tags` で wrap して `mark_safe` でテンプレに渡す。
+    prepare の出力には手を入れない（rev9 §7.4.1.3）。
+
+    呼び出し元（編集画面・ステップ画面）が増えても URL/引数/prepare 呼び出しは
+    同一（仕様書 §7.7.1.1 rev17 拡張）。
+
+    TODO(Phase 7): `mailings.view_campaign` Permission と所有者判定を追加する。
+    """
+
+    def get(self, request, pk, person_id):
+        from django.utils.safestring import mark_safe
+
+        from .models import Campaign
+        from .services.email_context import EmailContext, EmailMode
+
+        campaign = get_object_or_404(Campaign, pk=pk)
+        person = get_object_or_404(Person, pk=person_id)
+        ctx = EmailContext.prepare(campaign, person, EmailMode.PREVIEW)
+        subject_html = mark_safe(_highlight_unrendered_merge_tags(ctx.subject_rendered))
+        body_html = mark_safe(_highlight_unrendered_merge_tags(ctx.body_html))
+        return render(
+            request,
+            "mailings/_campaign_preview_modal_body.html",
+            {
+                "campaign": campaign,
+                "person": person,
+                "from_name": ctx.from_name,
+                "from_email": ctx.from_email,
+                "to_email": ctx.to_email,
+                "subject_html": subject_html,
+                "body_html": body_html,
+            },
+        )

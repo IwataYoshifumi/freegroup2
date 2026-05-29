@@ -7,7 +7,7 @@ MailingConfigForm: シングルトン MailingConfig の編集フォーム。
 from django import forms
 from django.core.exceptions import ValidationError
 
-from .models import MailingConfig, MailingList
+from .models import EmailTemplate, MailingConfig, MailingList
 
 
 class _AppInputMixin:
@@ -120,3 +120,30 @@ class MailingConfigForm(_AppInputMixin, forms.ModelForm):
                     ),
                 )
         return cleaned
+
+
+class EmailTemplateForm(_AppInputMixin, forms.ModelForm):
+    """EmailTemplate 編集フォーム（仕様書 §4.3 / §12.2、rev17/rev18 で 1:1 運用確定）。
+
+    指示書 (c) §3.1：name は編集画面から除外（Campaign と 1:1 のため、別管理する
+    業務上の意味がなく UI 混乱の元）。モデルフィールドとしての name は v1.7+
+    ライブラリ復活の余地として残置（§19 論点23）。本フォームでは name を読み書きしない。
+    """
+
+    class Meta:
+        model = EmailTemplate
+        fields = ["subject", "body", "body_text", "body_text_is_manual"]
+        labels = {
+            "subject": "件名",
+            "body": "本文（プレーンテキスト、HTML 不可。記法 3 種：差し込み変数 {{...}} / {% tracked_link %} / {% unsubscribe_link %}）",
+            "body_text": "代替テキスト（手動編集モード時のみ手動値を使う、§4.3）",
+            "body_text_is_manual": "代替テキストを手動値で使う",
+        }
+        widgets = {
+            "body": forms.Textarea(attrs={"rows": 16}),
+            "body_text": forms.Textarea(attrs={"rows": 6}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._apply_widget_classes()
