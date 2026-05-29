@@ -23,6 +23,7 @@ nav:
   - インストール: install.md
   - ユーザガイド:
     - 名刺の取り込み: usage/import.md
+    - Anthropic APIキーの取得: usage/anthropic-api-key.md
     - コンタクト管理: usage/contacts.md
     - ユーザー管理: usage/users.md
   - 管理者ガイド:
