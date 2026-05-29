@@ -592,6 +592,18 @@ class UnsubscribeLink(models.Model):
         unique=True,
         help_text="URL 埋め込みトークン（TrackingLink とは別 namespace、生成は Phase 3）",
     )
+    target_email = models.EmailField(
+        # rev15 §4.5A：NOT NULL かつ default なし。発行時に必ず焼き込まれる正本。
+        # UnsubscribeLink を作る経路は本番送信のみ（§7.4.6.4：TEST/PREVIEW では
+        # build を呼ばない）であり、send_one_recipient → EmailContext.prepare →
+        # UL.build(target_email=to_email) で必ず非空値が渡る。判定の信頼性を担保する。
+        help_text=(
+            "送信先メアドのスナップショット（発行時に焼き込み、rev15 §4.5A）。"
+            "配信停止判定（個人/代表）の正本。配信後に person.primary_contact が"
+            "差し替わっても判定が後天的にブレないよう、送信時の事実を保持する。"
+            "DeliveryHistory.to_email と同一値だが、配信停止フローでは本フィールドが正本。"
+        ),
+    )
     accessed_at = models.DateTimeField(
         null=True,
         blank=True,
@@ -613,21 +625,34 @@ class UnsubscribeLink(models.Model):
                 fields=["campaign", "person"],
                 name="unique_unsubscribe_link_campaign_person",
             ),
+            # rev15 §4.5A：target_email は発行時に必ず焼き込まれる正本。NOT NULL に
+            # 加えて空文字も禁止し、未焼き込みレコードを構造的に作れなくする
+            # （CharField 系の Django デフォルトは未指定で空文字が入るため、NOT NULL
+            # だけだと「target_email 未指定で create」が空文字で通ってしまう）。
+            CheckConstraint(
+                condition=~Q(target_email=""),
+                name="unsubscribelink_target_email_nonempty",
+            ),
         ]
 
     def __str__(self):
         return f"{self.campaign} → {self.token}"
 
     @classmethod
-    def build(cls, campaign, person):
+    def build(cls, campaign, person, target_email):
         """未保存の UnsubscribeLink インスタンスを組み立てる（§7.4.3、PRODUCTION 専用）。
 
         [性質] 純関数（DB 操作なし、トークン生成のみ）
-        [入力] campaign: Campaign、person: Person
+        [入力] campaign: Campaign、person: Person、target_email: str（送信先メアド、
+               発行時の事実として焼き込む、rev15 §4.5A）
         [出力] UnsubscribeLink（未保存、後段が bulk_create で永続化）
 
         TrackingLink とは別 namespace のトークンを secrets.token_urlsafe(8) で生成。
         original_url を持たない（配信停止画面 /u/<token>/ に固定、§4.5A.1）。
+
+        【rev15 で追加】 target_email は受信者へ実際に送られたメアドを保持する。配信
+        停止判定（個人/代表）と代表経路の SuppressedEmail 登録メアドは、本値を正本と
+        して使う（§9.5.4）。EmailContext.prepare 側が to_email を引数で渡す。
         """
         import secrets
 
@@ -635,6 +660,7 @@ class UnsubscribeLink(models.Model):
             campaign=campaign,
             person=person,
             token=secrets.token_urlsafe(8),
+            target_email=target_email,
         )
 
 
@@ -792,6 +818,12 @@ class SuppressedEmail(models.Model):
                 fields=["email"],
                 condition=Q(cancelled_at__isnull=True),
                 name="unique_active_suppressed_email",
+            ),
+        ]
+        permissions = [
+            (
+                "manage_suppressed_email",
+                "配信拒否リストを編集できる（解除・手動追加、§14.1.1）",
             ),
         ]
 

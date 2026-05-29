@@ -3376,7 +3376,10 @@ class UnsubscribeLinkModelTests(_Phase2ModelTestBase):
     def test_create_minimal(self):
         c = self._make_campaign()
         ul = UnsubscribeLink.objects.create(
-            campaign=c, person=self.person, token="utok_abcdef12"
+            campaign=c,
+            person=self.person,
+            token="utok_abcdef12",
+            target_email="alice@example.com",
         )
         self.assertIsNone(ul.accessed_at)
         self.assertIsNone(ul.unsubscribed_at)
@@ -3384,12 +3387,18 @@ class UnsubscribeLinkModelTests(_Phase2ModelTestBase):
     def test_unique_campaign_person(self):
         c = self._make_campaign()
         UnsubscribeLink.objects.create(
-            campaign=c, person=self.person, token="utok_aaaaaaaa"
+            campaign=c,
+            person=self.person,
+            token="utok_aaaaaaaa",
+            target_email="alice@example.com",
         )
         with self.assertRaises(IntegrityError):
             with transaction.atomic():
                 UnsubscribeLink.objects.create(
-                    campaign=c, person=self.person, token="utok_bbbbbbbb"
+                    campaign=c,
+                    person=self.person,
+                    token="utok_bbbbbbbb",
+                    target_email="alice@example.com",
                 )
 
     def test_token_unique_across_campaigns(self):
@@ -3401,12 +3410,18 @@ class UnsubscribeLinkModelTests(_Phase2ModelTestBase):
             created_by=self.user,
         )
         UnsubscribeLink.objects.create(
-            campaign=c1, person=self.person, token="udup_token"
+            campaign=c1,
+            person=self.person,
+            token="udup_token",
+            target_email="alice@example.com",
         )
         with self.assertRaises(IntegrityError):
             with transaction.atomic():
                 UnsubscribeLink.objects.create(
-                    campaign=c2, person=self.person2, token="udup_token"
+                    campaign=c2,
+                    person=self.person2,
+                    token="udup_token",
+                    target_email="bob@example.com",
                 )
 
 
@@ -4737,3 +4752,1140 @@ class PurgeOldClickLogIpsCommandTests(_Phase4TestBase):
         call_command("purge_old_click_log_ips", "--days=7", stdout=out)
         log.refresh_from_db()
         self.assertIsNone(log.ip_masked)
+
+
+# ======================================================================
+# Phase 5 §1：§9.5 サービス関数（get_same_person_unit / unsubscribe_person /
+# cancel_unsubscribe）＋ Person への 2 メソッド追加（recompute_unsubscribed_state /
+# set_unsubscribed_by_admin）の基盤テスト（仕様書 v1.6 §9.5 / §4.14.2 / §9.8、rev14）
+# ======================================================================
+
+
+from actionlogs.models import ActionLog
+
+from mailings.services.audit import (
+    ACTION_CANCEL_UNSUBSCRIBE,
+    ACTION_UNSUBSCRIBE_BY_ADMIN,
+    record_cancel_unsubscribe_action,
+    record_unsubscribe_by_admin_action,
+)
+from mailings.services.unsubscribe import (
+    cancel_unsubscribe,
+    get_same_person_unit,
+    unsubscribe_person,
+)
+
+
+class _Phase5UnitTestBase(TestCase):
+    """Phase 5 §1 テストの共通基底。Person 木構造のヘルパーを提供。"""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="phase5_user", password="x")
+
+    def _make_person(self, full_name, email=None):
+        p = Person.objects.create(status="active")
+        c = Contact.objects.create(
+            person=p,
+            status=Contact.Status.PRIMARY,
+            full_name=full_name,
+            email=email or f"{full_name.lower()}@example.com",
+            created_by=self.user,
+        )
+        p.primary_contact = c
+        p.save(update_fields=["primary_contact", "updated_at"])
+        return p
+
+    def _make_merged(self, root, full_name):
+        merged = self._make_person(full_name, email=f"merged-{full_name.lower()}@example.com")
+        # merged 化（primary_contact は mark_as_merged が NULL にする）
+        merged.mark_as_merged(root)
+        merged.refresh_from_db()
+        return merged
+
+
+class GetSamePersonUnitTests(_Phase5UnitTestBase):
+    def test_active_person_alone_returns_self(self):
+        alice = self._make_person("Alice")
+        unit = get_same_person_unit(alice)
+        self.assertEqual(unit, [alice])
+
+    def test_merged_person_returns_root_and_self(self):
+        root = self._make_person("Root")
+        merged = self._make_merged(root, "Merged")
+        unit = get_same_person_unit(merged)
+        ids = {p.id for p in unit}
+        self.assertEqual(ids, {root.id, merged.id})
+        # root が先頭
+        self.assertEqual(unit[0].id, root.id)
+
+    def test_root_with_multiple_merged_children(self):
+        root = self._make_person("Root2")
+        m1 = self._make_merged(root, "M1")
+        m2 = self._make_merged(root, "M2")
+        unit = get_same_person_unit(root)
+        ids = {p.id for p in unit}
+        self.assertEqual(ids, {root.id, m1.id, m2.id})
+
+    def test_multi_level_merge_collected_from_root(self):
+        # A → B → C（C が最終 root、A も B 経由で C に収集される必要あり）
+        c_root = self._make_person("C")
+        b = self._make_merged(c_root, "B")
+        # A を B にマージ → 後で B を C に再マージ済みなので A は B 経由
+        # mark_as_merged は parent を直接書くため、A を B に向ける
+        a = self._make_person("A")
+        a.mark_as_merged(b)
+        a.refresh_from_db()
+        # ユニット = {C, B, A}（C 起点で BFS、B の子に A）
+        unit = get_same_person_unit(c_root)
+        ids = {p.id for p in unit}
+        self.assertEqual(ids, {c_root.id, b.id, a.id})
+
+    def test_multi_level_merge_from_leaf_returns_full_unit(self):
+        c_root = self._make_person("C2")
+        b = self._make_merged(c_root, "B2")
+        a = self._make_person("A2")
+        a.mark_as_merged(b)
+        a.refresh_from_db()
+        # 葉の A から呼んでも root + 全 merged が返る
+        unit = get_same_person_unit(a)
+        ids = {p.id for p in unit}
+        self.assertEqual(ids, {c_root.id, b.id, a.id})
+        self.assertEqual(unit[0].id, c_root.id)
+
+    def test_cycle_detection_raises_value_error(self):
+        # データ不整合：A.merged_into = B、B.merged_into = A（循環）
+        a = self._make_person("CycA")
+        b = self._make_person("CycB")
+        # update で強制的に循環状態を作る（mark_as_merged は active→merged 専用）
+        Person.objects.filter(pk=a.pk).update(
+            merged_into=b, status=Person.Status.MERGED
+        )
+        Person.objects.filter(pk=b.pk).update(
+            merged_into=a, status=Person.Status.MERGED
+        )
+        a.refresh_from_db()
+        with self.assertRaises(ValueError):
+            get_same_person_unit(a)
+
+
+class UnsubscribePersonTests(_Phase5UnitTestBase):
+    def test_single_active_person_unsubscribed(self):
+        alice = self._make_person("Solo")
+        unsubscribe_person(
+            target_person=alice,
+            source="unsubscribe_link",
+            source_email="solo@example.com",
+        )
+        alice.refresh_from_db()
+        self.assertTrue(alice.is_unsubscribed)
+        unsub = Unsubscribe.objects.get(person=alice)
+        self.assertEqual(unsub.source, "unsubscribe_link")
+        self.assertEqual(unsub.source_email, "solo@example.com")
+        self.assertIsNone(unsub.cancelled_at)
+
+    def test_unit_all_members_get_unsubscribe_records(self):
+        root = self._make_person("UnitRoot")
+        merged = self._make_merged(root, "UnitMerged")
+        unsubscribe_person(
+            target_person=root,
+            source="manual",
+            source_email="contact@example.com",
+            note="phone request",
+        )
+        root.refresh_from_db()
+        merged.refresh_from_db()
+        self.assertTrue(root.is_unsubscribed)
+        self.assertTrue(merged.is_unsubscribed)
+        self.assertEqual(Unsubscribe.objects.filter(person=root).count(), 1)
+        self.assertEqual(Unsubscribe.objects.filter(person=merged).count(), 1)
+        self.assertEqual(Unsubscribe.objects.get(person=root).note, "phone request")
+
+    def test_idempotent_does_not_create_duplicate_active_unsubscribe(self):
+        alice = self._make_person("Idem")
+        unsubscribe_person(
+            target_person=alice,
+            source="unsubscribe_link",
+            source_email="idem@example.com",
+        )
+        # 2 回目（受信者の二度押し相当）
+        unsubscribe_person(
+            target_person=alice,
+            source="unsubscribe_link",
+            source_email="idem@example.com",
+        )
+        self.assertEqual(
+            Unsubscribe.objects.filter(person=alice, cancelled_at__isnull=True).count(),
+            1,
+        )
+
+    def test_re_unsubscribe_after_cancel_creates_new_record(self):
+        # 一度停止 → 解除 → 再度停止 のシナリオ。新しい active レコードが 1 件できる。
+        alice = self._make_person("Recycle")
+        unsubscribe_person(
+            target_person=alice,
+            source="unsubscribe_link",
+            source_email="recycle@example.com",
+        )
+        cancel_unsubscribe(target_person=alice, user=self.user)
+        unsubscribe_person(
+            target_person=alice,
+            source="manual",
+            source_email="recycle@example.com",
+        )
+        alice.refresh_from_db()
+        self.assertTrue(alice.is_unsubscribed)
+        active = Unsubscribe.objects.filter(person=alice, cancelled_at__isnull=True)
+        cancelled = Unsubscribe.objects.filter(person=alice, cancelled_at__isnull=False)
+        self.assertEqual(active.count(), 1)
+        self.assertEqual(cancelled.count(), 1)
+
+    def test_returns_unit_list(self):
+        root = self._make_person("RetRoot")
+        merged = self._make_merged(root, "RetMerged")
+        result = unsubscribe_person(
+            target_person=merged,
+            source="manual",
+            source_email="x@example.com",
+        )
+        ids = {p.id for p in result}
+        self.assertEqual(ids, {root.id, merged.id})
+
+
+class CancelUnsubscribeTests(_Phase5UnitTestBase):
+    def test_cancels_all_active_in_unit(self):
+        root = self._make_person("CancRoot")
+        merged = self._make_merged(root, "CancMerged")
+        unsubscribe_person(
+            target_person=root,
+            source="manual",
+            source_email="canc@example.com",
+        )
+        # 全員 active な状態
+        self.assertEqual(
+            Unsubscribe.objects.filter(cancelled_at__isnull=True).count(), 2
+        )
+        cancel_unsubscribe(target_person=root, user=self.user, note="resume")
+        root.refresh_from_db()
+        merged.refresh_from_db()
+        self.assertFalse(root.is_unsubscribed)
+        self.assertFalse(merged.is_unsubscribed)
+        self.assertEqual(
+            Unsubscribe.objects.filter(cancelled_at__isnull=True).count(), 0
+        )
+        for u in Unsubscribe.objects.all():
+            self.assertEqual(u.cancelled_by, self.user)
+
+    def test_cancel_with_no_active_records_just_sets_flag_false(self):
+        alice = self._make_person("Plain")
+        # まだ active な Unsubscribe が無くてもエラーにならない
+        cancel_unsubscribe(target_person=alice, user=self.user)
+        alice.refresh_from_db()
+        self.assertFalse(alice.is_unsubscribed)
+
+
+class PersonRecomputeUnsubscribedStateTests(_Phase5UnitTestBase):
+    def test_true_when_active_unsubscribe_exists(self):
+        alice = self._make_person("Rec1")
+        Unsubscribe.objects.create(
+            person=alice,
+            source_email="rec1@example.com",
+            source=Unsubscribe.Source.MANUAL,
+        )
+        alice.recompute_unsubscribed_state()
+        alice.refresh_from_db()
+        self.assertTrue(alice.is_unsubscribed)
+
+    def test_false_when_no_active_unsubscribe(self):
+        alice = self._make_person("Rec2")
+        # 既に is_unsubscribed=True に設定された人物（不整合状態）
+        Person.objects.filter(pk=alice.pk).update(is_unsubscribed=True)
+        alice.refresh_from_db()
+        alice.recompute_unsubscribed_state()
+        alice.refresh_from_db()
+        self.assertFalse(alice.is_unsubscribed)
+
+    def test_false_when_only_cancelled_unsubscribe(self):
+        alice = self._make_person("Rec3")
+        Unsubscribe.objects.create(
+            person=alice,
+            source_email="rec3@example.com",
+            source=Unsubscribe.Source.MANUAL,
+            cancelled_at=timezone.now(),
+        )
+        # 不整合状態（is_unsubscribed=True なのに active な Unsubscribe なし）にする
+        Person.objects.filter(pk=alice.pk).update(is_unsubscribed=True)
+        alice.refresh_from_db()
+        alice.recompute_unsubscribed_state()
+        alice.refresh_from_db()
+        self.assertFalse(alice.is_unsubscribed)
+
+
+class PersonSetUnsubscribedByAdminTests(_Phase5UnitTestBase):
+    def test_set_unsubscribed_by_admin_propagates_and_records_actionlog(self):
+        root = self._make_person("AdminRoot")
+        merged = self._make_merged(root, "AdminMerged")
+        root.set_unsubscribed_by_admin(user=self.user, note="telephone request")
+
+        root.refresh_from_db()
+        merged.refresh_from_db()
+        self.assertTrue(root.is_unsubscribed)
+        self.assertTrue(merged.is_unsubscribed)
+        self.assertEqual(
+            Unsubscribe.objects.filter(
+                person__in=[root, merged], cancelled_at__isnull=True
+            ).count(),
+            2,
+        )
+        # ActionLog が記録されている
+        log = ActionLog.objects.filter(action=ACTION_UNSUBSCRIBE_BY_ADMIN).get()
+        self.assertEqual(log.user, self.user)
+        self.assertEqual(log.object_repr, str(root))
+        self.assertEqual(log.data["source"], "manual")
+        self.assertIn("telephone", log.note)
+
+    def test_raises_value_error_when_no_primary_contact_email(self):
+        # primary_contact が無い Person
+        broken = Person.objects.create(status="active")
+        with self.assertRaises(ValueError):
+            broken.set_unsubscribed_by_admin(user=self.user)
+
+
+class RecordCancelUnsubscribeActionTests(_Phase5UnitTestBase):
+    def test_record_cancel_unsubscribe_creates_actionlog(self):
+        alice = self._make_person("CancRec")
+        record_cancel_unsubscribe_action(user=self.user, person=alice, note="resume on phone")
+        log = ActionLog.objects.filter(action=ACTION_CANCEL_UNSUBSCRIBE).get()
+        self.assertEqual(log.user, self.user)
+        self.assertEqual(log.data["person_id"], str(alice.pk))
+        self.assertIn("resume", log.note)
+
+
+class RecordUnsubscribeByAdminActionTests(_Phase5UnitTestBase):
+    def test_default_note_when_empty(self):
+        alice = self._make_person("UbyA")
+        record_unsubscribe_by_admin_action(user=self.user, person=alice, note="")
+        log = ActionLog.objects.filter(action=ACTION_UNSUBSCRIBE_BY_ADMIN).get()
+        # 空 note のときデフォルト文言が入る
+        self.assertIn("管理者代行", log.note)
+
+
+# ======================================================================
+# Phase 5 §2：バウンス処理（仕様書 v1.6 §10、rev14）
+# ======================================================================
+
+
+from mailings.services.bounce_processor import (
+    BOUNCE_TYPE_HARD,
+    BOUNCE_TYPE_SOFT,
+    process_bounce,
+    process_hard_bounce,
+    process_send_success,
+    process_soft_bounce,
+)
+
+
+class _Phase5BounceTestBase(TestCase):
+    """バウンス処理テストの共通基底。Campaign / DeliveryHistory を用意する。"""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="phase5_bounce", password="x")
+        self.template = EmailTemplate.objects.create(
+            name="T1", subject="件名", body="本文", created_by=self.user
+        )
+        self.mailing_list = MailingList.objects.create(
+            name="ML1", created_by=self.user
+        )
+        self.person = Person.objects.create(status="active")
+        contact = Contact.objects.create(
+            person=self.person,
+            status=Contact.Status.PRIMARY,
+            full_name="BounceUser",
+            email="bounceuser@example.com",
+            created_by=self.user,
+        )
+        self.person.primary_contact = contact
+        self.person.save(update_fields=["primary_contact", "updated_at"])
+        self.campaign = Campaign.objects.create(
+            name="BounceC",
+            template=self.template,
+            mailing_list=self.mailing_list,
+            created_by=self.user,
+        )
+
+    def _make_history(self, *, to_email, status=None):
+        return DeliveryHistory.objects.create(
+            campaign=self.campaign,
+            person=self.person,
+            to_email=to_email,
+            status=status or DeliveryHistory.Status.SENT,
+        )
+
+
+class ProcessHardBounceTests(_Phase5BounceTestBase):
+    def test_hard_creates_suppressed_email(self):
+        process_hard_bounce("dead@example.com", "550 User unknown")
+        sup = SuppressedEmail.objects.get(email="dead@example.com")
+        self.assertEqual(sup.source, SuppressedEmail.Source.BOUNCE_HARD)
+        self.assertIn("550", sup.bounce_reason)
+
+    def test_hard_idempotent_when_active_exists(self):
+        process_hard_bounce("dead@example.com", "550 User unknown")
+        process_hard_bounce("dead@example.com", "550 second event")
+        # 2 件目は作られない（partial unique で active は 1 件まで）
+        self.assertEqual(
+            SuppressedEmail.objects.filter(
+                email="dead@example.com", cancelled_at__isnull=True
+            ).count(),
+            1,
+        )
+
+
+class ProcessSoftBounceTests(_Phase5BounceTestBase):
+    def test_soft_increments_counter_until_threshold(self):
+        for i in range(1, 5):  # 1..4 回 → SuppressedEmail に昇格しない
+            process_soft_bounce("soft@example.com", f"4xx attempt {i}")
+            counter = SoftBounceCounter.objects.get(email="soft@example.com")
+            self.assertEqual(counter.count, i)
+        # 5 回目で昇格
+        process_soft_bounce("soft@example.com", "4xx attempt 5")
+        self.assertFalse(SoftBounceCounter.objects.filter(email="soft@example.com").exists())
+        sup = SuppressedEmail.objects.get(email="soft@example.com")
+        self.assertEqual(sup.source, SuppressedEmail.Source.BOUNCE_SOFT_PROMOTED)
+
+    def test_soft_skipped_when_already_suppressed(self):
+        SuppressedEmail.objects.create(
+            email="already@example.com",
+            source=SuppressedEmail.Source.BOUNCE_HARD,
+        )
+        process_soft_bounce("already@example.com", "4xx")
+        # SoftBounceCounter は作られない（重複昇格防止）
+        self.assertFalse(
+            SoftBounceCounter.objects.filter(email="already@example.com").exists()
+        )
+
+
+class ProcessSendSuccessTests(_Phase5BounceTestBase):
+    def test_resets_soft_bounce_counter(self):
+        SoftBounceCounter.objects.create(
+            email="reset@example.com", count=3, last_bounce_at=timezone.now()
+        )
+        process_send_success("reset@example.com")
+        self.assertFalse(SoftBounceCounter.objects.filter(email="reset@example.com").exists())
+
+    def test_no_op_when_no_counter(self):
+        # 例外を出さない
+        process_send_success("noop@example.com")
+
+    def test_empty_email_is_noop(self):
+        SoftBounceCounter.objects.create(
+            email="keep@example.com", count=1, last_bounce_at=timezone.now()
+        )
+        process_send_success("")
+        # 空メアドはノーオペ、既存カウンタは残る
+        self.assertTrue(SoftBounceCounter.objects.filter(email="keep@example.com").exists())
+
+
+class ProcessBounceDispatchTests(_Phase5BounceTestBase):
+    def test_hard_dispatches_to_process_hard(self):
+        process_bounce("dh@example.com", BOUNCE_TYPE_HARD, "550")
+        self.assertTrue(
+            SuppressedEmail.objects.filter(email="dh@example.com").exists()
+        )
+
+    def test_soft_dispatches_to_process_soft(self):
+        process_bounce("ds@example.com", BOUNCE_TYPE_SOFT, "421")
+        self.assertEqual(
+            SoftBounceCounter.objects.get(email="ds@example.com").count, 1
+        )
+
+    def test_unknown_bounce_type_raises(self):
+        with self.assertRaises(ValueError):
+            process_bounce("x@example.com", "unknown", "?")
+
+    def test_empty_email_silently_skipped(self):
+        process_bounce("", BOUNCE_TYPE_HARD, "550")
+        self.assertEqual(SuppressedEmail.objects.count(), 0)
+
+
+class DeliveryHistoryBouncedUpdateTests(_Phase5BounceTestBase):
+    def test_best_effort_updates_matching_history(self):
+        h = self._make_history(to_email="target@example.com")
+        process_bounce("target@example.com", BOUNCE_TYPE_HARD, "550 User unknown")
+        h.refresh_from_db()
+        self.assertEqual(h.status, DeliveryHistory.Status.BOUNCED)
+        self.assertIn("550", h.error_message)
+
+    def test_multiple_histories_all_marked(self):
+        # 同一メアドで 2 件 → 全件 bounced（最新 1 件選別ロジックを作らない、§10.4.1）
+        # ただし UniqueConstraint(campaign, person) があるため、別 campaign で 2 件作る
+        campaign2 = Campaign.objects.create(
+            name="BC2",
+            template=self.template,
+            mailing_list=self.mailing_list,
+            created_by=self.user,
+        )
+        h1 = self._make_history(to_email="multi@example.com")
+        h2 = DeliveryHistory.objects.create(
+            campaign=campaign2,
+            person=self.person,
+            to_email="multi@example.com",
+            status=DeliveryHistory.Status.SENT,
+        )
+        process_bounce("multi@example.com", BOUNCE_TYPE_SOFT, "421")
+        h1.refresh_from_db()
+        h2.refresh_from_db()
+        self.assertEqual(h1.status, DeliveryHistory.Status.BOUNCED)
+        self.assertEqual(h2.status, DeliveryHistory.Status.BOUNCED)
+
+
+class SendOneRecipientResetsSoftCounterTests(_Phase5BounceTestBase):
+    """Phase 5 後付け配線：送信成功で SoftBounceCounter リセット（§10.3.2）。"""
+
+    def test_send_success_clears_existing_counter(self):
+        from unittest.mock import patch
+
+        from mailings.services.campaign_send import send_one_recipient
+
+        # 配信前に SoftBounceCounter を仕込む
+        SoftBounceCounter.objects.create(
+            email=self.person.primary_contact.email,
+            count=2,
+            last_bounce_at=timezone.now(),
+        )
+        history = DeliveryHistory.objects.create(
+            campaign=self.campaign,
+            person=self.person,
+            to_email=self.person.primary_contact.email,
+            status=DeliveryHistory.Status.PENDING,
+        )
+        # MailingConfig（送信に必要）
+        MailingConfig.objects.create(
+            company_name="TestCo",
+            company_address="TestAddr",
+            unsubscribe_contact="contact@example.com",
+            dkim_domain="example.com",
+        )
+        # _send_email_via_backend をモックして成功扱い
+        with patch(
+            "mailings.services.campaign_send._send_email_via_backend"
+        ) as mock_send:
+            mock_send.return_value = None
+            ok = send_one_recipient(self.campaign, history)
+        self.assertTrue(ok)
+        # 送信成功で SoftBounceCounter が消えている
+        self.assertFalse(
+            SoftBounceCounter.objects.filter(
+                email=self.person.primary_contact.email
+            ).exists()
+        )
+
+
+# ======================================================================
+# Phase 5 §2b：BounceWebhookView（最小実装、§10.1 / §10.2）
+# ======================================================================
+
+
+from django.test import override_settings as _override_settings_for_webhook
+
+
+@_override_settings_for_webhook(
+    BOUNCE_WEBHOOK_ENABLED=True, BOUNCE_WEBHOOK_SHARED_SECRET="test-secret-token"
+)
+class BounceWebhookViewTests(_Phase5BounceTestBase):
+    """フラグ ON + 正しいシークレット下での挙動（payload 形式バリデーション等）。"""
+
+    SECRET_HEADER_KWARGS = {"HTTP_X_BOUNCE_WEBHOOK_TOKEN": "test-secret-token"}
+
+    def test_valid_hard_payload_creates_suppressed(self):
+        response = self.client.post(
+            "/mailings/bounce/webhook/",
+            data=json.dumps(
+                {"email": "wh@example.com", "bounce_type": "hard", "reason": "550"}
+            ),
+            content_type="application/json",
+            **self.SECRET_HEADER_KWARGS,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(SuppressedEmail.objects.filter(email="wh@example.com").exists())
+
+    def test_invalid_json_returns_400(self):
+        response = self.client.post(
+            "/mailings/bounce/webhook/",
+            data=b"not json",
+            content_type="application/json",
+            **self.SECRET_HEADER_KWARGS,
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_missing_fields_returns_400(self):
+        response = self.client.post(
+            "/mailings/bounce/webhook/",
+            data=json.dumps({"email": "x@example.com"}),
+            content_type="application/json",
+            **self.SECRET_HEADER_KWARGS,
+        )
+        self.assertEqual(response.status_code, 400)
+
+
+# ======================================================================
+# Phase 5 §2c：IMAP ハンドラ パーサ（純関数、§10.1 / §10.2）
+# ======================================================================
+
+
+from mailings.services.bounce_smtp_handler import (
+    parse_bounce_message,
+    process_one_message,
+)
+
+
+class ParseBounceMessageTests(TestCase):
+    def test_extracts_email_and_hard_from_dsn_with_5xx(self):
+        raw = (
+            b"From: postmaster@example.com\r\n"
+            b"To: bounce@freegroup2.example.com\r\n"
+            b"Subject: Delivery Status Notification (Failure)\r\n"
+            b"Failed-Recipients: rfc822; dead@target.com\r\n"
+            b"\r\n"
+            b"550 5.1.1 User unknown\r\n"
+        )
+        result = parse_bounce_message(raw)
+        self.assertIsNotNone(result)
+        email, bounce_type, reason = result
+        self.assertEqual(email, "dead@target.com")
+        self.assertEqual(bounce_type, BOUNCE_TYPE_HARD)
+        self.assertIn("550", reason)
+
+    def test_extracts_soft_from_4xx(self):
+        raw = (
+            b"From: postmaster@example.com\r\n"
+            b"To: bounce@freegroup2.example.com\r\n"
+            b"\r\n"
+            b"421 4.7.0 Service temporarily unavailable; please retry "
+            b"to soft@target.com\r\n"
+        )
+        result = parse_bounce_message(raw)
+        self.assertIsNotNone(result)
+        email, bounce_type, _ = result
+        self.assertEqual(email, "soft@target.com")
+        self.assertEqual(bounce_type, BOUNCE_TYPE_SOFT)
+
+    def test_returns_none_when_no_email_extractable(self):
+        raw = b"From: x\r\n\r\n(empty body)\r\n"
+        self.assertIsNone(parse_bounce_message(raw))
+
+    def test_invalid_bytes_returns_none(self):
+        self.assertIsNone(parse_bounce_message(b""))
+
+
+class ProcessOneMessageTests(_Phase5BounceTestBase):
+    def test_hard_message_results_in_suppressed(self):
+        raw = (
+            b"From: postmaster@example.com\r\n"
+            b"To: bounce@freegroup2.example.com\r\n"
+            b"Failed-Recipients: rfc822; pm-hard@target.com\r\n"
+            b"\r\n"
+            b"550 5.1.1 User unknown\r\n"
+        )
+        ok = process_one_message(raw)
+        self.assertTrue(ok)
+        self.assertTrue(SuppressedEmail.objects.filter(email="pm-hard@target.com").exists())
+
+    def test_unparseable_returns_false(self):
+        self.assertFalse(process_one_message(b"garbage"))
+
+
+# ======================================================================
+# Phase 5 §3：配信停止 受信者 UI（§9.2 / §4.5A.2、URL: /u/ 系）
+# ======================================================================
+
+
+class _Phase5UIBase(TestCase):
+    """受信者 UI / 管理 UI 共通基底。"""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="phase5_ui", password="x")
+        self.template = EmailTemplate.objects.create(
+            name="T1", subject="件名", body="本文", created_by=self.user
+        )
+        self.mailing_list = MailingList.objects.create(
+            name="ML1", created_by=self.user
+        )
+        self.campaign = Campaign.objects.create(
+            name="C1",
+            template=self.template,
+            mailing_list=self.mailing_list,
+            created_by=self.user,
+        )
+
+    def _make_person(self, full_name, email):
+        p = Person.objects.create(status="active")
+        c = Contact.objects.create(
+            person=p,
+            status=Contact.Status.PRIMARY,
+            full_name=full_name,
+            email=email,
+            created_by=self.user,
+        )
+        p.primary_contact = c
+        p.save(update_fields=["primary_contact", "updated_at"])
+        return p
+
+    def _make_unsub_link(self, person, token="utok_xxx", target_email=None):
+        # rev15 §4.5A：target_email は発行時に焼き込まれる必須値。テストでは未指定なら
+        # person.primary_contact.email を焼き込む（実運用と同じ value セマンティクス）。
+        if target_email is None:
+            target_email = (
+                person.primary_contact.email if person.primary_contact else ""
+            )
+        return UnsubscribeLink.objects.create(
+            campaign=self.campaign,
+            person=person,
+            token=token,
+            target_email=target_email,
+        )
+
+
+class UnsubscribePageGetTests(_Phase5UIBase):
+    def test_get_updates_accessed_at_only(self):
+        person = self._make_person("Alice", "alice@example.com")
+        link = self._make_unsub_link(person, token="utok_001")
+        response = self.client.get("/u/utok_001/")
+        self.assertEqual(response.status_code, 200)
+        link.refresh_from_db()
+        self.assertIsNotNone(link.accessed_at)
+        # GET では Unsubscribe / SuppressedEmail / is_unsubscribed を変えない
+        self.assertEqual(Unsubscribe.objects.count(), 0)
+        self.assertEqual(SuppressedEmail.objects.count(), 0)
+        person.refresh_from_db()
+        self.assertFalse(person.is_unsubscribed)
+
+    def test_get_with_invalid_token_redirects_to_tokenless(self):
+        response = self.client.get("/u/nope/")
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], "/u/")
+
+    def test_masked_email_displayed_from_target_email(self):
+        # rev15：表示メアドは UnsubscribeLink.target_email を使う（primary_contact ではない）
+        person = self._make_person("Bob", "robert@example.com")
+        self._make_unsub_link(person, token="utok_002", target_email="snapshot@example.com")
+        response = self.client.get("/u/utok_002/")
+        # snapshot@... が表示される（primary_contact の robert@... ではない）
+        self.assertContains(response, "sna***@example.com")
+        self.assertNotContains(response, "rob***@example.com")
+
+
+class UnsubscribeConfirmPostTests(_Phase5UIBase):
+    def test_post_personal_triggers_unsubscribe_person(self):
+        person = self._make_person("Carol", "carol.t@example.com")
+        link = self._make_unsub_link(person, token="utok_003")
+        response = self.client.post("/u/utok_003/confirm/")
+        self.assertEqual(response.status_code, 302)
+        person.refresh_from_db()
+        self.assertTrue(person.is_unsubscribed)
+        self.assertEqual(
+            Unsubscribe.objects.filter(person=person, cancelled_at__isnull=True).count(),
+            1,
+        )
+        link.refresh_from_db()
+        self.assertIsNotNone(link.unsubscribed_at)
+
+    def test_post_generic_creates_suppressed_email_from_target_email(self):
+        # rev15：個人/代表判定の正本は target_email。primary_contact が個人メアドでも
+        # target_email が代表メアドなら代表経路に倒れる（焼き込み時の事実が優先）。
+        person = self._make_person("MixCase", "personal@example.com")
+        self._make_unsub_link(
+            person, token="utok_004", target_email="info@example.com"
+        )
+        response = self.client.post("/u/utok_004/confirm/")
+        self.assertEqual(response.status_code, 302)
+        person.refresh_from_db()
+        # 代表メアドは Unsubscribe を作らない、Person は停止されない
+        self.assertFalse(person.is_unsubscribed)
+        self.assertEqual(Unsubscribe.objects.count(), 0)
+        # SuppressedEmail は target_email で登録される
+        self.assertTrue(
+            SuppressedEmail.objects.filter(email="info@example.com").exists()
+        )
+
+    def test_post_personal_uses_target_email_even_if_primary_contact_changed(self):
+        # rev15：配信後に primary_contact が代表メアドに差し替わっても、target_email が
+        # 個人メアドなら個人経路で停止する（判定が後天的にブレない、§4.5A）。
+        person = self._make_person("Recipient", "info@example.com")
+        # UnsubscribeLink には個人メアドを焼き込み（発行時の事実）
+        link = self._make_unsub_link(
+            person, token="utok_005a", target_email="personal@example.com"
+        )
+        response = self.client.post("/u/utok_005a/confirm/")
+        self.assertEqual(response.status_code, 302)
+        person.refresh_from_db()
+        # 個人経路 → Person 停止
+        self.assertTrue(person.is_unsubscribed)
+        self.assertEqual(Unsubscribe.objects.count(), 1)
+        # 代表経路の SuppressedEmail は作られない
+        self.assertEqual(SuppressedEmail.objects.count(), 0)
+        link.refresh_from_db()
+        self.assertIsNotNone(link.unsubscribed_at)
+
+    def test_post_propagates_to_unit_for_personal_email_after_merge(self):
+        # rev15：マージ後に merged.primary_contact が NULL になっても、target_email は
+        # 焼き込み済みなので fallback 不要で正常に個人経路 → ユニット全員伝播。
+        root = self._make_person("UnitRoot2", "uroot@example.com")
+        merged = self._make_person("UnitMerged2", "umerged@example.com")
+        # 発行時に target_email を焼き込んだ UnsubscribeLink
+        link = UnsubscribeLink.objects.create(
+            campaign=self.campaign,
+            person=merged,
+            token="utok_005",
+            target_email="umerged@example.com",
+        )
+        # マージ実行（merged.primary_contact が NULL になる）
+        merged.mark_as_merged(root)
+        merged.refresh_from_db()
+        self.assertIsNone(merged.primary_contact)
+
+        self.client.post("/u/utok_005/confirm/")
+        root.refresh_from_db()
+        merged.refresh_from_db()
+        # target_email から個人メアド判定 → unsubscribe_person → ユニット全員伝播
+        self.assertTrue(root.is_unsubscribed)
+        self.assertTrue(merged.is_unsubscribed)
+        # UnsubscribeLink 自体は person=merged のまま、unsubscribed_at は更新
+        link.refresh_from_db()
+        self.assertEqual(link.person_id, merged.id)
+        self.assertIsNotNone(link.unsubscribed_at)
+
+    def test_post_invalid_token_redirects_to_tokenless(self):
+        response = self.client.post("/u/nope/confirm/")
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], "/u/")
+
+
+class UnsubscribeDoneTests(_Phase5UIBase):
+    def test_done_view_does_not_require_unsublink(self):
+        # UnsubscribeLink が無くても 200（仕様書 §4.5A.2：done は UnsubscribeLink を読まない）
+        response = self.client.get("/u/random_token/done/")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "配信停止を受け付けました")
+
+
+class UnsubscribeTokenlessTests(TestCase):
+    def test_tokenless_returns_guidance_page(self):
+        response = self.client.get("/u/")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "正規メール内のリンクから")
+
+
+class MaskEmailHelperTests(TestCase):
+    def test_normal_local_part(self):
+        from mailings.views import _mask_email
+
+        self.assertEqual(_mask_email("robert@example.com"), "rob***@example.com")
+
+    def test_short_local_part(self):
+        from mailings.views import _mask_email
+
+        self.assertEqual(_mask_email("ab@example.com"), "***@example.com")
+
+    def test_empty_returns_empty(self):
+        from mailings.views import _mask_email
+
+        self.assertEqual(_mask_email(""), "")
+
+
+# ======================================================================
+# Phase 5 §4：管理者代行・解除 + SuppressedEmail 管理 UI
+# ======================================================================
+
+
+class _Phase5AdminBase(_Phase5UIBase):
+    """管理 UI テスト共通：権限付き管理者を用意する。"""
+
+    def setUp(self):
+        super().setUp()
+        admin = User.objects.create_user(username="phase5_admin", password="x")
+        perm = Permission.objects.get(codename="manage_suppressed_email")
+        admin.user_permissions.add(perm)
+        self.admin = admin
+        self.admin_client = Client()
+        self.admin_client.force_login(admin)
+
+
+class PersonUnsubscribeByAdminViewTests(_Phase5AdminBase):
+    def test_post_propagates_to_unit_and_records_actionlog(self):
+        root = self._make_person("AdminProp", "adminprop@example.com")
+        merged = self._make_person("AdminPropM", "adminpropm@example.com")
+        merged.mark_as_merged(root)
+        url = f"/mailings/persons/{root.pk}/unsubscribe-by-admin/"
+        response = self.admin_client.post(url, data={"note": "telephone"})
+        self.assertEqual(response.status_code, 302)
+        root.refresh_from_db()
+        merged.refresh_from_db()
+        self.assertTrue(root.is_unsubscribed)
+        self.assertTrue(merged.is_unsubscribed)
+        log = ActionLog.objects.filter(action=ACTION_UNSUBSCRIBE_BY_ADMIN).get()
+        self.assertEqual(log.user, self.admin)
+
+    def test_permission_required(self):
+        person = self._make_person("PermNo", "permno@example.com")
+        # 権限なしユーザ
+        no_perm = User.objects.create_user(username="noperm", password="x")
+        c = Client()
+        c.force_login(no_perm)
+        response = c.post(f"/mailings/persons/{person.pk}/unsubscribe-by-admin/")
+        self.assertEqual(response.status_code, 403)
+
+
+class PersonCancelUnsubscribeViewTests(_Phase5AdminBase):
+    def test_post_cancels_unit_unsubscribe_and_records(self):
+        from mailings.services.unsubscribe import unsubscribe_person
+
+        person = self._make_person("CancAdm", "cancadm@example.com")
+        unsubscribe_person(
+            target_person=person, source="manual", source_email="cancadm@example.com"
+        )
+        url = f"/mailings/persons/{person.pk}/cancel-unsubscribe/"
+        response = self.admin_client.post(url, data={"note": "resume"})
+        self.assertEqual(response.status_code, 302)
+        person.refresh_from_db()
+        self.assertFalse(person.is_unsubscribed)
+        log = ActionLog.objects.filter(action=ACTION_CANCEL_UNSUBSCRIBE).get()
+        self.assertEqual(log.user, self.admin)
+
+
+class SuppressedEmailListViewTests(_Phase5AdminBase):
+    def test_list_renders(self):
+        SuppressedEmail.objects.create(
+            email="list@example.com", source=SuppressedEmail.Source.MANUAL
+        )
+        response = self.admin_client.get("/mailings/suppressed/")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "list@example.com")
+
+
+class SuppressedEmailDetailViewTests(_Phase5AdminBase):
+    def test_get_renders(self):
+        sup = SuppressedEmail.objects.create(
+            email="det@example.com", source=SuppressedEmail.Source.BOUNCE_HARD
+        )
+        response = self.admin_client.get(f"/mailings/suppressed/{sup.pk}/")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "det@example.com")
+
+    def test_post_cancels(self):
+        sup = SuppressedEmail.objects.create(
+            email="canc@example.com", source=SuppressedEmail.Source.MANUAL
+        )
+        response = self.admin_client.post(f"/mailings/suppressed/{sup.pk}/")
+        self.assertEqual(response.status_code, 302)
+        sup.refresh_from_db()
+        self.assertIsNotNone(sup.cancelled_at)
+        self.assertEqual(sup.cancelled_by, self.admin)
+
+
+class SuppressedEmailCreateViewTests(_Phase5AdminBase):
+    def test_post_creates(self):
+        response = self.admin_client.post(
+            "/mailings/suppressed/add/",
+            data={"email": "new@example.com", "note": "added"},
+        )
+        self.assertEqual(response.status_code, 302)
+        sup = SuppressedEmail.objects.get(email="new@example.com")
+        self.assertEqual(sup.source, SuppressedEmail.Source.MANUAL)
+        self.assertEqual(sup.note, "added")
+
+    def test_post_duplicate_active_silently_skipped(self):
+        SuppressedEmail.objects.create(
+            email="dup@example.com", source=SuppressedEmail.Source.MANUAL
+        )
+        response = self.admin_client.post(
+            "/mailings/suppressed/add/",
+            data={"email": "dup@example.com"},
+        )
+        self.assertEqual(response.status_code, 302)
+        # 重複作成されない（partial unique 違反を回避）
+        self.assertEqual(
+            SuppressedEmail.objects.filter(email="dup@example.com").count(), 1
+        )
+
+    def test_post_empty_email_returns_form(self):
+        response = self.admin_client.post("/mailings/suppressed/add/", data={"email": ""})
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "メアドを入力してください")
+
+
+# ======================================================================
+# Phase 5 是正：UnsubscribeLink.target_email 焼き込み（rev15 §4.5A / §9.5.4）
+# ======================================================================
+
+
+class UnsubscribeLinkBuildTargetEmailTests(_Phase5UIBase):
+    """UnsubscribeLink.build() が target_email を必須引数で取り、焼き込むこと（§4.5A）。"""
+
+    def test_build_stores_target_email(self):
+        person = self._make_person("Build1", "build1@example.com")
+        link = UnsubscribeLink.build(
+            campaign=self.campaign, person=person, target_email="build1@example.com"
+        )
+        self.assertEqual(link.target_email, "build1@example.com")
+        # 未保存（DB に書かない）
+        self.assertFalse(
+            UnsubscribeLink.objects.filter(token=link.token).exists()
+        )
+
+    def test_build_with_different_email_than_primary(self):
+        # target_email は person.primary_contact.email と独立（呼び出し元が決める値）
+        person = self._make_person("Build2", "primary@example.com")
+        link = UnsubscribeLink.build(
+            campaign=self.campaign, person=person, target_email="snapshot@example.com"
+        )
+        self.assertEqual(link.target_email, "snapshot@example.com")
+
+
+class UnsubscribeLinkTargetEmailConstraintTests(_Phase5UIBase):
+    """target_email が空文字のまま作成できない構造的担保（§4.5A、rev15 是正）。
+
+    Django の CharField 系デフォルト挙動で「未指定 = 空文字」が入るため、NOT NULL だけ
+    では「target_email を渡さない create」が空文字で通ってしまう。本テストは
+    CheckConstraint(target_email != '') が効いて IntegrityError になることを確認する。
+    """
+
+    def test_create_without_target_email_raises_integrity_error(self):
+        person = self._make_person("NoTarget", "x@example.com")
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                UnsubscribeLink.objects.create(
+                    campaign=self.campaign,
+                    person=person,
+                    token="utok_empty01",
+                    # target_email を渡さない → CharField デフォルトで "" → CheckConstraint 違反
+                )
+
+    def test_create_with_empty_target_email_raises_integrity_error(self):
+        person = self._make_person("EmptyTarget", "y@example.com")
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                UnsubscribeLink.objects.create(
+                    campaign=self.campaign,
+                    person=person,
+                    token="utok_empty02",
+                    target_email="",  # 明示的に空文字でも CheckConstraint で弾く
+                )
+
+
+class EmailContextBakeTargetEmailTests(_Phase5UIBase):
+    """EmailContext.prepare(PRODUCTION) が UnsubscribeLink.target_email に to_email を
+    焼き込むこと（rev15 §4.5A、Phase 3 配線経由）。"""
+
+    def test_production_bakes_to_email_into_unsubscribe_link(self):
+        from mailings.services.email_context import EmailContext, EmailMode
+
+        # body にカスタムタグを含むテンプレート
+        template = EmailTemplate.objects.create(
+            name="UnsubT",
+            subject="件名",
+            body="本文 {% unsubscribe_link %}",
+            created_by=self.user,
+        )
+        # MailingConfig（送信に必要）
+        MailingConfig.objects.create(
+            company_name="TestCo",
+            company_address="TestAddr",
+            unsubscribe_contact="contact@example.com",
+            dkim_domain="example.com",
+        )
+        person = self._make_person("Bake", "baked-recipient@example.com")
+        campaign = Campaign.objects.create(
+            name="BakeC",
+            template=template,
+            mailing_list=self.mailing_list,
+            created_by=self.user,
+        )
+        ctx = EmailContext.prepare(campaign, person, EmailMode.PRODUCTION)
+        self.assertEqual(len(ctx.unsubscribe_links), 1)
+        # target_email = ctx.to_email = person.primary_contact.email
+        self.assertEqual(ctx.unsubscribe_links[0].target_email, "baked-recipient@example.com")
+        self.assertEqual(ctx.to_email, "baked-recipient@example.com")
+
+
+# ======================================================================
+# Phase 5 是正：BounceWebhookView 防御（settings フラグ + 共有シークレット、rev15）
+# ======================================================================
+
+
+from django.test import override_settings
+
+
+@override_settings(BOUNCE_WEBHOOK_ENABLED=False)
+class BounceWebhookDisabledTests(_Phase5BounceTestBase):
+    """フラグ OFF（既定）で 404 を返し process_bounce に到達しない。"""
+
+    def test_disabled_returns_404(self):
+        response = self.client.post(
+            "/mailings/bounce/webhook/",
+            data=json.dumps(
+                {"email": "x@example.com", "bounce_type": "hard", "reason": "550"}
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 404)
+        # process_bounce に到達していない（SuppressedEmail も作られない）
+        self.assertFalse(SuppressedEmail.objects.filter(email="x@example.com").exists())
+
+
+@override_settings(BOUNCE_WEBHOOK_ENABLED=True, BOUNCE_WEBHOOK_SHARED_SECRET="")
+class BounceWebhookSecretMissingTests(_Phase5BounceTestBase):
+    """フラグ ON でも共有シークレット未設定なら 404（設定漏れの暴露を防ぐ）。"""
+
+    def test_missing_secret_returns_404(self):
+        response = self.client.post(
+            "/mailings/bounce/webhook/",
+            data=json.dumps(
+                {"email": "x@example.com", "bounce_type": "hard", "reason": "550"}
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(SuppressedEmail.objects.filter(email="x@example.com").exists())
+
+
+@override_settings(
+    BOUNCE_WEBHOOK_ENABLED=True, BOUNCE_WEBHOOK_SHARED_SECRET="s3cr3t-token"
+)
+class BounceWebhookSecretMismatchTests(_Phase5BounceTestBase):
+    """シークレット不一致は 404 で弾き、process_bounce に到達しない。"""
+
+    def test_mismatch_returns_404(self):
+        response = self.client.post(
+            "/mailings/bounce/webhook/",
+            data=json.dumps(
+                {"email": "x@example.com", "bounce_type": "hard", "reason": "550"}
+            ),
+            content_type="application/json",
+            HTTP_X_BOUNCE_WEBHOOK_TOKEN="wrong",
+        )
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(SuppressedEmail.objects.filter(email="x@example.com").exists())
+
+    def test_missing_header_returns_404(self):
+        response = self.client.post(
+            "/mailings/bounce/webhook/",
+            data=json.dumps(
+                {"email": "x@example.com", "bounce_type": "hard", "reason": "550"}
+            ),
+            content_type="application/json",
+            # ヘッダなし
+        )
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(SuppressedEmail.objects.filter(email="x@example.com").exists())
+
+    def test_correct_secret_proceeds(self):
+        response = self.client.post(
+            "/mailings/bounce/webhook/",
+            data=json.dumps(
+                {"email": "ok@example.com", "bounce_type": "hard", "reason": "550"}
+            ),
+            content_type="application/json",
+            HTTP_X_BOUNCE_WEBHOOK_TOKEN="s3cr3t-token",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(SuppressedEmail.objects.filter(email="ok@example.com").exists())

@@ -160,13 +160,19 @@ def _unsubscribe_url_tokenless() -> str:
 
 
 def _render_custom_tags_production(
-    body: str, campaign, person, tracking_links: list, unsubscribe_links: list
+    body: str,
+    campaign,
+    person,
+    to_email: str,
+    tracking_links: list,
+    unsubscribe_links: list,
 ) -> str:
     """PRODUCTION mode：記法を build() でトークン付きリンクに変換（§7.4.6.4）。
 
     [性質] 副作用あり（純関数引数の tracking_links/unsubscribe_links に append、
            build 自体は DB 書き込みなし）
     [入力] body: HTML 化済み本文（escape + <br> 適用済み、`"`→`&quot;`、URL 内 `&`→`&amp;`）
+           to_email: 送信先メアド（UnsubscribeLink.target_email に焼き込む、rev15 §4.5A）
     [出力] str（<a> タグに変換済み）
 
     抽出した URL は ② でエスケープ済みなので `html.unescape` で生 URL に戻して
@@ -201,7 +207,7 @@ def _render_custom_tags_production(
     # 形態 2（テキスト指定）を先に処理して、形態 1（単独タグ）が拾ってしまわないようにする。
     def _replace_unsubscribe_with_text(match):
         text = match.group(1)
-        link = UL.build(campaign=campaign, person=person)
+        link = UL.build(campaign=campaign, person=person, target_email=to_email)
         unsubscribe_links.append(link)
         return f'<a href="{_unsubscribe_url(link.token)}">{text}</a>'
 
@@ -213,7 +219,7 @@ def _render_custom_tags_production(
         if unsubscribe_links:
             link = unsubscribe_links[0]
         else:
-            link = UL.build(campaign=campaign, person=person)
+            link = UL.build(campaign=campaign, person=person, target_email=to_email)
             unsubscribe_links.append(link)
         return f'<a href="{_unsubscribe_url(link.token)}">{UNSUBSCRIBE_DEFAULT_LABEL}</a>'
 
@@ -333,6 +339,9 @@ class EmailContext:
         # 件名：差し込みのみ（HTML 化しない、§7.4.4.4）。
         subject_rendered = _render_subject(template.subject, contact, sender)
 
+        # to_email を先に確定（UnsubscribeLink.target_email へ焼き込むため、rev15 §4.5A）
+        to_email = contact.email if contact else ""
+
         # 本文：処理順 ① 差し込み生値置換
         body = _render_merge_field(template.body, contact, sender)
         # 処理順 ② プレーンテキスト全体を HTML エスケープ + 改行 → <br>
@@ -342,7 +351,7 @@ class EmailContext:
         unsubscribe_links: list = []
         if mode is EmailMode.PRODUCTION:
             body = _render_custom_tags_production(
-                body, campaign, person, tracking_links, unsubscribe_links
+                body, campaign, person, to_email, tracking_links, unsubscribe_links
             )
         else:
             body = _render_custom_tags_test_or_preview(body)
@@ -354,8 +363,6 @@ class EmailContext:
         else:
             from_email = sender.email
             from_name = sender.get_full_name()
-
-        to_email = contact.email if contact else ""
 
         return cls(
             campaign=campaign,

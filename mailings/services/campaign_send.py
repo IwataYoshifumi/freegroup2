@@ -188,6 +188,14 @@ def send_one_recipient(campaign: Campaign, history: DeliveryHistory) -> bool:
         history.sent_at = timezone.now()
         history.error_message = ""
         history.save(update_fields=["status", "sent_at", "error_message"])
+
+        # Phase 5（後付け配線、§10.3.2 / §4.8A.2）：送信成功で SoftBounceCounter を
+        # リセット。連続方式のソフトバウンス計数は「送信成功で連続が切れる」設計のため、
+        # ここで明示的に呼ぶ。同 1 atomic 内なので send 成功と原子性が揃う。
+        from mailings.services.bounce_processor import process_send_success
+
+        process_send_success(history.to_email)
+
         return True
 
 

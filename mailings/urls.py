@@ -29,8 +29,68 @@ urlpatterns = [
         name="tracking_redirect",
     ),
     # ==================================================================
+    # 仕様書 v1.6 §5.1 No.35〜37 / No.41（Phase 5）：配信停止リンク、極短 URL。
+    # GET = 確認画面表示・accessed_at 更新のみ（プリフェッチ事故防止、§9.2 / §5.2.2）
+    # POST confirm = 停止確定、unsubscribed_at 更新、done へ 302
+    # GET done = 完了画面（UnsubscribeLink は読まない、§4.5A.2）
+    # GET /u/ = トークン無し独立ルート、案内表示のみ（メアド手入力 UI なし、§4.5A.2.1）
+    # ==================================================================
+    path(
+        "u/",
+        views.UnsubscribeTokenlessView.as_view(),
+        name="unsubscribe_page_tokenless",
+    ),
+    path(
+        "u/<str:token>/",
+        views.UnsubscribePageView.as_view(),
+        name="unsubscribe_page",
+    ),
+    path(
+        "u/<str:token>/confirm/",
+        views.UnsubscribeConfirmView.as_view(),
+        name="unsubscribe_confirm",
+    ),
+    path(
+        "u/<str:token>/done/",
+        views.UnsubscribeDoneView.as_view(),
+        name="unsubscribe_done",
+    ),
+    # ==================================================================
     # /mailings/ 配下：通常の管理画面・AJAX エンドポイント
     # ==================================================================
+    # Phase 5（仕様書 §5.1 No.17/18/19）：SuppressedEmail 管理
+    path(
+        "mailings/suppressed/",
+        views.SuppressedEmailListView.as_view(),
+        name="suppressed_list",
+    ),
+    path(
+        "mailings/suppressed/add/",
+        views.SuppressedEmailCreateView.as_view(),
+        name="suppressed_create",
+    ),
+    path(
+        "mailings/suppressed/<uuid:pk>/",
+        views.SuppressedEmailDetailView.as_view(),
+        name="suppressed_detail",
+    ),
+    # Phase 5（§9.8 / §9.3.1）：管理者代行・解除（Person 詳細画面から呼ぶ）
+    path(
+        "mailings/persons/<uuid:pk>/unsubscribe-by-admin/",
+        views.PersonUnsubscribeByAdminView.as_view(),
+        name="person_unsubscribe_by_admin",
+    ),
+    path(
+        "mailings/persons/<uuid:pk>/cancel-unsubscribe/",
+        views.PersonCancelUnsubscribeView.as_view(),
+        name="person_cancel_unsubscribe",
+    ),
+    # Phase 5（§10.1 / §10.2）：バウンス Webhook 受け口（外部 MTA 用、最小実装）
+    path(
+        "mailings/bounce/webhook/",
+        views.BounceWebhookView.as_view(),
+        name="bounce_webhook",
+    ),
     # MailingList CRUD（§5.1 No.27〜31 + No.33 改）
     path(
         "mailings/lists/", views.MailingListListView.as_view(), name="mailing_list_list"

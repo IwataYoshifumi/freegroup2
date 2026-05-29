@@ -2268,3 +2268,501 @@ class TrackingRedirectView(View):
             )
 
         return HttpResponseRedirect(tracking_link.original_url)
+
+
+# ======================================================================
+# Phase 5：バウンス Webhook 受け口 + 配信停止 受信者 UI + 管理者代行・解除 UI +
+# SuppressedEmail 管理 UI（仕様書 v1.6 §10.2 / §9 / §4.5A.2 / §4.8 / §6.2.7、rev14）
+# ======================================================================
+
+
+from django.utils.decorators import method_decorator
+from django.views.decorators.csrf import csrf_exempt
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class BounceWebhookView(View):
+    """外部 MTA（SES 等）からの Webhook 受け口（§10.1 / §10.2、Phase 5 / rev15 是正）。
+
+    【無防備な攻撃面にしないための多段防御（rev15 是正）】
+    SuppressedEmail フィルタは OFF 不可・常時 ON 固定（§10.0）のため、無防備な
+    Webhook 経由で任意メアドを `SuppressedEmail(bounce_hard)` に登録できると
+    「生きている顧客に二度と配信できなくする」攻撃が外部から成立する。これを防ぐため：
+
+      1. settings.BOUNCE_WEBHOOK_ENABLED が True でないと一切受け付けない（既定 False）
+      2. settings.BOUNCE_WEBHOOK_SHARED_SECRET が設定されていないと一切受け付けない
+      3. リクエストヘッダ X-Bounce-Webhook-Token が共有シークレットと一致しないと
+         一切受け付けない
+
+    上記いずれかで弾くときは 404 を返してエンドポイントの存在を隠す（攻撃者に情報を
+    与えない）。FreeGroup2 のデフォルト運用は自社 SMTP（cron ポーリング）なので、
+    大半の顧客で本エンドポイントは無効のまま安全に放置できる。
+
+    【本 Phase の実装範囲】
+    プロバイダ別 JSON 解析（SES Notification / EventBridge 形式）と正式な署名検証
+    （HMAC 等）の作り込みは v1.6 後続 / 実運用後とする（コメントは維持）。本 View は
+    「無防備な受け口を塞ぐ」ことに徹し、ペイロード形式は generic JSON で受ける。
+    """
+
+    http_method_names = ["post"]
+
+    SECRET_HEADER = "HTTP_X_BOUNCE_WEBHOOK_TOKEN"
+
+    def post(self, request):
+        import json
+
+        from django.conf import settings
+        from django.http import Http404, JsonResponse
+
+        from mailings.services.bounce_processor import (
+            BOUNCE_TYPE_HARD,
+            BOUNCE_TYPE_SOFT,
+            process_bounce,
+        )
+
+        # 防御 1：settings フラグでデフォルト無効化（既定 False、§10.1 / rev15 是正）
+        if not getattr(settings, "BOUNCE_WEBHOOK_ENABLED", False):
+            raise Http404
+
+        # 防御 2：共有シークレット未設定なら受け付けない（設定漏れで開きっぱなしを防ぐ）
+        secret = getattr(settings, "BOUNCE_WEBHOOK_SHARED_SECRET", "") or ""
+        if not secret:
+            raise Http404
+
+        # 防御 3：ヘッダのトークンが一致しないと受け付けない（不一致も 404 で存在を隠す）
+        provided = request.META.get(self.SECRET_HEADER, "") or ""
+        if provided != secret:
+            raise Http404
+
+        try:
+            payload = json.loads(request.body.decode("utf-8") or "{}")
+        except (ValueError, UnicodeDecodeError):
+            return JsonResponse({"error": "invalid json"}, status=400)
+
+        # generic JSON フォーマット { "email": "...", "bounce_type": "hard|soft",
+        # "reason": "..." }。プロバイダ別アダプタは v1.6 後続で追加（§10.1 末尾）。
+        target_email = (payload.get("email") or "").strip()
+        bounce_type = (payload.get("bounce_type") or "").strip().lower()
+        reason = (payload.get("reason") or "")[:5000]
+
+        if not target_email or bounce_type not in (BOUNCE_TYPE_HARD, BOUNCE_TYPE_SOFT):
+            return JsonResponse({"error": "missing email or bounce_type"}, status=400)
+
+        try:
+            process_bounce(target_email, bounce_type, reason)
+        except Exception as exc:
+            # 5xx で外部 MTA に再送を促す挙動が必要なら status 500 を返すが、
+            # 現状は受信側エラーで再送ループに陥らないよう 200 で握り潰す方針
+            # （Phase 5 後続で適切な戦略を選ぶ）
+            import logging
+
+            logging.getLogger(__name__).exception(
+                "BounceWebhookView: process_bounce raised: %s", exc
+            )
+            return JsonResponse({"status": "error", "detail": str(exc)}, status=200)
+
+        return JsonResponse({"status": "ok"})
+
+
+# ----------------------------------------------------------------------
+# 配信停止 受信者 UI（§9.2 / §4.5A.2、URL: /u/<token>/ 系）
+# ----------------------------------------------------------------------
+
+
+def _mask_email(email: str) -> str:
+    """メアドの local 部を 3 文字 + *** で覆う表示用ヘルパー（§6.2.7）。
+
+    [性質] 純関数
+    [入力] email: str（例 "tan_tan@example.com"）
+    [出力] str（例 "tan***@example.com"）。短すぎる local 部は全マスクで返す。
+    """
+    if not email or "@" not in email:
+        return ""
+    local, _, domain = email.partition("@")
+    if len(local) <= 3:
+        return f"***@{domain}"
+    return f"{local[:3]}***@{domain}"
+
+
+def _is_generic_email(email: str) -> bool:
+    """メアドの local 部が代表メアド扱いか判定する（§9.1、Phase 5）。
+
+    [性質] 純関数
+    [入力] email: str
+    [出力] bool（代表メアド扱いなら True）
+
+    DUPLICATE_GENERIC_EMAIL_LOCALPARTS（v1.4.2 §8.7）と完全一致照合。
+    大文字小文字は区別しない。
+    """
+    from config.constants import DUPLICATE_GENERIC_EMAIL_LOCALPARTS
+
+    if not email or "@" not in email:
+        return False
+    local = email.split("@", 1)[0].lower()
+    return local in DUPLICATE_GENERIC_EMAIL_LOCALPARTS
+
+
+class UnsubscribePageView(View):
+    """GET /u/<token>/：配信停止確認画面表示（§9.2 / §6.2.7、Phase 5 / rev15 是正）。
+
+    【プリフェッチ事故防止】 GET では何も状態を変えない。具体的には
+    UnsubscribeLink.accessed_at だけを更新（受信者が画面を開いた事実の記録）し、
+    Unsubscribe / SuppressedEmail の作成・is_unsubscribed の変更は POST 確定まで行わない
+    （§5.2.2 / §9.2、Gmail/Outlook のリンクプリフェッチ事故防止）。
+
+    【rev15 是正】 画面表示するメアドは UnsubscribeLink.target_email（発行時に焼き込み）
+    を使う。configent person.primary_contact から推定しない（配信後に primary_contact が
+    差し替わると判定がブレるため、§4.5A / §9.5.4）。
+
+    無効トークン時の遷移：トークン無し独立ルート `/u/` にリダイレクト
+    （§4.5A.2.1 「無効トークン時の遷移はコード君判断」）。
+    """
+
+    http_method_names = ["get"]
+
+    def get(self, request, token):
+        from django.shortcuts import redirect, render
+        from django.utils import timezone
+
+        from .models import UnsubscribeLink
+
+        try:
+            unsub_link = UnsubscribeLink.objects.get(token=token)
+        except UnsubscribeLink.DoesNotExist:
+            # 無効トークン → 案内画面へ
+            return redirect("mailings:unsubscribe_page_tokenless")
+
+        # accessed_at 更新（GET の唯一の副作用、§4.5A.2）
+        UnsubscribeLink.objects.filter(pk=unsub_link.pk).update(
+            accessed_at=timezone.now()
+        )
+
+        return render(
+            request,
+            "mailings/unsubscribe_page.html",
+            {
+                "token": token,
+                "masked_email": _mask_email(unsub_link.target_email),
+            },
+        )
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class UnsubscribeConfirmView(View):
+    """POST /u/<token>/confirm/：配信停止確定（§9.2.1 / §9.5 / §4.5A.2、rev15 是正）。
+
+    【rev15 是正】 個人/代表メアド判定の正本を `UnsubscribeLink.target_email`
+    （発行時に焼き込み済み）に一本化。configent person.primary_contact から推定する
+    fallback ロジックは撤去（target_email は build() で必ず焼き込まれるため不要、§9.5.4）。
+
+    POST のみ。target_email のローカル部を DUPLICATE_GENERIC_EMAIL_LOCALPARTS と照合：
+      - 個人 → unsubscribe_person(target_person=link.person, ...)：同一人物ユニット
+        全員伝播（§9.5）。停止主語は `person` フィールド（target_email ではない）。
+      - 代表 → SuppressedEmail に target_email を直接登録（判定と登録メアドを一致）。
+    成功後、unsubscribed_at を更新して done 画面に 302 リダイレクト。
+
+    CSRF 免除：受信メール内のフォームから POST されるため。トークンが推測困難な
+    乱数（secrets.token_urlsafe(8)）なので CSRF の二重認証は不要（§4.5A）。
+    """
+
+    http_method_names = ["post"]
+
+    def post(self, request, token):
+        from django.shortcuts import redirect
+        from django.utils import timezone
+
+        from .models import SuppressedEmail, UnsubscribeLink
+        from .services.unsubscribe import unsubscribe_person
+
+        try:
+            unsub_link = UnsubscribeLink.objects.get(token=token)
+        except UnsubscribeLink.DoesNotExist:
+            return redirect("mailings:unsubscribe_page_tokenless")
+
+        target_email = unsub_link.target_email or ""
+
+        if not target_email:
+            # target_email は build() で必ず焼き込まれる前提。空の場合は仕様外データ
+            # （rev15 より前に作成された UnsubscribeLink で default="" が入った等の
+            # マイグレ過渡期データ）。受信者には完了と見せて WARN ログを残す。
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "UnsubscribeConfirmView: target_email is empty for token %s "
+                "(legacy data prior to rev15?)",
+                token,
+            )
+        elif _is_generic_email(target_email):
+            # 代表メアド：SuppressedEmail に target_email を直接登録（§9.1 / §9.5.4）。
+            # Person 単位の Unsubscribe は作らない（停止主語は会社単位のメアド）。
+            with transaction.atomic():
+                active = SuppressedEmail.objects.filter(
+                    email=target_email, cancelled_at__isnull=True
+                ).exists()
+                if not active:
+                    SuppressedEmail.objects.create(
+                        email=target_email,
+                        source=SuppressedEmail.Source.UNSUBSCRIBE_GENERIC,
+                    )
+        else:
+            # 個人メアド：unsubscribe_person で同一人物ユニット全員伝播（§9.5）。
+            # 停止主語は person フィールド（target_email ではない、§4.5A 補足）。
+            unsubscribe_person(
+                target_person=unsub_link.person,
+                source="unsubscribe_link",
+                source_email=target_email,
+            )
+
+        # UnsubscribeLink.unsubscribed_at 更新（§4.5A.2、§9.5.4 のマージ後経路でも同じ）
+        UnsubscribeLink.objects.filter(pk=unsub_link.pk).update(
+            unsubscribed_at=timezone.now()
+        )
+
+        return redirect("mailings:unsubscribe_done", token=token)
+
+
+class UnsubscribeDoneView(View):
+    """GET /u/<token>/done/：配信停止完了画面（§4.5A.2、Phase 5）。
+
+    UnsubscribeLink は読まない（仕様書 §4.5A.2 末尾「done は UnsubscribeLink を読まない」）。
+    トークン値は URL パスから受け取るが状態確認には使わない（ブックマーク再訪・
+    リロード耐性のため UnsubscribeLink を引かない設計）。
+    """
+
+    http_method_names = ["get"]
+
+    def get(self, request, token):
+        from django.shortcuts import render
+
+        return render(request, "mailings/unsubscribe_done.html", {})
+
+
+class UnsubscribeTokenlessView(View):
+    """GET /u/：トークン無し独立ルート、案内表示のみ（§4.5A.2.1 / §5.1 No.41）。
+
+    【メアド手入力 UI は設けない】 第三者が他人のメアドを入力して勝手に配信停止できる
+    悪用を構造的に断つ（§4.5A.2.1）。
+    用途：
+      (a) テスト配信・プレビューの {% unsubscribe_link %} がトークン無しで /u/ に変換
+      (b) 本番メールの /u/<token>/ で無効トークン時のフォールバック（UnsubscribePageView
+          が redirect する）
+    """
+
+    http_method_names = ["get"]
+
+    def get(self, request):
+        from django.shortcuts import render
+
+        return render(request, "mailings/unsubscribe_tokenless.html", {})
+
+
+# ----------------------------------------------------------------------
+# 管理者代行・解除 UI（§9.8 / §9.3.1、Person 詳細から呼ぶ）
+# ----------------------------------------------------------------------
+
+
+@method_decorator(
+    permission_required(
+        "mailings.manage_suppressed_email", raise_exception=True
+    ),
+    name="dispatch",
+)
+class PersonUnsubscribeByAdminView(LoginRequiredMixin, View):
+    """POST /mailings/persons/<uuid:pk>/unsubscribe-by-admin/（§9.8、Phase 5）。
+
+    Person 詳細画面の「配信停止する」ボタンから呼ばれる。`Person.set_unsubscribed_by_admin`
+    が内部で `unsubscribe_person(source='manual', ...)` + ActionLog 記録を実行。
+    完了後は Person 詳細画面に PRG で戻る（messages.success メッセージ付き）。
+
+    権限：`mailings.manage_suppressed_email` 持ち（管理者代行枠）。
+    """
+
+    http_method_names = ["post"]
+
+    def post(self, request, pk):
+        from django.contrib import messages
+        from django.shortcuts import get_object_or_404, redirect
+
+        from persons.models import Person
+
+        person = get_object_or_404(Person, pk=pk)
+        note = request.POST.get("note", "").strip()
+        try:
+            person.set_unsubscribed_by_admin(user=request.user, note=note)
+        except ValueError as exc:
+            messages.error(request, f"配信停止できません: {exc}")
+        else:
+            messages.success(request, "配信停止を受け付けました（同一人物ユニット全員）。")
+        return redirect("persons:person_detail", pk=pk)
+
+
+@method_decorator(
+    permission_required(
+        "mailings.manage_suppressed_email", raise_exception=True
+    ),
+    name="dispatch",
+)
+class PersonCancelUnsubscribeView(LoginRequiredMixin, View):
+    """POST /mailings/persons/<uuid:pk>/cancel-unsubscribe/（§9.3.1、Phase 5）。
+
+    管理者による配信停止解除。`cancel_unsubscribe` サービス関数 + ActionLog 記録。
+    完了後 Person 詳細画面に PRG で戻る。
+    """
+
+    http_method_names = ["post"]
+
+    def post(self, request, pk):
+        from django.contrib import messages
+        from django.shortcuts import get_object_or_404, redirect
+
+        from persons.models import Person
+
+        from .services.audit import record_cancel_unsubscribe_action
+        from .services.unsubscribe import cancel_unsubscribe
+
+        person = get_object_or_404(Person, pk=pk)
+        note = request.POST.get("note", "").strip()
+        cancel_unsubscribe(target_person=person, user=request.user, note=note)
+        record_cancel_unsubscribe_action(user=request.user, person=person, note=note)
+        messages.success(request, "配信停止を解除しました（同一人物ユニット全員）。")
+        return redirect("persons:person_detail", pk=pk)
+
+
+# ----------------------------------------------------------------------
+# SuppressedEmail 管理 UI（§5.1 No.17/18/19、§4.8）
+# ----------------------------------------------------------------------
+
+
+@method_decorator(
+    permission_required(
+        "mailings.manage_suppressed_email", raise_exception=True
+    ),
+    name="dispatch",
+)
+class SuppressedEmailListView(LoginRequiredMixin, ListView):
+    """GET /mailings/suppressed/：配信拒否メアド一覧（§5.1 No.17、Phase 5）。"""
+
+    template_name = "mailings/suppressed_list.html"
+    context_object_name = "suppressed_emails"
+    paginate_by = 50
+
+    def get_queryset(self):
+        from .models import SuppressedEmail
+
+        # active を先に、解除済みは後ろ。created_at 降順
+        return SuppressedEmail.objects.all().order_by(
+            "cancelled_at", "-created_at"
+        )
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        ctx["back"] = BackNavigator(self.request)
+        ctx["active_app"] = "mailings"
+        return ctx
+
+
+@method_decorator(
+    permission_required(
+        "mailings.manage_suppressed_email", raise_exception=True
+    ),
+    name="dispatch",
+)
+class SuppressedEmailDetailView(LoginRequiredMixin, View):
+    """GET/POST /mailings/suppressed/<uuid:pk>/：詳細表示＋解除（§5.1 No.18、Phase 5）。
+
+    POST で cancelled_at = now() / cancelled_by = request.user に更新（論理削除、§4.8.1）。
+    解除後、同一メアド宛配信が解禁される。
+    """
+
+    def get(self, request, pk):
+        from django.shortcuts import get_object_or_404, render
+
+        from .models import SuppressedEmail
+
+        sup = get_object_or_404(SuppressedEmail, pk=pk)
+        return render(
+            request,
+            "mailings/suppressed_detail.html",
+            {
+                "suppressed": sup,
+                "back": BackNavigator(request),
+                "active_app": "mailings",
+            },
+        )
+
+    def post(self, request, pk):
+        from django.contrib import messages
+        from django.shortcuts import get_object_or_404, redirect
+        from django.utils import timezone
+
+        from .models import SuppressedEmail
+
+        sup = get_object_or_404(SuppressedEmail, pk=pk)
+        if sup.cancelled_at is None:
+            sup.cancelled_at = timezone.now()
+            sup.cancelled_by = request.user
+            sup.save(update_fields=["cancelled_at", "cancelled_by", "updated_at"])
+            messages.success(request, "配信拒否を解除しました。")
+        else:
+            messages.info(request, "既に解除済みです。")
+        return redirect("mailings:suppressed_detail", pk=pk)
+
+
+@method_decorator(
+    permission_required(
+        "mailings.manage_suppressed_email", raise_exception=True
+    ),
+    name="dispatch",
+)
+class SuppressedEmailCreateView(LoginRequiredMixin, View):
+    """GET/POST /mailings/suppressed/add/：管理者手動登録（§5.1 No.19、Phase 5）。
+
+    POST 時は source='manual' で SuppressedEmail を作成。既に active な同 email
+    レコードがある場合はメッセージ表示のみ（重複作成しない、§4.8.1）。
+    """
+
+    def get(self, request):
+        from django.shortcuts import render
+
+        return render(
+            request,
+            "mailings/suppressed_create.html",
+            {
+                "back": BackNavigator(request),
+                "active_app": "mailings",
+            },
+        )
+
+    def post(self, request):
+        from django.contrib import messages
+        from django.shortcuts import redirect, render
+
+        from .models import SuppressedEmail
+
+        email = (request.POST.get("email", "") or "").strip()
+        note = (request.POST.get("note", "") or "").strip()
+        if not email:
+            messages.error(request, "メアドを入力してください。")
+            return render(
+                request,
+                "mailings/suppressed_create.html",
+                {
+                    "back": BackNavigator(request),
+                    "active_app": "mailings",
+                },
+            )
+
+        with transaction.atomic():
+            already_active = SuppressedEmail.objects.filter(
+                email=email, cancelled_at__isnull=True
+            ).exists()
+            if already_active:
+                messages.info(request, f"{email} は既に登録済みです。")
+            else:
+                SuppressedEmail.objects.create(
+                    email=email,
+                    source=SuppressedEmail.Source.MANUAL,
+                    note=note,
+                )
+                messages.success(request, f"{email} を配信拒否に登録しました。")
+        return redirect("mailings:suppressed_list")
