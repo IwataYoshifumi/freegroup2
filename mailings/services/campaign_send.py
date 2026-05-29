@@ -33,7 +33,7 @@ from config.constants import (
     CAMPAIGN_RECIPIENT_MAX_FAILURES,
     CAMPAIGN_SEND_BATCH_LIMIT,
 )
-from mailings.models import Campaign, DeliveryHistory
+from mailings.models import Campaign, DeliveryHistory, MailingList
 from mailings.services.audit import (
     record_send_campaign_action,
     record_unsubscribe_filter_off_send,
@@ -276,9 +276,20 @@ def execute_campaign_send(
         if not campaign.apply_unsubscribe_filter:
             # §7.8.4：creator × OFF の場合のみ追加で監査（newsletter × OFF は手順 1 で拒否済み）
             record_unsubscribe_filter_off_send(invocation_actor, campaign)
-        campaign.status = Campaign.Status.SENDING
-        campaign.started_at = timezone.now()
-        campaign.save(update_fields=["status", "started_at", "updated_at"])
+        # rev16 §4.2.1 / §11.4.3：status の SCHEDULED → SENDING 遷移と
+        # mailing_list.members_frozen_at セットを 1 トランザクションで束ねる。
+        # 「status=SENDING なのに members_frozen_at=NULL」を構造的に作らせない。
+        # 冪等性（§19 論点 21）：filter(members_frozen_at__isnull=True).update()
+        # の 1 SQL で「最初に立った時刻で確定」を表現する。同一リストを複数
+        # キャンペーンが参照しても 2 件目以降は UPDATE 影響行 0 で何もしない。
+        with transaction.atomic():
+            now = timezone.now()
+            campaign.status = Campaign.Status.SENDING
+            campaign.started_at = now
+            campaign.save(update_fields=["status", "started_at", "updated_at"])
+            MailingList.objects.filter(
+                pk=campaign.mailing_list_id, members_frozen_at__isnull=True
+            ).update(members_frozen_at=now)
 
     # 4. 未送信受信者を batch_limit 件取得して 1 受信者ずつ送信
     summary = {"processed": 0, "sent": 0, "failed": 0}

@@ -4194,6 +4194,83 @@ class ExecuteCampaignSendTests(_Phase3TestBase):
         campaign.refresh_from_db()
         self.assertEqual(campaign.status, Campaign.Status.DONE)
 
+    def test_first_invocation_freezes_mailing_list_members(self):
+        """rev16 §4.2.1 / §11.4.3：SCHEDULED → SENDING 遷移時に当該リストの
+        members_frozen_at を現在時刻でセットする。"""
+        p1 = self._make_person("Alice")
+        self._add_member(self.mailing_list, p1)
+        # 事前条件：リストは未凍結
+        self.assertIsNone(self.mailing_list.members_frozen_at)
+        campaign = self._make_campaign()
+        before = timezone.now()
+        execute_campaign_send(campaign)
+        after = timezone.now()
+        self.mailing_list.refresh_from_db()
+        self.assertIsNotNone(self.mailing_list.members_frozen_at)
+        # 現在時刻でセットされている（before ≤ frozen ≤ after）
+        self.assertGreaterEqual(self.mailing_list.members_frozen_at, before)
+        self.assertLessEqual(self.mailing_list.members_frozen_at, after)
+
+    def test_freeze_is_idempotent_second_campaign_does_not_overwrite(self):
+        """§19 論点 21：同一リストを参照する 2 つ目のキャンペーン送信時、
+        既に立っている members_frozen_at は上書きしない（最初に立った時刻で確定）。"""
+        p1 = self._make_person("Alice")
+        self._add_member(self.mailing_list, p1)
+        # 1 件目のキャンペーン送信で凍結発動
+        campaign1 = self._make_campaign()
+        execute_campaign_send(campaign1)
+        self.mailing_list.refresh_from_db()
+        first_frozen_at = self.mailing_list.members_frozen_at
+        self.assertIsNotNone(first_frozen_at)
+
+        # 別のキャンペーンが同じリストを参照して送信
+        campaign2 = Campaign.objects.create(
+            name="C2",
+            template=self.template,
+            mailing_list=self.mailing_list,
+            scheduled_at=timezone.now() - timedelta(seconds=1),
+            status=Campaign.Status.SCHEDULED,
+            sender_mode=Campaign.SenderMode.CREATOR,
+            apply_unsubscribe_filter=True,
+            created_by=self.user,
+        )
+        execute_campaign_send(campaign2)
+
+        self.mailing_list.refresh_from_db()
+        # 上書きされず最初の値のまま
+        self.assertEqual(self.mailing_list.members_frozen_at, first_frozen_at)
+
+    def test_freeze_preserved_after_send_failure(self):
+        """§11.3.6：配信失敗時も凍結は維持（NULL に戻さない）。"""
+        p1 = self._make_person("Alice")
+        self._add_member(self.mailing_list, p1)
+        campaign = self._make_campaign()
+        with patch(
+            "mailings.services.campaign_send._send_email_via_backend",
+            side_effect=Exception("SMTP down"),
+        ):
+            execute_campaign_send(campaign)
+        self.mailing_list.refresh_from_db()
+        # 全件失敗でも凍結は立ったまま
+        self.assertIsNotNone(self.mailing_list.members_frozen_at)
+
+    def test_freeze_not_triggered_on_second_invocation_of_same_campaign(self):
+        """batch_limit で分割される 2 回目以降の起動（status は既に SENDING）では
+        凍結は再発動しない（is_first_invocation 分岐内に閉じている）。"""
+        for i in range(2):
+            p = self._make_person(f"Person{i}", email=f"p{i}@example.com")
+            self._add_member(self.mailing_list, p)
+        campaign = self._make_campaign()
+        # 1 回目：batch_limit=1 で凍結発動 + 1 件処理
+        execute_campaign_send(campaign, batch_limit=1)
+        self.mailing_list.refresh_from_db()
+        first_frozen_at = self.mailing_list.members_frozen_at
+        self.assertIsNotNone(first_frozen_at)
+        # 2 回目：status は既に SENDING、is_first_invocation=False で凍結処理を通らない
+        execute_campaign_send(campaign, batch_limit=10)
+        self.mailing_list.refresh_from_db()
+        self.assertEqual(self.mailing_list.members_frozen_at, first_frozen_at)
+
 
 class SendScheduledCampaignsCommandTests(_Phase3TestBase):
     def test_command_picks_pending_campaigns(self):
