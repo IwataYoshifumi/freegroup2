@@ -17,6 +17,18 @@
      {% if active_menu == 'mailings:mailing_list_list' %}class="is-active"{% endif %}>
     配信リスト一覧
   </a>
+  {% if perms.mailings.view_campaign or perms.mailings.view_all_campaigns %}
+  <a href="{% url 'mailings:campaign_list' %}"
+     {% if active_menu == 'mailings:campaign_list' %}class="is-active"{% endif %}>
+    キャンペーン一覧
+  </a>
+  {% endif %}
+  {% if perms.mailings.view_campaign %}
+  <a href="{% url 'mailings:suppressed_list' %}"
+     {% if active_menu == 'mailings:suppressed_list' %}class="is-active"{% endif %}>
+    配信停止リスト
+  </a>
+  {% endif %}
   <a href="{% url 'mailings:config_edit' %}"
      {% if active_menu == 'mailings:config_edit' %}class="is-active"{% endif %}>
     配信設定
