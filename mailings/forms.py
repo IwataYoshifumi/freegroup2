@@ -7,7 +7,7 @@ MailingConfigForm: シングルトン MailingConfig の編集フォーム。
 from django import forms
 from django.core.exceptions import ValidationError
 
-from .models import EmailTemplate, MailingConfig, MailingList
+from .models import Campaign, EmailTemplate, MailingConfig, MailingList
 
 
 class _AppInputMixin:
@@ -146,4 +146,60 @@ class EmailTemplateForm(_AppInputMixin, forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self._apply_widget_classes()
+
+
+class CampaignForm(_AppInputMixin, forms.ModelForm):
+    """Campaign 新規作成・編集共通フォーム（(b)、仕様書 §4.2 / §6.2.1 / §7.8）。
+
+    Campaign.clean() がメルマガ × OFF・newsletter 系必須・DKIM ドメイン・scheduled_at 未来
+    日時の全バリデーションを担う。本フォームは widget と必須/非必須の Form 層制御のみ。
+
+    sender_email / sender_name は creator 方式時は空でよいが、newsletter 時の必須は
+    Form.required ではなく Campaign.clean() で「業務制約として」検証する（draft 段階で
+    sender_mode 未確定のまま空保存可、確定時に Model.clean が弾く）。
+
+    UI 上の「newsletter 時に apply_unsubscribe_filter を disabled 表示」は
+    template_form の inline JS で実現（§7.8.4 構造的禁止の UI 表現、本フォーム側では
+    Form.required レベルでの制約のみで、widget 属性での disabled は付けない＝
+    creator ↔ newsletter 切替時に都度設定が必要なため JS が動的に切替）。
+    """
+
+    class Meta:
+        model = Campaign
+        fields = [
+            "name",
+            "mailing_list",
+            "sender_mode",
+            "sender_email",
+            "sender_name",
+            "apply_unsubscribe_filter",
+            "scheduled_at",
+        ]
+        labels = {
+            "name": "キャンペーン名（管理用、受信者には見えない）",
+            "mailing_list": "宛先リスト（必須）",
+            "sender_mode": "送信元方式",
+            "sender_email": "差出人アドレス（メルマガ方式時のみ必須、DKIM 許可ドメイン配下）",
+            "sender_name": "差出人名（メルマガ方式時のみ必須）",
+            "apply_unsubscribe_filter": "配信停止フィルタを適用する（メルマガ方式時は ON 固定）",
+            "scheduled_at": "予約配信日時（予約時は必須・未来日時のみ。下書き保存時は空可）",
+        }
+        widgets = {
+            "sender_mode": forms.RadioSelect,
+            "scheduled_at": forms.DateTimeInput(attrs={"type": "datetime-local"}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # アーカイブ済みリストを除外（新規キャンペーンの宛先には選べない）。
+        self.fields["mailing_list"].queryset = MailingList.objects.filter(
+            is_archived=False
+        )
+        # 必須/任意マーキング（Form 層、newsletter 時の sender_* 必須は Model.clean で）
+        self.fields["name"].required = True
+        self.fields["mailing_list"].required = True
+        self.fields["sender_email"].required = False
+        self.fields["sender_name"].required = False
+        self.fields["scheduled_at"].required = False
         self._apply_widget_classes()

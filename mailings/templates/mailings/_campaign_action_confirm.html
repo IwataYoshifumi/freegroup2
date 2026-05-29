@@ -1,0 +1,20 @@
+{# inline 確認ダイアログの部分テンプレ（既存 app-modal 機構流用、(b) §5.4-5.7）。
+   呼び出し側で {% include with modal_id=..., title=..., message=..., action_url=..., action_label=..., action_class=... %} #}
+<div id="{{ modal_id }}" class="app-modal" hidden role="dialog" aria-modal="true" aria-labelledby="{{ modal_id }}Title">
+  <div class="app-modal__panel">
+    <header class="app-modal__header">
+      <h2 id="{{ modal_id }}Title">{{ title }}</h2>
+      <button type="button" class="app-btn app-btn--sm" data-action="close-modal">閉じる</button>
+    </header>
+    <div class="app-modal__body">
+      <p>{{ message|safe }}</p>
+      <form method="post" action="{{ action_url }}" style="margin-top:16px;">
+        {% csrf_token %}
+        <div class="app-action-area">
+          <button type="submit" class="app-btn {{ action_class|default:'app-btn--primary' }}">{{ action_label }}</button>
+          <button type="button" class="app-btn" data-action="close-modal">キャンセル</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>

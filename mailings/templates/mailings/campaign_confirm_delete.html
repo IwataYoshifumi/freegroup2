@@ -1,0 +1,26 @@
+{% extends "mailings/app_base.html" %}
+{% load back_tags %}
+
+{% block title %}キャンペーン削除確認 — {{ campaign.name }}{% endblock %}
+
+{% block content %}
+  <div class="app-page-header">
+    <div>
+      <div class="app-breadcrumb">メール配信 / キャンペーン / 削除確認</div>
+      <h1>キャンペーン削除：{{ campaign.name }}</h1>
+    </div>
+  </div>
+
+  <section class="app-card">
+    <p>このキャンペーンを削除します。<strong>元に戻すことはできません</strong>（物理削除ではなく論理削除＝is_archived=True に設定、紐付く EmailTemplate も同時に論理削除されます）。</p>
+    <p class="app-muted">仕様書 §12.4：EmailTemplate の is_archived は Campaign の論理削除に連動。物理削除は OneToOne PROTECT のため不可。</p>
+
+    <form method="post" style="margin-top:16px;">
+      {% csrf_token %}
+      <div class="app-action-area">
+        <button type="submit" class="app-btn app-btn--danger">削除する</button>
+        <a class="app-btn" href="{% url 'mailings:campaign_detail' pk=campaign.pk %}">キャンセル</a>
+      </div>
+    </form>
+  </section>
+{% endblock %}

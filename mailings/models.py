@@ -325,6 +325,14 @@ class Campaign(models.Model):
     total_count = models.IntegerField(default=0)
     sent_count = models.IntegerField(default=0)
     failed_count = models.IntegerField(default=0)
+    is_archived = models.BooleanField(
+        default=False,
+        help_text=(
+            "論理削除フラグ（§12.4）。Campaign 論理削除サービスが Campaign と紐付く"
+            "EmailTemplate を同一 atomic で True に更新する（OneToOne PROTECT のため"
+            "物理削除不可）。一覧・詳細は is_archived=False のみ表示"
+        ),
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -338,6 +346,65 @@ class Campaign(models.Model):
 
     def __str__(self):
         return self.name
+
+    def clean(self):
+        """構造的制約と遷移時バリデーション（仕様書 §7.8.4 / §4.2 / §7.8.3、(b) で実装）。
+
+        [性質] 副作用なし（DB 読み取りなし、ただし validate_sender_domain 経由で
+                Settings シングルトンを読む可能性あり = 準関数）
+        [入力] なし（self の値を検証）
+        [例外] ValidationError
+
+        検証順：
+          1. sender_mode='newsletter' × apply_unsubscribe_filter=False（特電法事故防止、§7.8.4）
+          2. sender_mode='newsletter' × sender_email 空（必須、§7.8.3）
+          3. sender_mode='newsletter' × sender_name 空（必須、§7.8.3）
+          4. sender_mode='newsletter' のとき validate_sender_domain（DKIM ドメイン外なら ValidationError）
+          5. status='scheduled' 遷移時：scheduled_at 必須・未来日時のみ（§4.2）
+
+        draft 保存時は (5) をスキップ（scheduled_at 未確定のまま draft 保存可）。
+        (1)-(4) は draft でも常時検証（メルマガ × OFF 等は draft でも作らせない＝
+        誤って scheduled に進めて配信実行直前バリデーションで弾かれる前に止める）。
+        """
+        super().clean()
+        from django.core.exceptions import ValidationError
+        from django.utils import timezone
+
+        errors = {}
+
+        # (1) 構造的禁止：メルマガ方式 × Unsubscribe フィルタ OFF
+        if (
+            self.sender_mode == self.SenderMode.NEWSLETTER
+            and not self.apply_unsubscribe_filter
+        ):
+            errors["apply_unsubscribe_filter"] = (
+                "メルマガ方式では配信停止フィルタを OFF にできません（特電法事故防止、§7.8.4）"
+            )
+
+        if self.sender_mode == self.SenderMode.NEWSLETTER:
+            # (2)(3) メルマガ方式の差出人必須
+            if not (self.sender_email or "").strip():
+                errors["sender_email"] = "メルマガ方式では差出人アドレスが必須です（§7.8.3）"
+            if not (self.sender_name or "").strip():
+                errors["sender_name"] = "メルマガ方式では差出人名が必須です（§7.8.3）"
+            # (4) DKIM 許可ドメイン検証（sender_email が埋まっているときのみ）
+            if (self.sender_email or "").strip() and "sender_email" not in errors:
+                from mailings.services.sender_domain import validate_sender_domain
+
+                try:
+                    validate_sender_domain(self)
+                except ValidationError as e:
+                    errors["sender_email"] = e.messages[0] if e.messages else str(e)
+
+        # (5) scheduled 遷移時：scheduled_at 必須・未来日時
+        if self.status == self.Status.SCHEDULED:
+            if self.scheduled_at is None:
+                errors["scheduled_at"] = "予約配信日時は必須です（§4.2）"
+            elif self.scheduled_at <= timezone.now():
+                errors["scheduled_at"] = "予約配信日時は未来日時を指定してください（§4.2）"
+
+        if errors:
+            raise ValidationError(errors)
 
     @classmethod
     def get_pending_scheduled(cls):

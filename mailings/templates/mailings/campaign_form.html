@@ -1,0 +1,81 @@
+{% extends "mailings/app_base.html" %}
+{% load back_tags %}
+
+{% block title %}{% if is_create %}キャンペーン新規作成{% else %}キャンペーン編集{% endif %} — FreeGroup2{% endblock %}
+
+{% block content %}
+  <div class="app-page-header">
+    <div>
+      <div class="app-breadcrumb">メール配信 / キャンペーン / {% if is_create %}新規作成{% else %}編集{% endif %}</div>
+      <h1>{% if is_create %}キャンペーン新規作成{% else %}キャンペーン編集：{{ campaign.name }}{% endif %}</h1>
+    </div>
+  </div>
+
+  {% if messages %}
+    {% for message in messages %}
+      <section class="app-card">
+        <div class="app-message">{{ message }}</div>
+      </section>
+    {% endfor %}
+  {% endif %}
+
+  <section class="app-card">
+    {% if is_create %}
+      <p class="app-muted" style="margin-bottom:12px;">
+        保存すると Campaign と空の EmailTemplate が同時に作成されます。件名・本文は詳細画面の「件名・本文を編集」から編集します。
+      </p>
+    {% endif %}
+
+    <form method="post" class="app-form-grid-edit">
+      {% csrf_token %}
+
+      {% if form.non_field_errors %}
+        <div class="app-message app-message--error">{{ form.non_field_errors }}</div>
+      {% endif %}
+
+      <div class="app-form-grid" style="grid-template-columns: 1fr;">
+        {% for field in form %}
+          <div class="app-form__group">
+            <label class="app-form__label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+            {{ field }}
+            {% if field.errors %}<div class="app-message app-message--error">{{ field.errors }}</div>{% endif %}
+            {% if field.help_text %}<small class="app-muted">{{ field.help_text }}</small>{% endif %}
+          </div>
+        {% endfor %}
+      </div>
+
+      <div class="app-action-area">
+        <button type="submit" class="app-btn app-btn--primary">{% if is_create %}作成して詳細へ{% else %}保存して詳細へ{% endif %}</button>
+        {% if is_create %}
+          <a class="app-btn" href="{% url 'mailings:campaign_list' %}">キャンセル</a>
+        {% else %}
+          <a class="app-btn" href="{% url 'mailings:campaign_detail' pk=campaign.pk %}">キャンセル</a>
+        {% endif %}
+      </div>
+    </form>
+  </section>
+
+  <script>
+  (function () {
+    /* §7.8.4 構造的禁止の UI 表現：sender_mode=newsletter のとき
+       apply_unsubscribe_filter を checked=true + disabled に固定。creator で解除。 */
+    const modeRadios = document.querySelectorAll('input[name="sender_mode"]');
+    const filterCheckbox = document.getElementById('{{ form.apply_unsubscribe_filter.id_for_label }}');
+    if (!modeRadios.length || !filterCheckbox) return;
+
+    function syncFilterDisabled() {
+      let selectedMode = '';
+      modeRadios.forEach(function (r) { if (r.checked) selectedMode = r.value; });
+      if (selectedMode === 'newsletter') {
+        filterCheckbox.checked = true;
+        filterCheckbox.disabled = true;
+      } else {
+        filterCheckbox.disabled = false;
+      }
+    }
+
+    modeRadios.forEach(function (r) { r.addEventListener('change', syncFilterDisabled); });
+    syncFilterDisabled();
+  })();
+  </script>
+{% endblock %}

@@ -296,4 +296,40 @@ urlpatterns = [
         views.CampaignPreviewView.as_view(),
         name="campaign_preview",
     ),
+    # (b) Campaign CRUD + アクション群（URL一覧表 rev17 No.7-11 + 補助 schedule/cancel/archive）
+    path(
+        "mailings/campaigns/create/",
+        views.CampaignCreateView.as_view(),
+        name="campaign_create",
+    ),
+    path(
+        "mailings/campaigns/<uuid:pk>/",
+        views.CampaignDetailView.as_view(),
+        name="campaign_detail",
+    ),
+    path(
+        "mailings/campaigns/<uuid:pk>/update/",
+        views.CampaignUpdateView.as_view(),
+        name="campaign_update",
+    ),
+    path(
+        "mailings/campaigns/<uuid:pk>/schedule/",
+        views.CampaignScheduleView.as_view(),
+        name="campaign_schedule",
+    ),
+    path(
+        "mailings/campaigns/<uuid:pk>/cancel-schedule/",
+        views.CampaignCancelScheduleView.as_view(),
+        name="campaign_cancel_schedule",
+    ),
+    path(
+        "mailings/campaigns/<uuid:pk>/archive/",
+        views.CampaignArchiveView.as_view(),
+        name="campaign_archive",
+    ),
+    path(
+        "mailings/campaigns/<uuid:pk>/test-send/",
+        views.CampaignTestSendView.as_view(),
+        name="campaign_test_send",
+    ),
 ]

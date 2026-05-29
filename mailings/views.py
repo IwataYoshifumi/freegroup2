@@ -35,8 +35,8 @@ from tags.models import Tag, TagCategory
 
 from persons.services.person_search import SEARCH_PARAMS, search_persons
 
-from .forms import EmailTemplateForm, MailingConfigForm, MailingListForm
-from .models import EmailTemplate, MailingList, MailingListMember
+from .forms import CampaignForm, EmailTemplateForm, MailingConfigForm, MailingListForm
+from .models import Campaign, EmailTemplate, MailingList, MailingListMember
 from .services.list_freeze import (
     freeze_members,
     get_or_create_singleton_mailing_config,
@@ -3043,7 +3043,7 @@ class EmailTemplateUpdateView(LoginRequiredMixin, UpdateView):
 
     指示書 (c) §3.2 で確定した 2 ボタン方式：
       - 「保存して戻る」（name="action" value="save_return"）→ DB 保存 →
-        Campaign 詳細画面へリダイレクト（TODO(b) 暫定 fallback）
+        Campaign 詳細画面（mailings:campaign_detail）へリダイレクト
       - 「プレビュー」（name="action" value="preview"）→ DB 保存 →
         編集画面に `?preview=1` 付きでリダイレクト → テンプレ JS が既存
         `openPreviewModal` 機構（app.js）を起動して No.82 プレビュー View
@@ -3070,15 +3070,15 @@ class EmailTemplateUpdateView(LoginRequiredMixin, UpdateView):
                 reverse("mailings:template_update", kwargs={"pk": self.object.pk})
                 + "?preview=1"
             )
-        # save_return（既定）：Campaign 詳細へ戻す。
-        # TODO(b): Campaign UI 実装後 `mailings:campaign_detail` に差し替え、
-        # テストもあわせて更新する。現状は (b) 未実装のため一覧 fallback。
-        return redirect("mailings:campaign_list")
+        # save_return（既定）：Campaign 詳細へ戻す（rev18 OneToOne 逆引きで Campaign 取得）。
+        return redirect("mailings:campaign_detail", pk=self.object.campaign.pk)
 
     def get_success_url(self):
-        # form_valid 内で明示 redirect を返すため通常到達しないが、
-        # Django UpdateView の規約上未定義だと SuspiciousOperation になり得るためフォールバック。
-        return reverse("mailings:campaign_list")
+        # form_valid 内で明示 redirect を返すため通常到達しないが、Django UpdateView の
+        # 規約上未定義だと SuspiciousOperation になり得るためフォールバック（campaign_detail）。
+        return reverse(
+            "mailings:campaign_detail", kwargs={"pk": self.object.campaign.pk}
+        )
 
     def get_context_data(self, **kwargs):
         from .services.recipient_extraction import extract_recipients
@@ -3144,3 +3144,266 @@ class CampaignPreviewView(LoginRequiredMixin, View):
                 "body_html": body_html,
             },
         )
+
+
+# ======================================================================
+# (b) Campaign UI 全般（仕様書 §4.2 / §6.1 No.7-11 / §6.2.1 / §6.2.1.1 / §7.2.5
+# / §7.7 / §7.8 / §12.4、URL一覧表 rev17 No.7-11）。
+# 詳細画面をハブにした単一ページ完結フロー。ステップ画面化は v1.6 後半/v1.7+（指示書 §3.3）。
+# 全 View に LoginRequiredMixin のみ。PermissionRequiredMixin・所有者判定は (d) Phase 7
+# で一括追加（指示書 §3.4、各 docstring に TODO(Phase 7) を明記）。
+# ======================================================================
+
+
+class CampaignCreateView(LoginRequiredMixin, CreateView):
+    """Campaign 新規作成（URL一覧 rev17 No.7、(b) §5.1）。
+
+    create_campaign_with_template で Campaign + 空 EmailTemplate を atomic 生成。
+    成功時は詳細画面へリダイレクト（PRG）。
+
+    TODO(Phase 7): mailings.create_campaign + 所有者判定（既存ユーザのみ作成可）を追加。
+    """
+
+    model = Campaign
+    form_class = CampaignForm
+    template_name = "mailings/campaign_form.html"
+
+    def form_valid(self, form):
+        from .services.campaign_actions import create_campaign_with_template
+
+        from django.core.exceptions import ValidationError
+
+        try:
+            campaign = create_campaign_with_template(form, self.request.user)
+        except ValidationError as e:
+            form.add_error(None, e)
+            return self.form_invalid(form)
+        return redirect("mailings:campaign_detail", pk=campaign.pk)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update(
+            {
+                "is_create": True,
+                "back": BackNavigator(self.request),
+                "active_app": "mailings",
+            }
+        )
+        return context
+
+
+class CampaignDetailView(LoginRequiredMixin, DetailView):
+    """Campaign 詳細画面（ハブ、URL一覧 rev17 No.8、(b) §5.2）。
+
+    1 画面に基本情報・メール内容・宛先サマリー・テスト送信・status 別アクションを集約。
+    ステップ画面化（仕様書 §6.2.1）は v1.6 後半/v1.7+（指示書 §3.3）。
+
+    TODO(Phase 7): mailings.view_campaign + 所有者判定（既存 has_view_permission との
+        統合方針を確定。現状は LoginRequiredMixin のみで素通り）。
+    """
+
+    model = Campaign
+    template_name = "mailings/campaign_detail.html"
+    context_object_name = "campaign"
+
+    def get_queryset(self):
+        # アーカイブ済み Campaign は詳細画面に出さない（is_archived=True は 404）
+        return Campaign.objects.select_related(
+            "template", "mailing_list", "created_by"
+        ).filter(is_archived=False)
+
+    def get_context_data(self, **kwargs):
+        from mailings.services.recipient_extraction import extract_recipients
+        from mailings.services.report_aggregation import get_campaign_summary
+
+        context = super().get_context_data(**kwargs)
+        campaign = self.object
+        recipients = extract_recipients(campaign).select_related("primary_contact")
+        sample_count = 10  # 指示書 §5.2「先頭 10 件目安」
+        context.update(
+            {
+                "template": campaign.template,
+                "summary": get_campaign_summary(campaign),
+                "recipient_count": recipients.count(),
+                "sample_recipients": list(recipients[:sample_count]),
+                "test_recipient_email": self.request.user.email,
+                "back": BackNavigator(self.request),
+                "active_app": "mailings",
+            }
+        )
+        return context
+
+
+class CampaignUpdateView(LoginRequiredMixin, UpdateView):
+    """Campaign 編集画面（基本情報のみ、URL一覧 rev17 No.9、(b) §5.3）。
+
+    draft のみ編集可。それ以外は詳細画面へ redirect + warning。
+    件名・本文は本画面では編集しない（(c) の EmailTemplateUpdateView で行う、
+    指示書 Q3 確定の動線 2 分割）。
+
+    TODO(Phase 7): mailings.create_campaign + 所有者判定を追加。
+    """
+
+    model = Campaign
+    form_class = CampaignForm
+    template_name = "mailings/campaign_form.html"
+
+    def dispatch(self, request, *args, **kwargs):
+        campaign = get_object_or_404(
+            Campaign, pk=kwargs.get("pk"), is_archived=False
+        )
+        if campaign.status != Campaign.Status.DRAFT:
+            from django.contrib import messages
+
+            messages.warning(
+                request,
+                "下書き状態のキャンペーンのみ編集できます。",
+            )
+            return redirect("mailings:campaign_detail", pk=campaign.pk)
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_queryset(self):
+        return Campaign.objects.filter(is_archived=False)
+
+    def get_success_url(self):
+        return reverse("mailings:campaign_detail", kwargs={"pk": self.object.pk})
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update(
+            {
+                "is_create": False,
+                "back": BackNavigator(self.request),
+                "active_app": "mailings",
+            }
+        )
+        return context
+
+
+class _CampaignActionBaseView(LoginRequiredMixin, View):
+    """schedule / cancel_schedule / test_send 共通基底：POST のみ・status 検査・PRG。
+
+    エラー時は django.contrib.messages.error でフラッシュして詳細画面へ戻す。
+    """
+
+    def get(self, request, pk):
+        from django.http import HttpResponseNotAllowed
+
+        return HttpResponseNotAllowed(["POST"])
+
+    def _redirect_detail(self, pk):
+        return redirect("mailings:campaign_detail", pk=pk)
+
+
+class CampaignScheduleView(_CampaignActionBaseView):
+    """予約アクション：DRAFT → SCHEDULED（URL一覧 rev17 No.10、(b) §5.4）。
+
+    TODO(Phase 7): mailings.send_campaign + 所有者判定を追加。
+    """
+
+    def post(self, request, pk):
+        from django.contrib import messages
+        from django.core.exceptions import ValidationError
+
+        from .services.campaign_actions import schedule_campaign
+
+        campaign = get_object_or_404(Campaign, pk=pk, is_archived=False)
+        try:
+            schedule_campaign(campaign)
+        except ValidationError as e:
+            for field, errs in (e.message_dict.items() if hasattr(e, "message_dict") else [(None, e.messages)]):
+                for err in errs:
+                    messages.error(request, f"{field}: {err}" if field else err)
+            return self._redirect_detail(pk)
+        messages.success(request, "配信を予約しました。")
+        return self._redirect_detail(pk)
+
+
+class CampaignCancelScheduleView(_CampaignActionBaseView):
+    """予約取消アクション：SCHEDULED → DRAFT 復帰、scheduled_at 維持（(b) §5.5、§7.2.5）。
+
+    TODO(Phase 7): mailings.send_campaign + 所有者判定を追加。
+    """
+
+    def post(self, request, pk):
+        from django.contrib import messages
+        from django.core.exceptions import ValidationError
+
+        from .services.campaign_actions import cancel_scheduled_campaign
+
+        campaign = get_object_or_404(Campaign, pk=pk, is_archived=False)
+        try:
+            cancel_scheduled_campaign(campaign)
+        except ValidationError as e:
+            for err in e.messages:
+                messages.error(request, err)
+            return self._redirect_detail(pk)
+        messages.success(request, "予約を取り消して下書きに戻しました。")
+        return self._redirect_detail(pk)
+
+
+class CampaignArchiveView(LoginRequiredMixin, View):
+    """論理削除（(b) §5.6、仕様書 §12.4）。
+
+    GET = 確認画面、POST = 実行（draft のみ可、Campaign + EmailTemplate を同一 atomic で
+    is_archived=True）。MailingListDeleteView 流儀踏襲（指示書 Q4 確定）。
+
+    TODO(Phase 7): mailings.create_campaign + 所有者判定を追加。
+    """
+
+    def get(self, request, pk):
+        campaign = get_object_or_404(Campaign, pk=pk, is_archived=False)
+        return render(
+            request,
+            "mailings/campaign_confirm_delete.html",
+            {
+                "campaign": campaign,
+                "back": BackNavigator(request),
+                "active_app": "mailings",
+            },
+        )
+
+    def post(self, request, pk):
+        from django.contrib import messages
+        from django.core.exceptions import ValidationError
+
+        from .services.campaign_actions import archive_campaign
+
+        campaign = get_object_or_404(Campaign, pk=pk, is_archived=False)
+        try:
+            archive_campaign(campaign)
+        except ValidationError as e:
+            for err in e.messages:
+                messages.error(request, err)
+            return redirect("mailings:campaign_detail", pk=pk)
+        messages.success(request, "キャンペーンを削除しました。")
+        return redirect("mailings:campaign_list")
+
+
+class CampaignTestSendView(_CampaignActionBaseView):
+    """テスト送信（URL一覧 rev17 No.11、(b) §5.7、仕様書 §7.7）。
+
+    送信先は request.user.email 固定（指示書 §3.2、第三者悪用経路の構造的防止）。
+    POST のみ、PRG で詳細画面へ戻して結果メッセージをフラッシュ表示。
+
+    TODO(Phase 7): mailings.send_campaign + 所有者判定を追加。
+    """
+
+    def post(self, request, pk):
+        from django.contrib import messages
+
+        from .services.campaign_actions import run_test_send
+
+        campaign = get_object_or_404(Campaign, pk=pk, is_archived=False)
+        try:
+            run_test_send(campaign, request.user.email)
+        except ValueError as e:
+            messages.error(request, str(e))
+            return self._redirect_detail(pk)
+        except Exception as e:
+            messages.error(request, f"テスト送信に失敗しました: {type(e).__name__}: {e}")
+            return self._redirect_detail(pk)
+        messages.success(
+            request, f"{request.user.email} 宛にテスト送信しました。"
+        )
+        return self._redirect_detail(pk)
