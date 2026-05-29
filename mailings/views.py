@@ -2766,3 +2766,236 @@ class SuppressedEmailCreateView(LoginRequiredMixin, View):
                 )
                 messages.success(request, f"{email} を配信拒否に登録しました。")
         return redirect("mailings:suppressed_list")
+
+
+# ======================================================================
+# Phase 6：配信レポート画面 + CSV ダウンロード（仕様書 v1.6 第13章 / §6.2.2 /
+# §6.2.3 / §13.2、rev15）
+# ======================================================================
+
+
+class CampaignListView(LoginRequiredMixin, ListView):
+    """GET /mailings/campaigns/（§5.1 No.6、Phase 6 新規）。
+
+    集計値カードを付したキャンペーン一覧。view_all_campaigns 持ちは全件、それ以外は
+    自分のキャンペーンのみ。各行に Campaign.total_count / sent_count（フィールド参照）
+    と TrackingLink/DeliveryHistory/UnsubscribeLink を都度集計したサマリを表示。
+
+    N+1 対策：QuerySet レベルで campaign を取得し、テンプレート側で
+    get_campaign_summary を呼ぶ際に毎回 3 クエリ発生する素朴実装は避け、View 側で
+    一括集計してから渡す。
+    """
+
+    template_name = "mailings/campaign_list.html"
+    context_object_name = "campaigns"
+    paginate_by = 50
+
+    def get_queryset(self):
+        from .models import Campaign
+
+        qs = Campaign.objects.select_related("template", "mailing_list").order_by(
+            "-created_at"
+        )
+        if not self.request.user.has_perm("mailings.view_all_campaigns"):
+            qs = qs.filter(created_by=self.request.user)
+        return qs
+
+    def get_context_data(self, **kwargs):
+        from mailings.services.report_aggregation import get_campaign_summary
+
+        ctx = super().get_context_data(**kwargs)
+        # 表示中のページ分のみ集計（paginator 適用後の object_list）。
+        # テンプレートでの dict キーアクセス困難回避のため、campaign + summary の組を渡す。
+        ctx["campaigns_with_summary"] = [
+            {"campaign": c, "summary": get_campaign_summary(c)}
+            for c in ctx["campaigns"]
+        ]
+        ctx["back"] = BackNavigator(self.request)
+        ctx["active_app"] = "mailings"
+        return ctx
+
+
+class CampaignReportView(LoginRequiredMixin, View):
+    """GET /mailings/campaigns/<uuid:pk>/report/（§5.1 No.12、Phase 6 新規）。
+
+    配信レポート詳細：基本情報 + 集計値カード + リンク別表 + 一覧導線 + CSV リンク
+    （§6.2.2）。閲覧権限は campaign.has_view_permission(user)（§4.2.1）。
+    """
+
+    def get(self, request, pk):
+        from django.http import HttpResponseForbidden
+        from django.shortcuts import get_object_or_404, render
+
+        from mailings.services.report_aggregation import (
+            get_campaign_summary,
+            get_link_aggregates,
+        )
+
+        from .models import Campaign as _Campaign
+
+        campaign = get_object_or_404(
+            _Campaign.objects.select_related("template", "mailing_list", "created_by"),
+            pk=pk,
+        )
+        if not campaign.has_view_permission(request.user):
+            return HttpResponseForbidden()
+
+        return render(
+            request,
+            "mailings/campaign_report.html",
+            {
+                "campaign": campaign,
+                "summary": get_campaign_summary(campaign),
+                "link_aggregates": get_link_aggregates(campaign),
+                "back": BackNavigator(request),
+                "active_app": "mailings",
+            },
+        )
+
+
+class _CampaignReportFilteredListBaseView(LoginRequiredMixin, View):
+    """3 つの絞り込み一覧（クリック / バウンス / 配信停止）の共通基底（§6.2.3）。
+
+    サブクラスが `template_name` と `aggregator` を提供する。aggregator は
+    campaign を受けて List[dict(person, last_action_at)] を返す関数。
+    """
+
+    template_name: str = ""
+    aggregator = None  # 型は Callable[[Campaign], List[dict]]
+    page_title: str = ""
+
+    def get(self, request, pk):
+        from django.http import HttpResponseForbidden
+        from django.shortcuts import get_object_or_404, render
+
+        from .models import Campaign as _Campaign
+
+        campaign = get_object_or_404(_Campaign.objects.select_related("template"), pk=pk)
+        if not campaign.has_view_permission(request.user):
+            return HttpResponseForbidden()
+
+        rows = self.__class__.aggregator(campaign)
+        return render(
+            request,
+            self.template_name,
+            {
+                "campaign": campaign,
+                "rows": rows,
+                "page_title": self.page_title,
+                "back": BackNavigator(request),
+                "active_app": "mailings",
+            },
+        )
+
+
+class CampaignReportClickedListView(_CampaignReportFilteredListBaseView):
+    """GET /mailings/campaigns/<uuid:pk>/report/clicked/（§5.1 No.13、§6.2.3）。"""
+
+    template_name = "mailings/campaign_report_clicked.html"
+    page_title = "クリックした受信者"
+
+    @staticmethod
+    def aggregator(campaign):
+        from mailings.services.report_aggregation import get_clicked_persons
+
+        return get_clicked_persons(campaign)
+
+
+class CampaignReportBouncedListView(_CampaignReportFilteredListBaseView):
+    """GET /mailings/campaigns/<uuid:pk>/report/bounced/（§5.1 No.14、§6.2.3）。"""
+
+    template_name = "mailings/campaign_report_bounced.html"
+    page_title = "バウンスした受信者"
+
+    @staticmethod
+    def aggregator(campaign):
+        from mailings.services.report_aggregation import get_bounced_persons
+
+        return get_bounced_persons(campaign)
+
+
+class CampaignReportUnsubscribedListView(_CampaignReportFilteredListBaseView):
+    """GET /mailings/campaigns/<uuid:pk>/report/unsubscribed/（§5.1 No.15、§6.2.3）。"""
+
+    template_name = "mailings/campaign_report_unsubscribed.html"
+    page_title = "配信停止した受信者"
+
+    @staticmethod
+    def aggregator(campaign):
+        from mailings.services.report_aggregation import get_unsubscribed_persons
+
+        return get_unsubscribed_persons(campaign)
+
+
+class CampaignReportCSVView(LoginRequiredMixin, View):
+    """GET/POST /mailings/campaigns/<uuid:pk>/report/csv/（§5.1 No.16 / §13.2、Phase 6）。
+
+    GET：項目選択フォームを表示（チェックボックス）。
+    POST：選択された項目で CSV を生成しダウンロードを返す（UTF-8 BOM 付き、§13.2）。
+
+    閲覧権限は campaign.has_view_permission(user)。GET / POST ともに権限チェック。
+    """
+
+    http_method_names = ["get", "post"]
+
+    def get(self, request, pk):
+        from django.http import HttpResponseForbidden
+        from django.shortcuts import get_object_or_404, render
+
+        from mailings.services.report_aggregation import CSV_AVAILABLE_FIELDS
+
+        from .models import Campaign as _Campaign
+
+        campaign = get_object_or_404(_Campaign, pk=pk)
+        if not campaign.has_view_permission(request.user):
+            return HttpResponseForbidden()
+        return render(
+            request,
+            "mailings/campaign_report_csv_form.html",
+            {
+                "campaign": campaign,
+                "fields": CSV_AVAILABLE_FIELDS,
+                "back": BackNavigator(request),
+                "active_app": "mailings",
+            },
+        )
+
+    def post(self, request, pk):
+        import csv
+        import io
+
+        from django.http import HttpResponse, HttpResponseForbidden
+        from django.shortcuts import get_object_or_404
+
+        from mailings.services.report_aggregation import (
+            CSV_AVAILABLE_KEYS,
+            csv_rows,
+        )
+
+        from .models import Campaign as _Campaign
+
+        campaign = get_object_or_404(_Campaign, pk=pk)
+        if not campaign.has_view_permission(request.user):
+            return HttpResponseForbidden()
+
+        selected = [f for f in request.POST.getlist("fields") if f in CSV_AVAILABLE_KEYS]
+        if not selected:
+            from django.contrib import messages
+
+            messages.error(request, "1 つ以上の項目を選択してください。")
+            return self.get(request, pk)
+
+        # UTF-8 BOM 付き（Excel 文字化け回避、§13.2）。
+        # StringIO で CSV を組み立て、最後に BOM 付きでバイト列化する。
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        for row in csv_rows(campaign, selected):
+            writer.writerow(row)
+
+        response = HttpResponse(
+            "﻿" + buf.getvalue(),
+            content_type="text/csv; charset=utf-8",
+        )
+        filename = f"campaign_report_{campaign.pk}.csv"
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response

@@ -5889,3 +5889,490 @@ class BounceWebhookSecretMismatchTests(_Phase5BounceTestBase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertTrue(SuppressedEmail.objects.filter(email="ok@example.com").exists())
+
+
+# ======================================================================
+# Phase 6：配信レポート画面 + CSV ダウンロード（仕様書 v1.6 第13章 / §6.2.2 /
+# §6.2.3 / §13.2、rev15）
+# ======================================================================
+
+
+from mailings.services.report_aggregation import (
+    CSV_AVAILABLE_FIELDS,
+    CSV_AVAILABLE_KEYS,
+    CSV_FIELD_EMAIL,
+    CSV_FIELD_FULL_NAME,
+    CSV_FIELD_IS_BOUNCED,
+    CSV_FIELD_IS_UNSUBSCRIBED,
+    CSV_FIELD_LAST_CLICKED_AT,
+    CSV_FIELD_ORGANIZATION,
+    CSV_FIELD_PERSON_ID,
+    CSV_FIELD_STATUS,
+    CSV_FIELD_TOTAL_ACCESS,
+    CSV_FIELD_VALID_CLICKS,
+    csv_rows,
+    get_bounced_persons,
+    get_campaign_summary,
+    get_clicked_persons,
+    get_link_aggregates,
+    get_unsubscribed_persons,
+)
+
+
+class _Phase6TestBase(TestCase):
+    """Phase 6 レポートテスト基底：Campaign + 受信者 + 配信履歴 + リンクの fixture。"""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="phase6_user", password="x")
+        self.other_user = User.objects.create_user(
+            username="phase6_other", password="x"
+        )
+        self.template = EmailTemplate.objects.create(
+            name="T1", subject="件名", body="本文", created_by=self.user
+        )
+        self.mailing_list = MailingList.objects.create(
+            name="ML1", created_by=self.user
+        )
+        # Campaign 本体（自分作成、view_all_campaigns なしでも閲覧可）
+        self.campaign = Campaign.objects.create(
+            name="MyCampaign",
+            template=self.template,
+            mailing_list=self.mailing_list,
+            created_by=self.user,
+            total_count=10,
+            sent_count=8,
+            failed_count=1,
+        )
+        # 他人キャンペーン
+        self.other_campaign = Campaign.objects.create(
+            name="OthersCampaign",
+            template=self.template,
+            mailing_list=self.mailing_list,
+            created_by=self.other_user,
+        )
+        self.client.force_login(self.user)
+
+    def _make_person(self, full_name, email, organization=""):
+        p = Person.objects.create(status="active")
+        c = Contact.objects.create(
+            person=p,
+            status=Contact.Status.PRIMARY,
+            full_name=full_name,
+            email=email,
+            organization=organization,
+            created_by=self.user,
+        )
+        p.primary_contact = c
+        p.save(update_fields=["primary_contact", "updated_at"])
+        return p, c
+
+    def _make_history(self, person, contact, to_email=None, status=None,
+                       organization=None, full_name=None, salutation=None,
+                       error=""):
+        return DeliveryHistory.objects.create(
+            campaign=self.campaign,
+            person=person,
+            contact=contact,
+            to_email=to_email or (contact.email if contact else ""),
+            organization_at_send=organization
+            if organization is not None
+            else contact.organization or "",
+            full_name_at_send=full_name
+            if full_name is not None
+            else (contact.full_name if contact else ""),
+            salutation_name_at_send=salutation or "",
+            status=status or DeliveryHistory.Status.SENT,
+            error_message=error,
+        )
+
+    def _make_tracking(self, person, url, *, click_count=0, total_access_count=0,
+                        last_clicked_at=None):
+        token = uuid.uuid4().hex[:11]
+        return TrackingLink.objects.create(
+            campaign=self.campaign,
+            person=person,
+            original_url=url,
+            token=token,
+            click_count=click_count,
+            total_access_count=total_access_count,
+            last_clicked_at=last_clicked_at,
+        )
+
+    def _make_unsub_link(self, person, *, unsubscribed_at=None, token=None):
+        return UnsubscribeLink.objects.create(
+            campaign=self.campaign,
+            person=person,
+            token=token or uuid.uuid4().hex[:11],
+            target_email=person.primary_contact.email,
+            unsubscribed_at=unsubscribed_at,
+        )
+
+
+class GetCampaignSummaryTests(_Phase6TestBase):
+    def test_summary_uses_campaign_fields_for_total_sent(self):
+        s = get_campaign_summary(self.campaign)
+        self.assertEqual(s["total"], 10)
+        self.assertEqual(s["sent"], 8)
+
+    def test_bounced_counts_delivery_history_bounced(self):
+        p1, c1 = self._make_person("B1", "b1@example.com")
+        p2, c2 = self._make_person("B2", "b2@example.com")
+        self._make_history(p1, c1, status=DeliveryHistory.Status.BOUNCED)
+        self._make_history(p2, c2, status=DeliveryHistory.Status.SENT)
+        s = get_campaign_summary(self.campaign)
+        self.assertEqual(s["bounced"], 1)
+
+    def test_clicks_sum_tracking_link_counts(self):
+        p1, _ = self._make_person("C1", "c1@example.com")
+        p2, _ = self._make_person("C2", "c2@example.com")
+        self._make_tracking(p1, "https://a/", click_count=3, total_access_count=5)
+        self._make_tracking(p2, "https://a/", click_count=2, total_access_count=4)
+        s = get_campaign_summary(self.campaign)
+        self.assertEqual(s["valid_clicks"], 5)
+        self.assertEqual(s["total_access"], 9)
+
+    def test_unsubscribed_uses_unsubscribelink_not_delivery_history(self):
+        """配信停止数の出所は UnsubscribeLink、DeliveryHistory.status='unsubscribed' は使わない。"""
+        p1, c1 = self._make_person("U1", "u1@example.com")
+        p2, c2 = self._make_person("U2", "u2@example.com")
+        # UnsubscribeLink の unsubscribed_at 非NULL は 1 件
+        self._make_unsub_link(p1, unsubscribed_at=timezone.now())
+        self._make_unsub_link(p2, unsubscribed_at=None)  # まだ確定していない
+        # ノイズとして DeliveryHistory.status='unsubscribed' を作っても集計に影響しないこと
+        self._make_history(p1, c1, status=DeliveryHistory.Status.UNSUBSCRIBED)
+        self._make_history(p2, c2, status=DeliveryHistory.Status.UNSUBSCRIBED)
+        s = get_campaign_summary(self.campaign)
+        self.assertEqual(s["unsubscribed"], 1)
+
+    def test_empty_campaign_returns_zeros(self):
+        s = get_campaign_summary(self.other_campaign)
+        self.assertEqual(s["bounced"], 0)
+        self.assertEqual(s["valid_clicks"], 0)
+        self.assertEqual(s["total_access"], 0)
+        self.assertEqual(s["unsubscribed"], 0)
+
+
+class GetLinkAggregatesTests(_Phase6TestBase):
+    def test_per_url_aggregation(self):
+        p1, _ = self._make_person("L1", "l1@example.com")
+        p2, _ = self._make_person("L2", "l2@example.com")
+        p3, _ = self._make_person("L3", "l3@example.com")
+        # URL A：p1 と p2 がクリック（unique=2）、click_count 合計 4
+        tl_a1 = self._make_tracking(p1, "https://a/", click_count=2, total_access_count=3)
+        tl_a2 = self._make_tracking(p2, "https://a/", click_count=2, total_access_count=2)
+        # URL B：p3 のみクリック（unique=1）
+        tl_b = self._make_tracking(p3, "https://b/", click_count=1, total_access_count=1)
+        # ClickLog（unique_users 算出用、is_valid_click=True のもの）
+        for tl in (tl_a1, tl_a2):
+            ClickLog.objects.create(
+                tracking_link=tl, http_method="GET", is_valid_click=True
+            )
+        ClickLog.objects.create(
+            tracking_link=tl_b, http_method="GET", is_valid_click=True
+        )
+        # ボットクリックは unique_users に含めない
+        ClickLog.objects.create(
+            tracking_link=tl_a1,
+            http_method="GET",
+            is_valid_click=False,
+            bot_reason="known_bot",
+        )
+
+        rows = get_link_aggregates(self.campaign)
+        # URL 昇順
+        self.assertEqual([r["original_url"] for r in rows], ["https://a/", "https://b/"])
+        self.assertEqual(rows[0]["valid_clicks"], 4)
+        self.assertEqual(rows[0]["total_access"], 5)
+        self.assertEqual(rows[0]["unique_users"], 2)  # ボットクリックは数えない
+        self.assertEqual(rows[1]["valid_clicks"], 1)
+        self.assertEqual(rows[1]["unique_users"], 1)
+
+
+class GetClickedPersonsTests(_Phase6TestBase):
+    def test_returns_persons_with_click_count_gt_zero_only(self):
+        p1, _ = self._make_person("Clk1", "c1@example.com")
+        p2, _ = self._make_person("Clk2", "c2@example.com")
+        p3, _ = self._make_person("NoClk", "n@example.com")
+        now = timezone.now()
+        self._make_tracking(
+            p1, "https://a/", click_count=2, last_clicked_at=now
+        )
+        self._make_tracking(
+            p2,
+            "https://a/",
+            click_count=1,
+            last_clicked_at=now - timedelta(minutes=5),
+        )
+        # p3 は click_count=0 → 含まれない
+        self._make_tracking(p3, "https://a/", click_count=0)
+        rows = get_clicked_persons(self.campaign)
+        person_ids = [r["person"].pk for r in rows]
+        self.assertIn(p1.pk, person_ids)
+        self.assertIn(p2.pk, person_ids)
+        self.assertNotIn(p3.pk, person_ids)
+        # 最新優先で並ぶ
+        self.assertEqual(rows[0]["person"].pk, p1.pk)
+
+    def test_person_dedup_across_multiple_urls(self):
+        # 同一 person が複数 URL をクリックしても 1 行
+        p, _ = self._make_person("Multi", "m@example.com")
+        now = timezone.now()
+        self._make_tracking(p, "https://a/", click_count=2, last_clicked_at=now)
+        self._make_tracking(
+            p, "https://b/", click_count=1, last_clicked_at=now - timedelta(minutes=1)
+        )
+        rows = get_clicked_persons(self.campaign)
+        self.assertEqual(len(rows), 1)
+        # last_action_at は最大値（最新の last_clicked_at）
+        self.assertEqual(rows[0]["last_action_at"], now)
+
+
+class GetBouncedPersonsTests(_Phase6TestBase):
+    def test_only_bounced_status_included(self):
+        p1, c1 = self._make_person("B1", "b1@example.com")
+        p2, c2 = self._make_person("B2", "b2@example.com")
+        self._make_history(p1, c1, status=DeliveryHistory.Status.BOUNCED)
+        self._make_history(p2, c2, status=DeliveryHistory.Status.SENT)
+        rows = get_bounced_persons(self.campaign)
+        person_ids = [r["person"].pk for r in rows]
+        self.assertEqual(person_ids, [p1.pk])
+
+
+class GetUnsubscribedPersonsTests(_Phase6TestBase):
+    def test_uses_unsubscribelink_not_delivery_history(self):
+        p1, c1 = self._make_person("UP1", "up1@example.com")
+        p2, _ = self._make_person("UP2", "up2@example.com")
+        self._make_unsub_link(p1, unsubscribed_at=timezone.now())
+        self._make_unsub_link(p2, unsubscribed_at=None)
+        # ノイズ：DeliveryHistory.status='unsubscribed' を作っても出ないこと
+        self._make_history(p2, c1, status=DeliveryHistory.Status.UNSUBSCRIBED)
+        rows = get_unsubscribed_persons(self.campaign)
+        person_ids = [r["person"].pk for r in rows]
+        self.assertEqual(person_ids, [p1.pk])
+
+
+class CsvRowsTests(_Phase6TestBase):
+    def test_csv_header_and_snapshot_values(self):
+        p, c = self._make_person("Snap", "snap@example.com", organization="OrgX")
+        self._make_history(
+            p,
+            c,
+            to_email="snap@example.com",
+            organization="OrgAtSendTime",  # スナップショット値
+            full_name="NameAtSendTime",
+            salutation="様",
+        )
+        rows = list(
+            csv_rows(
+                self.campaign,
+                [
+                    CSV_FIELD_PERSON_ID,
+                    CSV_FIELD_ORGANIZATION,
+                    CSV_FIELD_FULL_NAME,
+                    CSV_FIELD_EMAIL,
+                ],
+            )
+        )
+        header, data = rows[0], rows[1]
+        self.assertEqual(
+            header, ("Person ID", "会社名", "氏名", "メアド")
+        )
+        self.assertEqual(data[0], str(p.pk))
+        # スナップショットが取れている（現在の Contact.organization='OrgX' ではなくスナップショット値）
+        self.assertEqual(data[1], "OrgAtSendTime")
+        self.assertEqual(data[2], "NameAtSendTime")
+        self.assertEqual(data[3], "snap@example.com")
+
+    def test_csv_is_unsubscribed_uses_current_person_state(self):
+        p, c = self._make_person("IU", "iu@example.com")
+        self._make_history(p, c)
+        # 現在状態で is_unsubscribed=True に
+        Person.objects.filter(pk=p.pk).update(is_unsubscribed=True)
+        rows = list(csv_rows(self.campaign, [CSV_FIELD_IS_UNSUBSCRIBED]))
+        self.assertEqual(rows[1][0], "1")
+
+    def test_csv_is_bounced_based_on_status(self):
+        p, c = self._make_person("IB", "ib@example.com")
+        self._make_history(p, c, status=DeliveryHistory.Status.BOUNCED, error="550")
+        rows = list(csv_rows(self.campaign, [CSV_FIELD_IS_BOUNCED]))
+        self.assertEqual(rows[1][0], "1")
+
+    def test_csv_click_aggregates_from_tracking_link(self):
+        p, c = self._make_person("CA", "ca@example.com")
+        self._make_history(p, c)
+        now = timezone.now()
+        self._make_tracking(
+            p,
+            "https://x/",
+            click_count=3,
+            total_access_count=5,
+            last_clicked_at=now,
+        )
+        self._make_tracking(
+            p,
+            "https://y/",
+            click_count=2,
+            total_access_count=2,
+            last_clicked_at=now - timedelta(minutes=10),
+        )
+        rows = list(
+            csv_rows(
+                self.campaign,
+                [
+                    CSV_FIELD_VALID_CLICKS,
+                    CSV_FIELD_TOTAL_ACCESS,
+                    CSV_FIELD_LAST_CLICKED_AT,
+                ],
+            )
+        )
+        self.assertEqual(rows[1][0], "5")  # 3+2
+        self.assertEqual(rows[1][1], "7")  # 5+2
+        # last_clicked_at = max（最新）
+        self.assertEqual(rows[1][2], now.isoformat())
+
+    def test_unknown_field_silently_filtered(self):
+        rows = list(
+            csv_rows(self.campaign, ["bogus_field", CSV_FIELD_PERSON_ID])
+        )
+        # ヘッダのみ
+        self.assertEqual(rows[0], ("Person ID",))
+
+
+class CampaignListViewTests(_Phase6TestBase):
+    def test_list_filters_to_own_when_no_view_all_perm(self):
+        response = self.client.get("/mailings/campaigns/")
+        self.assertEqual(response.status_code, 200)
+        # 自キャンペーンは表示、他人は非表示
+        self.assertContains(response, "MyCampaign")
+        self.assertNotContains(response, "OthersCampaign")
+
+    def test_list_shows_all_when_view_all_perm(self):
+        perm = Permission.objects.get(codename="view_all_campaigns")
+        self.user.user_permissions.add(perm)
+        # キャッシュをクリアするため再ログイン
+        self.client.force_login(self.user)
+        response = self.client.get("/mailings/campaigns/")
+        self.assertContains(response, "MyCampaign")
+        self.assertContains(response, "OthersCampaign")
+
+    def test_list_renders_summary_card(self):
+        # バウンス 1 件作って表示確認
+        p, c = self._make_person("Bx", "bx@example.com")
+        self._make_history(p, c, status=DeliveryHistory.Status.BOUNCED)
+        response = self.client.get("/mailings/campaigns/")
+        self.assertContains(response, "MyCampaign")
+
+
+class CampaignReportViewTests(_Phase6TestBase):
+    def test_view_renders_for_owner(self):
+        response = self.client.get(
+            f"/mailings/campaigns/{self.campaign.pk}/report/"
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "MyCampaign")
+
+    def test_view_forbidden_for_non_owner_without_perm(self):
+        response = self.client.get(
+            f"/mailings/campaigns/{self.other_campaign.pk}/report/"
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_view_allowed_for_view_all_perm(self):
+        perm = Permission.objects.get(codename="view_all_campaigns")
+        self.user.user_permissions.add(perm)
+        self.client.force_login(self.user)
+        response = self.client.get(
+            f"/mailings/campaigns/{self.other_campaign.pk}/report/"
+        )
+        self.assertEqual(response.status_code, 200)
+
+
+class CampaignReportFilteredListViewsTests(_Phase6TestBase):
+    def test_clicked_view_renders_only_clickers(self):
+        p1, _ = self._make_person("Clk", "clk@example.com")
+        self._make_tracking(
+            p1, "https://a/", click_count=1, last_clicked_at=timezone.now()
+        )
+        response = self.client.get(
+            f"/mailings/campaigns/{self.campaign.pk}/report/clicked/"
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "clk@example.com")
+
+    def test_bounced_view_renders_only_bouncers(self):
+        p, c = self._make_person("Bnc", "bnc@example.com")
+        self._make_history(p, c, status=DeliveryHistory.Status.BOUNCED)
+        response = self.client.get(
+            f"/mailings/campaigns/{self.campaign.pk}/report/bounced/"
+        )
+        self.assertContains(response, "bnc@example.com")
+
+    def test_unsubscribed_view_renders_only_unsubscribers(self):
+        p, _ = self._make_person("Uns", "uns@example.com")
+        self._make_unsub_link(p, unsubscribed_at=timezone.now())
+        response = self.client.get(
+            f"/mailings/campaigns/{self.campaign.pk}/report/unsubscribed/"
+        )
+        self.assertContains(response, "uns@example.com")
+
+    def test_forbidden_for_non_owner(self):
+        response = self.client.get(
+            f"/mailings/campaigns/{self.other_campaign.pk}/report/clicked/"
+        )
+        self.assertEqual(response.status_code, 403)
+
+
+class CampaignReportCSVViewTests(_Phase6TestBase):
+    def test_get_renders_form(self):
+        response = self.client.get(
+            f"/mailings/campaigns/{self.campaign.pk}/report/csv/"
+        )
+        self.assertEqual(response.status_code, 200)
+        # 全項目のラベルが出る
+        for _, label in CSV_AVAILABLE_FIELDS:
+            self.assertContains(response, label)
+
+    def test_post_returns_csv_with_bom(self):
+        p, c = self._make_person("CSV1", "csv1@example.com", organization="OrgZ")
+        self._make_history(
+            p, c, organization="OrgZ", full_name="CSV1", salutation="様"
+        )
+        response = self.client.post(
+            f"/mailings/campaigns/{self.campaign.pk}/report/csv/",
+            data={"fields": [CSV_FIELD_EMAIL, CSV_FIELD_ORGANIZATION]},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "text/csv; charset=utf-8")
+        body = response.content.decode("utf-8")
+        # BOM が先頭にある（Excel 文字化け回避）
+        self.assertTrue(body.startswith("﻿"))
+        self.assertIn("csv1@example.com", body)
+        self.assertIn("OrgZ", body)
+        # Content-Disposition でダウンロード扱い
+        self.assertIn("attachment", response["Content-Disposition"])
+
+    def test_post_with_no_fields_returns_form(self):
+        response = self.client.post(
+            f"/mailings/campaigns/{self.campaign.pk}/report/csv/", data={}
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "1 つ以上の項目を選択してください")
+
+    def test_post_unknown_field_filtered(self):
+        p, c = self._make_person("CSV2", "csv2@example.com")
+        self._make_history(p, c)
+        response = self.client.post(
+            f"/mailings/campaigns/{self.campaign.pk}/report/csv/",
+            data={"fields": ["bogus", CSV_FIELD_EMAIL]},
+        )
+        # bogus は弾かれて EMAIL のみ
+        self.assertEqual(response.status_code, 200)
+        body = response.content.decode("utf-8")
+        self.assertIn("メアド", body)
+
+    def test_post_forbidden_for_non_owner(self):
+        response = self.client.post(
+            f"/mailings/campaigns/{self.other_campaign.pk}/report/csv/",
+            data={"fields": [CSV_FIELD_EMAIL]},
+        )
+        self.assertEqual(response.status_code, 403)

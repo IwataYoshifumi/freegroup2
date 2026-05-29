@@ -1,0 +1,47 @@
+{% extends "mailings/app_base.html" %}
+{% load back_tags %}
+
+{% block title %}{{ page_title }} — {{ campaign.name }}{% endblock %}
+
+{% block content %}
+  <div class="app-page-header">
+    <div>
+      <div class="app-breadcrumb">メール配信 / キャンペーン / レポート / {{ page_title }}</div>
+      <h1>{{ page_title }}：{{ campaign.name }}</h1>
+    </div>
+    <div class="app-page-header__actions">
+      <a class="app-btn app-btn--secondary" href="{% url 'mailings:campaign_report' pk=campaign.pk %}">レポートへ戻る</a>
+    </div>
+  </div>
+
+  <section class="app-card">
+    <table class="app-table">
+      <thead>
+        <tr>
+          <th>会社名</th>
+          <th>氏名</th>
+          <th>メアド</th>
+          <th>バウンス検知日時</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+          <tr>
+            <td>{{ row.person.primary_contact.organization|default:"—" }}</td>
+            <td>{{ row.person.primary_contact.full_name|default:row.person.id }}</td>
+            <td>{{ row.person.primary_contact.email|default:"—" }}</td>
+            <td>{{ row.last_action_at|date:"Y-m-d H:i"|default:"—" }}</td>
+            <td>
+              {% if row.person.primary_contact %}
+                <a class="app-btn app-btn--sm" href="{% url 'contacts:contact_detail' pk=row.person.primary_contact.pk %}">詳細</a>
+              {% endif %}
+            </td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="5">該当する受信者はいません。</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+{% endblock %}

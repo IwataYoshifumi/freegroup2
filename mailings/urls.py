@@ -91,6 +91,39 @@ urlpatterns = [
         views.BounceWebhookView.as_view(),
         name="bounce_webhook",
     ),
+    # Phase 6（仕様書 §5.1 No.6 / No.12〜16、§13 / §6.2.2 / §6.2.3 / §13.2）：
+    # 配信レポート画面 + CSV ダウンロード。レポートは読み取り専用集計、
+    # 配信停止数の出所は UnsubscribeLink（DeliveryHistory.status='unsubscribed' は使わない、§指示書確定事項）。
+    path(
+        "mailings/campaigns/",
+        views.CampaignListView.as_view(),
+        name="campaign_list",
+    ),
+    path(
+        "mailings/campaigns/<uuid:pk>/report/",
+        views.CampaignReportView.as_view(),
+        name="campaign_report",
+    ),
+    path(
+        "mailings/campaigns/<uuid:pk>/report/clicked/",
+        views.CampaignReportClickedListView.as_view(),
+        name="campaign_report_clicked",
+    ),
+    path(
+        "mailings/campaigns/<uuid:pk>/report/bounced/",
+        views.CampaignReportBouncedListView.as_view(),
+        name="campaign_report_bounced",
+    ),
+    path(
+        "mailings/campaigns/<uuid:pk>/report/unsubscribed/",
+        views.CampaignReportUnsubscribedListView.as_view(),
+        name="campaign_report_unsubscribed",
+    ),
+    path(
+        "mailings/campaigns/<uuid:pk>/report/csv/",
+        views.CampaignReportCSVView.as_view(),
+        name="campaign_report_csv",
+    ),
     # MailingList CRUD（§5.1 No.27〜31 + No.33 改）
     path(
         "mailings/lists/", views.MailingListListView.as_view(), name="mailing_list_list"

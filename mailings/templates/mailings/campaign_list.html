@@ -1,0 +1,68 @@
+{% extends "mailings/app_base.html" %}
+{% load back_tags %}
+
+{% block title %}配信キャンペーン一覧 — FreeGroup2{% endblock %}
+
+{% block content %}
+  <div class="app-page-header">
+    <div>
+      <div class="app-breadcrumb">メール配信 / キャンペーン</div>
+      <h1>配信キャンペーン一覧</h1>
+    </div>
+  </div>
+
+  {% if messages %}
+    {% for message in messages %}
+      <section class="app-card">
+        <div class="app-message">{{ message }}</div>
+      </section>
+    {% endfor %}
+  {% endif %}
+
+  <section class="app-card">
+    <table class="app-table">
+      <thead>
+        <tr>
+          <th>名称</th>
+          <th>状態</th>
+          <th>配信件数</th>
+          <th>送信成功</th>
+          <th>バウンス</th>
+          <th>有効クリック<br>(総アクセス)</th>
+          <th>配信停止</th>
+          <th>作成日時</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in campaigns_with_summary %}
+          <tr>
+            <td>{{ item.campaign.name }}</td>
+            <td>{{ item.campaign.get_status_display }}</td>
+            <td>{{ item.summary.total }}</td>
+            <td>{{ item.summary.sent }}</td>
+            <td>{{ item.summary.bounced }}</td>
+            <td>{{ item.summary.valid_clicks }} ({{ item.summary.total_access }})</td>
+            <td>{{ item.summary.unsubscribed }}</td>
+            <td>{{ item.campaign.created_at|date:"Y-m-d H:i" }}</td>
+            <td><a class="app-btn app-btn--sm" href="{% url 'mailings:campaign_report' pk=item.campaign.pk %}">レポート</a></td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="9">配信キャンペーンはまだありません。</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  {% if is_paginated %}
+    <nav class="app-pager">
+      {% if page_obj.has_previous %}
+        <a class="app-btn app-btn--sm" href="?page={{ page_obj.previous_page_number }}">前へ</a>
+      {% endif %}
+      <span>{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span>
+      {% if page_obj.has_next %}
+        <a class="app-btn app-btn--sm" href="?page={{ page_obj.next_page_number }}">次へ</a>
+      {% endif %}
+    </nav>
+  {% endif %}
+{% endblock %}
