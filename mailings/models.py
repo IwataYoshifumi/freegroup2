@@ -261,10 +261,10 @@ class Campaign(models.Model):
         max_length=200,
         help_text="キャンペーン名（管理用、受信者には見えない）",
     )
-    template = models.ForeignKey(
+    template = models.OneToOneField(
         EmailTemplate,
         on_delete=models.PROTECT,
-        related_name="+",
+        related_name="campaign",
     )
     mailing_list = models.ForeignKey(
         MailingList,

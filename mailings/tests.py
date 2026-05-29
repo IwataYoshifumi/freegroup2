@@ -3145,9 +3145,18 @@ class _Phase2ModelTestBase(TestCase):
         return p
 
     def _make_campaign(self, *, status=Campaign.Status.DRAFT, scheduled_at=None):
+        # rev18 §4.2：Campaign.template は OneToOneField。同一 setUp 内で
+        # 複数 Campaign を作るテストがあるため、_make_campaign は呼び出し毎に
+        # 新規 EmailTemplate を生成する（共有不可）。
+        template = EmailTemplate.objects.create(
+            name=f"T_{uuid.uuid4().hex[:8]}",
+            subject="件名",
+            body="本文",
+            created_by=self.user,
+        )
         return Campaign.objects.create(
             name="C1",
-            template=self.template,
+            template=template,
             mailing_list=self.mailing_list,
             scheduled_at=scheduled_at,
             status=status,
@@ -3283,9 +3292,12 @@ class DeliveryHistoryModelTests(_Phase2ModelTestBase):
 
     def test_same_person_different_campaign_ok(self):
         c1 = self._make_campaign()
+        # rev18 §4.2：template は OneToOne。c2 用に別 template を用意する。
         c2 = Campaign.objects.create(
             name="C2",
-            template=self.template,
+            template=EmailTemplate.objects.create(
+                name="T2", subject="件名", body="本文", created_by=self.user
+            ),
             mailing_list=self.mailing_list,
             created_by=self.user,
         )
@@ -3350,9 +3362,12 @@ class TrackingLinkModelTests(_Phase2ModelTestBase):
 
     def test_token_unique_across_campaigns(self):
         c1 = self._make_campaign()
+        # rev18 §4.2：template は OneToOne。c2 用に別 template を用意する。
         c2 = Campaign.objects.create(
             name="C2",
-            template=self.template,
+            template=EmailTemplate.objects.create(
+                name="T2", subject="件名", body="本文", created_by=self.user
+            ),
             mailing_list=self.mailing_list,
             created_by=self.user,
         )
@@ -3403,9 +3418,12 @@ class UnsubscribeLinkModelTests(_Phase2ModelTestBase):
 
     def test_token_unique_across_campaigns(self):
         c1 = self._make_campaign()
+        # rev18 §4.2：template は OneToOne。c2 用に別 template を用意する。
         c2 = Campaign.objects.create(
             name="C2",
-            template=self.template,
+            template=EmailTemplate.objects.create(
+                name="T2", subject="件名", body="本文", created_by=self.user
+            ),
             mailing_list=self.mailing_list,
             created_by=self.user,
         )
@@ -4224,9 +4242,15 @@ class ExecuteCampaignSendTests(_Phase3TestBase):
         self.assertIsNotNone(first_frozen_at)
 
         # 別のキャンペーンが同じリストを参照して送信
+        # rev18 §4.2：template は OneToOne。campaign2 用に別 template を用意する。
         campaign2 = Campaign.objects.create(
             name="C2",
-            template=self.template,
+            template=EmailTemplate.objects.create(
+                name="T2",
+                subject="件名2",
+                body="本文2",
+                created_by=self.user,
+            ),
             mailing_list=self.mailing_list,
             scheduled_at=timezone.now() - timedelta(seconds=1),
             status=Campaign.Status.SCHEDULED,
@@ -4285,9 +4309,15 @@ class SendScheduledCampaignsCommandTests(_Phase3TestBase):
         MailingListMember.objects.create(
             mailing_list=future_list, person=future_p, added_by=self.user
         )
+        # rev18 §4.2：template は OneToOne。FutureCampaign 用に別 template を用意する。
         Campaign.objects.create(
             name="FutureCampaign",
-            template=self.template,
+            template=EmailTemplate.objects.create(
+                name="T_future",
+                subject="件名",
+                body="本文",
+                created_by=self.user,
+            ),
             mailing_list=future_list,
             scheduled_at=timezone.now() + timedelta(hours=1),
             status=Campaign.Status.SCHEDULED,
@@ -5295,9 +5325,12 @@ class DeliveryHistoryBouncedUpdateTests(_Phase5BounceTestBase):
     def test_multiple_histories_all_marked(self):
         # 同一メアドで 2 件 → 全件 bounced（最新 1 件選別ロジックを作らない、§10.4.1）
         # ただし UniqueConstraint(campaign, person) があるため、別 campaign で 2 件作る
+        # rev18 §4.2：template は OneToOne。campaign2 用に別 template を用意する。
         campaign2 = Campaign.objects.create(
             name="BC2",
-            template=self.template,
+            template=EmailTemplate.objects.create(
+                name="T2", subject="件名", body="本文", created_by=self.user
+            ),
             mailing_list=self.mailing_list,
             created_by=self.user,
         )
@@ -6020,10 +6053,13 @@ class _Phase6TestBase(TestCase):
             sent_count=8,
             failed_count=1,
         )
-        # 他人キャンペーン
+        # 他人キャンペーン（rev18 §4.2：template は OneToOne、別 template を用意）
+        self.other_template = EmailTemplate.objects.create(
+            name="T_other", subject="件名", body="本文", created_by=self.other_user
+        )
         self.other_campaign = Campaign.objects.create(
             name="OthersCampaign",
-            template=self.template,
+            template=self.other_template,
             mailing_list=self.mailing_list,
             created_by=self.other_user,
         )
