@@ -160,5 +160,6 @@ Windows サーバーで運用する場合は、cron の代わりに **タスク�
 - **Group（グループ）の作成**：部署横断で共有するグループ
 - **Department（部署）の作成**：所属する部署のツリー構造
 - **ユーザーへの Role / Group / Department の割り当て**
+- **重複チェックの初期化（初回のみ）**：`python manage.py recheck_duplicates --all` を実行して既存の Contact を重複チェック対象として初期化する。以降は cron（`check_duplicates`）が自動で処理する。
 
 これで名刺取り込みを始められる状態になります。次は [名刺の取り込み](usage/import.md) に進んでください。
