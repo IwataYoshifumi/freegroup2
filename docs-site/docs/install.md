@@ -68,7 +68,7 @@ AUTH_BACKEND=local
 
 - `DJANGO_SECRET_KEY` は本番環境では必ず推測困難なランダム文字列に変更してください。
 - `DEBUG` は本番では必ず `False` にしてください（True のままだと内部情報が漏えいする恐れがあります）。
-- `ANTHROPIC_API_KEY` は [console.anthropic.com](https://console.anthropic.com/) で取得します。OCR の課金はこの API キーに対して発生します。
+- `ANTHROPIC_API_KEY` は [console.anthropic.com](https://console.anthropic.com/) で取得します。OCR の課金はこの API キーに対して発生します。取得・設定の詳しい手順は [Anthropic APIキーの取得](install/anthropic-api-key.md) を参照してください。
 
 LDAP 認証を使う場合は、`AUTH_BACKEND` を `ldap` または `both` にして、`LDAP_SERVER_URI` 以下の項目も設定します。詳細は [ユーザー管理](usage/users.md) を参照してください。
 
