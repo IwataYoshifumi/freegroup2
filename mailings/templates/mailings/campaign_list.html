@@ -9,6 +9,9 @@
       <div class="app-breadcrumb">メール配信 / キャンペーン</div>
       <h1>配信キャンペーン一覧</h1>
     </div>
+    <div class="app-page-header__actions">
+      <a class="app-btn app-btn--primary" href="{% url 'mailings:campaign_create' %}">＋ 新規キャンペーン作成</a>
+    </div>
   </div>
 
   {% if messages %}
@@ -37,7 +40,7 @@
       <tbody>
         {% for item in campaigns_with_summary %}
           <tr>
-            <td>{{ item.campaign.name }}</td>
+            <td><a href="{% url 'mailings:campaign_detail' pk=item.campaign.pk %}">{{ item.campaign.name }}</a></td>
             <td>{{ item.campaign.get_status_display }}</td>
             <td>{{ item.summary.total }}</td>
             <td>{{ item.summary.sent }}</td>
@@ -45,7 +48,10 @@
             <td>{{ item.summary.valid_clicks }} ({{ item.summary.total_access }})</td>
             <td>{{ item.summary.unsubscribed }}</td>
             <td>{{ item.campaign.created_at|date:"Y-m-d H:i" }}</td>
-            <td><a class="app-btn app-btn--sm" href="{% url 'mailings:campaign_report' pk=item.campaign.pk %}">レポート</a></td>
+            <td>
+              <a class="app-btn app-btn--sm" href="{% url 'mailings:campaign_detail' pk=item.campaign.pk %}">詳細</a>
+              <a class="app-btn app-btn--sm" href="{% url 'mailings:campaign_report' pk=item.campaign.pk %}">レポート</a>
+            </td>
           </tr>
         {% empty %}
           <tr><td colspan="9">配信キャンペーンはまだありません。</td></tr>

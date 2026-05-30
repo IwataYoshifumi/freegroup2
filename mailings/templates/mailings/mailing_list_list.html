@@ -10,7 +10,8 @@
       <h1>配信リスト一覧</h1>
     </div>
     <div class="app-action-area">
-      {% url 'mailings:mailing_list_create' as create_url %}
+      {# 旧 mailing_list_create (単一画面 CreateView) は View/URL/テスト残置、リンクのみウィザード入口に張替（指示書作業4） #}
+      {% url 'mailings:new_list_meta' as create_url %}
       <a href="{% append_back_url create_url back %}" class="app-btn app-btn--primary">＋ 新規リスト作成</a>
     </div>
   </div>

@@ -188,6 +188,11 @@ a { color: inherit; text-decoration: none; }
   margin-bottom: 2px;
 }
 
+/* サイドバーのサブメニュー項目（グループ配下、インデント表現のみ） */
+.app-sidebar a.app-sidebar__subitem {
+  padding-left: 24px;
+}
+
 .app-sidebar a:hover,
 .app-sidebar a.is-active,
 .app-drawer a:hover,

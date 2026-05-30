@@ -1616,6 +1616,10 @@ class NewListMetaView(LoginRequiredMixin, View):
 
     GET：session を初期化（step='meta'、name/description クリア）してフォーム表示。
     POST：name 必須検証 → name/description/step='tags' を session 保存 → 1-C へ 302。
+
+    【作業5】 ?campaign=<uuid> でクエリパラメータが渡されたら、紐づけ対象の Campaign を
+    検証して session に campaign_id を埋め込む。Commit 時に NewListCommitView が拾って
+    Campaign.mailing_list を新リストに差し替え、Campaign 詳細画面へ戻る。
     """
 
     template_name = "mailings/new_list_meta.html"
@@ -1624,6 +1628,17 @@ class NewListMetaView(LoginRequiredMixin, View):
         # 入口：session を初期化（途中放棄後の再入場で新規開始、§4.5.1a）。
         _new_list_clear(request)
         _new_list_save(request, step="meta", name="", description="")
+        # 【作業5】 ?campaign=<uuid> が渡されており、対象が draft / archived=False ならば
+        # session に campaign_id を保存（commit 時に拾って差し替え + 詳細画面へ戻る）。
+        campaign_id_param = request.GET.get("campaign", "")
+        if campaign_id_param:
+            target = Campaign.objects.filter(
+                pk=campaign_id_param,
+                is_archived=False,
+                status=Campaign.Status.DRAFT,
+            ).first()
+            if target is not None:
+                _new_list_save(request, campaign_id=str(target.pk))
         form = MailingListForm()
         return self._render(request, form)
 
@@ -1789,6 +1804,12 @@ class NewListCommitView(LoginRequiredMixin, View):
         name = state["name"]
         description = state.get("description", "") or ""
         snapshot_ids = state.get("snapshot_person_ids") or []
+        # 【作業5】 ウィザード入口で session に campaign_id が積まれていれば、
+        # commit 時に新リスト作成と同 atomic で当該 Campaign の mailing_list を差し替える。
+        # 差し替え条件は GET 時と同じ（draft / is_archived=False）を再確認（途中で status が
+        # 変わった場合の保険）。差し替え失敗時は通常通り mailing_list_detail へ戻す。
+        link_campaign_id = state.get("campaign_id")
+        linked_campaign = None
         with transaction.atomic():
             mailing_list = MailingList.objects.create(
                 name=name, description=description, created_by=request.user
@@ -1809,7 +1830,28 @@ class NewListCommitView(LoginRequiredMixin, View):
             MailingListMember.objects.bulk_create(
                 to_create, ignore_conflicts=True
             )
+            if link_campaign_id:
+                linked_campaign = Campaign.objects.filter(
+                    pk=link_campaign_id,
+                    is_archived=False,
+                    status=Campaign.Status.DRAFT,
+                ).first()
+                if linked_campaign is not None:
+                    linked_campaign.mailing_list = mailing_list
+                    linked_campaign.save(
+                        update_fields=["mailing_list", "updated_at"]
+                    )
         _new_list_clear(request)
+        if linked_campaign is not None:
+            from django.contrib import messages
+
+            messages.success(
+                request,
+                f"新規リスト「{mailing_list.name}」を作成し、キャンペーンに紐づけました。",
+            )
+            return redirect(
+                "mailings:campaign_detail", pk=linked_campaign.pk
+            )
         return redirect("mailings:mailing_list_detail", pk=mailing_list.pk)
 
 

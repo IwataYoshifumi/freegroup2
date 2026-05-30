@@ -7164,3 +7164,123 @@ class CampaignTestSendViewTests(_PhaseBTestBase):
         self.assertEqual(len(mail.outbox), 1)
         # 操作者本人のメアド固定（指示書 §3.2）
         self.assertEqual(mail.outbox[0].to, [self.user.email])
+
+
+# ======================================================================
+# 画面内導線整備（サイドバー再構成 + 一覧/詳細リンク + ウィザード入口張替 +
+# draft キャンペーンからの新規リスト作成→紐づけ）
+# ======================================================================
+
+
+class CampaignListUiLinksTests(_PhaseBTestBase):
+    """campaign_list.html に「新規作成」ボタンと各行「詳細」リンクが出ること。"""
+
+    def test_create_button_present(self):
+        response = self.client.get("/mailings/campaigns/")
+        self.assertEqual(response.status_code, 200)
+        body = response.content.decode("utf-8")
+        self.assertIn("/mailings/campaigns/create/", body)
+        self.assertIn("新規キャンペーン作成", body)
+
+    def test_row_has_detail_link(self):
+        response = self.client.get("/mailings/campaigns/")
+        body = response.content.decode("utf-8")
+        # 各行に campaign_detail への href が出る（self.campaign で作った draft が
+        # 一覧に乗る前提で、URL を確認）
+        self.assertIn(f"/mailings/campaigns/{self.campaign.pk}/", body)
+
+
+class MailingListListWizardLinkTests(_PhaseBTestBase):
+    """mailing_list_list.html の「＋新規リスト作成」が new_list_meta を指す。"""
+
+    def test_create_button_points_to_wizard(self):
+        response = self.client.get("/mailings/lists/")
+        self.assertEqual(response.status_code, 200)
+        body = response.content.decode("utf-8")
+        self.assertIn("/mailings/lists/new/", body)
+
+
+class NewListWizardCampaignLinkTests(_PhaseBTestBase):
+    """作業5：?campaign=<uuid> で起動された wizard が commit 時に
+    Campaign.mailing_list を新リストに差し替え、Campaign 詳細へリダイレクトする。"""
+
+    def _person(self, full_name, email):
+        return self._make_person(full_name, email=email)
+
+    def test_meta_get_with_campaign_param_saves_to_session(self):
+        url = f"/mailings/lists/new/?campaign={self.campaign.pk}"
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        # session に campaign_id が保存されている
+        session = self.client.session
+        state = session.get("mailing_list_new_create_state") or {}
+        self.assertEqual(state.get("campaign_id"), str(self.campaign.pk))
+
+    def test_meta_get_ignores_non_draft_campaign(self):
+        # scheduled の Campaign では session に campaign_id を保存しない
+        self.campaign.status = Campaign.Status.SCHEDULED
+        self.campaign.scheduled_at = timezone.now() + timedelta(hours=1)
+        self.campaign.save(update_fields=["status", "scheduled_at"])
+        url = f"/mailings/lists/new/?campaign={self.campaign.pk}"
+        self.client.get(url)
+        state = self.client.session.get("mailing_list_new_create_state") or {}
+        self.assertNotIn("campaign_id", state)
+
+    def test_commit_with_campaign_id_relinks_and_redirects_to_campaign_detail(self):
+        # session に必要な state を全部用意（meta → tag_selection → confirm → commit を
+        # スキップして、commit エンドポイントを直接叩く形でテスト）
+        p = self._person("CommitTarget", "commit@example.com")
+        session = self.client.session
+        session["mailing_list_new_create_state"] = {
+            "step": "confirm",
+            "name": "新リスト",
+            "description": "",
+            "snapshot_person_ids": [str(p.pk)],
+            "campaign_id": str(self.campaign.pk),
+        }
+        session.save()
+        old_list_id = self.campaign.mailing_list_id
+        response = self.client.post("/mailings/lists/new/confirm/")
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, f"/mailings/campaigns/{self.campaign.pk}/")
+        self.campaign.refresh_from_db()
+        # mailing_list が新リストに差し替わっている
+        self.assertNotEqual(self.campaign.mailing_list_id, old_list_id)
+        self.assertEqual(self.campaign.mailing_list.name, "新リスト")
+        # session はクリアされている
+        state = self.client.session.get("mailing_list_new_create_state")
+        self.assertFalse(state)
+
+    def test_commit_without_campaign_id_redirects_to_list_detail(self):
+        p = self._person("PlainCommit", "plain@example.com")
+        session = self.client.session
+        session["mailing_list_new_create_state"] = {
+            "step": "confirm",
+            "name": "通常リスト",
+            "description": "",
+            "snapshot_person_ids": [str(p.pk)],
+        }
+        session.save()
+        response = self.client.post("/mailings/lists/new/confirm/")
+        self.assertEqual(response.status_code, 302)
+        # campaign_id が無いケースは従来通り mailing_list_detail へ
+        self.assertIn("/mailings/lists/", response.url)
+        self.assertNotIn("/mailings/campaigns/", response.url)
+
+
+class CampaignDetailNewListButtonTests(_PhaseBTestBase):
+    """campaign_detail.html で draft のときだけ「新規リストを作成して紐づける」ボタンが出る。"""
+
+    def test_draft_shows_button(self):
+        response = self.client.get(f"/mailings/campaigns/{self.campaign.pk}/")
+        body = response.content.decode("utf-8")
+        self.assertIn("新規リストを作成して紐づける", body)
+        self.assertIn(f"?campaign={self.campaign.pk}", body)
+
+    def test_scheduled_hides_button(self):
+        self.campaign.status = Campaign.Status.SCHEDULED
+        self.campaign.scheduled_at = timezone.now() + timedelta(hours=1)
+        self.campaign.save(update_fields=["status", "scheduled_at"])
+        response = self.client.get(f"/mailings/campaigns/{self.campaign.pk}/")
+        body = response.content.decode("utf-8")
+        self.assertNotIn("新規リストを作成して紐づける", body)
