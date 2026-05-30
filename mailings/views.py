@@ -83,7 +83,7 @@ class MailingListListView(LoginRequiredMixin, ListView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         back = BackNavigator(self.request)
-        back.push_current("配信リスト一覧", ["page", "archived_only"])
+        back.push_current("", ["page", "archived_only"])
         context.update(
             {
                 "back": back,
@@ -2853,8 +2853,9 @@ class CampaignListView(LoginRequiredMixin, ListView):
             for c in ctx["campaigns"]
         ]
         back = BackNavigator(self.request)
-        # 一覧自身を戻り先候補としてスタックに積む（詳細→戻る で一覧に戻れるように）
-        back.push_current("キャンペーン一覧", ["page"])
+        # 一覧自身を戻り先候補としてスタックに積む（詳細→戻る で一覧に戻れるように）。
+        # title は "" にして back_link / back_all_link がデフォルト「戻る」「最初に戻る」を表示する（HIG v1.2 §3.2）。
+        back.push_current("", ["page"])
         ctx["back"] = back
         ctx["active_app"] = "mailings"
         ctx["active_menu"] = "mailings:campaign_list"

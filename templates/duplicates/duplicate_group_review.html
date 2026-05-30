@@ -197,16 +197,15 @@
     {% if form.has_confirm_checkboxes %}
       <div class="app-section--executes-merge">
         <div class="app-section__header" style="margin-top:var(--app-space-md);"><h2>確認チェック</h2></div>
-        <div class="app-form__group">
-          {% for field in form %}
-            {% if field.name|slice:":10" == "confirmed_" %}
-              <div class="app-form__group">
-                <label>{{ field }} {{ field.label }}</label>
-                {{ field.errors }}
-              </div>
-            {% endif %}
-          {% endfor %}
-        </div>
+        {% for field in form %}
+          {% if field.name|slice:":10" == "confirmed_" %}
+            <div class="app-form__group">
+              <div class="app-form__label">{{ field.label }}</div>
+              {{ field }}
+              {{ field.errors }}
+            </div>
+          {% endif %}
+        {% endfor %}
       </div>
     {% endif %}
 

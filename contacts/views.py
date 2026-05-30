@@ -134,7 +134,7 @@ class ContactListView(ListView):
 
         back = BackNavigator(self.request)
         back.push_current(
-            "コンタクト一覧",
+            "",
             [
                 "name",
                 "organization",

@@ -41,23 +41,31 @@ dict[field_name -> ContactFieldConfidence]）と is_editable（編集可能モ�
 
     {% if cfc_state == 'mid' or cfc_state == 'low' %}
       <div class="app-contact-field-actions">
-        <label>
-          <input type="radio"
-                 name="contact-field-action-{{ field_name }}"
-                 class="js-contact-field-action"
-                 value="confirm">
-          確認 OK
-        </label>
-        <label>
-          <input type="radio"
-                 name="contact-field-action-{{ field_name }}"
-                 class="js-contact-field-action"
-                 value="edit">
-          要修正
-        </label>
+        {# HIG v1.2 §4.1：確認 OK / 要修正 を app-radio-toggle のトグルボタンに。
+           js-contact-field-action は app.js が拾う JS フックなので維持。 #}
+        <ul class="app-radio-toggle">
+          <li>
+            <label>
+              <input type="radio"
+                     name="contact-field-action-{{ field_name }}"
+                     class="js-contact-field-action"
+                     value="confirm">
+              確認 OK
+            </label>
+          </li>
+          <li>
+            <label>
+              <input type="radio"
+                     name="contact-field-action-{{ field_name }}"
+                     class="js-contact-field-action"
+                     value="edit">
+              要修正
+            </label>
+          </li>
+        </ul>
 
         <button type="button"
-                class="app-btn app-btn--sm js-contact-field-confirm-btn"
+                class="app-btn app-btn--sm app-btn--success js-contact-field-confirm-btn"
                 hidden>
           確定
         </button>
@@ -67,12 +75,12 @@ dict[field_name -> ContactFieldConfidence]）と is_editable（編集可能モ�
                  class="app-input js-contact-field-edit-input"
                  value="{{ value }}">
           <button type="button"
-                  class="app-btn app-btn--sm js-contact-field-update-btn">
+                  class="app-btn app-btn--sm app-btn--success js-contact-field-update-btn">
             修正
           </button>
           <button type="button"
                   class="app-btn app-btn--sm app-btn--secondary js-contact-field-cancel-btn">
-            キャンセル
+            戻る
           </button>
         </div>
       </div>

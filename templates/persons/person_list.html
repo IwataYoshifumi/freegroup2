@@ -72,7 +72,8 @@
             </tr>
           {% empty %}
             <tr><td colspan="8" class="app-muted">
-              該当する人物がいません。
+              該当する人物がいません。新しい名刺を取り込めば人物が自動で作られます。
+              <a href="{% url 'cards:card_upload' %}">名刺を取り込む →</a>
             </td></tr>
           {% endfor %}
         </tbody>
@@ -107,7 +108,10 @@
           </div>
         </a>
       {% empty %}
-        <p class="app-muted">該当する人物がいません。</p>
+        <p class="app-muted">
+          該当する人物がいません。新しい名刺を取り込めば人物が自動で作られます。
+          <a href="{% url 'cards:card_upload' %}">名刺を取り込む →</a>
+        </p>
       {% endfor %}
     </div>
 

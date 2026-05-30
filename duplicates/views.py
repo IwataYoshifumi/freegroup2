@@ -290,7 +290,7 @@ class DuplicateCandidateGroupListView(LoginRequiredMixin, ListView):
 
         back = BackNavigator(self.request)
         back.push_current(
-            "重複候補グループ一覧",
+            "",
             ["rank", "progress", "user", "searched", "page"],
         )
         context["back"] = back
@@ -773,7 +773,7 @@ class PersonMergeLogListView(LoginRequiredMixin, ListView):
         context = super().get_context_data(**kwargs)
         back = BackNavigator(self.request)
         back.push_current(
-            "マージログ一覧",
+            "",
             ["status", "user", "searched", "page"],
         )
         context["back"] = back

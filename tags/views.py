@@ -64,7 +64,7 @@ class TagCategoryListView(LoginRequiredMixin, ListView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         back = BackNavigator(self.request)
-        back.push_current("タグカテゴリ一覧", ["page", "archived_only"])
+        back.push_current("", ["page", "archived_only"])
         context.update(
             {
                 "back": back,
@@ -246,7 +246,7 @@ class TagListView(LoginRequiredMixin, ListView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         back = BackNavigator(self.request)
-        back.push_current("タグ一覧", ["category", "page", "archived_only"])
+        back.push_current("", ["category", "page", "archived_only"])
         context.update(
             {
                 "back": back,
@@ -509,7 +509,7 @@ class BulkTaggingView(LoginRequiredMixin, TemplateView):
         context = super().get_context_data(**kwargs)
         back = BackNavigator(self.request)
         back.push_current(
-            "検索＆一括タグ付け",
+            "",
             list(SEARCH_PARAMS) + ["status", "searched", "page"],
         )
         context.update(

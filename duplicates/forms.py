@@ -136,9 +136,17 @@ class MergeForm(ContactBaseForm):
                 conf.confidence in ("low", "mid")
                 and conf.confirmed_at is None
             ):
+                # HIG v1.2 §4.1：widget 差し替え型のトグル化（contacts と同じ作法）。
+                # BooleanField のまま widget だけ RadioSelect に差し替え、to_python が
+                # 'True'/'False' を bool に変換するので clean() の判定はそのまま動く。
                 self.fields[f"confirmed_{field_name}"] = forms.BooleanField(
                     required=False,
-                    label=f"『{field_name}』フィールドを確認しました",
+                    initial=False,
+                    label=f"『{field_name}』フィールド",
+                    widget=forms.RadioSelect(
+                        choices=[(True, "確認しました"), (False, "未確認")],
+                        attrs={"class": "app-radio-toggle"},
+                    ),
                 )
 
     def clean(self):
@@ -409,9 +417,16 @@ class MergeUndoForm(forms.Form):
         widget=forms.Textarea,
         label="復元の備考",
     )
+    # HIG v1.2 §4.1：widget 差し替え型のトグル化。required=True は維持（未選択／False で
+    # 送信されると BooleanField の標準検証が「必須」エラーを返す）。
     confirmed = forms.BooleanField(
         required=True,
+        initial=False,
         label="この操作は取り消せません。内容を理解しました",
+        widget=forms.RadioSelect(
+            choices=[(True, "理解しました"), (False, "まだ理解していません")],
+            attrs={"class": "app-radio-toggle"},
+        ),
     )
 
     def __init__(self, *args, **kwargs):

@@ -109,16 +109,15 @@
 
     <div class="app-section__header" style="margin-top:var(--app-space-md);"><h2>確認</h2></div>
     <div class="app-form__group">
-      <label>
-        {{ form.confirmed }} {{ form.confirmed.label }}
-      </label>
+      <div class="app-form__label">{{ form.confirmed.label }}</div>
+      {{ form.confirmed }}
       {{ form.confirmed.errors }}
     </div>
 
     <div class="app-action-area" style="margin-top:24px;">
-      <button type="submit" class="app-btn app-btn--danger">復元する</button>
       {% url 'duplicates:merge_log_detail' pk=merge_log.pk as detail_url %}
-      <a href="{% append_back_url detail_url back %}" class="app-btn app-btn--secondary">キャンセル</a>
+      <a href="{% append_back_url detail_url back %}" class="app-btn app-btn--secondary">戻る</a>
+      <button type="submit" class="app-btn app-btn--warning">復元する</button>
     </div>
   </form>
 {% endblock %}

@@ -138,7 +138,7 @@
       <div class="app-action-area" style="margin-top:0;">
         {% url 'duplicates:merge_log_confirm_undo' pk=merge_log.pk as confirm_undo_url %}
         <a href="{% append_back_url confirm_undo_url back %}"
-           class="app-btn app-btn--danger">このマージを復元する</a>
+           class="app-btn app-btn--warning">このマージを復元する</a>
         <span class="app-muted">復元すると merged_person が active 状態に戻ります。</span>
       </div>
     </section>

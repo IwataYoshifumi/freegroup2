@@ -102,7 +102,7 @@
           <p class="app-muted">あなた（{{ user.username }}）と紐付け済みです。</p>
           <div class="app-action-area">
             {% url 'accounts:link_user_person_confirm' person_id=person.id as confirm_url %}
-            <a href="{% append_back_url confirm_url back %}" class="app-btn app-btn--danger">紐付けを解除</a>
+            <a href="{% append_back_url confirm_url back %}" class="app-btn app-btn--warning">紐付けを解除</a>
           </div>
         {% else %}
           <p class="app-muted">ユーザー「{{ linked.username }}」と紐付け済みです。</p>

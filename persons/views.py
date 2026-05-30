@@ -56,7 +56,7 @@ class PersonListView(ListView):
 
         back = BackNavigator(self.request)
         back.push_current(
-            "人物一覧",
+            "",
             [
                 "name",
                 "organization",

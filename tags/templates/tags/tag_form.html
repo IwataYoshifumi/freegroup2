@@ -15,25 +15,26 @@
     </div>
   </div>
 
-  <section class="app-card">
+  <section class="app-card" style="max-width: 720px; margin: 0 auto;">
     <form method="post" class="app-form-grid-edit">
       {% csrf_token %}
 
       <div class="app-form-grid" style="grid-template-columns: 1fr;">
         {% for field in form %}
           <div class="app-form__group">
-            <label class="app-form__label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+            <label class="app-form__label" for="{{ field.id_for_label }}">
+              {{ field.label }}{% if field.help_text %}<span class="app-help-icon" data-tooltip="{{ field.help_text }}" tabindex="0">?</span>{% endif %}
+            </label>
             {{ field }}
             {% if field.errors %}{{ field.errors }}{% endif %}
-            {% if field.help_text %}<small class="app-muted">{{ field.help_text }}</small>{% endif %}
           </div>
         {% endfor %}
       </div>
 
       <div class="app-action-area">
-        <button type="submit" class="app-btn app-btn--primary">保存</button>
         {% url 'tags:tag_list' as cancel_url %}
-        <a href="{% append_back_url cancel_url back %}" class="app-btn app-btn--secondary">キャンセル</a>
+        <a href="{% append_back_url cancel_url back %}" class="app-btn app-btn--secondary">戻る</a>
+        <button type="submit" class="app-btn app-btn--success">保存</button>
       </div>
     </form>
   </section>

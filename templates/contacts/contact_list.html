@@ -126,7 +126,9 @@
             </tr>
           {% empty %}
             <tr><td colspan="7" class="app-muted">
-              該当するコンタクトがありません。
+              該当するコンタクトがありません。新しい名刺を取り込むか、コンタクトを新規作成しましょう。
+              <a href="{% url 'cards:card_upload' %}">名刺を取り込む →</a>
+              <a href="{% append_back_url create_url back %}" style="margin-left:12px;">コンタクト新規作成 →</a>
             </td></tr>
           {% endfor %}
         </tbody>
@@ -160,7 +162,11 @@
           </div>
         </a>
       {% empty %}
-        <p class="app-muted">該当するコンタクトがありません。</p>
+        <p class="app-muted">
+          該当するコンタクトがありません。新しい名刺を取り込むか、コンタクトを新規作成しましょう。
+          <a href="{% url 'cards:card_upload' %}">名刺を取り込む →</a>
+          <a href="{% append_back_url create_url back %}" style="margin-left:12px;">コンタクト新規作成 →</a>
+        </p>
       {% endfor %}
     </div>
 

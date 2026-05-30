@@ -132,7 +132,7 @@ class OriginalListView(ListView):
         context = super().get_context_data(**kwargs)
 
         back = BackNavigator(self.request)
-        back.push_current("元画像一覧", ["status", "date_from", "date_to", "page", "per_page"])
+        back.push_current("", ["status", "date_from", "date_to", "page", "per_page"])
         context["back"] = back
 
         context["active_app"] = "cards"
@@ -666,7 +666,7 @@ class CardListView(ListView):
 
         back = BackNavigator(self.request)
         back.push_current(
-            "名刺一覧",
+            "",
             ["name", "organization", "department", "title", "email", "tel", "address", "ocr_result", "page"],
         )
         context["back"] = back

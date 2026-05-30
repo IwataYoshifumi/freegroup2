@@ -60,7 +60,7 @@
 
     {% if object.is_active %}
       <div class="app-action-area" style="margin-top: var(--app-space-md);">
-        <a href="{% url 'accounts:retire_user' user_id=object.id %}" class="app-btn app-btn--danger">退職処理</a>
+        <a href="{% url 'accounts:retire_user' user_id=object.id %}" class="app-btn app-btn--warning">退職処理</a>
       </div>
     {% else %}
       <div class="app-action-area" style="margin-top: var(--app-space-md);">
