@@ -25,12 +25,9 @@
     <form method="post">
       {% csrf_token %}
       <div class="app-action-area">
+        {% back_all_link back %}
+        {% back_link back %}
         <button type="submit" class="app-btn app-btn--warning">アーカイブ化する</button>
-        {% url 'mailings:mailing_list_list' as cancel_url %}
-        <a href="{% append_back_url cancel_url back %}" class="app-btn app-btn--secondary">戻る</a>
-        {% if back.back_all_exist %}
-          <a href="{% back_all_url back %}" class="app-btn app-btn--secondary">最初に戻る</a>
-        {% endif %}
       </div>
     </form>
   </section>

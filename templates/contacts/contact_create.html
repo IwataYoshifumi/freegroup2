@@ -11,12 +11,8 @@
       <p class="app-muted">手動入力で新規 Contact を作成します。重複候補が見つかった場合は確認画面を表示します。</p>
     </div>
     <div class="app-action-area">
-      {% if back.back_exist %}
-        <a href="{% back_url back %}" class="app-btn app-btn--secondary">戻る</a>
-      {% endif %}
-      {% if back.back_all_exist %}
-        <a href="{% back_all_url back %}" class="app-btn app-btn--secondary">最初に戻る</a>
-      {% endif %}
+      {% back_all_link back %}
+      {% back_link back %}
     </div>
   </div>
 
@@ -217,13 +213,9 @@
 
     {# ==================== 操作ボタン ==================== #}
     <div class="app-action-area" style="margin-top:24px;">
+      {% back_all_link back %}
+      {% back_link back %}
       <button type="submit" class="app-btn app-btn--primary">新規作成</button>
-      {% if back.back_exist %}
-        <a href="{% back_url back %}" class="app-btn app-btn--secondary">戻る</a>
-      {% endif %}
-      {% if back.back_all_exist %}
-        <a href="{% back_all_url back %}" class="app-btn app-btn--secondary">最初に戻る</a>
-      {% endif %}
     </div>
   </form>
 {% endblock %}

@@ -16,15 +16,8 @@
       </h1>
     </div>
     <div class="app-action-area">
-      {% if back.back_exist %}
-        <a href="{% back_url back %}" class="app-btn app-btn--secondary">戻る</a>
-      {% else %}
-        {% url 'mailings:mailing_list_list' as list_url %}
-        <a href="{{ list_url }}" class="app-btn app-btn--secondary">リスト一覧へ</a>
-      {% endif %}
-      {% if back.back_all_exist %}
-        <a href="{% back_all_url back %}" class="app-btn app-btn--secondary">最初に戻る</a>
-      {% endif %}
+      {% back_all_link back %}
+      {% back_link back %}
     </div>
   </div>
 

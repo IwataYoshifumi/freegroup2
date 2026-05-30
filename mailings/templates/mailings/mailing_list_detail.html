@@ -49,12 +49,8 @@
       </div>
     </div>
     <div class="app-action-area">
-      {% if back.back_exist %}
-        <a href="{% back_url back %}" class="app-btn app-btn--secondary">戻る</a>
-      {% endif %}
-      {% if back.back_all_exist %}
-        <a href="{% back_all_url back %}" class="app-btn app-btn--secondary">最初に戻る</a>
-      {% endif %}
+      {% back_all_link back %}
+      {% back_link back %}
       {% url 'mailings:mailing_list_update' pk=mailing_list.id as update_url %}
       {% url 'mailings:mailing_list_delete' pk=mailing_list.id as delete_url %}
       {% if mailing_list.is_archived %}
@@ -194,17 +190,11 @@
       <p class="app-muted">{% if is_frozen %}メンバーがまだ凍結されていません。{% else %}メンバーがまだいません。{% endif %}</p>
     {% endif %}
 
-    {# ε.4：戻るボタン画面下部 #}
-    {% if back.back_exist or back.back_all_exist %}
-      <div class="app-action-area" style="margin-top:16px; justify-content:flex-start;">
-        {% if back.back_exist %}
-          <a href="{% back_url back %}" class="app-btn app-btn--secondary">戻る</a>
-        {% endif %}
-        {% if back.back_all_exist %}
-          <a href="{{ back.back_all_url }}" class="app-btn app-btn--secondary">最初に戻る</a>
-        {% endif %}
-      </div>
-    {% endif %}
+    {# ε.4：戻るボタン画面下部。タグが空文字を返すので、両方空ならラッパーだけ残るが視覚上は影響しない。 #}
+    <div class="app-action-area" style="margin-top:16px; justify-content:flex-start;">
+      {% back_all_link back %}
+      {% back_link back %}
+    </div>
   </section>
 
   <script>

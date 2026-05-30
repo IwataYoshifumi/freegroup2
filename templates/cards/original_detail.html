@@ -11,11 +11,8 @@
       <h1>元画像詳細</h1>
     </div>
     <div class="app-action-area">
-      {% if back.back_exist %}
-        <a href="{% back_url back %}" class="app-btn app-btn--secondary">
-          <span class="app-icon--back"></span> 戻る
-        </a>
-      {% endif %}
+      {% back_all_link back %}
+      {% back_link back %}
     </div>
   </div>
 

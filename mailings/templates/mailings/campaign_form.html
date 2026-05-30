@@ -49,19 +49,9 @@
       </div>
 
       <div class="app-action-area">
+        {% back_all_link back %}
+        {% back_link back %}
         <button type="submit" class="app-btn app-btn--primary">{% if is_create %}作成して詳細へ{% else %}保存して詳細へ{% endif %}</button>
-        {% if back.back_exist %}
-          <a class="app-btn app-btn--secondary" href="{% back_url back %}">戻る</a>
-        {% else %}
-          {% if is_create %}
-            <a class="app-btn app-btn--secondary" href="{% url 'mailings:campaign_list' %}">戻る</a>
-          {% else %}
-            <a class="app-btn app-btn--secondary" href="{% url 'mailings:campaign_detail' pk=campaign.pk %}">戻る</a>
-          {% endif %}
-        {% endif %}
-        {% if back.back_all_exist %}
-          <a class="app-btn app-btn--secondary" href="{% back_all_url back %}">最初に戻る</a>
-        {% endif %}
       </div>
     </form>
   </section>

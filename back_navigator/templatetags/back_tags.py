@@ -1,4 +1,5 @@
 from django import template
+from django.utils.html import format_html
 
 register = template.Library()
 
@@ -11,14 +12,51 @@ def append_back_url(url, back):
 
 @register.simple_tag
 def back_url(back):
-    """直前の画面へ戻るURLを返す"""
+    """直前の画面へ戻るURL文字列のみを返す。
+
+    通常は {% back_link back %} を使う。本タグは URL を href 以外で使う
+    （JS / リダイレクトテキスト等）特殊用途のみ。
+    """
     return back.back_url
 
 
 @register.simple_tag
 def back_all_url(back):
-    """最初の画面へ戻るURLを返す"""
+    """最初の画面へ戻るURL文字列のみを返す。通常は {% back_all_link back %} を使う。"""
     return back.back_all_url
+
+
+@register.simple_tag
+def back_link(back):
+    """戻り先があれば「戻る」リンク（<a>）を返す。なければ空文字。
+
+    HIG v1.2 §3.2 準拠：判定・URL・ラベル・出す出さないをすべてタグ内部に隠す。
+    テンプレ側に {% if back.back_exist %} は書かない。
+    ラベルは back.back_title（スタックに積まれた title。なければ "戻る"）。
+    クラスは戻る・離脱導線の共通表記 app-btn app-btn--secondary（HIG 3.6）。
+    """
+    if not back.back_exist:
+        return ""
+    return format_html(
+        '<a class="app-btn app-btn--secondary" href="{}">{}</a>',
+        back.back_url,
+        back.back_title or "戻る",
+    )
+
+
+@register.simple_tag
+def back_all_link(back):
+    """履歴が 2 階層以上あれば「最初に戻る」リンク（<a>）を返す。なければ空文字。
+
+    HIG v1.2 §3.2 準拠：「戻る」とセットで配置するが、表示判定はテンプレに書かない。
+    """
+    if not back.back_all_exist:
+        return ""
+    return format_html(
+        '<a class="app-btn app-btn--secondary" href="{}">{}</a>',
+        back.back_all_url,
+        back.back_all_title or "最初に戻る",
+    )
 
 
 @register.simple_tag

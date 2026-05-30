@@ -29,14 +29,8 @@
       </h1>
     </div>
     <div class="app-page-header__actions">
-      {% if back.back_exist %}
-        <a class="app-btn app-btn--secondary" href="{% back_url back %}">戻る</a>
-      {% else %}
-        <a class="app-btn app-btn--secondary" href="{% url 'mailings:campaign_list' %}">一覧へ戻る</a>
-      {% endif %}
-      {% if back.back_all_exist %}
-        <a class="app-btn app-btn--secondary" href="{% back_all_url back %}">最初に戻る</a>
-      {% endif %}
+      {% back_all_link back %}
+      {% back_link back %}
     </div>
   </div>
 

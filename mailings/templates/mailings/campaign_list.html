@@ -10,11 +10,10 @@
       <h1>配信キャンペーン一覧</h1>
     </div>
     <div class="app-page-header__actions">
+      {% back_all_link back %}
+      {% back_link back %}
       {% url 'mailings:campaign_create' as create_url %}
       <a class="app-btn app-btn--primary" href="{% append_back_url create_url back %}">＋ 新規キャンペーン作成</a>
-      {% if back.back_all_exist %}
-        <a class="app-btn app-btn--secondary" href="{% back_all_url back %}">最初に戻る</a>
-      {% endif %}
     </div>
   </div>
 
