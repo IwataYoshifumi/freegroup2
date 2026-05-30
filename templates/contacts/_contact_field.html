@@ -41,8 +41,10 @@ dict[field_name -> ContactFieldConfidence]）と is_editable（編集可能モ�
 
     {% if cfc_state == 'mid' or cfc_state == 'low' %}
       <div class="app-contact-field-actions">
-        {# HIG v1.2 §4.1：確認 OK / 要修正 を app-radio-toggle のトグルボタンに。
-           js-contact-field-action は app.js が拾う JS フックなので維持。 #}
+        {% comment %}
+        HIG v1.2 §4.1：確認 OK / 要修正 を app-radio-toggle のトグルボタンに。
+        js-contact-field-action は app.js が拾う JS フックなので維持。
+        {% endcomment %}
         <ul class="app-radio-toggle">
           <li>
             <label>

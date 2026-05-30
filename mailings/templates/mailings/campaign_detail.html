@@ -55,7 +55,7 @@
       {% url 'mailings:campaign_archive' pk=campaign.pk as archive_url %}
       <div class="app-action-area" style="justify-content: space-between;">
         <div style="display:flex; gap:var(--app-space-sm); flex-wrap:wrap;">
-          <a class="app-btn" href="{% append_back_url update_url back %}">基本情報を編集</a>
+          <a class="app-btn app-btn--success" href="{% append_back_url update_url back %}">基本情報を編集</a>
           <a class="app-btn app-btn--secondary" href="{% url 'mailings:new_list_meta' %}?campaign={{ campaign.pk }}">新規リストを作成して紐づける</a>
           <button type="button" class="app-btn app-btn--secondary" data-action="open-modal" data-target="testSendConfirmModal">テスト送信</button>
           <button type="button" class="app-btn app-btn--primary" data-action="open-modal" data-target="scheduleConfirmModal">予約する</button>
@@ -82,7 +82,7 @@
       <h2>メール内容</h2>
       {% if campaign.status == 'draft' %}
         {% url 'mailings:template_update' pk=template.pk as template_update_url %}
-        <a class="app-btn app-btn--secondary" href="{% append_back_url template_update_url back %}">件名・本文を編集</a>
+        <a class="app-btn app-btn--success" href="{% append_back_url template_update_url back %}">件名・本文を編集</a>
       {% endif %}
     </div>
     <div class="app-form__group" style="margin-top:8px;">

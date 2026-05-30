@@ -231,8 +231,10 @@
 
   <div class="app-action-area" style="margin-top:24px; max-width:1100px;">
     {% if debug %}
-      {# HIG v1.2 §3.3：物理削除の入口はトラッシュ＋黒系。最終実行（confirm 後）に danger を残す方針。
-         デバッグ用直接削除のため confirm 画面は js-card-delete-btn の JS が出す。js- フックは維持。 #}
+      {% comment %}
+      HIG v1.3 §3.3：物理削除の入口はトラッシュ＋黒系。最終実行（confirm 後）に danger を残す方針。
+      デバッグ用直接削除のため confirm 画面は js-card-delete-btn の JS が出す。js- フックは維持。
+      {% endcomment %}
       <form method="post" action="{% url 'cards:card_delete' pk=card.id %}"
             class="js-card-delete-form" style="margin: 0;">
         {% csrf_token %}

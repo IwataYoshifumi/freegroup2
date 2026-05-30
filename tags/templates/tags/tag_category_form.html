@@ -4,7 +4,8 @@
 {% block title %}{% if is_create %}タグカテゴリ作成{% else %}タグカテゴリ編集{% endif %} — FreeGroup2{% endblock %}
 
 {% block content %}
-  <div class="app-page-header">
+  {# HIG v1.3 §2.1：外側のカード枠ごと中央寄せ。視覚的に揃えるためヘッダーも同じ max-width に揃える。 #}
+  <div class="app-page-header" style="max-width: 720px; margin: 0 auto;">
     <div>
       <div class="app-breadcrumb">タグカテゴリ一覧 / {% if is_create %}新規作成{% else %}編集{% endif %}</div>
       <h1>{% if is_create %}タグカテゴリ作成{% else %}タグカテゴリ編集：{{ object.name }}{% endif %}</h1>

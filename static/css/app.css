@@ -1934,12 +1934,15 @@ ul.app-radio-list li label {
   border-color: var(--app-border);
 }
 
-/* ===== 送信元方式トグル（CampaignForm sender_mode） =====
+/* ===== 送信元方式トグル / 配信停止フィルタトグル 等（HIG v1.3 §4.1） =====
    Bootstrap .btn-check 相当：独立した outline/solid 切替ボタンの横並び。
    非選択は outline-primary、選択中は primary solid。標準 radio は視覚上隠し、
-   label 自体をボタンとして見せる（Django RadioSelect の <label><input>テキスト</label>
-   構造に合わせて :has() セレクタで判定）。 */
-ul.app-radio-toggle {
+   label 自体をボタンとして見せる（<label><input>テキスト</label> 構造に対し
+   :has() セレクタで判定）。
+   構造非依存：Django 5+ の RadioSelect は <div class="app-radio-toggle"><div><label>
+   構造で出る（旧来の <ul><li> ではない）。.app-radio-toggle の直下が ul/div どちらでも
+   動くよう、構造に依らない子孫セレクタで書く。 */
+.app-radio-toggle {
   display: inline-flex;
   flex-wrap: wrap;
   list-style: none;
@@ -1947,15 +1950,16 @@ ul.app-radio-toggle {
   margin: 0;
   gap: 8px;
 }
-ul.app-radio-toggle li { margin: 0; }
-ul.app-radio-toggle li input[type="radio"] {
+.app-radio-toggle > * { margin: 0; list-style: none; }
+.app-radio-toggle input[type="radio"],
+.app-radio-toggle input[type="checkbox"] {
   position: absolute;
   opacity: 0;
   pointer-events: none;
   width: 0;
   height: 0;
 }
-ul.app-radio-toggle li label {
+.app-radio-toggle label {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1970,15 +1974,17 @@ ul.app-radio-toggle li label {
   user-select: none;
   transition: background-color .12s ease, color .12s ease;
 }
-ul.app-radio-toggle li label:hover {
+.app-radio-toggle label:hover {
   background: rgba(37, 99, 235, 0.08);
 }
-ul.app-radio-toggle li label:has(input[type="radio"]:checked) {
+.app-radio-toggle label:has(input[type="radio"]:checked),
+.app-radio-toggle label:has(input[type="checkbox"]:checked) {
   background: var(--app-color-primary);
   color: #fff;
   border-color: var(--app-color-primary);
 }
-ul.app-radio-toggle li label:has(input[type="radio"]:focus-visible) {
+.app-radio-toggle label:has(input[type="radio"]:focus-visible),
+.app-radio-toggle label:has(input[type="checkbox"]:focus-visible) {
   outline: 2px solid #1d4ed8;
   outline-offset: 2px;
 }

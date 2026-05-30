@@ -1,5 +1,7 @@
-{# inline 確認ダイアログの部分テンプレ（既存 app-modal 機構流用、(b) §5.4-5.7）。
-   呼び出し側で {% include with modal_id=..., title=..., message=..., action_url=..., action_label=..., action_class=... %} #}
+{% comment %}
+inline 確認ダイアログの部分テンプレ（既存 app-modal 機構流用、(b) §5.4-5.7）。
+呼び出し側で {% include with modal_id=..., title=..., message=..., action_url=..., action_label=..., action_class=... %}
+{% endcomment %}
 <div id="{{ modal_id }}" class="app-modal" hidden role="dialog" aria-modal="true" aria-labelledby="{{ modal_id }}Title">
   <div class="app-modal__panel">
     <header class="app-modal__header">
