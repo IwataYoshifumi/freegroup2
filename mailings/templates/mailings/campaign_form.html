@@ -19,14 +19,17 @@
     {% endfor %}
   {% endif %}
 
-  <section class="app-card">
+  <section class="app-card" style="max-width: 720px; margin: 0 auto;">
     {% if is_create %}
       <p class="app-muted" style="margin-bottom:12px;">
         保存すると Campaign と空の EmailTemplate が同時に作成されます。件名・本文は詳細画面の「件名・本文を編集」から編集します。
       </p>
     {% endif %}
 
-    <form method="post" class="app-form-grid-edit">
+    <form method="post"
+          class="app-form-grid-edit"
+          data-creator-email="{{ request.user.email|default:'' }}"
+          data-creator-name="{{ request.user.get_full_name|default:'' }}">
       {% csrf_token %}
 
       {% if form.non_field_errors %}
@@ -36,10 +39,11 @@
       <div class="app-form-grid" style="grid-template-columns: 1fr;">
         {% for field in form %}
           <div class="app-form__group">
-            <label class="app-form__label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+            <label class="app-form__label" for="{{ field.id_for_label }}">
+              {{ field.label }}{% if field.help_text %}<span class="app-help-icon" data-tooltip="{{ field.help_text }}" tabindex="0">?</span>{% endif %}
+            </label>
             {{ field }}
             {% if field.errors %}<div class="app-message app-message--error">{{ field.errors }}</div>{% endif %}
-            {% if field.help_text %}<small class="app-muted">{{ field.help_text }}</small>{% endif %}
           </div>
         {% endfor %}
       </div>
@@ -47,40 +51,18 @@
       <div class="app-action-area">
         <button type="submit" class="app-btn app-btn--primary">{% if is_create %}作成して詳細へ{% else %}保存して詳細へ{% endif %}</button>
         {% if back.back_exist %}
-          <a class="app-btn" href="{% back_url back %}">戻る</a>
+          <a class="app-btn app-btn--secondary" href="{% back_url back %}">戻る</a>
         {% else %}
           {% if is_create %}
-            <a class="app-btn" href="{% url 'mailings:campaign_list' %}">戻る</a>
+            <a class="app-btn app-btn--secondary" href="{% url 'mailings:campaign_list' %}">戻る</a>
           {% else %}
-            <a class="app-btn" href="{% url 'mailings:campaign_detail' pk=campaign.pk %}">戻る</a>
+            <a class="app-btn app-btn--secondary" href="{% url 'mailings:campaign_detail' pk=campaign.pk %}">戻る</a>
           {% endif %}
+        {% endif %}
+        {% if back.back_all_exist %}
+          <a class="app-btn app-btn--secondary" href="{% back_all_url back %}">最初に戻る</a>
         {% endif %}
       </div>
     </form>
   </section>
-
-  {% if not is_create %}
-  <script>
-  (function () {
-    /* メルマガ方式選択時に「配信停止フィルタ」を ON 固定 + 操作不可にする UI 制御。 */
-    const modeRadios = document.querySelectorAll('input[name="sender_mode"]');
-    const filterCheckbox = document.getElementById('{{ form.apply_unsubscribe_filter.id_for_label }}');
-    if (!modeRadios.length || !filterCheckbox) return;
-
-    function syncFilterDisabled() {
-      let selectedMode = '';
-      modeRadios.forEach(function (r) { if (r.checked) selectedMode = r.value; });
-      if (selectedMode === 'newsletter') {
-        filterCheckbox.checked = true;
-        filterCheckbox.disabled = true;
-      } else {
-        filterCheckbox.disabled = false;
-      }
-    }
-
-    modeRadios.forEach(function (r) { r.addEventListener('change', syncFilterDisabled); });
-    syncFilterDisabled();
-  })();
-  </script>
-  {% endif %}
 {% endblock %}

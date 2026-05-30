@@ -42,7 +42,7 @@
       <form method="post" action="{% url 'mailings:suppressed_detail' pk=suppressed.pk %}">
         {% csrf_token %}
         <p>この配信拒否を解除すると、当該メアドへの配信が再開されます。</p>
-        <button type="submit" class="app-btn app-btn--danger">解除する</button>
+        <button type="submit" class="app-btn app-btn--warning">解除する</button>
       </form>
     </section>
   {% endif %}

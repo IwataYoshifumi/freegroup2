@@ -52,6 +52,9 @@
       {% if back.back_exist %}
         <a href="{% back_url back %}" class="app-btn app-btn--secondary">戻る</a>
       {% endif %}
+      {% if back.back_all_exist %}
+        <a href="{% back_all_url back %}" class="app-btn app-btn--secondary">最初に戻る</a>
+      {% endif %}
       {% url 'mailings:mailing_list_update' pk=mailing_list.id as update_url %}
       {% url 'mailings:mailing_list_delete' pk=mailing_list.id as delete_url %}
       {% if mailing_list.is_archived %}
@@ -127,18 +130,18 @@
         {% url 'mailings:list_member_remove_by_tag' pk=mailing_list.id as member_remove_by_tag_url %}
         <div style="display:flex; gap:8px; align-items:center;">
           {% if mailing_list.is_archived %}
-            <span class="app-btn app-btn--danger" style="opacity:0.5; pointer-events:none;" aria-disabled="true"
+            <span class="app-btn app-btn--warning" style="opacity:0.5; pointer-events:none;" aria-disabled="true"
                   title="アーカイブ済みのため編集できません">メンバーを削除</span>
-            <span class="app-btn app-btn--danger" style="opacity:0.5; pointer-events:none;" aria-disabled="true"
+            <span class="app-btn app-btn--warning" style="opacity:0.5; pointer-events:none;" aria-disabled="true"
                   title="アーカイブ済みのため編集できません">タグで除外</span>
           {% elif is_frozen %}
-            <span class="app-btn app-btn--danger" style="opacity:0.5; pointer-events:none;" aria-disabled="true"
+            <span class="app-btn app-btn--warning" style="opacity:0.5; pointer-events:none;" aria-disabled="true"
                   title="凍結中のため編集できません">メンバーを削除</span>
-            <span class="app-btn app-btn--danger" style="opacity:0.5; pointer-events:none;" aria-disabled="true"
+            <span class="app-btn app-btn--warning" style="opacity:0.5; pointer-events:none;" aria-disabled="true"
                   title="凍結中のため編集できません">タグで除外</span>
           {% else %}
-            <a href="{% append_back_url member_remove_url back %}" class="app-btn app-btn--danger">メンバーを削除</a>
-            <a href="{% append_back_url member_remove_by_tag_url back %}" class="app-btn app-btn--danger">タグで除外</a>
+            <a href="{% append_back_url member_remove_url back %}" class="app-btn app-btn--warning">メンバーを削除</a>
+            <a href="{% append_back_url member_remove_by_tag_url back %}" class="app-btn app-btn--warning">タグで除外</a>
           {% endif %}
         </div>
       </div>

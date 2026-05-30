@@ -1,7 +1,7 @@
 {% comment %}
 メール配信サイドバー部品（include 専用）。app_base.html から呼ばれる。
-2階層構造：「キャンペーン」「配信設定」は単独項目、「タグ管理」「配信リスト管理」は
-グループ見出し（クリックでアコーディオン開閉）+ 配下サブアイテム。
+全項目を 2 階層のアコーディオングループに統一：「キャンペーン」「タグ管理」「配信リスト管理」
+「配信設定」がグループ見出し（クリックでアコーディオン開閉）+ 配下サブアイテム。
 普段は折りたたみ、active_menu が含まれるグループのみ初期展開する。
 既存 toggleCollapsible 機構（app.js）の data-action="toggle-collapsible" を流用、
 表示切替は .app-collapsible-body の既存 CSS で動く。
@@ -9,11 +9,24 @@
 <nav class="app-sidebar" aria-label="メール配信メニュー">
   <div class="app-sidebar__section-title">メール配信</div>
 
+  {# キャンペーン（active_menu が mailings:campaign_list / mailings:campaign_create のとき初期展開） #}
   {% if perms.mailings.view_campaign or perms.mailings.view_all_campaigns %}
-  <a href="{% url 'mailings:campaign_list' %}"
-     {% if active_menu == 'mailings:campaign_list' %}class="is-active"{% endif %}>
-    キャンペーン
-  </a>
+  <div class="app-collapsible{% if active_menu == 'mailings:campaign_list' or active_menu == 'mailings:campaign_create' %} is-open{% endif %}">
+    <button type="button" class="app-sidebar__section-title app-sidebar__group-toggle" data-action="toggle-collapsible" aria-expanded="{% if active_menu == 'mailings:campaign_list' or active_menu == 'mailings:campaign_create' %}true{% else %}false{% endif %}">
+      <span class="app-collapsible__icon app-collapsible__icon--inline">{% if active_menu == 'mailings:campaign_list' or active_menu == 'mailings:campaign_create' %}▾{% else %}▸{% endif %}</span>
+      キャンペーン
+    </button>
+    <div class="app-collapsible-body">
+      <a href="{% url 'mailings:campaign_create' %}"
+         class="app-sidebar__subitem{% if active_menu == 'mailings:campaign_create' %} is-active{% endif %}">
+        キャンペーン新規作成
+      </a>
+      <a href="{% url 'mailings:campaign_list' %}"
+         class="app-sidebar__subitem{% if active_menu == 'mailings:campaign_list' %} is-active{% endif %}">
+        キャンペーン一覧
+      </a>
+    </div>
+  </div>
   {% endif %}
 
   {# タグ管理（active_menu が tags:* のとき初期展開） #}
@@ -58,8 +71,17 @@
     </div>
   </div>
 
-  <a href="{% url 'mailings:config_edit' %}"
-     {% if active_menu == 'mailings:config_edit' %}class="is-active"{% endif %}>
-    配信設定
-  </a>
+  {# 配信設定（active_menu が mailings:config_edit のとき初期展開） #}
+  <div class="app-collapsible{% if active_menu == 'mailings:config_edit' %} is-open{% endif %}">
+    <button type="button" class="app-sidebar__section-title app-sidebar__group-toggle" data-action="toggle-collapsible" aria-expanded="{% if active_menu == 'mailings:config_edit' %}true{% else %}false{% endif %}">
+      <span class="app-collapsible__icon app-collapsible__icon--inline">{% if active_menu == 'mailings:config_edit' %}▾{% else %}▸{% endif %}</span>
+      配信設定
+    </button>
+    <div class="app-collapsible-body">
+      <a href="{% url 'mailings:config_edit' %}"
+         class="app-sidebar__subitem{% if active_menu == 'mailings:config_edit' %} is-active{% endif %}">
+        配信設定
+      </a>
+    </div>
+  </div>
 </nav>

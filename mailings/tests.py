@@ -861,24 +861,25 @@ class ButtonColorAndLabelTests(_MemberEditTestBase):
         self.assertIn('class="app-btn app-btn--primary">メンバーを追加</a>', body)
         self.assertNotIn(">個別追加<", body)
 
-    def test_detail_remove_button_is_danger_with_new_label(self):
+    def test_detail_remove_button_is_warning_with_new_label(self):
+        # HIG v1.2 §3.6：リストから外す操作は物理削除ではなくやり直せるため warning（黄）。
         ml = self._make_list()
         url = reverse("mailings:mailing_list_detail", args=[ml.pk])
         resp = self.client.get(url)
         body = resp.content.decode("utf-8")
-        self.assertIn('class="app-btn app-btn--danger">メンバーを削除</a>', body)
+        self.assertIn('class="app-btn app-btn--warning">メンバーを削除</a>', body)
         self.assertNotIn(">個別削除<", body)
-        # warning カラーは旧ラベルでは使われていない（=危険操作=danger）
-        self.assertNotIn('class="app-btn app-btn--warning">メンバーを削除', body)
+        # 旧 danger 表記が残らないことも検証。
+        self.assertNotIn('class="app-btn app-btn--danger">メンバーを削除', body)
 
     def test_frozen_detail_buttons_keep_color_and_label(self):
         ml = self._make_list(frozen=True)
         url = reverse("mailings:mailing_list_detail", args=[ml.pk])
         resp = self.client.get(url)
         body = resp.content.decode("utf-8")
-        # disabled でも色クラスは維持（§4.1）
+        # disabled でも色クラスは維持（§4.1）。HIG v1.2 §3.6 で削除系は warning。
         self.assertIn("app-btn--primary", body)
-        self.assertIn("app-btn--danger", body)
+        self.assertIn("app-btn--warning", body)
         self.assertIn("メンバーを追加", body)
         self.assertIn("メンバーを削除", body)
 
@@ -3025,9 +3026,9 @@ class DetailViewRemoveByTagButtonTests(_RemoveByTagTestBase):
         )
         self.assertIn(remove_by_tag_url, body)
         self.assertIn(">タグで除外</a>", body)
-        # 削除系の行＝赤ボタン
-        # 削除系の行は <a ... class="app-btn app-btn--danger">タグで除外</a>
-        self.assertIn('class="app-btn app-btn--danger">タグで除外</a>', body)
+        # HIG v1.2 §3.6：リストから外す操作はやり直せるため warning（黄）。
+        # 描画は <a ... class="app-btn app-btn--warning">タグで除外</a>
+        self.assertIn('class="app-btn app-btn--warning">タグで除外</a>', body)
 
     def test_detail_frozen_disables_remove_by_tag_button(self):
         self.mailing_list.members_frozen_at = timezone.now()

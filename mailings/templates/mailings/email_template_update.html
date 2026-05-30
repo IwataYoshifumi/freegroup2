@@ -19,7 +19,7 @@
     {% endfor %}
   {% endif %}
 
-  <section class="app-card">
+  <section class="app-card" style="max-width: 800px; margin: 0 auto;">
     <p class="app-muted" style="margin-bottom:12px;">
       件名・本文はプレーンテキストで入力します（HTML タグは書きません）。本文に置ける記法は
       差し込み変数 <code>{% verbatim %}{{会社名}}{% endverbatim %}</code> 等・
@@ -104,7 +104,7 @@
       <div class="app-action-area">
         <button type="submit" name="action" value="save_return" class="app-btn app-btn--primary">保存して戻る</button>
         <button type="submit" name="action" value="preview" class="app-btn app-btn--secondary">プレビュー</button>
-        <a class="app-btn" href="{% url 'mailings:campaign_list' %}">キャンセル</a>
+        <a class="app-btn" href="{% url 'mailings:campaign_list' %}">戻る</a>
       </div>
     </form>
   </section>

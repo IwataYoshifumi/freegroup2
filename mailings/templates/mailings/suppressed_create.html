@@ -19,7 +19,7 @@
     {% endfor %}
   {% endif %}
 
-  <section class="app-card">
+  <section class="app-card" style="max-width: 720px; margin: 0 auto;">
     <form method="post" action="{% url 'mailings:suppressed_create' %}" class="app-form-grid">
       {% csrf_token %}
       <div class="app-form__group">
@@ -32,7 +32,7 @@
       </div>
       <div>
         <button type="submit" class="app-btn app-btn--primary">登録</button>
-        <a class="app-btn app-btn--secondary" href="{% url 'mailings:suppressed_list' %}">キャンセル</a>
+        <a class="app-btn app-btn--secondary" href="{% url 'mailings:suppressed_list' %}">戻る</a>
       </div>
     </form>
   </section>

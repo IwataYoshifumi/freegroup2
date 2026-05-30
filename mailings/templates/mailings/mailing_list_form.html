@@ -22,6 +22,9 @@
         {% url 'mailings:mailing_list_list' as list_url %}
         <a href="{{ list_url }}" class="app-btn app-btn--secondary">リスト一覧へ</a>
       {% endif %}
+      {% if back.back_all_exist %}
+        <a href="{% back_all_url back %}" class="app-btn app-btn--secondary">最初に戻る</a>
+      {% endif %}
     </div>
   </div>
 

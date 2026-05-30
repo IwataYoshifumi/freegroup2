@@ -15,10 +15,13 @@
       {% else %}
         <a class="app-btn app-btn--secondary" href="{% url 'mailings:campaign_detail' pk=campaign.pk %}">戻る</a>
       {% endif %}
+      {% if back.back_all_exist %}
+        <a class="app-btn app-btn--secondary" href="{% back_all_url back %}">最初に戻る</a>
+      {% endif %}
     </div>
   </div>
 
-  <section class="app-card">
+  <section class="app-card" style="max-width: 640px; margin: 0 auto;">
     <p>このキャンペーンを削除します。<strong>元に戻すことはできません</strong>。紐づくメール本文も同時に削除扱いになります。</p>
 
     <form method="post" style="margin-top:16px;">
@@ -26,9 +29,9 @@
       <div class="app-action-area">
         <button type="submit" class="app-btn app-btn--danger">削除する</button>
         {% if back.back_exist %}
-          <a class="app-btn" href="{% back_url back %}">キャンセル</a>
+          <a class="app-btn" href="{% back_url back %}">戻る</a>
         {% else %}
-          <a class="app-btn" href="{% url 'mailings:campaign_detail' pk=campaign.pk %}">キャンセル</a>
+          <a class="app-btn" href="{% url 'mailings:campaign_detail' pk=campaign.pk %}">戻る</a>
         {% endif %}
       </div>
     </form>

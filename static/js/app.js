@@ -1214,3 +1214,31 @@
   /* 初期プレビューを 1 回発火（条件が空なら 0 件 + samples=[] が返るだけ） */
   fetchPreview();
 })();
+
+/* ============================================================
+ * Campaign 編集フォーム：送信元方式トグルと差出人欄の連動補完
+ *
+ * 「メール作成者」を選んだ瞬間に sender_email / sender_name が空欄なら、
+ * <form data-creator-email=... data-creator-name=...> から拾ったログインユーザー値で
+ * 補完する。既に値が入っている欄は触らない（手入力尊重）。
+ * 「メルマガ」側への切替時は何もしない（メルマガ用差出人はユーザー入力に任せる）。
+ * ============================================================ */
+(function () {
+  document.addEventListener('change', function (event) {
+    const radio = event.target;
+    if (!radio || radio.tagName !== 'INPUT' || radio.type !== 'radio') return;
+    if (radio.name !== 'sender_mode' || radio.value !== 'creator' || !radio.checked) return;
+    const form = radio.closest('form');
+    if (!form) return;
+    const userEmail = (form.dataset.creatorEmail || '').trim();
+    const userName = (form.dataset.creatorName || '').trim();
+    const emailInput = form.querySelector('input[name="sender_email"]');
+    const nameInput = form.querySelector('input[name="sender_name"]');
+    if (emailInput && userEmail && !emailInput.value.trim()) {
+      emailInput.value = userEmail;
+    }
+    if (nameInput && userName && !nameInput.value.trim()) {
+      nameInput.value = userName;
+    }
+  });
+})();

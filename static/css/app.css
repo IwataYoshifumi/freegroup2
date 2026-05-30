@@ -1910,3 +1910,95 @@ ul.app-radio-list li label {
   gap: 6px;
   font-weight: normal;
 }
+
+/* ===== 削除ボタン（控えめ・黒系） =====
+   赤い塗りボタンと違って画面上の威圧感を抑える。削除フローの確認モーダルは別途出る前提。 */
+.app-btn-trash {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  min-height: 32px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: #4b5563;
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+}
+.app-btn-trash:hover {
+  background: #f3f4f6;
+  color: #111827;
+  border-color: var(--app-border);
+}
+
+/* ===== 送信元方式トグル（CampaignForm sender_mode） =====
+   Bootstrap .btn-check 相当：独立した outline/solid 切替ボタンの横並び。
+   非選択は outline-primary、選択中は primary solid。標準 radio は視覚上隠し、
+   label 自体をボタンとして見せる（Django RadioSelect の <label><input>テキスト</label>
+   構造に合わせて :has() セレクタで判定）。 */
+ul.app-radio-toggle {
+  display: inline-flex;
+  flex-wrap: wrap;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  gap: 8px;
+}
+ul.app-radio-toggle li { margin: 0; }
+ul.app-radio-toggle li input[type="radio"] {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+  width: 0;
+  height: 0;
+}
+ul.app-radio-toggle li label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 18px;
+  min-height: 38px;
+  cursor: pointer;
+  font-weight: 600;
+  background: transparent;
+  color: var(--app-color-primary);
+  border: 1px solid var(--app-color-primary);
+  border-radius: 8px;
+  user-select: none;
+  transition: background-color .12s ease, color .12s ease;
+}
+ul.app-radio-toggle li label:hover {
+  background: rgba(37, 99, 235, 0.08);
+}
+ul.app-radio-toggle li label:has(input[type="radio"]:checked) {
+  background: var(--app-color-primary);
+  color: #fff;
+  border-color: var(--app-color-primary);
+}
+ul.app-radio-toggle li label:has(input[type="radio"]:focus-visible) {
+  outline: 2px solid #1d4ed8;
+  outline-offset: 2px;
+}
+
+/* ===== ヘルプアイコン（フォーム欄ラベル横の ? ツールチップ） =====
+   既存の [data-tooltip] JS（app.js floating-tooltip）に乗る。常時表示の help_text を畳んで、
+   情報密度を下げる。 */
+.app-help-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: #e5e7eb;
+  color: #374151;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: help;
+  user-select: none;
+}
+.app-help-icon:hover { background: #d1d5db; }

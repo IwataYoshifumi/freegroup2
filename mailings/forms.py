@@ -192,7 +192,7 @@ class CampaignForm(_AppInputMixin, forms.ModelForm):
             "scheduled_at": "予約配信日時",
         }
         widgets = {
-            "sender_mode": forms.RadioSelect(attrs={"class": "app-radio-list"}),
+            "sender_mode": forms.RadioSelect(attrs={"class": "app-radio-toggle"}),
             "scheduled_at": forms.DateTimeInput(attrs={"type": "datetime-local"}),
         }
 
@@ -210,6 +210,21 @@ class CampaignForm(_AppInputMixin, forms.ModelForm):
             )
             # mailing_list は draft の間は空のままで OK（Model.clean が scheduled 遷移時に必須化）
             self.fields["mailing_list"].required = False
+        if "sender_mode" in self.fields:
+            # トグル UI に合わせて表示ラベルを簡潔化（モデル定義の choices は維持）。
+            self.fields["sender_mode"].choices = [
+                ("creator", "メール作成者"),
+                ("newsletter", "メルマガ"),
+            ]
+        if "apply_unsubscribe_filter" in self.fields:
+            # チェックボックス → 2 値トグル（適用する／適用しない）に置き換え。
+            # BooleanField のまま widget だけ RadioSelect に差し替えれば、to_python が
+            # 'True' / 'False' 文字列を bool に変換するため値の型は維持される。
+            self.fields["apply_unsubscribe_filter"].widget = forms.RadioSelect(
+                choices=[(True, "適用する"), (False, "適用しない")],
+                attrs={"class": "app-radio-toggle"},
+            )
+            self.fields["apply_unsubscribe_filter"].required = False
         # name は常に必須。
         if "name" in self.fields:
             self.fields["name"].required = True

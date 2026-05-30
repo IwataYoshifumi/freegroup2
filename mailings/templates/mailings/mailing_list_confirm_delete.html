@@ -11,7 +11,7 @@
     </div>
   </div>
 
-  <section class="app-card">
+  <section class="app-card" style="max-width: 640px; margin: 0 auto;">
     <p>以下のリストをアーカイブ化します。アーカイブ化後はリスト一覧に表示されなくなります（物理削除はしません、Campaign 履歴保護のため。詳細画面から非アーカイブ化で元に戻せます）。</p>
     <ul>
       <li><strong>リスト名：</strong>{{ mailing_list.name }}</li>
@@ -25,9 +25,12 @@
     <form method="post">
       {% csrf_token %}
       <div class="app-action-area">
-        <button type="submit" class="app-btn app-btn--danger">アーカイブ化する</button>
+        <button type="submit" class="app-btn app-btn--warning">アーカイブ化する</button>
         {% url 'mailings:mailing_list_list' as cancel_url %}
         <a href="{% append_back_url cancel_url back %}" class="app-btn app-btn--secondary">戻る</a>
+        {% if back.back_all_exist %}
+          <a href="{% back_all_url back %}" class="app-btn app-btn--secondary">最初に戻る</a>
+        {% endif %}
       </div>
     </form>
   </section>

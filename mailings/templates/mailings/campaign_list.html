@@ -12,6 +12,9 @@
     <div class="app-page-header__actions">
       {% url 'mailings:campaign_create' as create_url %}
       <a class="app-btn app-btn--primary" href="{% append_back_url create_url back %}">＋ 新規キャンペーン作成</a>
+      {% if back.back_all_exist %}
+        <a class="app-btn app-btn--secondary" href="{% back_all_url back %}">最初に戻る</a>
+      {% endif %}
     </div>
   </div>
 
@@ -27,6 +30,7 @@
     <table class="app-table">
       <thead>
         <tr>
+          <th class="app-table__col--action"></th>
           <th>名称</th>
           <th>状態</th>
           <th>配信件数</th>
@@ -35,7 +39,6 @@
           <th>有効クリック<br>(総アクセス)</th>
           <th>配信停止</th>
           <th>作成日時</th>
-          <th></th>
         </tr>
       </thead>
       <tbody>
@@ -43,6 +46,10 @@
           <tr>
             {% url 'mailings:campaign_detail' pk=item.campaign.pk as detail_url %}
             {% url 'mailings:campaign_report' pk=item.campaign.pk as report_url %}
+            <td class="app-table__col--action">
+              <a class="app-btn app-btn--sm" href="{% append_back_url detail_url back %}">詳細</a>
+              <a class="app-btn app-btn--sm" href="{% append_back_url report_url back %}">レポート</a>
+            </td>
             <td><a href="{% append_back_url detail_url back %}">{{ item.campaign.name }}</a></td>
             <td>{{ item.campaign.get_status_display }}</td>
             <td>{{ item.summary.total }}</td>
@@ -51,13 +58,12 @@
             <td>{{ item.summary.valid_clicks }} ({{ item.summary.total_access }})</td>
             <td>{{ item.summary.unsubscribed }}</td>
             <td>{{ item.campaign.created_at|date:"Y-m-d H:i" }}</td>
-            <td>
-              <a class="app-btn app-btn--sm" href="{% append_back_url detail_url back %}">詳細</a>
-              <a class="app-btn app-btn--sm" href="{% append_back_url report_url back %}">レポート</a>
-            </td>
           </tr>
         {% empty %}
-          <tr><td colspan="9">配信キャンペーンはまだありません。</td></tr>
+          <tr><td colspan="9">
+            まだキャンペーンがありません。
+            <a href="{% append_back_url create_url back %}">＋ 新規キャンペーン作成 →</a>
+          </td></tr>
         {% endfor %}
       </tbody>
     </table>

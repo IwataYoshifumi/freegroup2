@@ -34,6 +34,9 @@
       {% else %}
         <a class="app-btn app-btn--secondary" href="{% url 'mailings:campaign_list' %}">一覧へ戻る</a>
       {% endif %}
+      {% if back.back_all_exist %}
+        <a class="app-btn app-btn--secondary" href="{% back_all_url back %}">最初に戻る</a>
+      {% endif %}
     </div>
   </div>
 
@@ -45,26 +48,30 @@
     {% endfor %}
   {% endif %}
 
-  {# ====== タイトル直下：機能ボタン集約 ======
-     append_back_url は「次の画面に back_stack を引き継ぎ、その画面の『戻る』で
-     詳細画面に戻したい」リンクにのみ付ける（基本情報を編集／削除確認）。
-     新規リスト作成（ウィザード）は session 経由で campaign 紐づけと commit 後の
-     詳細画面リダイレクトが既に実装されているため、back_stack を載せない。 #}
+  {% comment %}
+  タイトル直下：機能ボタン集約。
+  append_back_url は「次の画面に back_stack を引き継ぎ、その画面の『戻る』で
+  詳細画面に戻したい」リンクにのみ付ける（基本情報を編集／削除確認）。
+  新規リスト作成（ウィザード）は session 経由で campaign 紐づけと commit 後の
+  詳細画面リダイレクトが既に実装されているため、back_stack を載せない。
+  {% endcomment %}
   <section class="app-card">
     {% if campaign.status == 'draft' %}
       {% url 'mailings:campaign_update' pk=campaign.pk as update_url %}
       {% url 'mailings:campaign_archive' pk=campaign.pk as archive_url %}
-      <div class="app-action-area">
-        <a class="app-btn" href="{% append_back_url update_url back %}">基本情報を編集</a>
-        <a class="app-btn app-btn--secondary" href="{% url 'mailings:new_list_meta' %}?campaign={{ campaign.pk }}">新規リストを作成して紐づける</a>
-        <button type="button" class="app-btn app-btn--secondary" data-action="open-modal" data-target="testSendConfirmModal">テスト送信</button>
-        <button type="button" class="app-btn app-btn--primary" data-action="open-modal" data-target="scheduleConfirmModal">予約する</button>
-        <a class="app-btn app-btn--danger" href="{% append_back_url archive_url back %}">削除</a>
+      <div class="app-action-area" style="justify-content: space-between;">
+        <div style="display:flex; gap:var(--app-space-sm); flex-wrap:wrap;">
+          <a class="app-btn" href="{% append_back_url update_url back %}">基本情報を編集</a>
+          <a class="app-btn app-btn--secondary" href="{% url 'mailings:new_list_meta' %}?campaign={{ campaign.pk }}">新規リストを作成して紐づける</a>
+          <button type="button" class="app-btn app-btn--secondary" data-action="open-modal" data-target="testSendConfirmModal">テスト送信</button>
+          <button type="button" class="app-btn app-btn--primary" data-action="open-modal" data-target="scheduleConfirmModal">予約する</button>
+        </div>
+        <a class="app-btn-trash" href="{% append_back_url archive_url back %}" title="削除">🗑 削除</a>
       </div>
     {% elif campaign.status == 'scheduled' %}
       <div class="app-action-area">
         <button type="button" class="app-btn app-btn--secondary" data-action="open-modal" data-target="testSendConfirmModal">テスト送信</button>
-        <button type="button" class="app-btn app-btn--danger" data-action="open-modal" data-target="cancelScheduleConfirmModal">予約を取り消す</button>
+        <button type="button" class="app-btn app-btn--warning" data-action="open-modal" data-target="cancelScheduleConfirmModal">予約を取り消す</button>
       </div>
     {% elif campaign.status == 'sending' %}
       <p>配信中です。中断機能は提供していません。</p>
@@ -148,7 +155,7 @@
             {% csrf_token %}
             <div class="app-action-area">
               <button type="submit" class="app-btn app-btn--primary">予約する</button>
-              <button type="button" class="app-btn" data-action="close-modal">キャンセル</button>
+              <button type="button" class="app-btn" data-action="close-modal">戻る</button>
             </div>
           </form>
         </div>
@@ -167,8 +174,8 @@
           <form method="post" action="{% url 'mailings:campaign_cancel_schedule' pk=campaign.pk %}" style="margin-top:16px;">
             {% csrf_token %}
             <div class="app-action-area">
-              <button type="submit" class="app-btn app-btn--danger">予約を取り消す</button>
-              <button type="button" class="app-btn" data-action="close-modal">キャンセル</button>
+              <button type="submit" class="app-btn app-btn--warning">予約を取り消す</button>
+              <button type="button" class="app-btn" data-action="close-modal">戻る</button>
             </div>
           </form>
         </div>
@@ -188,7 +195,7 @@
             {% csrf_token %}
             <div class="app-action-area">
               <button type="submit" class="app-btn app-btn--primary">テスト送信</button>
-              <button type="button" class="app-btn" data-action="close-modal">キャンセル</button>
+              <button type="button" class="app-btn" data-action="close-modal">戻る</button>
             </div>
           </form>
         </div>
