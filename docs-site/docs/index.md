@@ -34,9 +34,10 @@ FreeGroup2 は、名刺画像から OCR で情報を読み取り、データベ�
 はじめて FreeGroup2 を使う方は、以下の順に読み進めてください。
 
 1. [インストール](install.md) — サーバーへの導入と初期設定
-2. [名刺の取り込み](usage/import.md) — 画像アップロードと OCR の流れ
-3. [コンタクト管理](usage/contacts.md) — 取り込んだ情報の検索・編集
-4. [ユーザー管理](usage/users.md) — 複数人で運用する場合の設定
+2. [Anthropic APIキーの取得](install/anthropic-api-key.md) — OCR に必要な API キーの発行と設定
+3. [名刺の取り込み](usage/import.md) — 画像アップロードと OCR の流れ
+4. [コンタクト管理](usage/contacts.md) — 取り込んだ情報の検索・編集
+5. [ユーザー管理](usage/users.md) — 複数人で運用する場合の設定
 
 運用者向け情報：
 

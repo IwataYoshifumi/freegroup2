@@ -69,4 +69,4 @@ API の課金はご自身のアカウントに乗るため、想定外の使い�
 | キーが動かない・OCR がエラーになる | 支払い方法の登録とクレジット購入が済んでいるか確認してください（手順 2）。 |
 | claude.ai にはログインできるが API キーの画面が無い | [platform.claude.com](https://platform.claude.com/)（API Console）側にログインしているか確認してください。claude.ai とは別サービスです。 |
 
-設定が済んだら、[名刺の取り込み](import.md) に進んで OCR を試してください。
+設定が済んだら、[名刺の取り込み](../usage/import.md) に進んで OCR を試してください。
