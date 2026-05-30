@@ -4,13 +4,36 @@
 {% block title %}キャンペーン詳細 — {{ campaign.name }}{% endblock %}
 
 {% block content %}
+  {% comment %}
+  基本情報はタイトル周辺に圧縮：ステータス・予約配信日時を h1 の右に並べ、
+  作成者・作成日時・送信元方式・配信停止フィルタは「ⓘ」アイコンの title 属性に
+  ツールチップとして格納（HTML5 標準のツールチップ表示）。
+  機能ボタン（基本情報を編集 / 新規リストを作成して紐づける / テスト送信 / 予約する / 削除）は
+  ステータス別にタイトル直下の 1 エリアにまとめ、宛先・メール内容セクションからは外す。
+  {% endcomment %}
+
   <div class="app-page-header">
     <div>
       <div class="app-breadcrumb">メール配信 / キャンペーン / 詳細</div>
-      <h1>キャンペーン詳細：{{ campaign.name }}</h1>
+      <h1 style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+        <span>{{ campaign.name }}</span>
+        <span class="app-badge app-badge--{{ campaign.status }}">{{ campaign.get_status_display }}</span>
+        {% if campaign.scheduled_at %}
+          <span class="app-muted" style="font-size:14px; font-weight:normal;">予約：{{ campaign.scheduled_at|date:"Y-m-d H:i" }}</span>
+        {% endif %}
+        <span
+          class="app-muted"
+          style="font-size:14px; cursor:help;"
+          title="作成者：{{ campaign.created_by.get_full_name|default:campaign.created_by.username }}&#10;作成日時：{{ campaign.created_at|date:"Y-m-d H:i" }}&#10;送信元方式：{{ campaign.get_sender_mode_display }}{% if campaign.sender_mode == 'newsletter' %}（{{ campaign.sender_name }} <{{ campaign.sender_email }}>）{% endif %}&#10;配信停止フィルタ：{% if campaign.apply_unsubscribe_filter %}適用する（ON）{% else %}適用しない（OFF）{% endif %}"
+        >ⓘ</span>
+      </h1>
     </div>
     <div class="app-page-header__actions">
-      <a class="app-btn app-btn--secondary" href="{% url 'mailings:campaign_list' %}">一覧へ戻る</a>
+      {% if back.back_exist %}
+        <a class="app-btn app-btn--secondary" href="{% back_url back %}">戻る</a>
+      {% else %}
+        <a class="app-btn app-btn--secondary" href="{% url 'mailings:campaign_list' %}">一覧へ戻る</a>
+      {% endif %}
     </div>
   </div>
 
@@ -22,33 +45,43 @@
     {% endfor %}
   {% endif %}
 
-  {# ====== セクション1：基本情報 ====== #}
+  {# ====== タイトル直下：機能ボタン集約 ======
+     append_back_url は「次の画面に back_stack を引き継ぎ、その画面の『戻る』で
+     詳細画面に戻したい」リンクにのみ付ける（基本情報を編集／削除確認）。
+     新規リスト作成（ウィザード）は session 経由で campaign 紐づけと commit 後の
+     詳細画面リダイレクトが既に実装されているため、back_stack を載せない。 #}
   <section class="app-card">
-    <h2>基本情報</h2>
-    <dl class="app-form-grid" style="grid-template-columns: 180px 1fr; gap:4px 12px;">
-      <dt>ステータス</dt>
-      <dd><span class="app-badge app-badge--{{ campaign.status }}">{{ campaign.get_status_display }}</span></dd>
-      <dt>キャンペーン名</dt>
-      <dd>{{ campaign.name }}</dd>
-      <dt>作成者</dt>
-      <dd>{{ campaign.created_by.get_full_name|default:campaign.created_by.username }}</dd>
-      <dt>作成日時</dt>
-      <dd>{{ campaign.created_at|date:"Y-m-d H:i" }}</dd>
-      <dt>予約配信日時</dt>
-      <dd>{{ campaign.scheduled_at|date:"Y-m-d H:i"|default:"未設定" }}</dd>
-      <dt>送信元方式</dt>
-      <dd>{{ campaign.get_sender_mode_display }}{% if campaign.sender_mode == 'newsletter' %}（{{ campaign.sender_name }} &lt;{{ campaign.sender_email }}&gt;）{% endif %}</dd>
-      <dt>配信停止フィルタ</dt>
-      <dd>{% if campaign.apply_unsubscribe_filter %}適用する（ON）{% else %}適用しない（OFF）{% endif %}</dd>
-    </dl>
+    {% if campaign.status == 'draft' %}
+      {% url 'mailings:campaign_update' pk=campaign.pk as update_url %}
+      {% url 'mailings:campaign_archive' pk=campaign.pk as archive_url %}
+      <div class="app-action-area">
+        <a class="app-btn" href="{% append_back_url update_url back %}">基本情報を編集</a>
+        <a class="app-btn app-btn--secondary" href="{% url 'mailings:new_list_meta' %}?campaign={{ campaign.pk }}">新規リストを作成して紐づける</a>
+        <button type="button" class="app-btn app-btn--secondary" data-action="open-modal" data-target="testSendConfirmModal">テスト送信</button>
+        <button type="button" class="app-btn app-btn--primary" data-action="open-modal" data-target="scheduleConfirmModal">予約する</button>
+        <a class="app-btn app-btn--danger" href="{% append_back_url archive_url back %}">削除</a>
+      </div>
+    {% elif campaign.status == 'scheduled' %}
+      <div class="app-action-area">
+        <button type="button" class="app-btn app-btn--secondary" data-action="open-modal" data-target="testSendConfirmModal">テスト送信</button>
+        <button type="button" class="app-btn app-btn--danger" data-action="open-modal" data-target="cancelScheduleConfirmModal">予約を取り消す</button>
+      </div>
+    {% elif campaign.status == 'sending' %}
+      <p>配信中です。中断機能は提供していません。</p>
+    {% elif campaign.status == 'done' or campaign.status == 'failed' %}
+      <div class="app-action-area">
+        <a class="app-btn app-btn--secondary" href="{% url 'mailings:campaign_report' pk=campaign.pk %}">配信レポートを見る</a>
+      </div>
+    {% endif %}
   </section>
 
-  {# ====== セクション2：メール内容（テンプレ件名・本文の読み取り表示、§6.2.1.1） ====== #}
+  {# ====== メール内容 ====== #}
   <section class="app-card">
     <div style="display:flex; justify-content:space-between; align-items:center;">
       <h2>メール内容</h2>
       {% if campaign.status == 'draft' %}
-        <a class="app-btn app-btn--secondary" href="{% url 'mailings:template_update' pk=template.pk %}">件名・本文を編集</a>
+        {% url 'mailings:template_update' pk=template.pk as template_update_url %}
+        <a class="app-btn app-btn--secondary" href="{% append_back_url template_update_url back %}">件名・本文を編集</a>
       {% endif %}
     </div>
     <div class="app-form__group" style="margin-top:8px;">
@@ -65,80 +98,43 @@
     </div>
   </section>
 
-  {# ====== セクション3：宛先サマリー ====== #}
+  {# ====== 宛先サマリー ====== #}
   <section class="app-card">
-    <div style="display:flex; justify-content:space-between; align-items:center;">
-      <h2>宛先</h2>
-      {% if campaign.status == 'draft' %}
-        {% comment %}
-        【作業5】 draft のみ：その場で新規リストを作って当該キャンペーンに紐づける導線。
-        scheduled / sending / done では出さない（配信実行で凍結したメンバーが「誰に送ったか」
-        を確定させており、後からの差し替えは履歴整合と特電法対応を壊すため、§7.7.1 / §11.4.3）。
-        {% endcomment %}
-        <a class="app-btn app-btn--secondary" href="{% url 'mailings:new_list_meta' %}?campaign={{ campaign.pk }}">新規リストを作成して紐づける</a>
-      {% endif %}
-    </div>
-    <p>
-      リスト：<a href="{% url 'mailings:mailing_list_detail' pk=campaign.mailing_list.pk %}">{{ campaign.mailing_list.name }}</a>
-      <span class="app-muted" style="margin-left:8px;">対象件数：{{ recipient_count }} 件</span>
-    </p>
-    {% if sample_recipients %}
-      <table class="app-table" style="margin-top:8px;">
-        <thead>
-          <tr><th>会社名</th><th>氏名</th><th>メアド</th></tr>
-        </thead>
-        <tbody>
-          {% for person in sample_recipients %}
-            <tr>
-              <td>{{ person.primary_contact.organization|default:"—" }}</td>
-              <td>{{ person.primary_contact.full_name|default:person.id }}</td>
-              <td>{{ person.primary_contact.email|default:"—" }}</td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-      {% if recipient_count > sample_recipients|length %}
-        <p class="app-muted" style="margin-top:6px;">先頭 {{ sample_recipients|length }} 件のみ表示（全 {{ recipient_count }} 件）。</p>
+    <h2>宛先</h2>
+    {% if campaign.mailing_list %}
+      <p>
+        リスト：<a href="{% url 'mailings:mailing_list_detail' pk=campaign.mailing_list.pk %}">{{ campaign.mailing_list.name }}</a>
+        <span class="app-muted" style="margin-left:8px;">対象件数：{{ recipient_count }} 件</span>
+      </p>
+      {% if sample_recipients %}
+        <table class="app-table" style="margin-top:8px;">
+          <thead>
+            <tr><th>会社名</th><th>氏名</th><th>メアド</th></tr>
+          </thead>
+          <tbody>
+            {% for person in sample_recipients %}
+              <tr>
+                <td>{{ person.primary_contact.organization|default:"—" }}</td>
+                <td>{{ person.primary_contact.full_name|default:person.id }}</td>
+                <td>{{ person.primary_contact.email|default:"—" }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% if recipient_count > sample_recipients|length %}
+          <p class="app-muted" style="margin-top:6px;">先頭 {{ sample_recipients|length }} 件のみ表示（全 {{ recipient_count }} 件）。</p>
+        {% endif %}
+      {% else %}
+        <p class="app-muted">配信対象 Person がいません。</p>
       {% endif %}
     {% else %}
-      <p class="app-muted">配信対象 Person がいません。</p>
-    {% endif %}
-  </section>
-
-  {# ====== セクション4：テスト送信 ====== #}
-  {% if campaign.status == 'draft' or campaign.status == 'scheduled' %}
-    <section class="app-card">
-      <h2>テスト送信</h2>
-      <p>送信先：<strong>{{ test_recipient_email }}</strong>（操作者本人固定、変更不可）</p>
-      <button type="button" class="app-btn app-btn--secondary" data-action="open-modal" data-target="testSendConfirmModal">テスト送信</button>
-    </section>
-  {% endif %}
-
-  {# ====== セクション5：ステータス別アクション ====== #}
-  <section class="app-card">
-    <h2>アクション</h2>
-    {% if campaign.status == 'draft' %}
-      <div class="app-action-area">
-        <a class="app-btn" href="{% url 'mailings:campaign_update' pk=campaign.pk %}">基本情報を編集</a>
-        <button type="button" class="app-btn app-btn--primary" data-action="open-modal" data-target="scheduleConfirmModal">予約する</button>
-        <a class="app-btn app-btn--danger" href="{% url 'mailings:campaign_archive' pk=campaign.pk %}">削除</a>
-      </div>
-    {% elif campaign.status == 'scheduled' %}
-      <div class="app-action-area">
-        <button type="button" class="app-btn app-btn--danger" data-action="open-modal" data-target="cancelScheduleConfirmModal">予約を取り消す</button>
-      </div>
-    {% elif campaign.status == 'sending' %}
-      <p>配信中です。中断機能は提供していません（§7.2.5）。</p>
-    {% elif campaign.status == 'done' or campaign.status == 'failed' %}
-      <div class="app-action-area">
-        <a class="app-btn app-btn--secondary" href="{% url 'mailings:campaign_report' pk=campaign.pk %}">配信レポートを見る</a>
-      </div>
+      <p class="app-muted">
+        宛先リストが未設定です。「基本情報を編集」から宛先リストを選ぶか、「新規リストを作成して紐づける」から作成してください。
+      </p>
     {% endif %}
   </section>
 
   {# ====== inline モーダル：schedule / cancel_schedule / test_send ====== #}
-  {# Django テンプレ include の引数解析が全角文字を含むリテラル文字列で誤動作するため、 #}
-  {# part テンプレ include をやめ、ここに 3 モーダルをインライン展開する。 #}
   {% if campaign.status == 'draft' %}
     <div id="scheduleConfirmModal" class="app-modal" hidden role="dialog" aria-modal="true" aria-labelledby="scheduleConfirmModalTitle">
       <div class="app-modal__panel">
@@ -147,7 +143,7 @@
           <button type="button" class="app-btn app-btn--sm" data-action="close-modal">閉じる</button>
         </header>
         <div class="app-modal__body">
-          <p>{{ campaign.scheduled_at|date:"Y-m-d H:i" }} に配信を予約します。よろしいですか？</p>
+          <p>{{ campaign.scheduled_at|date:"Y-m-d H:i"|default:"（基本情報で予約日時を設定してください）" }} に配信を予約します。よろしいですか？</p>
           <form method="post" action="{% url 'mailings:campaign_schedule' pk=campaign.pk %}" style="margin-top:16px;">
             {% csrf_token %}
             <div class="app-action-area">

@@ -46,19 +46,23 @@
 
       <div class="app-action-area">
         <button type="submit" class="app-btn app-btn--primary">{% if is_create %}作成して詳細へ{% else %}保存して詳細へ{% endif %}</button>
-        {% if is_create %}
-          <a class="app-btn" href="{% url 'mailings:campaign_list' %}">キャンセル</a>
+        {% if back.back_exist %}
+          <a class="app-btn" href="{% back_url back %}">戻る</a>
         {% else %}
-          <a class="app-btn" href="{% url 'mailings:campaign_detail' pk=campaign.pk %}">キャンセル</a>
+          {% if is_create %}
+            <a class="app-btn" href="{% url 'mailings:campaign_list' %}">戻る</a>
+          {% else %}
+            <a class="app-btn" href="{% url 'mailings:campaign_detail' pk=campaign.pk %}">戻る</a>
+          {% endif %}
         {% endif %}
       </div>
     </form>
   </section>
 
+  {% if not is_create %}
   <script>
   (function () {
-    /* §7.8.4 構造的禁止の UI 表現：sender_mode=newsletter のとき
-       apply_unsubscribe_filter を checked=true + disabled に固定。creator で解除。 */
+    /* メルマガ方式選択時に「配信停止フィルタ」を ON 固定 + 操作不可にする UI 制御。 */
     const modeRadios = document.querySelectorAll('input[name="sender_mode"]');
     const filterCheckbox = document.getElementById('{{ form.apply_unsubscribe_filter.id_for_label }}');
     if (!modeRadios.length || !filterCheckbox) return;
@@ -78,4 +82,5 @@
     syncFilterDisabled();
   })();
   </script>
+  {% endif %}
 {% endblock %}

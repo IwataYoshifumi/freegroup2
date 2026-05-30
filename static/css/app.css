@@ -193,6 +193,41 @@ a { color: inherit; text-decoration: none; }
   padding-left: 24px;
 }
 
+/* サイドバーのアコーディオン見出し（button 化、リンクと同じ見た目に揃える） */
+.app-sidebar__group-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  color: var(--app-muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-align: left;
+  border-radius: 8px;
+  margin: 8px 0;
+}
+.app-sidebar__group-toggle:hover {
+  background: rgba(15, 23, 42, 0.04);
+}
+
+/* インライン用アイコン（▾/▸ をテキストとして並べる、円背景は付けない） */
+.app-collapsible__icon--inline {
+  display: inline;
+  min-width: 0;
+  min-height: 0;
+  background: transparent;
+  color: inherit;
+  border-radius: 0;
+  width: auto;
+  height: auto;
+  padding: 0;
+}
+
 .app-sidebar a:hover,
 .app-sidebar a.is-active,
 .app-drawer a:hover,
@@ -1849,4 +1884,29 @@ form:has(.js-decision-additional_role:checked) .app-merge-survivor__label--prima
 .app-preview__body {
   white-space: normal;
   line-height: 1.5;
+}
+
+/* 縦並びのラジオ／チェックリスト（Campaign 送信元方式など） */
+.app-radio-list {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 4px 12px 4px 0;
+  width: auto;
+}
+/* RadioSelect が <ul> で出力されるケースのリセット */
+ul.app-radio-list,
+ul.app-radio-list li {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+ul.app-radio-list li {
+  margin: 4px 0;
+}
+ul.app-radio-list li label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: normal;
 }

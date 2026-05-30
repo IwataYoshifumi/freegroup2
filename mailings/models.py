@@ -270,18 +270,14 @@ class Campaign(models.Model):
         MailingList,
         on_delete=models.PROTECT,
         related_name="+",
-        help_text=(
-            "宛先リスト（必須、rev12 で必須 FK 化）。リスト削除でキャンペーン履歴が"
-            "壊れないよう PROTECT。リストは論理削除運用（§4.11 / §11）"
-        ),
+        null=True,
+        blank=True,
+        help_text="このキャンペーンの宛先リスト。配信を予約する時点までに必ず選んでください。",
     )
     scheduled_at = models.DateTimeField(
         null=True,
         blank=True,
-        help_text=(
-            "予約配信日時。rev9 で即時配信モード廃止。status=scheduled 遷移時の"
-            "未来日時必須は Phase 3 のサービス層・フォーム層で担保（§4.2）"
-        ),
+        help_text="配信を実行する日時。下書きの間は空のままで OK ですが、予約する時点で未来の日時を指定してください。",
     )
     status = models.CharField(
         max_length=20,
@@ -292,28 +288,21 @@ class Campaign(models.Model):
         max_length=20,
         choices=SenderMode.choices,
         default=SenderMode.CREATOR,
-        help_text="送信元方式（§7.8、別表 C.26）",
+        help_text="送信元の名義を選びます。",
     )
     sender_email = models.EmailField(
         blank=True,
-        help_text=(
-            "メルマガ方式時の差出人アドレス（自社 DKIM 許可ドメイン配下のみ）。"
-            "メール作成者方式時は空（created_by から取得、§7.8.3）"
-        ),
+        help_text="メルマガとして配信する場合の差出人アドレス。自社の DKIM 設定済みドメインの配下を指定してください。",
     )
     sender_name = models.CharField(
         max_length=200,
         blank=True,
         default="",
-        help_text="メルマガ方式時の差出人名。メール作成者方式時は空",
+        help_text="メルマガとして配信する場合の差出人名（受信メールの From 欄に表示されます）。",
     )
     apply_unsubscribe_filter = models.BooleanField(
         default=True,
-        help_text=(
-            "Unsubscribe フィルタ適用フラグ。default=True（安全側）。"
-            "sender_mode='newsletter' のときは構造的に常時 True 固定（特電法事故防止）。"
-            "強制ロジックは Phase 3 のサービス層・フォーム層（§7.8.4）"
-        ),
+        help_text="配信停止を希望した宛先には送らない設定です。通常はオンのままにしてください。メルマガとして配信する場合は常時オンに固定されます。",
     )
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -396,12 +385,18 @@ class Campaign(models.Model):
                 except ValidationError as e:
                     errors["sender_email"] = e.messages[0] if e.messages else str(e)
 
-        # (5) scheduled 遷移時：scheduled_at 必須・未来日時
+        # (5) scheduled 遷移時：scheduled_at 必須・未来日時 + 宛先リスト必須
         if self.status == self.Status.SCHEDULED:
             if self.scheduled_at is None:
-                errors["scheduled_at"] = "予約配信日時は必須です（§4.2）"
+                errors["scheduled_at"] = "予約配信日時は必須です。"
             elif self.scheduled_at <= timezone.now():
-                errors["scheduled_at"] = "予約配信日時は未来日時を指定してください（§4.2）"
+                errors["scheduled_at"] = "予約配信日時は未来の日時を指定してください。"
+            # 宛先リストは draft の間は空のままで OK だが、scheduled 遷移時には必須。
+            # （rev12 までは DB レベル NOT NULL だったが、Campaign を「名前だけ」で
+            # 先に作って後から宛先を埋める運用に揃えるため、必須チェックを scheduled
+            # 遷移時に移管した）
+            if self.mailing_list_id is None:
+                errors["mailing_list"] = "宛先リストを選択してください。"
 
         if errors:
             raise ValidationError(errors)

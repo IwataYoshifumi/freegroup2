@@ -10,7 +10,8 @@
       <h1>配信キャンペーン一覧</h1>
     </div>
     <div class="app-page-header__actions">
-      <a class="app-btn app-btn--primary" href="{% url 'mailings:campaign_create' %}">＋ 新規キャンペーン作成</a>
+      {% url 'mailings:campaign_create' as create_url %}
+      <a class="app-btn app-btn--primary" href="{% append_back_url create_url back %}">＋ 新規キャンペーン作成</a>
     </div>
   </div>
 
@@ -40,7 +41,9 @@
       <tbody>
         {% for item in campaigns_with_summary %}
           <tr>
-            <td><a href="{% url 'mailings:campaign_detail' pk=item.campaign.pk %}">{{ item.campaign.name }}</a></td>
+            {% url 'mailings:campaign_detail' pk=item.campaign.pk as detail_url %}
+            {% url 'mailings:campaign_report' pk=item.campaign.pk as report_url %}
+            <td><a href="{% append_back_url detail_url back %}">{{ item.campaign.name }}</a></td>
             <td>{{ item.campaign.get_status_display }}</td>
             <td>{{ item.summary.total }}</td>
             <td>{{ item.summary.sent }}</td>
@@ -49,8 +52,8 @@
             <td>{{ item.summary.unsubscribed }}</td>
             <td>{{ item.campaign.created_at|date:"Y-m-d H:i" }}</td>
             <td>
-              <a class="app-btn app-btn--sm" href="{% url 'mailings:campaign_detail' pk=item.campaign.pk %}">詳細</a>
-              <a class="app-btn app-btn--sm" href="{% url 'mailings:campaign_report' pk=item.campaign.pk %}">レポート</a>
+              <a class="app-btn app-btn--sm" href="{% append_back_url detail_url back %}">詳細</a>
+              <a class="app-btn app-btn--sm" href="{% append_back_url report_url back %}">レポート</a>
             </td>
           </tr>
         {% empty %}

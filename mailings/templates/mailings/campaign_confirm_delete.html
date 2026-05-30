@@ -9,17 +9,27 @@
       <div class="app-breadcrumb">メール配信 / キャンペーン / 削除確認</div>
       <h1>キャンペーン削除：{{ campaign.name }}</h1>
     </div>
+    <div class="app-page-header__actions">
+      {% if back.back_exist %}
+        <a class="app-btn app-btn--secondary" href="{% back_url back %}">戻る</a>
+      {% else %}
+        <a class="app-btn app-btn--secondary" href="{% url 'mailings:campaign_detail' pk=campaign.pk %}">戻る</a>
+      {% endif %}
+    </div>
   </div>
 
   <section class="app-card">
-    <p>このキャンペーンを削除します。<strong>元に戻すことはできません</strong>（物理削除ではなく論理削除＝is_archived=True に設定、紐付く EmailTemplate も同時に論理削除されます）。</p>
-    <p class="app-muted">仕様書 §12.4：EmailTemplate の is_archived は Campaign の論理削除に連動。物理削除は OneToOne PROTECT のため不可。</p>
+    <p>このキャンペーンを削除します。<strong>元に戻すことはできません</strong>。紐づくメール本文も同時に削除扱いになります。</p>
 
     <form method="post" style="margin-top:16px;">
       {% csrf_token %}
       <div class="app-action-area">
         <button type="submit" class="app-btn app-btn--danger">削除する</button>
-        <a class="app-btn" href="{% url 'mailings:campaign_detail' pk=campaign.pk %}">キャンセル</a>
+        {% if back.back_exist %}
+          <a class="app-btn" href="{% back_url back %}">キャンセル</a>
+        {% else %}
+          <a class="app-btn" href="{% url 'mailings:campaign_detail' pk=campaign.pk %}">キャンセル</a>
+        {% endif %}
       </div>
     </form>
   </section>

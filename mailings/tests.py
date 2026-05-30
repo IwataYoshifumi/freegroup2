@@ -3185,15 +3185,18 @@ class CampaignModelTests(_Phase2ModelTestBase):
         values = {v for v, _ in Campaign.SenderMode.choices}
         self.assertEqual(values, {"creator", "newsletter"})
 
-    def test_mailing_list_is_required(self):
-        with self.assertRaises(IntegrityError):
-            with transaction.atomic():
-                Campaign.objects.create(
-                    name="C2",
-                    template=self.template,
-                    mailing_list=None,
-                    created_by=self.user,
-                )
+    def test_mailing_list_is_optional_for_draft(self):
+        # 作業2：mailing_list は null=True に変更。draft 段階では DB レベルで空可。
+        # scheduled 遷移時の必須化は CampaignCleanTests::test_scheduled_without_mailing_list_raises でカバー。
+        c = Campaign.objects.create(
+            name="C-draft-no-list",
+            template=EmailTemplate.objects.create(
+                name="T_no_list", subject="件名", body="本文", created_by=self.user
+            ),
+            mailing_list=None,
+            created_by=self.user,
+        )
+        self.assertIsNone(c.mailing_list_id)
 
     def test_view_all_campaigns_permission_exists(self):
         ct = ContentType.objects.get_for_model(Campaign)
@@ -6828,6 +6831,23 @@ class CampaignCleanTests(_PhaseBTestBase):
         c.scheduled_at = timezone.now() - timedelta(hours=1)
         c.clean()
 
+    def test_scheduled_without_mailing_list_raises(self):
+        # 作業2：scheduled 遷移時は mailing_list 必須（draft は空でも OK）
+        c = self.campaign
+        c.status = Campaign.Status.SCHEDULED
+        c.scheduled_at = timezone.now() + timedelta(hours=1)
+        c.mailing_list = None
+        with self.assertRaises(ValidationError) as ctx:
+            c.clean()
+        self.assertIn("mailing_list", ctx.exception.message_dict)
+
+    def test_draft_without_mailing_list_passes(self):
+        # 作業2：draft の間は mailing_list 空でも保存・編集可
+        c = self.campaign
+        c.status = Campaign.Status.DRAFT
+        c.mailing_list = None
+        c.clean()  # raise しないこと
+
 
 class CreateCampaignWithTemplateTests(_PhaseBTestBase):
     """create_campaign_with_template の atomic 性（(b) §5.1、Service 層）。"""
@@ -6997,33 +7017,27 @@ class CampaignCreateViewTests(_PhaseBTestBase):
         self.assertEqual(response.status_code, 302)
         self.assertIn("/login/", response.url)
 
-    def test_get_renders_form(self):
+    def test_get_renders_form_with_only_name(self):
+        # 作業1：新規作成画面は name のみ表示。mailing_list 等は出さない（詳細→基本情報編集で設定）。
         response = self.client.get(self.URL)
         self.assertEqual(response.status_code, 200)
         self.assertIn(b'name="name"', response.content)
-        self.assertIn(b'name="mailing_list"', response.content)
+        self.assertNotIn(b'name="mailing_list"', response.content)
+        self.assertNotIn(b'name="sender_mode"', response.content)
+        self.assertNotIn(b'name="scheduled_at"', response.content)
 
-    def test_post_creates_campaign_and_redirects_to_detail(self):
+    def test_post_creates_campaign_with_name_only(self):
+        # 作業1＋作業2：name のみ POST で作成可能（mailing_list は null=True、後で詳細→基本情報編集で設定）。
         from mailings.models import EmailTemplate
 
         before_c = Campaign.objects.count()
         before_t = EmailTemplate.objects.count()
-        response = self.client.post(
-            self.URL,
-            data={
-                "name": "新作",
-                "mailing_list": self.mailing_list.pk,
-                "sender_mode": Campaign.SenderMode.CREATOR,
-                "sender_email": "",
-                "sender_name": "",
-                "apply_unsubscribe_filter": "on",
-                "scheduled_at": "",
-            },
-        )
+        response = self.client.post(self.URL, data={"name": "新作"})
         self.assertEqual(response.status_code, 302)
         self.assertEqual(Campaign.objects.count(), before_c + 1)
         self.assertEqual(EmailTemplate.objects.count(), before_t + 1)
         new_campaign = Campaign.objects.get(name="新作")
+        self.assertIsNone(new_campaign.mailing_list_id)  # 新規作成時は宛先リスト未設定
         self.assertEqual(response.url, f"/mailings/campaigns/{new_campaign.pk}/")
 
 

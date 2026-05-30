@@ -16,7 +16,17 @@ class _AppInputMixin:
     def _apply_widget_classes(self):
         for field in self.fields.values():
             widget = field.widget
-            if isinstance(widget, forms.CheckboxInput):
+            # チェックボックス・ラジオ・複数選択は app-input を付けると <input> 側に
+            # 適用されて形が崩れる（ラベル幅一杯のボックス化など）。専用クラスを
+            # 個別 widgets= に直書きする運用に揃える。
+            if isinstance(
+                widget,
+                (
+                    forms.CheckboxInput,
+                    forms.RadioSelect,
+                    forms.CheckboxSelectMultiple,
+                ),
+            ):
                 continue
             css = widget.attrs.get("class", "")
             if "app-input" not in css.split():
@@ -150,20 +160,16 @@ class EmailTemplateForm(_AppInputMixin, forms.ModelForm):
 
 
 class CampaignForm(_AppInputMixin, forms.ModelForm):
-    """Campaign 新規作成・編集共通フォーム（(b)、仕様書 §4.2 / §6.2.1 / §7.8）。
+    """Campaign 新規作成・編集共通フォーム。
 
-    Campaign.clean() がメルマガ × OFF・newsletter 系必須・DKIM ドメイン・scheduled_at 未来
-    日時の全バリデーションを担う。本フォームは widget と必須/非必須の Form 層制御のみ。
-
-    sender_email / sender_name は creator 方式時は空でよいが、newsletter 時の必須は
-    Form.required ではなく Campaign.clean() で「業務制約として」検証する（draft 段階で
-    sender_mode 未確定のまま空保存可、確定時に Model.clean が弾く）。
-
-    UI 上の「newsletter 時に apply_unsubscribe_filter を disabled 表示」は
-    template_form の inline JS で実現（§7.8.4 構造的禁止の UI 表現、本フォーム側では
-    Form.required レベルでの制約のみで、widget 属性での disabled は付けない＝
-    creator ↔ newsletter 切替時に都度設定が必要なため JS が動的に切替）。
+    新規作成（is_create=True）はキャンペーン名のみを表示する。宛先リスト・送信元方式・
+    差出人・配信停止フィルタ・予約日時は詳細画面の「基本情報を編集」から設定する運用。
+    Campaign.clean() がメルマガ系必須・DKIM ドメイン・scheduled_at 未来日時・宛先リスト
+    必須（scheduled 遷移時）の業務バリデーションを担う。本フォームは widget と Form 層の
+    必須/任意制御のみ。
     """
+
+    CREATE_VISIBLE_FIELDS = ("name",)
 
     class Meta:
         model = Campaign
@@ -177,29 +183,38 @@ class CampaignForm(_AppInputMixin, forms.ModelForm):
             "scheduled_at",
         ]
         labels = {
-            "name": "キャンペーン名（管理用、受信者には見えない）",
-            "mailing_list": "宛先リスト（必須）",
+            "name": "キャンペーン名",
+            "mailing_list": "宛先リスト",
             "sender_mode": "送信元方式",
-            "sender_email": "差出人アドレス（メルマガ方式時のみ必須、DKIM 許可ドメイン配下）",
-            "sender_name": "差出人名（メルマガ方式時のみ必須）",
-            "apply_unsubscribe_filter": "配信停止フィルタを適用する（メルマガ方式時は ON 固定）",
-            "scheduled_at": "予約配信日時（予約時は必須・未来日時のみ。下書き保存時は空可）",
+            "sender_email": "差出人アドレス",
+            "sender_name": "差出人名",
+            "apply_unsubscribe_filter": "配信停止フィルタを適用する",
+            "scheduled_at": "予約配信日時",
         }
         widgets = {
-            "sender_mode": forms.RadioSelect,
+            "sender_mode": forms.RadioSelect(attrs={"class": "app-radio-list"}),
             "scheduled_at": forms.DateTimeInput(attrs={"type": "datetime-local"}),
         }
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, is_create=False, **kwargs):
         super().__init__(*args, **kwargs)
-        # アーカイブ済みリストを除外（新規キャンペーンの宛先には選べない）。
-        self.fields["mailing_list"].queryset = MailingList.objects.filter(
-            is_archived=False
-        )
-        # 必須/任意マーキング（Form 層、newsletter 時の sender_* 必須は Model.clean で）
-        self.fields["name"].required = True
-        self.fields["mailing_list"].required = True
-        self.fields["sender_email"].required = False
-        self.fields["sender_name"].required = False
-        self.fields["scheduled_at"].required = False
+        # 新規作成時はキャンペーン名のみ表示。残りは詳細→基本情報編集で埋める運用。
+        if is_create:
+            for fname in list(self.fields.keys()):
+                if fname not in self.CREATE_VISIBLE_FIELDS:
+                    del self.fields[fname]
+        if "mailing_list" in self.fields:
+            # アーカイブ済みリストは選択肢から除外。
+            self.fields["mailing_list"].queryset = MailingList.objects.filter(
+                is_archived=False
+            )
+            # mailing_list は draft の間は空のままで OK（Model.clean が scheduled 遷移時に必須化）
+            self.fields["mailing_list"].required = False
+        # name は常に必須。
+        if "name" in self.fields:
+            self.fields["name"].required = True
+        # newsletter 時の sender_* 必須は Model.clean が業務制約として検証する。
+        for fname in ("sender_email", "sender_name", "scheduled_at"):
+            if fname in self.fields:
+                self.fields[fname].required = False
         self._apply_widget_classes()

@@ -2852,8 +2852,12 @@ class CampaignListView(LoginRequiredMixin, ListView):
             {"campaign": c, "summary": get_campaign_summary(c)}
             for c in ctx["campaigns"]
         ]
-        ctx["back"] = BackNavigator(self.request)
+        back = BackNavigator(self.request)
+        # 一覧自身を戻り先候補としてスタックに積む（詳細→戻る で一覧に戻れるように）
+        back.push_current("キャンペーン一覧", ["page"])
+        ctx["back"] = back
         ctx["active_app"] = "mailings"
+        ctx["active_menu"] = "mailings:campaign_list"
         return ctx
 
 
@@ -3210,6 +3214,12 @@ class CampaignCreateView(LoginRequiredMixin, CreateView):
     form_class = CampaignForm
     template_name = "mailings/campaign_form.html"
 
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        # 新規作成画面は name のみ表示する（CampaignForm 側の出し分け）。
+        kwargs["is_create"] = True
+        return kwargs
+
     def form_valid(self, form):
         from .services.campaign_actions import create_campaign_with_template
 
@@ -3223,12 +3233,15 @@ class CampaignCreateView(LoginRequiredMixin, CreateView):
         return redirect("mailings:campaign_detail", pk=campaign.pk)
 
     def get_context_data(self, **kwargs):
+        # クエリパラメータを持たない画面なので push_current は呼ばない。
+        # 戻り先は呼び出し元テンプレ側で append_back_url を使うことで back スタックに積む。
         context = super().get_context_data(**kwargs)
         context.update(
             {
                 "is_create": True,
                 "back": BackNavigator(self.request),
                 "active_app": "mailings",
+                "active_menu": "mailings:campaign_list",
             }
         )
         return context
@@ -3260,17 +3273,26 @@ class CampaignDetailView(LoginRequiredMixin, DetailView):
 
         context = super().get_context_data(**kwargs)
         campaign = self.object
-        recipients = extract_recipients(campaign).select_related("primary_contact")
-        sample_count = 10  # 指示書 §5.2「先頭 10 件目安」
+        # 宛先リスト未設定の draft は extract_recipients を呼べないので 0 件として扱う。
+        if campaign.mailing_list_id is None:
+            recipient_count = 0
+            sample_recipients = []
+        else:
+            recipients = extract_recipients(campaign).select_related("primary_contact")
+            recipient_count = recipients.count()
+            sample_recipients = list(recipients[:10])
+        # 詳細画面はクエリパラメータを持たないので push_current は呼ばない。
+        # 一覧→詳細→編集 等の経路はテンプレ側 append_back_url で back スタックに積む。
         context.update(
             {
                 "template": campaign.template,
                 "summary": get_campaign_summary(campaign),
-                "recipient_count": recipients.count(),
-                "sample_recipients": list(recipients[:sample_count]),
+                "recipient_count": recipient_count,
+                "sample_recipients": sample_recipients,
                 "test_recipient_email": self.request.user.email,
                 "back": BackNavigator(self.request),
                 "active_app": "mailings",
+                "active_menu": "mailings:campaign_list",
             }
         )
         return context
@@ -3311,12 +3333,15 @@ class CampaignUpdateView(LoginRequiredMixin, UpdateView):
         return reverse("mailings:campaign_detail", kwargs={"pk": self.object.pk})
 
     def get_context_data(self, **kwargs):
+        # 編集画面はクエリパラメータを持たないので push_current は呼ばない。
+        # 詳細画面側の「基本情報を編集」リンクで append_back_url を使うことで戻り先を積む。
         context = super().get_context_data(**kwargs)
         context.update(
             {
                 "is_create": False,
                 "back": BackNavigator(self.request),
                 "active_app": "mailings",
+                "active_menu": "mailings:campaign_list",
             }
         )
         return context
