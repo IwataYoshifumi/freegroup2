@@ -70,9 +70,11 @@
     <div style="display:flex; justify-content:space-between; align-items:center;">
       <h2>宛先</h2>
       {% if campaign.status == 'draft' %}
-        {# 【作業5】 draft のみ：その場で新規リストを作って当該キャンペーンに紐づける導線。
-           scheduled / sending / done では出さない（配信実行で凍結したメンバーが「誰に送ったか」
-           を確定させており、後からの差し替えは履歴整合と特電法対応を壊すため、§7.7.1 / §11.4.3）。 #}
+        {% comment %}
+        【作業5】 draft のみ：その場で新規リストを作って当該キャンペーンに紐づける導線。
+        scheduled / sending / done では出さない（配信実行で凍結したメンバーが「誰に送ったか」
+        を確定させており、後からの差し替えは履歴整合と特電法対応を壊すため、§7.7.1 / §11.4.3）。
+        {% endcomment %}
         <a class="app-btn app-btn--secondary" href="{% url 'mailings:new_list_meta' %}?campaign={{ campaign.pk }}">新規リストを作成して紐づける</a>
       {% endif %}
     </div>
