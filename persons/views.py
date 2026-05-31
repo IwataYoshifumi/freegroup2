@@ -33,6 +33,63 @@ from .models import Person
 from .services.person_search import SEARCH_PARAMS, search_persons
 
 
+# ----------------------------------------------------------------------
+# 人物一覧の列ソート（HIG 第6章。mailings の方式を手本に persons 内で完結。
+# 共通化はしない＝mailings 側を参照しない。許可リストは person_list.html に
+# 実在するソート可能ヘッダ 4 列だけ：氏名 / 会社 / 役職 / 連絡先(メール)。
+# 部署・住所は person_list に列が無いためキーを持たせない（不正キー→氏名 asc）。）
+# URL クエリ ?sort=<key>&dir=<asc|desc>。並びは primary_contact 経由。
+# ----------------------------------------------------------------------
+
+PERSON_LIST_SORT_FIELD_MAP = {
+    "name": "primary_contact__full_name",
+    "company": "primary_contact__organization",
+    "title": "primary_contact__title",
+    "email": "primary_contact__email",
+}
+PERSON_LIST_SORT_DEFAULT_KEY = "name"
+PERSON_LIST_SORT_DEFAULT_DIR = "asc"
+PERSON_LIST_SORT_ALLOWED_DIRS = ("asc", "desc")
+
+
+def _resolve_person_list_sort(params):
+    """GET から (sort_key, direction, is_sorted) を解決する。
+
+    [性質] 純関数（DB 操作なし・副作用なし）
+    [入力] params: QueryDict 様（request.GET）
+    [出力] (sort_key, direction, is_sorted)
+        - sort パラメータが無い → (既定キー, 既定方向, False)＝ソート未指定。
+          呼び出し側は search_persons() の既定並び（-updated_at, -created_at）を維持する。
+        - sort が有る → is_sorted=True。不正キーは既定キー(氏名)、不正方向は既定方向(asc)に落とす。
+    """
+    raw_sort = params.get("sort") or ""
+    if not raw_sort:
+        return PERSON_LIST_SORT_DEFAULT_KEY, PERSON_LIST_SORT_DEFAULT_DIR, False
+    if raw_sort not in PERSON_LIST_SORT_FIELD_MAP:
+        # 不正キー（部署・住所など許可リスト外）→ デフォルト（氏名・asc）に落とす。
+        # 方向も既定に戻す（「氏名・asc」に揃える）。
+        return PERSON_LIST_SORT_DEFAULT_KEY, PERSON_LIST_SORT_DEFAULT_DIR, True
+    direction = params.get("dir") or PERSON_LIST_SORT_DEFAULT_DIR
+    if direction not in PERSON_LIST_SORT_ALLOWED_DIRS:
+        direction = PERSON_LIST_SORT_DEFAULT_DIR
+    return raw_sort, direction, True
+
+
+def _apply_person_list_sort(qs, params):
+    """Person QuerySet に ?sort=...&dir=... を適用する（純関数）。
+
+    [性質] 純関数（QuerySet を加工して返すのみ・DB 操作なし）
+    sort 未指定なら qs をそのまま返す（search_persons() の既定並びを温存）。
+    指定有りのときだけ許可リスト経由で order_by を差し替える。
+    """
+    sort_key, direction, is_sorted = _resolve_person_list_sort(params)
+    if not is_sorted:
+        return qs
+    field = PERSON_LIST_SORT_FIELD_MAP[sort_key]
+    prefix = "" if direction == "asc" else "-"
+    return qs.order_by(prefix + field, "pk")
+
+
 class PersonListView(ListView):
     """人物一覧画面（仕様書 §11.4 7 番）。
 
@@ -49,7 +106,9 @@ class PersonListView(ListView):
 
     def get_queryset(self):
         # v1.6 Phase 1b: 検索ロジックを persons.services.person_search に切り出し（論点 A-1）。
-        return search_persons(self.request.GET)
+        # HIG 第6章：?sort=&dir= があればサーバー側ソートを優先、無ければ既定並びを維持。
+        qs = search_persons(self.request.GET)
+        return _apply_person_list_sort(qs, self.request.GET)
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -67,10 +126,18 @@ class PersonListView(ListView):
                 "address",
                 "status",
                 "searched",
+                # HIG 6.1：並び替え・ページ状態を戻るで復元するため sort/dir を追加。
+                "sort",
+                "dir",
                 "page",
             ],
         )
         context["back"] = back
+
+        # ソート見出しの矢印描画用（_sortable_th.html）。未ソート時は空キーで矢印を出さない。
+        sort_key, sort_dir, is_sorted = _resolve_person_list_sort(self.request.GET)
+        context["current_sort"] = sort_key if is_sorted else ""
+        context["current_dir"] = sort_dir
 
         context["active_app"] = "persons"
         context["active_menu"] = "persons:person_list"

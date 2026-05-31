@@ -160,6 +160,108 @@ class PersonListViewTests(TestCase):
         self.assertIn(p_both.id, ids)
         self.assertEqual(len(ids), 2)
 
+    # ---- HIG 第6章：列ソート（?sort=&dir=、許可リスト 4 列）----
+
+    def test_server_side_sort_company_asc_and_desc(self):
+        """?sort=company&dir=asc/desc で会社（primary_contact__organization）順に並ぶ。"""
+        p_c, _ = self._make_active_with_primary(full_name="C", organization="Cccorp")
+        p_a, _ = self._make_active_with_primary(full_name="A", organization="Aaacorp")
+        p_b, _ = self._make_active_with_primary(full_name="B", organization="Bbbcorp")
+
+        resp = self.client.get(self.url, {"sort": "company", "dir": "asc"})
+        ids = [p.id for p in resp.context["persons"]]
+        # Aaacorp < Acme Corp(person_a) < Bbbcorp < Cccorp
+        self.assertLess(ids.index(p_a.id), ids.index(p_b.id))
+        self.assertLess(ids.index(p_b.id), ids.index(p_c.id))
+        self.assertEqual(resp.context["current_sort"], "company")
+        self.assertEqual(resp.context["current_dir"], "asc")
+
+        resp = self.client.get(self.url, {"sort": "company", "dir": "desc"})
+        ids = [p.id for p in resp.context["persons"]]
+        self.assertLess(ids.index(p_c.id), ids.index(p_b.id))
+        self.assertLess(ids.index(p_b.id), ids.index(p_a.id))
+        self.assertEqual(resp.context["current_dir"], "desc")
+
+    def test_invalid_sort_key_falls_back_to_name_asc(self):
+        """許可リスト外キー（?sort=department）は氏名・asc に落ちる（補正仕様）。"""
+        p_z, _ = self._make_active_with_primary(full_name="Zzz Person")
+        p_a, _ = self._make_active_with_primary(full_name="Aaa Person")
+
+        resp = self.client.get(self.url, {"sort": "department", "dir": "desc"})
+        self.assertEqual(resp.context["current_sort"], "name")
+        self.assertEqual(resp.context["current_dir"], "asc")
+        ids = [p.id for p in resp.context["persons"]]
+        # 氏名昇順：Aaa < Alice Smith(person_a) < Zzz
+        self.assertLess(ids.index(p_a.id), ids.index(self.person_a.id))
+        self.assertLess(ids.index(self.person_a.id), ids.index(p_z.id))
+
+    def test_invalid_dir_falls_back_to_asc(self):
+        """有効キー＋不正方向（?sort=name&dir=foo）は asc に落ちる。"""
+        resp = self.client.get(self.url, {"sort": "name", "dir": "foo"})
+        self.assertEqual(resp.context["current_sort"], "name")
+        self.assertEqual(resp.context["current_dir"], "asc")
+
+    def test_no_sort_param_keeps_default_order_no_arrow(self):
+        """sort 未指定なら search_persons の既定並びを維持し、矢印用 current_sort は空。"""
+        resp = self.client.get(self.url)
+        self.assertEqual(resp.context["current_sort"], "")
+
+    def test_thead_uses_japanese_status_heading(self):
+        """<thead> 見出しが「状態」になり、英字見出し status を出さない（HIG 原則4）。"""
+        resp = self.client.get(self.url)
+        self.assertContains(resp, "状態")
+        self.assertNotContains(resp, ">status<")
+
+    def test_sort_headers_and_column_toggle_rendered(self):
+        """ソート可能 4 列の data-sort-key と列切替 UI が描画される。"""
+        resp = self.client.get(self.url)
+        body = resp.content.decode("utf-8")
+        for key in ("name", "company", "title", "email"):
+            self.assertIn(f'data-sort-key="{key}"', body)
+        # 列切替（persons 専用 localStorage キー）
+        self.assertIn("js-person-column-toggle", body)
+        self.assertIn("person_list_visible_columns", body)
+        # 部署・住所はソートキーを持たない（許可リスト外）
+        self.assertNotIn('data-sort-key="department"', body)
+        self.assertNotIn('data-sort-key="address"', body)
+
+    def test_column_toggle_init_is_deferred_until_dom_ready(self):
+        """列切替の初期化が DOM 構築後に走る（再読込時もテーブルに表示状態が適用される）。
+
+        partial はテーブルより上のツールバーに置かれるため、即時実行だと初期 apply の
+        時点で [data-col-key] が未生成になり localStorage 復元状態が反映されない。
+        DOMContentLoaded 遅延が入っていることを描画 HTML で回帰確認する（JS 層のため）。
+        """
+        resp = self.client.get(self.url)
+        body = resp.content.decode("utf-8")
+        self.assertIn("DOMContentLoaded", body)
+        self.assertIn("readyState", body)
+        self.assertIn("person_list_visible_columns", body)
+
+    def test_pagination_preserves_sort_query(self):
+        """ソート状態でページ送りしても sort/dir が失われない（_pagination.html）。"""
+        for i in range(25):
+            self._make_active_with_primary(
+                full_name=f"pp-{i:02d}", organization=f"org{i:02d}"
+            )
+        resp = self.client.get(self.url, {"sort": "company", "dir": "desc"})
+        self.assertTrue(resp.context["is_paginated"])
+        body = resp.content.decode("utf-8")
+        self.assertIn("sort=company", body)
+        self.assertIn("dir=desc", body)
+
+    def test_push_current_captures_sort_and_dir(self):
+        """戻る復元用に push_current が sort/dir を back スタックへ取り込む（HIG 6.1）。"""
+        resp = self.client.get(self.url, {"sort": "company", "dir": "desc"})
+        back = resp.context["back"]
+        urls = " ".join(entry.get("url", "") for entry in back.back_stack)
+        self.assertIn("sort=company", urls)
+        self.assertIn("dir=desc", urls)
+        # ページも keys に含まれる（既存挙動の回帰確認）
+        resp2 = self.client.get(self.url, {"sort": "name", "dir": "asc", "page": "1"})
+        urls2 = " ".join(e.get("url", "") for e in resp2.context["back"].back_stack)
+        self.assertIn("sort=name", urls2)
+
     def test_pagination_21_records(self):
         """21 件以上で 2 ページに分かれる（paginate_by=20）。"""
         for i in range(20):

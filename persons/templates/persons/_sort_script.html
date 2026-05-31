@@ -1,0 +1,51 @@
+{% comment %}
+列ソート用 JS partial（HIG 第6章。mailings の _sort_script.html を手本に persons 用へ
+複製・調整。共通化はしない）。
+
+利用側のマークアップ規約：<th data-sort-key="name">氏名 ...icon...</th>
+
+挙動：
+  - 列ヘッダ（th[data-sort-key]）クリックで URL クエリ ?sort=<key>&dir=<asc|desc> をトグル
+  - tri-state：未指定 → asc → desc → 未指定 …
+    （mailings 手本は cur 既定を 'name' とするため氏名列の初回が desc から始まるが、
+     persons では「未ソート」を厳密に扱い、氏名を含む全列の初回クリックを asc から始める）
+  - sort/dir 以外の URL クエリ（検索条件・restore 等）は維持する
+  - 並び替えのたび page を 1 に戻す（旧ページ番号で範囲外になるのを防ぐ）
+  - 列が CSS で hidden（列切替で非表示）の場合はクリック無効
+  - 1 ページに何度 include されてもイベント登録は 1 回
+{% endcomment %}
+<script>
+  (function () {
+    if (window.__personSortHeaderInit) return;
+    window.__personSortHeaderInit = true;
+    document.querySelectorAll('th[data-sort-key]').forEach(function (th) {
+      th.style.cursor = 'pointer';
+      th.style.userSelect = 'none';
+      th.addEventListener('click', function () {
+        if (window.getComputedStyle(th).display === 'none') return;
+        var key = th.dataset.sortKey;
+        var url = new URL(window.location.href);
+        var sp = url.searchParams;
+        var cur = sp.get('sort');
+        var dir = sp.get('dir');
+        if (cur === key) {
+          if (dir === 'desc') {
+            sp.delete('sort');
+            sp.delete('dir');
+          } else if (dir === 'asc') {
+            sp.set('sort', key);
+            sp.set('dir', 'desc');
+          } else {
+            sp.set('sort', key);
+            sp.set('dir', 'asc');
+          }
+        } else {
+          sp.set('sort', key);
+          sp.set('dir', 'asc');
+        }
+        sp.delete('page');
+        window.location.href = url.toString();
+      });
+    });
+  })();
+</script>

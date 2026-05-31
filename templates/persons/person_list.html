@@ -18,18 +18,21 @@
   </section>
 
   <section class="app-card">
+    <div style="display:flex; justify-content:flex-end; margin-bottom:12px;">
+      {% include "persons/_column_toggle.html" %}
+    </div>
     <div class="app-table-wrapper">
       <table class="app-table app-table--nowrap">
         <thead>
           <tr>
             <th class="app-table__col--action">操作</th>
-            <th class="app-table__col--name">氏名</th>
-            <th class="app-table__col--status">status</th>
-            <th class="app-table__col--organization">会社</th>
-            <th class="app-table__col--dept">役職</th>
-            <th class="app-table__col--email">連絡先</th>
-            <th>アクティブ数</th>
-            <th class="app-table__col--date">更新日時</th>
+            {% include "persons/_sortable_th.html" with key="name" label="氏名" col_class="app-table__col--name" current_sort=current_sort current_dir=current_dir %}
+            <th class="app-table__col--status">状態</th>
+            {% include "persons/_sortable_th.html" with key="company" label="会社" col_class="app-table__col--organization" current_sort=current_sort current_dir=current_dir %}
+            {% include "persons/_sortable_th.html" with key="title" label="役職" col_class="app-table__col--dept" current_sort=current_sort current_dir=current_dir %}
+            {% include "persons/_sortable_th.html" with key="email" label="連絡先" col_class="app-table__col--email" current_sort=current_sort current_dir=current_dir %}
+            <th data-col-key="active_count">アクティブ数</th>
+            <th class="app-table__col--date" data-col-key="updated_at">更新日時</th>
           </tr>
         </thead>
         <tbody>
@@ -39,27 +42,27 @@
               <td class="app-table__col--action">
                 <a href="{% append_back_url detail_url back %}" class="app-btn app-btn--secondary app-btn--sm">詳細</a>
               </td>
-              <td>
+              <td data-col-key="name">
                 {{ person.primary_contact.full_name|default:"(氏名なし)" }}
               </td>
               <td>
                 {% status_badge person %}
               </td>
-              <td>
+              <td data-col-key="company">
                 {% if person.primary_contact.organization %}
                   <span class="app-ellipsis" data-tooltip="{{ person.primary_contact.organization }}">{{ person.primary_contact.organization|truncatechars:30 }}</span>
                 {% else %}-{% endif %}
               </td>
-              <td>{{ person.primary_contact.title|default:"-" }}</td>
-              <td>
+              <td data-col-key="title">{{ person.primary_contact.title|default:"-" }}</td>
+              <td data-col-key="email">
                 {% if person.primary_contact.email %}<div>{{ person.primary_contact.email }}</div>{% endif %}
                 {% if person.primary_contact.mobile_phone %}<div>{{ person.primary_contact.mobile_phone }}</div>{% endif %}
                 {% if person.primary_contact.personal_phone %}<div>{{ person.primary_contact.personal_phone }}</div>{% endif %}
                 {% if person.primary_contact.personal_fax %}<div>FAX: {{ person.primary_contact.personal_fax }}</div>{% endif %}
                 {% if not person.primary_contact.email and not person.primary_contact.mobile_phone and not person.primary_contact.personal_phone and not person.primary_contact.personal_fax %}-{% endif %}
               </td>
-              <td>{{ person.active_count }}</td>
-              <td>{{ person.updated_at|date:"Y/m/d H:i" }}</td>
+              <td data-col-key="active_count">{{ person.active_count }}</td>
+              <td data-col-key="updated_at">{{ person.updated_at|date:"Y/m/d H:i" }}</td>
             </tr>
           {% empty %}
             <tr><td colspan="8" class="app-muted">
@@ -100,4 +103,6 @@
       {% include "persons/_pagination.html" %}
     {% endif %}
   </section>
+
+  {% include "persons/_sort_script.html" %}
 {% endblock %}
