@@ -51,6 +51,7 @@ INSTALLED_APPS = [
     "accounts",
     "home",
     "back_navigator",
+    "ui_components",
     "cards",
     "persons",
     "contacts",

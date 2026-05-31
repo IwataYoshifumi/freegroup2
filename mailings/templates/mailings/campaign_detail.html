@@ -1,5 +1,6 @@
 {% extends "mailings/app_base.html" %}
 {% load back_tags %}
+{% load badge_tags %}
 
 {% block title %}キャンペーン詳細 — {{ campaign.name }}{% endblock %}
 
@@ -17,7 +18,7 @@
       <div class="app-breadcrumb">メール配信 / キャンペーン / 詳細</div>
       <h1 style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
         <span>{{ campaign.name }}</span>
-        <span class="app-badge app-badge--{{ campaign.status }}">{{ campaign.get_status_display }}</span>
+        {% status_badge campaign %}
         {% if campaign.scheduled_at %}
           <span class="app-muted" style="font-size:14px; font-weight:normal;">予約：{{ campaign.scheduled_at|date:"Y-m-d H:i" }}</span>
         {% endif %}

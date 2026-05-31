@@ -1,5 +1,6 @@
 {% extends "cards/app_base.html" %}
 {% load back_tags %}
+{% load badge_tags %}
 {% load ui_tags %}
 
 {% block title %}コンタクト詳細 — FreeGroup2{% endblock %}
@@ -91,19 +92,11 @@
       <h2 style="margin:0;">{{ contact.full_name|default:"(氏名なし)" }}</h2>
 
       {# status バッジ #}
-      {% if is_primary %}
-        <span class="app-status-badge app-status-badge--success">primary</span>
-      {% elif is_active %}
-        <span class="app-status-badge app-status-badge--warning">active</span>
-      {% elif is_inactive %}
-        <span class="app-status-badge app-status-badge--muted">inactive</span>
-      {% endif %}
+      {% status_badge contact %}
 
-      {# Person.status バッジ #}
+      {# Person.status バッジ（通常以外のときだけ出す） #}
       {% if contact.person.status != "active" %}
-        <span class="app-status-badge app-status-badge--muted">
-          Person.{{ contact.person.status }}
-        </span>
+        {% status_badge contact.person %}
       {% endif %}
 
       {# マージ候補バッジ #}
@@ -258,11 +251,7 @@
              style="display:flex; align-items:center; gap:var(--app-space-sm); text-decoration:none; color:inherit;">
             <div class="app-list-card__main" style="margin:0; flex:1 1 auto;">
               <strong>{{ other.full_name|default:"(氏名なし)" }}</strong>
-              {% if other.status == "primary" %}
-                <span class="app-status-badge app-status-badge--success">primary</span>
-              {% elif other.status == "active" %}
-                <span class="app-status-badge app-status-badge--warning">active</span>
-              {% endif %}
+              {% status_badge other %}
               {% if other.organization %}<div class="app-muted">{{ other.organization }}</div>{% endif %}
             </div>
           </a>

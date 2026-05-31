@@ -1,5 +1,6 @@
 {% extends "cards/app_base.html" %}
 {% load back_tags %}
+{% load badge_tags %}
 
 {% block title %}人物一覧 — FreeGroup2{% endblock %}
 
@@ -46,13 +47,7 @@
                 {% endif %}
               </td>
               <td>
-                {% if person.status == "active" %}
-                  <span class="app-status-badge app-status-badge--success">active</span>
-                {% elif person.status == "merged" %}
-                  <span class="app-status-badge app-status-badge--info">merged</span>
-                {% elif person.status == "archived" %}
-                  <span class="app-status-badge app-status-badge--muted">archived</span>
-                {% endif %}
+                {% status_badge person %}
               </td>
               <td>
                 {% if person.primary_contact.organization %}
@@ -92,13 +87,7 @@
                 (primary_contact 未設定)
               {% endif %}
             </strong>
-            {% if person.status == "active" %}
-              <span class="app-status-badge app-status-badge--success">active</span>
-            {% elif person.status == "merged" %}
-              <span class="app-status-badge app-status-badge--info">merged</span>
-            {% elif person.status == "archived" %}
-              <span class="app-status-badge app-status-badge--muted">archived</span>
-            {% endif %}
+            {% status_badge person %}
             {% if person.primary_contact.organization %}<div>{{ person.primary_contact.organization }}</div>{% endif %}
             {% if person.primary_contact.title %}<div class="app-muted">{{ person.primary_contact.title }}</div>{% endif %}
           </div>

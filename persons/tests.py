@@ -244,7 +244,9 @@ class PersonDetailViewTests(TestCase):
         resp = self.client.get(self._url(archived))
         self.assertEqual(resp.status_code, 200)
         self.assertTemplateUsed(resp, "persons/person_detail_archived.html")
-        self.assertIn("archived", resp.content.decode())
+        # status バッジは status_badge タグで日本語ラベル表示（HIG 原則4・英字値は出さない）
+        self.assertIn("アーカイブ", resp.content.decode())
+        self.assertNotIn(">archived<", resp.content.decode())
 
     def test_merged_person_shows_merge_logs(self):
         """merged Person はマージ履歴セクションを表示。"""

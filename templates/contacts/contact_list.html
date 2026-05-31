@@ -1,5 +1,6 @@
 {% extends "cards/app_base.html" %}
 {% load back_tags %}
+{% load badge_tags %}
 
 {% block title %}コンタクト一覧 — FreeGroup2{% endblock %}
 
@@ -101,13 +102,7 @@
               </td>
               <td>{{ contact.full_name|default:"-" }}</td>
               <td>
-                {% if contact.status == "primary" %}
-                  <span class="app-status-badge app-status-badge--success">primary</span>
-                {% elif contact.status == "active" %}
-                  <span class="app-status-badge app-status-badge--warning">active</span>
-                {% elif contact.status == "inactive" %}
-                  <span class="app-status-badge app-status-badge--muted">inactive</span>
-                {% endif %}
+                {% status_badge contact %}
               </td>
               <td>
                 {% if contact.organization %}
@@ -141,13 +136,7 @@
         <a href="{% append_back_url detail_url back %}" class="app-list-card" style="display:block; text-decoration:none; color:inherit;">
           <div class="app-list-card__main">
             <strong>{{ contact.full_name|default:"(氏名なし)" }}</strong>
-            {% if contact.status == "primary" %}
-              <span class="app-status-badge app-status-badge--success">primary</span>
-            {% elif contact.status == "active" %}
-              <span class="app-status-badge app-status-badge--warning">active</span>
-            {% elif contact.status == "inactive" %}
-              <span class="app-status-badge app-status-badge--muted">inactive</span>
-            {% endif %}
+            {% status_badge contact %}
             {% if contact.organization %}<div>{{ contact.organization }}</div>{% endif %}
             {% if contact.title %}<div class="app-muted">{{ contact.title }}</div>{% endif %}
           </div>

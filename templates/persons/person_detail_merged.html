@@ -1,5 +1,6 @@
 {% extends "cards/app_base.html" %}
 {% load back_tags %}
+{% load badge_tags %}
 
 {% block title %}人物詳細（統合済み） — FreeGroup2{% endblock %}
 
@@ -9,7 +10,7 @@
       <div class="app-breadcrumb">人物管理 / 人物一覧 / 詳細</div>
       <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
         <h1>人物詳細</h1>
-        <span class="app-status-badge app-status-badge--info">merged</span>
+        {% status_badge person %}
       </div>
     </div>
     <div class="app-action-area">

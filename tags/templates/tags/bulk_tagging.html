@@ -1,5 +1,6 @@
 {% extends "mailings/app_base.html" %}
 {% load back_tags %}
+{% load badge_tags %}
 
 {% block title %}検索＆一括タグ付け — FreeGroup2{% endblock %}
 
@@ -65,7 +66,7 @@
                   <td>{{ person.primary_contact.organization|default:"-" }}</td>
                   <td>{{ person.primary_contact.title|default:"-" }}</td>
                   <td>{{ person.primary_contact.email|default:"-" }}</td>
-                  <td>{{ person.status }}</td>
+                  <td>{% status_badge person %}</td>
                 </tr>
               {% empty %}
                 <tr><td colspan="6" class="app-muted">該当する人物がいません。</td></tr>
