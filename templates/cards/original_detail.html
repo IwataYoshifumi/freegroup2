@@ -98,6 +98,9 @@
         <div class="app-detail-value">{{ original.updated_at|date:"Y/m/d H:i:s" }}</div>
       </div>
 
+      {# HIG v1.4 原則4：検出統計はチューニング用の開発者向け数値。debug 時のみ表示。 #}
+      {# 検出枚数（detected_count, 上の「検出した名刺の枚数」）はユーザー向けでガード外。 #}
+      {% if debug %}
       {% if debug_summary %}
         <div class="app-detail-item">
           <div class="app-detail-label">画像サイズ (W × H)</div>
@@ -125,8 +128,6 @@
           <div class="app-detail-label">最終検出名刺数</div>
           <div class="app-detail-value">{{ debug_summary.results_count }} 件</div>
         </div>
-        {# HIG v1.4 原則4：内部語・チューニング数値は開発者向け。debug 時のみ表示。 #}
-        {% if debug %}
         <div class="app-detail-item">
           <div class="app-detail-label">reject_reason 別件数</div>
           <div class="app-detail-value">{{ debug_summary.reject_reason_str }}</div>
@@ -139,11 +140,11 @@
           <div class="app-detail-label">検出 vs BC 化ギャップ</div>
           <div class="app-detail-value">{{ debug_summary.detection_gap_str }}</div>
         </div>
-        {% endif %}
         <div class="app-detail-item">
           <div class="app-detail-label">最終計算日時</div>
           <div class="app-detail-value">{{ debug_summary.computed_at }}</div>
         </div>
+      {% endif %}
       {% endif %}
     </div>
 
@@ -163,6 +164,8 @@
   </section>
 
   {# ========== セクション 3: OpenCV マスク画像（attempt 別ブロック） ========== #}
+  {# HIG v1.4 原則4：マスク画像は OpenCV 中間生成物。debug 時のみ表示。 #}
+  {% if debug %}
   <section class="app-card app-collapsible is-open">
     <button type="button" class="app-collapsible__header" data-action="toggle-collapsible" aria-expanded="true">
       <span>OpenCV マスク画像</span>
@@ -222,8 +225,11 @@
       {% endif %}
     </div>
   </section>
+  {% endif %}
 
   {# ========== セクション 4: OpenCV 候補一覧テーブル ========== #}
+  {# HIG v1.4 原則4：候補一覧は OpenCV 中間データ。debug 時のみ表示。 #}
+  {% if debug %}
   <section class="app-card app-collapsible is-open">
     <button type="button" class="app-collapsible__header" data-action="toggle-collapsible" aria-expanded="true">
       <span>OpenCV 候補一覧テーブル</span>
@@ -285,8 +291,11 @@
       {% endif %}
     </div>
   </section>
+  {% endif %}
 
   {# ========== セクション 5: 重複除去結果 ========== #}
+  {# HIG v1.4 原則4：重複除去結果は OpenCV 中間データ。debug 時のみ表示。 #}
+  {% if debug %}
   <section class="app-card app-collapsible">
     <button type="button" class="app-collapsible__header" data-action="toggle-collapsible" aria-expanded="false">
       <span>OpenCV 重複除去結果</span>
@@ -329,8 +338,11 @@
       {% endif %}
     </div>
   </section>
+  {% endif %}
 
   {# ========== セクション 6: warp 失敗候補（warp_failures が空なら出さない） ========== #}
+  {# HIG v1.4 原則4：warp 失敗候補は OpenCV 中間データ。debug 時のみ表示。 #}
+  {% if debug %}
   {% if warp_failures %}
     <section class="app-card app-collapsible">
       <button type="button" class="app-collapsible__header" data-action="toggle-collapsible" aria-expanded="false">
@@ -369,6 +381,7 @@
         </div>
       </div>
     </section>
+  {% endif %}
   {% endif %}
 
   {# ========== セクション 7: 検出された名刺（既存維持） ========== #}

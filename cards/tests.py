@@ -421,7 +421,19 @@ class OriginalDetailDebugGatingTests(TestCase):
                         ],
                         "candidates_dedup": [],
                         "results": [],
-                        "warp_failures": [],
+                        "warp_failures": [
+                            {
+                                "polygon": {
+                                    "top_left": {"x": 0, "y": 0},
+                                    "top_right": {"x": 10, "y": 0},
+                                    "bottom_right": {"x": 10, "y": 10},
+                                    "bottom_left": {"x": 0, "y": 10},
+                                },
+                                "computed_width": 10,
+                                "computed_height": 10,
+                                "min_required": [50, 50],
+                            }
+                        ],
                     }
                 ],
             },
@@ -433,27 +445,56 @@ class OriginalDetailDebugGatingTests(TestCase):
     @override_settings(DEBUG=True)
     def test_debug_terms_shown_in_debug_mode(self):
         resp = self.client.get(self._url())
+        # セクション2 検出統計サマリーの各数値
+        self.assertContains(resp, "画像サイズ")
+        self.assertContains(resp, "輪郭検出数")
+        self.assertContains(resp, "フィルタ通過 / 全候補")
+        self.assertContains(resp, "重複除去後 / 通過候補")
+        self.assertContains(resp, "透視変換失敗")
+        self.assertContains(resp, "最終検出名刺数")
+        self.assertContains(resp, "最終計算日時")
         self.assertContains(resp, "reject_reason 別件数")
         self.assertContains(resp, "has_minimum_info")
         self.assertContains(resp, "検出 vs BC 化ギャップ")
+        # セクション3〜6（中間生成物・候補/重複/warp 表）
+        self.assertContains(resp, "OpenCV マスク画像")
+        self.assertContains(resp, "OpenCV 候補一覧テーブル")
+        self.assertContains(resp, "OpenCV 重複除去結果")
+        self.assertContains(resp, "透視変換失敗候補")  # セクション6 warp 表
         self.assertContains(resp, "area_too_small")  # 候補表セルの生値
         self.assertContains(resp, "debug_json 全体")  # JSON viewer セクション
+        # 検出枚数（ユーザー向け）は debug でも当然表示
+        self.assertContains(resp, "検出した名刺の枚数")
 
     @override_settings(DEBUG=False)
     def test_debug_terms_hidden_in_production(self):
         resp = self.client.get(self._url())
+        # セクション2 検出統計サマリーの各数値
+        self.assertNotContains(resp, "画像サイズ")
+        self.assertNotContains(resp, "輪郭検出数")
+        self.assertNotContains(resp, "フィルタ通過 / 全候補")
+        self.assertNotContains(resp, "重複除去後 / 通過候補")
+        self.assertNotContains(resp, "最終検出名刺数")
+        self.assertNotContains(resp, "最終計算日時")
         self.assertNotContains(resp, "reject_reason")
         self.assertNotContains(resp, "has_minimum_info")
         self.assertNotContains(resp, "検出 vs BC 化ギャップ")
+        # セクション3〜6 のセクション見出し（中間生成物）
+        self.assertNotContains(resp, "OpenCV マスク画像")
+        self.assertNotContains(resp, "OpenCV 候補一覧テーブル")
+        self.assertNotContains(resp, "OpenCV 重複除去結果")
+        self.assertNotContains(resp, "透視変換失敗候補")  # セクション6 warp 表
         self.assertNotContains(resp, "area_too_small")  # 生値は出さない
         self.assertNotContains(resp, "debug_json 全体")  # JSON viewer セクション非表示
 
     @override_settings(DEBUG=False)
-    def test_user_facing_info_always_shown(self):
+    def test_user_facing_info_shown_in_production(self):
         resp = self.client.get(self._url())
-        # 日本語化した検出枚数ラベル（英字 BusinessCard を外したもの）
+        # 日本語化した検出枚数ラベル（英字 BusinessCard を外したもの）は本番でも表示
         self.assertContains(resp, "検出した名刺の枚数")
         self.assertNotContains(resp, "検出枚数 (BusinessCard)")
+        # 検出枚数の値（detected_count=3）も表示される
+        self.assertContains(resp, "検出した名刺の枚数")
 
 
 @override_settings(MEDIA_ROOT=tempfile.mkdtemp(prefix="phase_g_exif_"))
