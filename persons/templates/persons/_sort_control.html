@@ -1,0 +1,103 @@
+{% comment %}
+人物一覧の多段ソートコントロール（HIG 第6章 / 4.1）。検索フォーム内に置く折りたたみブロック。
+列見出しクリックのソートは廃止し、この1か所に一本化する（入口を2つにしない）。
+
+期待 context（PersonListView._person_sort_context 由来）:
+  sort_rows: [{"key","dir"}] を 3 行（未指定行は key="" / dir="asc"）
+  sort_is_active: bool（折りたたみの開閉初期状態。ソート指定があれば開く）
+  sort_value: 正規化済み sort 文字列（hidden の初期値・JS 無効時の再送信用）
+
+クエリは単一 sort（例 ?sort=company,-title,name）。送信時に下の inline JS が 3 行を読んで
+hidden(name="sort") へ「優先順つきカンマ区切り・降順は先頭 -」で組み立てる。列ドロップダウンは
+name を持たせず、方向ラジオは送信直前に disabled にして、URL を sort 単一パラメータに保つ。
+新規 CSS/JS ファイルは作らず、既存 app-collapsible / app-radio-toggle と inline script で完結。
+{% endcomment %}
+<div class="app-collapsible js-person-sort-control{% if sort_is_active %} is-open{% endif %}"
+     style="grid-column: span 4; margin-top: var(--app-space-sm);">
+  <button type="button" class="app-collapsible__header" data-action="toggle-collapsible"
+          aria-expanded="{% if sort_is_active %}true{% else %}false{% endif %}">
+    <span>ソート</span>
+    <span class="app-collapsible__icon">{% if sort_is_active %}▾{% else %}▸{% endif %}</span>
+  </button>
+  <div class="app-collapsible-body">
+    {# JS が送信直前に value を組み立てる。未ソート時は disabled で sort= を URL に出さない。 #}
+    <input type="hidden" name="sort" class="js-person-sort-value"
+           value="{{ sort_value }}"{% if not sort_is_active %} disabled{% endif %}>
+
+    {% for row in sort_rows %}
+      <div class="js-person-sort-row"
+           style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom: var(--app-space-sm);">
+        <span class="app-form__label" style="min-width:5em; margin:0;">第{{ forloop.counter }}キー</span>
+        <select class="app-input js-person-sort-key" style="max-width:160px;">
+          <option value="">指定なし</option>
+          <option value="name"{% if row.key == "name" %} selected{% endif %}>氏名</option>
+          <option value="company"{% if row.key == "company" %} selected{% endif %}>会社</option>
+          <option value="title"{% if row.key == "title" %} selected{% endif %}>役職</option>
+          <option value="email"{% if row.key == "email" %} selected{% endif %}>連絡先</option>
+        </select>
+        <ul class="app-radio-toggle">
+          <li>
+            <label>
+              <input type="radio" name="_psortdir{{ forloop.counter }}"
+                     class="js-person-sort-dir" value="asc"
+                     {% if row.dir != "desc" %}checked{% endif %}>
+              昇順
+            </label>
+          </li>
+          <li>
+            <label>
+              <input type="radio" name="_psortdir{{ forloop.counter }}"
+                     class="js-person-sort-dir" value="desc"
+                     {% if row.dir == "desc" %}checked{% endif %}>
+              降順
+            </label>
+          </li>
+        </ul>
+      </div>
+    {% endfor %}
+
+    <p class="app-muted" style="margin:0; font-size:0.85em;">
+      上の行ほど優先（第1キー→第2キー→第3キー）。「指定なし」の行は無視されます。
+    </p>
+  </div>
+</div>
+<script>
+  (function () {
+    if (window.__personSortControlInit) return;
+    window.__personSortControlInit = true;
+    function init() {
+      var ctrl = document.querySelector('.js-person-sort-control');
+      if (!ctrl) return;
+      var form = ctrl.closest('form');
+      if (!form) return;
+      var hidden = ctrl.querySelector('.js-person-sort-value');
+      form.addEventListener('submit', function () {
+        var parts = [];
+        var seen = {};
+        ctrl.querySelectorAll('.js-person-sort-row').forEach(function (row) {
+          var sel = row.querySelector('.js-person-sort-key');
+          var key = sel ? sel.value : '';
+          if (!key || seen[key]) return;     // 未指定・同一列の二重指定は無視
+          seen[key] = true;
+          var dirEl = row.querySelector('.js-person-sort-dir:checked');
+          var dir = dirEl ? dirEl.value : 'asc';
+          parts.push((dir === 'desc' ? '-' : '') + key);
+        });
+        if (parts.length) {
+          hidden.value = parts.join(',');
+          hidden.disabled = false;
+        } else {
+          hidden.value = '';
+          hidden.disabled = true;            // 空なら sort= を URL に出さない
+        }
+        // 方向ラジオは name を持つので、送信から外して URL を sort 単一に保つ。
+        ctrl.querySelectorAll('.js-person-sort-dir').forEach(function (r) { r.disabled = true; });
+      });
+    }
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', init);
+    } else {
+      init();
+    }
+  })();
+</script>

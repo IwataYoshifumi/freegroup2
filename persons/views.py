@@ -34,11 +34,15 @@ from .services.person_search import SEARCH_PARAMS, search_persons
 
 
 # ----------------------------------------------------------------------
-# 人物一覧の列ソート（HIG 第6章。mailings の方式を手本に persons 内で完結。
-# 共通化はしない＝mailings 側を参照しない。許可リストは person_list.html に
-# 実在するソート可能ヘッダ 4 列だけ：氏名 / 会社 / 役職 / 連絡先(メール)。
-# 部署・住所は person_list に列が無いためキーを持たせない（不正キー→氏名 asc）。）
-# URL クエリ ?sort=<key>&dir=<asc|desc>。並びは primary_contact 経由。
+# 人物一覧の多段ソート（HIG 第6章。検索フォーム内のソートコントロール一本化）。
+# 共通化はしない＝persons 内で完結。許可リストは person_list.html に実在する
+# ソート可能ヘッダ 4 列だけ：氏名 / 会社 / 役職 / 連絡先(メール)。
+# 「画面に出ている列＝ソートできる列＝許可リストにあるキー」を一致させ、部署・住所等の
+# 使わない経路は残さない（不正キーは無視＝既定の並びに戻す）。
+#
+# クエリは単一パラメータ sort に優先順つきでカンマ区切り、降順は先頭 "-"。
+#   例 ?sort=company,-title,name （第1=会社昇順 / 第2=役職降順 / 第3=氏名昇順）
+# dir パラメータは廃止。並びは primary_contact 経由。
 # ----------------------------------------------------------------------
 
 PERSON_LIST_SORT_FIELD_MAP = {
@@ -47,47 +51,80 @@ PERSON_LIST_SORT_FIELD_MAP = {
     "title": "primary_contact__title",
     "email": "primary_contact__email",
 }
-PERSON_LIST_SORT_DEFAULT_KEY = "name"
-PERSON_LIST_SORT_DEFAULT_DIR = "asc"
-PERSON_LIST_SORT_ALLOWED_DIRS = ("asc", "desc")
+# 多段ソートの最大段数（ソートコントロールの行数と一致）。
+PERSON_LIST_SORT_MAX_KEYS = 3
 
 
-def _resolve_person_list_sort(params):
-    """GET から (sort_key, direction, is_sorted) を解決する。
+def _parse_person_sort(params):
+    """単一 sort パラメータ（例 "company,-title,name"）を [(key, direction), ...] に解決する。
 
     [性質] 純関数（DB 操作なし・副作用なし）
     [入力] params: QueryDict 様（request.GET）
-    [出力] (sort_key, direction, is_sorted)
-        - sort パラメータが無い → (既定キー, 既定方向, False)＝ソート未指定。
-          呼び出し側は search_persons() の既定並び（-updated_at, -created_at）を維持する。
-        - sort が有る → is_sorted=True。不正キーは既定キー(氏名)、不正方向は既定方向(asc)に落とす。
+    [出力] list[tuple[str, str]]（key は許可リスト内、direction は "asc" / "desc"）
+        - 先頭 "-" は降順、無印は昇順。
+        - 許可リスト外キー・空トークンは無視（不正値は黙って捨てる＝既定の並びに戻す）。
+        - 同一キーの二重指定は先勝ちで除外。最大 PERSON_LIST_SORT_MAX_KEYS 段まで。
     """
-    raw_sort = params.get("sort") or ""
-    if not raw_sort:
-        return PERSON_LIST_SORT_DEFAULT_KEY, PERSON_LIST_SORT_DEFAULT_DIR, False
-    if raw_sort not in PERSON_LIST_SORT_FIELD_MAP:
-        # 不正キー（部署・住所など許可リスト外）→ デフォルト（氏名・asc）に落とす。
-        # 方向も既定に戻す（「氏名・asc」に揃える）。
-        return PERSON_LIST_SORT_DEFAULT_KEY, PERSON_LIST_SORT_DEFAULT_DIR, True
-    direction = params.get("dir") or PERSON_LIST_SORT_DEFAULT_DIR
-    if direction not in PERSON_LIST_SORT_ALLOWED_DIRS:
-        direction = PERSON_LIST_SORT_DEFAULT_DIR
-    return raw_sort, direction, True
+    raw = params.get("sort") or ""
+    tokens = []
+    seen = set()
+    for chunk in raw.split(","):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        if chunk.startswith("-"):
+            direction = "desc"
+            key = chunk[1:]
+        else:
+            direction = "asc"
+            key = chunk
+        if key not in PERSON_LIST_SORT_FIELD_MAP or key in seen:
+            continue
+        seen.add(key)
+        tokens.append((key, direction))
+        if len(tokens) >= PERSON_LIST_SORT_MAX_KEYS:
+            break
+    return tokens
 
 
 def _apply_person_list_sort(qs, params):
-    """Person QuerySet に ?sort=...&dir=... を適用する（純関数）。
+    """Person QuerySet に多段ソート（?sort=key,-key,...）を適用する（純関数）。
 
     [性質] 純関数（QuerySet を加工して返すのみ・DB 操作なし）
-    sort 未指定なら qs をそのまま返す（search_persons() の既定並びを温存）。
-    指定有りのときだけ許可リスト経由で order_by を差し替える。
+    有効トークンが無ければ qs をそのまま返す（search_persons() の既定並びを温存）。
+    指定有りのときだけ許可リスト経由で order_by を多段で差し替える（末尾に pk で安定化）。
     """
-    sort_key, direction, is_sorted = _resolve_person_list_sort(params)
-    if not is_sorted:
+    tokens = _parse_person_sort(params)
+    if not tokens:
         return qs
-    field = PERSON_LIST_SORT_FIELD_MAP[sort_key]
-    prefix = "" if direction == "asc" else "-"
-    return qs.order_by(prefix + field, "pk")
+    order = []
+    for key, direction in tokens:
+        prefix = "-" if direction == "desc" else ""
+        order.append(prefix + PERSON_LIST_SORT_FIELD_MAP[key])
+    order.append("pk")
+    return qs.order_by(*order)
+
+
+def _person_sort_context(params):
+    """ソート UI（検索フォーム内の折りたたみ）の描画用 context を作る（純関数）。
+
+    [出力] dict:
+        sort_rows: PERSON_LIST_SORT_MAX_KEYS 行分の [{"key", "dir"}]
+                   （未指定行は key="" / dir="asc"）。各行が列ドロップダウン＋方向トグルに対応。
+        sort_is_active: bool（有効トークンが 1 つでもあるか＝折りたたみの開閉初期状態の判定）。
+        sort_value: 正規化済み sort 文字列（hidden の初期値・no-JS 再送信用）。
+    """
+    tokens = _parse_person_sort(params)
+    rows = [{"key": k, "dir": d} for (k, d) in tokens]
+    while len(rows) < PERSON_LIST_SORT_MAX_KEYS:
+        rows.append({"key": "", "dir": "asc"})
+    return {
+        "sort_rows": rows,
+        "sort_is_active": bool(tokens),
+        "sort_value": ",".join(
+            ("-" + k if d == "desc" else k) for k, d in tokens
+        ),
+    }
 
 
 class PersonListView(ListView):
@@ -106,7 +143,7 @@ class PersonListView(ListView):
 
     def get_queryset(self):
         # v1.6 Phase 1b: 検索ロジックを persons.services.person_search に切り出し（論点 A-1）。
-        # HIG 第6章：?sort=&dir= があればサーバー側ソートを優先、無ければ既定並びを維持。
+        # HIG 第6章：?sort=key,-key,... があればサーバー側で全件多段ソート、無ければ既定並びを維持。
         qs = search_persons(self.request.GET)
         return _apply_person_list_sort(qs, self.request.GET)
 
@@ -126,18 +163,15 @@ class PersonListView(ListView):
                 "address",
                 "status",
                 "searched",
-                # HIG 6.1：並び替え・ページ状態を戻るで復元するため sort/dir を追加。
+                # HIG 6.1：並び替え・ページ状態を戻るで復元するため sort を追加（単一パラメータ）。
                 "sort",
-                "dir",
                 "page",
             ],
         )
         context["back"] = back
 
-        # ソート見出しの矢印描画用（_sortable_th.html）。未ソート時は空キーで矢印を出さない。
-        sort_key, sort_dir, is_sorted = _resolve_person_list_sort(self.request.GET)
-        context["current_sort"] = sort_key if is_sorted else ""
-        context["current_dir"] = sort_dir
+        # 検索フォーム内ソートコントロール用（sort_rows / sort_is_active / sort_value）。
+        context.update(_person_sort_context(self.request.GET))
 
         context["active_app"] = "persons"
         context["active_menu"] = "persons:person_list"

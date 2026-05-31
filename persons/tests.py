@@ -160,51 +160,92 @@ class PersonListViewTests(TestCase):
         self.assertIn(p_both.id, ids)
         self.assertEqual(len(ids), 2)
 
-    # ---- HIG 第6章：列ソート（?sort=&dir=、許可リスト 4 列）----
+    # ---- HIG 第6章：多段ソート（単一 sort パラメータ、例 ?sort=company,-title,name）----
 
-    def test_server_side_sort_company_asc_and_desc(self):
-        """?sort=company&dir=asc/desc で会社（primary_contact__organization）順に並ぶ。"""
+    def test_single_key_sort_asc_and_desc(self):
+        """?sort=company（昇順）/ ?sort=-company（降順）で会社順に並ぶ。"""
         p_c, _ = self._make_active_with_primary(full_name="C", organization="Cccorp")
         p_a, _ = self._make_active_with_primary(full_name="A", organization="Aaacorp")
         p_b, _ = self._make_active_with_primary(full_name="B", organization="Bbbcorp")
 
-        resp = self.client.get(self.url, {"sort": "company", "dir": "asc"})
+        resp = self.client.get(self.url, {"sort": "company"})
         ids = [p.id for p in resp.context["persons"]]
         # Aaacorp < Acme Corp(person_a) < Bbbcorp < Cccorp
         self.assertLess(ids.index(p_a.id), ids.index(p_b.id))
         self.assertLess(ids.index(p_b.id), ids.index(p_c.id))
-        self.assertEqual(resp.context["current_sort"], "company")
-        self.assertEqual(resp.context["current_dir"], "asc")
+        self.assertTrue(resp.context["sort_is_active"])
+        self.assertEqual(resp.context["sort_rows"][0], {"key": "company", "dir": "asc"})
 
-        resp = self.client.get(self.url, {"sort": "company", "dir": "desc"})
+        resp = self.client.get(self.url, {"sort": "-company"})
         ids = [p.id for p in resp.context["persons"]]
         self.assertLess(ids.index(p_c.id), ids.index(p_b.id))
         self.assertLess(ids.index(p_b.id), ids.index(p_a.id))
-        self.assertEqual(resp.context["current_dir"], "desc")
+        self.assertEqual(resp.context["sort_rows"][0], {"key": "company", "dir": "desc"})
 
-    def test_invalid_sort_key_falls_back_to_name_asc(self):
-        """許可リスト外キー（?sort=department）は氏名・asc に落ちる（補正仕様）。"""
-        p_z, _ = self._make_active_with_primary(full_name="Zzz Person")
-        p_a, _ = self._make_active_with_primary(full_name="Aaa Person")
-
-        resp = self.client.get(self.url, {"sort": "department", "dir": "desc"})
-        self.assertEqual(resp.context["current_sort"], "name")
-        self.assertEqual(resp.context["current_dir"], "asc")
+    def test_multi_key_sort_priority(self):
+        """?sort=company,-name で 会社昇順 → 同社内は氏名降順（多段・全件）。"""
+        # 同じ会社 "Same" を持つ 2 人を氏名違いで作る
+        p_same_z, _ = self._make_active_with_primary(
+            full_name="Zoe", organization="Same"
+        )
+        p_same_a, _ = self._make_active_with_primary(
+            full_name="Amy", organization="Same"
+        )
+        # 別会社（後ろに来る）
+        p_other, _ = self._make_active_with_primary(
+            full_name="Mike", organization="Zzcorp"
+        )
+        resp = self.client.get(self.url, {"sort": "company,-name"})
         ids = [p.id for p in resp.context["persons"]]
-        # 氏名昇順：Aaa < Alice Smith(person_a) < Zzz
-        self.assertLess(ids.index(p_a.id), ids.index(self.person_a.id))
-        self.assertLess(ids.index(self.person_a.id), ids.index(p_z.id))
+        # 会社 "Same" グループが "Zzcorp" より前、グループ内は氏名降順 Zoe→Amy
+        self.assertLess(ids.index(p_same_z.id), ids.index(p_same_a.id))
+        self.assertLess(ids.index(p_same_a.id), ids.index(p_other.id))
+        # sort_rows が 2 段ぶん復元される
+        self.assertEqual(resp.context["sort_rows"][0], {"key": "company", "dir": "asc"})
+        self.assertEqual(resp.context["sort_rows"][1], {"key": "name", "dir": "desc"})
 
-    def test_invalid_dir_falls_back_to_asc(self):
-        """有効キー＋不正方向（?sort=name&dir=foo）は asc に落ちる。"""
-        resp = self.client.get(self.url, {"sort": "name", "dir": "foo"})
-        self.assertEqual(resp.context["current_sort"], "name")
-        self.assertEqual(resp.context["current_dir"], "asc")
+    def test_invalid_keys_ignored_in_multi(self):
+        """許可リスト外キー（department/address）は無視され、有効キーだけ適用される。"""
+        p_z, _ = self._make_active_with_primary(full_name="Z", organization="Zzcorp")
+        p_a, _ = self._make_active_with_primary(full_name="A", organization="Aaacorp")
+        resp = self.client.get(self.url, {"sort": "department,company,address"})
+        ids = [p.id for p in resp.context["persons"]]
+        # company 昇順だけが効く
+        self.assertLess(ids.index(p_a.id), ids.index(p_z.id))
+        self.assertTrue(resp.context["sort_is_active"])
+        self.assertEqual(resp.context["sort_rows"][0], {"key": "company", "dir": "asc"})
 
-    def test_no_sort_param_keeps_default_order_no_arrow(self):
-        """sort 未指定なら search_persons の既定並びを維持し、矢印用 current_sort は空。"""
+    def test_all_invalid_or_empty_sort_keeps_default(self):
+        """全キーが不正（or 空）なら sort 無効＝既定の並びを維持し、折りたたみは閉じ判定。"""
+        resp = self.client.get(self.url, {"sort": "department,address"})
+        self.assertFalse(resp.context["sort_is_active"])
+        self.assertEqual(resp.context["sort_value"], "")
+        # 全行が「指定なし」
+        self.assertTrue(all(r["key"] == "" for r in resp.context["sort_rows"]))
+
+        resp_empty = self.client.get(self.url, {"sort": ""})
+        self.assertFalse(resp_empty.context["sort_is_active"])
+
+    def test_no_sort_param_keeps_default_order(self):
+        """sort 未指定なら search_persons の既定並びを維持し、折りたたみは閉じ判定。"""
         resp = self.client.get(self.url)
-        self.assertEqual(resp.context["current_sort"], "")
+        self.assertFalse(resp.context["sort_is_active"])
+        self.assertEqual(resp.context["sort_value"], "")
+
+    def test_duplicate_key_first_wins(self):
+        """同一キーの二重指定は先勝ち（?sort=-company,company → company 降順のみ）。"""
+        resp = self.client.get(self.url, {"sort": "-company,company"})
+        rows = resp.context["sort_rows"]
+        self.assertEqual(rows[0], {"key": "company", "dir": "desc"})
+        # 2 行目以降は未指定（重複が落ちている）
+        self.assertEqual(rows[1]["key"], "")
+
+    def test_collapse_open_state_reflects_sort(self):
+        """ソート指定があれば折りたたみは開く（is-open）、無ければ閉じる。"""
+        resp_sorted = self.client.get(self.url, {"sort": "company"})
+        self.assertContains(resp_sorted, "js-person-sort-control is-open")
+        resp_plain = self.client.get(self.url)
+        self.assertNotContains(resp_plain, "js-person-sort-control is-open")
 
     def test_thead_uses_japanese_status_heading(self):
         """<thead> 見出しが「状態」になり、英字見出し status を出さない（HIG 原則4）。"""
@@ -212,18 +253,23 @@ class PersonListViewTests(TestCase):
         self.assertContains(resp, "状態")
         self.assertNotContains(resp, ">status<")
 
-    def test_sort_headers_and_column_toggle_rendered(self):
-        """ソート可能 4 列の data-sort-key と列切替 UI が描画される。"""
+    def test_header_sort_removed_and_sort_control_rendered(self):
+        """列見出しクリックのソート（data-sort-key/方向アイコン script）は廃止され、
+        検索フォーム内のソートコントロール＋列切替が描画される。"""
         resp = self.client.get(self.url)
         body = resp.content.decode("utf-8")
-        for key in ("name", "company", "title", "email"):
-            self.assertIn(f'data-sort-key="{key}"', body)
-        # 列切替（persons 専用 localStorage キー）
-        self.assertIn("js-person-column-toggle", body)
+        # 列見出しソートは消えている
+        self.assertNotIn("data-sort-key", body)
+        self.assertNotIn("__personSortHeaderInit", body)
+        # フォーム内ソートコントロール（折りたたみ＋4列ドロップダウン＋方向トグル）
+        self.assertIn("js-person-sort-control", body)
+        self.assertIn('name="sort"', body)
+        self.assertIn("app-radio-toggle", body)
+        for label in ("指定なし", "氏名", "会社", "役職", "連絡先"):
+            self.assertIn(label, body)
+        # 列切替（data-col-key と persons 専用キー）は維持
+        self.assertIn("data-col-key", body)
         self.assertIn("person_list_visible_columns", body)
-        # 部署・住所はソートキーを持たない（許可リスト外）
-        self.assertNotIn('data-sort-key="department"', body)
-        self.assertNotIn('data-sort-key="address"', body)
 
     def test_column_toggle_init_is_deferred_until_dom_ready(self):
         """列切替の初期化が DOM 構築後に走る（再読込時もテーブルに表示状態が適用される）。
@@ -239,28 +285,25 @@ class PersonListViewTests(TestCase):
         self.assertIn("person_list_visible_columns", body)
 
     def test_pagination_preserves_sort_query(self):
-        """ソート状態でページ送りしても sort/dir が失われない（_pagination.html）。"""
+        """ソート状態でページ送りしても sort が失われない（_pagination.html）。"""
         for i in range(25):
             self._make_active_with_primary(
                 full_name=f"pp-{i:02d}", organization=f"org{i:02d}"
             )
-        resp = self.client.get(self.url, {"sort": "company", "dir": "desc"})
+        resp = self.client.get(self.url, {"sort": "-company"})
         self.assertTrue(resp.context["is_paginated"])
         body = resp.content.decode("utf-8")
-        self.assertIn("sort=company", body)
-        self.assertIn("dir=desc", body)
+        # urlencode で - は %2D にエンコードされるため両表記を許容して確認
+        self.assertTrue("sort=-company" in body or "sort=%2Dcompany" in body)
 
-    def test_push_current_captures_sort_and_dir(self):
-        """戻る復元用に push_current が sort/dir を back スタックへ取り込む（HIG 6.1）。"""
-        resp = self.client.get(self.url, {"sort": "company", "dir": "desc"})
+    def test_push_current_captures_sort_not_dir(self):
+        """戻る復元用に push_current が sort を取り込み、廃止した dir は keys に無い（HIG 6.1）。"""
+        resp = self.client.get(self.url, {"sort": "company,-title"})
         back = resp.context["back"]
         urls = " ".join(entry.get("url", "") for entry in back.back_stack)
-        self.assertIn("sort=company", urls)
-        self.assertIn("dir=desc", urls)
-        # ページも keys に含まれる（既存挙動の回帰確認）
-        resp2 = self.client.get(self.url, {"sort": "name", "dir": "asc", "page": "1"})
-        urls2 = " ".join(e.get("url", "") for e in resp2.context["back"].back_stack)
-        self.assertIn("sort=name", urls2)
+        self.assertIn("sort=", urls)
+        self.assertIn("company", urls)
+        self.assertNotIn("dir=", urls)
 
     def test_pagination_21_records(self):
         """21 件以上で 2 ページに分かれる（paginate_by=20）。"""

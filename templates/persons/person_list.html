@@ -14,7 +14,7 @@
 
   <section class="app-card">
     {% url 'persons:person_list' as reset_url %}
-    {% include "persons/_search_form.html" %}
+    {% include "persons/_search_form.html" with show_sort_control=True %}
   </section>
 
   <section class="app-card">
@@ -26,11 +26,11 @@
         <thead>
           <tr>
             <th class="app-table__col--action">操作</th>
-            {% include "persons/_sortable_th.html" with key="name" label="氏名" col_class="app-table__col--name" current_sort=current_sort current_dir=current_dir %}
+            <th class="app-table__col--name" data-col-key="name">氏名</th>
             <th class="app-table__col--status">状態</th>
-            {% include "persons/_sortable_th.html" with key="company" label="会社" col_class="app-table__col--organization" current_sort=current_sort current_dir=current_dir %}
-            {% include "persons/_sortable_th.html" with key="title" label="役職" col_class="app-table__col--dept" current_sort=current_sort current_dir=current_dir %}
-            {% include "persons/_sortable_th.html" with key="email" label="連絡先" col_class="app-table__col--email" current_sort=current_sort current_dir=current_dir %}
+            <th class="app-table__col--organization" data-col-key="company">会社</th>
+            <th class="app-table__col--dept" data-col-key="title">役職</th>
+            <th class="app-table__col--email" data-col-key="email">連絡先</th>
             <th data-col-key="active_count">アクティブ数</th>
             <th class="app-table__col--date" data-col-key="updated_at">更新日時</th>
           </tr>
@@ -103,6 +103,4 @@
       {% include "persons/_pagination.html" %}
     {% endif %}
   </section>
-
-  {% include "persons/_sort_script.html" %}
 {% endblock %}

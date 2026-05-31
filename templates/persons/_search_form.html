@@ -9,6 +9,8 @@ v1.4.2 既存 7 項目（name/organization/department/title/email/tel/address）
   selected_statuses: list[str]
   reset_url: str（リセットボタンの遷移先。include 側で {% url %} 等で渡す）
   submit_label: str（任意。既定 "検索"）
+  show_sort_control: bool（任意。True のとき人物一覧の多段ソートコントロールを出す。
+                          person_list.html からのみ True で渡す。他画面では出さない）
 {% endcomment %}
 <form method="get" class="app-form-grid-edit">
   <input type="hidden" name="searched" value="1">
@@ -70,6 +72,10 @@ v1.4.2 既存 7 項目（name/organization/department/title/email/tel/address）
           </label>
         </div>
       </div>
+    {% endif %}
+
+    {% if show_sort_control %}
+      {% include "persons/_sort_control.html" %}
     {% endif %}
   </div>
 
