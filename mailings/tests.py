@@ -1969,6 +1969,9 @@ class NewListConfirmViewTests(_NewListWizardTestBase):
         self.assertIn("対象 1 件でリストを作成します", body)
         # Person 名は出さない（一覧テーブルがない）
         self.assertNotIn("VisibleName", body)
+        # 説明文は業務語（対象人物）で、英字 Person を出さない（HIG v1.4 原則4）
+        self.assertIn("対象人物", body)
+        self.assertNotIn("対象 Person", body)
 
 
 class NewListCommitViewTests(_NewListWizardTestBase):

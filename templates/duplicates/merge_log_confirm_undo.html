@@ -17,8 +17,8 @@
 
   <div class="app-alert app-alert--danger" style="max-width:1100px;">
     <strong>この操作は取り消せません。</strong>
-    {{ merged_person.primary_contact.full_name|default:"(氏名なし)" }} を active 状態に戻し、
-    {{ undo_preview.contacts_to_restore|length }} 件の Contact が
+    {{ merged_person.primary_contact.full_name|default:"(氏名なし)" }} を有効状態に戻し、
+    {{ undo_preview.contacts_to_restore|length }} 件の連絡先が
     {{ merged_person.primary_contact.full_name|default:"(氏名なし)" }} 配下に戻されます。
   </div>
 
@@ -38,7 +38,7 @@
         <dd class="app-detail-value">{{ surviving_person.primary_contact.full_name|default:"(氏名なし)" }}</dd>
       </div>
       <div class="app-detail-item">
-        <dt class="app-detail-label">統合元</dt>
+        <dt class="app-detail-label">マージド側</dt>
         <dd class="app-detail-value">{{ merged_person.primary_contact.full_name|default:"(氏名なし)" }}</dd>
       </div>
     </dl>
@@ -48,7 +48,7 @@
     <div class="app-section__header"><h2>復元プレビュー</h2></div>
     <div class="app-form-grid">
       <div class="app-form__group">
-        <h3>統合元（{{ merged_person.primary_contact.full_name|default:"-" }}）に戻る Contact</h3>
+        <h3>マージド側（{{ merged_person.primary_contact.full_name|default:"-" }}）に戻る連絡先</h3>
         {% if undo_preview.contacts_to_restore %}
           <dl class="app-detail-list">
             {% for c in undo_preview.contacts_to_restore %}
@@ -63,7 +63,7 @@
         {% endif %}
       </div>
       <div class="app-form__group">
-        <h3>サバイブ側に残る Contact</h3>
+        <h3>サバイブ側に残る連絡先</h3>
         {% if undo_preview.contacts_remaining_in_surviving %}
           <dl class="app-detail-list">
             {% for c in undo_preview.contacts_remaining_in_surviving %}

@@ -944,6 +944,23 @@ class DuplicateCandidateGroupUpdateViewGetTests(
             candidate.person_b.pk,
         )
 
+    def test_compare_headings_use_business_terms_not_person_ab(self):
+        """フィールド比較の左右見出しが英字 Person A/B でなく人物（左/右）であること
+        （HIG v1.4 原則4）。フォーム挙動は不変。"""
+        self._make_candidate(
+            self.person_x, self.person_y, group_id=self.group_id
+        )
+        resp = self.client.get(self._url())
+        self.assertEqual(resp.status_code, 200)
+        # 業務語が出る
+        self.assertContains(resp, "人物（左）")
+        self.assertContains(resp, "人物（右）")
+        self.assertContains(resp, "これをサバイブ側にする")
+        # 英字内部語は出ない
+        self.assertNotContains(resp, "Person A")
+        self.assertNotContains(resp, "Person B")
+        self.assertNotContains(resp, "これをサバイブにする</span>")
+
     def test_pair_ordering_score_desc_then_created_at_asc(self):
         """score 降順 → 同 score なら created_at 昇順で先頭 1 件取得（論点2 案C）。"""
         self._make_candidate(
@@ -2013,6 +2030,22 @@ class PersonMergeLogDetailViewTests(_PersonMergeLogViewTestBase):
         self.assertContains(resp, "統合元次郎")
         self.assertContains(resp, "復元可能")
 
+    def test_labels_use_business_terms_not_internal(self):
+        """見出し・復元注記が業務語で、内部語（merged_person/active/Contact 英字）を出さない
+        （HIG v1.4 原則4/7）。"""
+        log = self._make_log()
+        resp = self.client.get(self._url(log.pk))
+        # 業務語が出る
+        self.assertContains(resp, "マージド側")
+        self.assertContains(resp, "復元するとマージド側が有効状態に戻ります。")
+        self.assertContains(resp, "に戻る連絡先")
+        self.assertContains(resp, "サバイブ側に残る連絡先")
+        # 内部語は出ない
+        self.assertNotContains(resp, "merged_person")
+        self.assertNotContains(resp, "active 状態")
+        self.assertNotContains(resp, "に戻る Contact")
+        self.assertNotContains(resp, "残る Contact")
+
     def test_undo_preview_shows_contacts_to_restore(self):
         """get_undo_preview の contacts_to_restore が画面に出る。"""
         log = self._make_log()
@@ -2112,6 +2145,22 @@ class PersonMergeLogConfirmUndoViewTests(_PersonMergeLogViewTestBase):
         self.assertEqual(resp.status_code, 200)
         self.assertIsInstance(resp.context["form"], MergeUndoForm)
         self.assertIn("undo_preview", resp.context)
+
+    def test_confirm_page_uses_business_terms_not_internal(self):
+        """確認本文・見出しが業務語で、内部語（active/Contact 英字）を出さない
+        （HIG v1.4 原則4/7）。「取り消せません」明示は維持。"""
+        log = self._make_log(status=PersonMergeLog.Status.UNDOABLE)
+        resp = self.client.get(self._url(log.pk))
+        self.assertEqual(resp.status_code, 200)
+        # 業務語が出る
+        self.assertContains(resp, "マージド側")
+        self.assertContains(resp, "有効状態に戻し")
+        self.assertContains(resp, "件の連絡先が")
+        self.assertContains(resp, "この操作は取り消せません。")
+        # 内部語は出ない
+        self.assertNotContains(resp, "active 状態")
+        self.assertNotContains(resp, "件の Contact が")
+        self.assertNotContains(resp, "に戻る Contact")
 
     def test_get_undone_redirects_with_error(self):
         log = self._make_log(status=PersonMergeLog.Status.UNDONE)
