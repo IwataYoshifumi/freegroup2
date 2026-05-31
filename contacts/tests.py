@@ -1044,7 +1044,10 @@ class ContactDetailViewTests(TestCase):
     def test_r6_confirmed_field_no_edit_ui(self):
         """R6: 編集可能モードでも confirmed フィールドには修正 UI が出力されない。
 
-        バッジは「確認済み」が描画され、行フックは維持される。
+        確認済みバッジは恒常表示しない（HIG v1.4 原則4）。行フック・
+        data-confidence-state="confirmed"・バッジスロットは維持されるが、
+        緑バッジ・「確認済み」テキストはサーバー描画されない
+        （確認直後の一時表示は app.js の applyConfirmedState が担う）。
         """
         # email に confirmed_at セット済みの CFC を作成
         ContactFieldConfidence.objects.create(
@@ -1055,11 +1058,13 @@ class ContactDetailViewTests(TestCase):
             confirmed_by=self.user,
         )
         rendered = self._render_field("email", "a@example.com")
-        # 行レベルのフック + 確認済みバッジ
+        # 行レベルのフック・状態属性・バッジスロットは維持
         self.assertIn("js-contact-field-row", rendered)
         self.assertIn('data-confidence-state="confirmed"', rendered)
-        self.assertIn("app-status-badge--success", rendered)
-        self.assertIn("確認済み", rendered)
+        self.assertIn("js-contact-field-badge-slot", rendered)
+        # 確認済みの恒常バッジは描画しない（原則4）
+        self.assertNotIn("app-status-badge--success", rendered)
+        self.assertNotIn("確認済み", rendered)
         # 修正 UI フックは出力されない
         self.assertNotIn("js-contact-field-action", rendered)
         self.assertNotIn("js-contact-field-confirm-btn", rendered)
@@ -1219,8 +1224,12 @@ class ConfidenceTagTests(TestCase):
         self.assertIn("app-status-badge--error", rendered)
         self.assertIn("低", rendered)
 
-    def test_c4_confirmed_shows_confirmed_badge(self):
-        """C4: confirmed_at IS NOT NULL → 確認済みバッジ表示。"""
+    def test_c4_confirmed_shows_nothing(self):
+        """C4: confirmed_at IS NOT NULL → 恒常バッジを描画しない（HIG v1.4 原則4）。
+
+        確認済みは恒常表示しない。確認直後の一時バッジは app.js が
+        クライアント挿入する（原則5）。サーバー描画は空文字。
+        """
         ContactFieldConfidence.objects.create(
             contact=self.contact,
             field_name="email",
@@ -1229,8 +1238,9 @@ class ConfidenceTagTests(TestCase):
             confirmed_by=self.user,
         )
         rendered = self._render(self.contact, "email")
-        self.assertIn("app-status-badge--success", rendered)
-        self.assertIn("確認済み", rendered)
+        self.assertEqual(rendered.strip(), "")
+        self.assertNotIn("確認済み", rendered)
+        self.assertNotIn("app-status-badge--success", rendered)
 
 
 class ContactConfidenceTagTests(TestCase):

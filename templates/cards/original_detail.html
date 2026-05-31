@@ -80,12 +80,13 @@
           {% elif original.status == "failed" %}
             <span class="app-status-badge app-status-badge--error">処理失敗</span>
           {% else %}
-            <span class="app-status-badge">{{ original.status }}</span>
+            {# HIG v1.4 原則4：未知状態の生値は開発者向け。debug 時のみ表示。 #}
+            {% if debug %}<span class="app-status-badge">{{ original.status }}</span>{% endif %}
           {% endif %}
         </div>
       </div>
       <div class="app-detail-item">
-        <div class="app-detail-label">検出枚数 (BusinessCard)</div>
+        <div class="app-detail-label">検出した名刺の枚数</div>
         <div class="app-detail-value">{% if original.detected_count %}{{ original.detected_count }}{% else %}-{% endif %}</div>
       </div>
       <div class="app-detail-item">
@@ -124,6 +125,8 @@
           <div class="app-detail-label">最終検出名刺数</div>
           <div class="app-detail-value">{{ debug_summary.results_count }} 件</div>
         </div>
+        {# HIG v1.4 原則4：内部語・チューニング数値は開発者向け。debug 時のみ表示。 #}
+        {% if debug %}
         <div class="app-detail-item">
           <div class="app-detail-label">reject_reason 別件数</div>
           <div class="app-detail-value">{{ debug_summary.reject_reason_str }}</div>
@@ -136,6 +139,7 @@
           <div class="app-detail-label">検出 vs BC 化ギャップ</div>
           <div class="app-detail-value">{{ debug_summary.detection_gap_str }}</div>
         </div>
+        {% endif %}
         <div class="app-detail-item">
           <div class="app-detail-label">最終計算日時</div>
           <div class="app-detail-value">{{ debug_summary.computed_at }}</div>
@@ -269,7 +273,8 @@
                       <span class="app-status-badge app-status-badge--error">✗ 除外</span>
                     {% endif %}
                   </td>
-                  <td>{% if c.reject_reason %}{{ c.reject_reason }}{% else %}-{% endif %}</td>
+                  {# HIG v1.4 原則4：reject_reason の生値は開発者向け。debug 時のみ表示。 #}
+                  <td>{% if debug and c.reject_reason %}{{ c.reject_reason }}{% else %}-{% endif %}</td>
                 </tr>
               {% endfor %}
             </tbody>
@@ -445,6 +450,8 @@
   </section>
 
   {# ========== セクション 9: debug_json 全体 (json-viewer) ========== #}
+  {# HIG v1.4 原則4：JSON 生データは開発者向け。debug 時のみ表示。 #}
+  {% if debug %}
   <section class="app-card app-collapsible">
     <button type="button" class="app-collapsible__header" data-action="toggle-collapsible" aria-expanded="false">
       <span>debug_json 全体</span>
@@ -466,9 +473,13 @@
       {% endif %}
     </div>
   </section>
+  {% endif %}
 
   {# ===== このブランチ専用スクリプト（A 側マージ時に共通化判断） ===== #}
+  {# andypf-json-viewer は debug_json 表示専用のため debug 時のみ読み込む（HIG v1.4 原則4）。 #}
+  {% if debug %}
   <script src="https://cdn.jsdelivr.net/npm/@andypf/json-viewer@2.4.0/dist/iife/index.js"></script>
+  {% endif %}
   <script>
     (function () {
       // 候補一覧テーブルの除外候補トグル

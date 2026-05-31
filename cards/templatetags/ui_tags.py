@@ -54,7 +54,8 @@ def confidence(confidences, field_name, format="badge"):
     [出力] SafeString
         - confidence='high'（疑似インスタンス）: 空文字（バッジを描画しない）
         - low/mid AND confirmed_at IS NULL: 低 / 中 バッジ
-        - confirmed_at IS NOT NULL: 「確認済み」バッジ
+        - confirmed_at IS NOT NULL: 空文字（恒常表示しない、HIG v1.4 原則4）。
+          確認直後の一時バッジは app.js の applyConfirmedState がクライアント挿入（原則5）。
 
     判定ロジック：
       ContactFieldConfidence は low/mid のみ DB レコードが存在する設計
@@ -74,9 +75,10 @@ def confidence(confidences, field_name, format="badge"):
         return mark_safe("")
 
     if cfc.confirmed_at is not None:
-        return mark_safe(
-            '<span class="app-status-badge app-status-badge--success">確認済み</span>'
-        )
+        # 確認済みは恒常表示しない（HIG v1.4 原則4：正常状態にバッジを出さない）。
+        # 確認直後の一時バッジは app.js の applyConfirmedState がクライアント挿入する
+        # （原則5：操作には応答を返す）。リロード・離脱で消えるのが正しい状態。
+        return mark_safe("")
 
     variant_label = _CONFIDENCE_BADGE_VARIANT.get(cfc.confidence)
     if variant_label is None:

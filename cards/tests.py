@@ -388,6 +388,74 @@ class CardDetailDebugUidTests(TestCase):
         self.assertNotContains(resp, "Card UID:")
 
 
+class OriginalDetailDebugGatingTests(TestCase):
+    """original_detail.html のデバッグ表示 debug ガード（HIG v1.4 原則4）。
+
+    JSON 系・チューニング数値・内部語は DEBUG=True かつ INTERNAL_IPS 内のときだけ
+    出し、本番（DEBUG=False）では出さない。検出枚数（日本語ラベル）は常に表示。
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_superuser(
+            username="orig_dbg_user", password="dummy"
+        )
+        self.client = Client()
+        self.client.force_login(self.user)
+        self.original = OriginalImage.objects.create(
+            user=self.user,
+            status=OriginalImage.STATUS_EXTRACTED,
+            detected_count=3,
+            debug_json={
+                "image_size": {"width": 100, "height": 100, "area": 10000},
+                "computed_at": "2026-05-31T00:00:00",
+                "attempts": [
+                    {
+                        "attempt_no": 1,
+                        "contours_count": 1,
+                        "candidates_filter": [
+                            {
+                                "passed": False,
+                                "reject_reason": "area_too_small",
+                                "area": 10,
+                            },
+                        ],
+                        "candidates_dedup": [],
+                        "results": [],
+                        "warp_failures": [],
+                    }
+                ],
+            },
+        )
+
+    def _url(self):
+        return reverse("originals:original_detail", kwargs={"pk": self.original.id})
+
+    @override_settings(DEBUG=True)
+    def test_debug_terms_shown_in_debug_mode(self):
+        resp = self.client.get(self._url())
+        self.assertContains(resp, "reject_reason 別件数")
+        self.assertContains(resp, "has_minimum_info")
+        self.assertContains(resp, "検出 vs BC 化ギャップ")
+        self.assertContains(resp, "area_too_small")  # 候補表セルの生値
+        self.assertContains(resp, "debug_json 全体")  # JSON viewer セクション
+
+    @override_settings(DEBUG=False)
+    def test_debug_terms_hidden_in_production(self):
+        resp = self.client.get(self._url())
+        self.assertNotContains(resp, "reject_reason")
+        self.assertNotContains(resp, "has_minimum_info")
+        self.assertNotContains(resp, "検出 vs BC 化ギャップ")
+        self.assertNotContains(resp, "area_too_small")  # 生値は出さない
+        self.assertNotContains(resp, "debug_json 全体")  # JSON viewer セクション非表示
+
+    @override_settings(DEBUG=False)
+    def test_user_facing_info_always_shown(self):
+        resp = self.client.get(self._url())
+        # 日本語化した検出枚数ラベル（英字 BusinessCard を外したもの）
+        self.assertContains(resp, "検出した名刺の枚数")
+        self.assertNotContains(resp, "検出枚数 (BusinessCard)")
+
+
 @override_settings(MEDIA_ROOT=tempfile.mkdtemp(prefix="phase_g_exif_"))
 class PhaseGExifUploadTests(TestCase):
     """Phase G：UploadView 経由で OriginalImage.exif_json が正しく保存される
