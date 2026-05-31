@@ -40,11 +40,7 @@
                 <a href="{% append_back_url detail_url back %}" class="app-btn app-btn--secondary app-btn--sm">詳細</a>
               </td>
               <td>
-                {% if person.primary_contact %}
-                  {{ person.primary_contact.full_name|default:"(氏名なし)" }}
-                {% else %}
-                  <span class="app-muted">(primary_contact 未設定)</span>
-                {% endif %}
+                {{ person.primary_contact.full_name|default:"(氏名なし)" }}
               </td>
               <td>
                 {% status_badge person %}
@@ -81,11 +77,7 @@
         <a href="{% append_back_url detail_url back %}" class="app-list-card" style="display:block; text-decoration:none; color:inherit;">
           <div class="app-list-card__main">
             <strong>
-              {% if person.primary_contact %}
-                {{ person.primary_contact.full_name|default:"(氏名なし)" }}
-              {% else %}
-                (primary_contact 未設定)
-              {% endif %}
+              {{ person.primary_contact.full_name|default:"(氏名なし)" }}
             </strong>
             {% status_badge person %}
             {% if person.primary_contact.organization %}<div>{{ person.primary_contact.organization }}</div>{% endif %}

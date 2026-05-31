@@ -162,8 +162,7 @@
               {% for m in members %}
                 <tr>
                   <td data-col-key="name">
-                    {% if m.person.primary_contact %}{{ m.person.primary_contact.full_name|default:"(氏名なし)" }}
-                    {% else %}<span class="app-muted">(primary_contact 未設定)</span>{% endif %}
+                    {{ m.person.primary_contact.full_name|default:"(氏名なし)" }}
                     {% include "mailings/_unsubscribed_badge.html" with person=m.person %}
                   </td>
                   <td data-col-key="company">{{ m.person.primary_contact.organization|default:"-" }}</td>

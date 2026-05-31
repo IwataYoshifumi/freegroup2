@@ -107,8 +107,7 @@
                 </td>
                 <td>{{ person.primary_contact.organization|default:"-" }}</td>
                 <td>
-                  {% if person.primary_contact %}{{ person.primary_contact.full_name|default:"(氏名なし)" }}
-                  {% else %}<span class="app-muted">(primary_contact 未設定)</span>{% endif %}
+                  {{ person.primary_contact.full_name|default:"(氏名なし)" }}
                 </td>
                 <td>{{ person.primary_contact.title|default:"-" }}</td>
                 <td>{{ person.primary_contact.email|default:"-" }}</td>

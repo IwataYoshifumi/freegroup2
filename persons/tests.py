@@ -179,7 +179,9 @@ class PersonListViewTests(TestCase):
         ids = [p.id for p in resp.context["persons"]]
         self.assertIn(orphan.id, ids)
         body = resp.content.decode()
-        self.assertIn("(primary_contact 未設定)", body)
+        # 氏名欄は内部語を出さず (氏名なし) に畳む（HIG 原則4）
+        self.assertIn("(氏名なし)", body)
+        self.assertNotIn("(primary_contact 未設定)", body)
 
 
 class PersonDetailViewTests(TestCase):

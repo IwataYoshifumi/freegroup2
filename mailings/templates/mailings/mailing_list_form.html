@@ -317,8 +317,7 @@
                       <tr>
                         <td><input type="checkbox" name="person_ids" value="{{ p.id }}" class="js-add-person-cb"></td>
                         <td>
-                          {% if p.primary_contact %}{{ p.primary_contact.full_name|default:"(氏名なし)" }}
-                          {% else %}<span class="app-muted">(primary_contact 未設定)</span>{% endif %}
+                          {{ p.primary_contact.full_name|default:"(氏名なし)" }}
                         </td>
                         <td>{{ p.primary_contact.organization|default:"-" }}</td>
                         <td>{{ p.primary_contact.title|default:"-" }}</td>
@@ -363,8 +362,7 @@
                       <button type="button" class="app-btn app-btn--warning app-btn--sm js-member-remove">削除</button>
                     </td>
                     <td>
-                      {% if m.person.primary_contact %}{{ m.person.primary_contact.full_name|default:"(氏名なし)" }}
-                      {% else %}<span class="app-muted">(primary_contact 未設定)</span>{% endif %}
+                      {{ m.person.primary_contact.full_name|default:"(氏名なし)" }}
                     </td>
                     <td>{{ m.person.primary_contact.organization|default:"-" }}</td>
                     <td>{{ m.person.primary_contact.title|default:"-" }}</td>
@@ -478,8 +476,7 @@
                 {% for m in members %}
                   <tr>
                     <td>
-                      {% if m.person.primary_contact %}{{ m.person.primary_contact.full_name|default:"(氏名なし)" }}
-                      {% else %}<span class="app-muted">(primary_contact 未設定)</span>{% endif %}
+                      {{ m.person.primary_contact.full_name|default:"(氏名なし)" }}
                     </td>
                     <td>{{ m.person.primary_contact.organization|default:"-" }}</td>
                     <td>{{ m.person.primary_contact.title|default:"-" }}</td>
