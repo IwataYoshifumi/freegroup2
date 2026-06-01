@@ -18,7 +18,10 @@ from django.conf import settings
 from django.db import transaction
 
 from cards.models import BusinessCard, Contact, ContactFieldConfidence, OriginalImage, Person
-from cards.services.detectors.opencv_detector import detect_cards_with_debug
+from cards.services.detectors.opencv_detector import (
+    detect_cards_with_debug,
+    results_from_debug_result,
+)
 from cards.services.has_minimum_info import has_minimum_info
 from cards.services.json_normalizer import (
     calc_orientation_adjusted_confidence_map,
@@ -79,7 +82,9 @@ class PipelineCoordinator:
         detections = []
         try:
             debug_result = detect_cards_with_debug(self.original_image.image_file.path)
-            detections = debug_result.get("results") or []
+            # 検出結果は attempts[-1] に入る。在り処を知る唯一の窓口 results_from_debug_result()
+            # を通して取り出す（旧トップレベル results を直読みして全件 garbage 化した 1f9712f の修正）。
+            detections = results_from_debug_result(debug_result)
             self.original_image.detected_count = len(detections)
 
             # debug_json 保存は失敗しても OCR を止めない（debug は副次情報のため）
