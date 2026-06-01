@@ -1,7 +1,13 @@
-"""名刺領域検出・4隅座標取得・透視変換（OpenCV 実装）。
+"""名刺領域検出・4隅座標取得・透視変換（OpenCV 実装・rev2 方式）。
 
-3種のマスク（輝度差・Canny・HSV彩度）を OR 合成して名刺候補を抽出し、
-minAreaRect → boxPoints → 幾何ソートで4隅座標を取得する。
+3種のマスク（輝度差 diff・Canny edge・HSV彩度 sat）を **OR 合成せず**、
+マスクごとにクロージング → findContours → minAreaRect まで回して候補を出し、
+名刺らしい縦横比（1.6〜1.8）の候補だけを残す。マスク横断で中心座標＋IoU が
+近い候補を1件に統合（重複除去）する。採否の主基準は縦横比のみで、サイズは
+OCR 不能な極小を落とす緩い絶対下限としてのみ使う。
+
+正本：docs/OpenCV/名刺画像前処理_設計方針_OpenCV_OSD_rev2.md 第1部。
+
 透視変換で正立化した画像をそのまま返す（向き補正は行わない）。
 """
 
@@ -9,6 +15,7 @@ import logging
 
 import cv2
 import numpy as np
+from django.conf import settings
 from PIL import Image, ImageOps
 
 logger = logging.getLogger(__name__)
@@ -21,14 +28,36 @@ _CANNY_LOW = 50
 _CANNY_HIGH = 150
 _CANNY_DILATE_KERNEL = (3, 3)
 _SAT_THRESHOLD = 40
-_SAT_WHITE_RATIO_MAX = 0.50  # mask_sat の白画素率がこれを超えたらフォールバック発動（背景高彩度対策）
+_SAT_WHITE_RATIO_MAX = 0.50  # mask_sat の白画素率がこれを超えたら sat を候補抽出から除外（背景高彩度対策）
 
 # ── カードフィルタパラメータ ──────────────────────────────
-_AREA_MIN_RATIO = 0.008
-_AREA_MAX_RATIO = 0.45
-_ASPECT_MIN = 1.1
-_ASPECT_MAX = 4.5
-_OVERLAP_THRESHOLD = 0.50
+# 採否の主基準は縦横比のみ（rev2 §1.2.3）。範囲 1.6〜1.8 は名刺という物の形そのもので
+# 画像・解像度・撮影枚数によらない固定範囲＝確定値（日本標準 91×55≈1.65／欧米 89×51≈1.75）。
+_ASPECT_MIN = 1.6
+_ASPECT_MAX = 1.8
+
+# ── 未確定パラメータ（settings から読む・仮値・評価基準で詰める） ──
+# rev2 §1.2.4（絶対下限）／§1.4・§4.2（統合の IoU・中心距離）参照。ハードコードせず
+# settings 値を優先し、settings 未設定時のみ下記フォールバック（= settings の仮値と同値）。
+_DEFAULT_MIN_CARD_AREA_PX = 8000        # OCR 不能な極小候補を落とす緩い絶対下限[px^2]（仮値・未確定）
+_DEFAULT_DEDUP_IOU_THRESHOLD = 0.30     # マスク横断 重複統合の IoU しきい値（仮値・未確定）
+_DEFAULT_DEDUP_CENTER_DIST_RATIO = 0.50  # 中心距離 ≤ ratio×対角線 を IoU と併用（仮値・未確定）
+
+
+def _min_card_area_px() -> float:
+    """[性質] 準関数（settings 読取） / OCR 不能な極小候補を落とす緩い絶対下限[px^2]。"""
+    return float(getattr(settings, "OPENCV_MIN_CARD_AREA_PX", _DEFAULT_MIN_CARD_AREA_PX))
+
+
+def _dedup_iou_threshold() -> float:
+    """[性質] 準関数（settings 読取） / マスク横断 重複統合の IoU しきい値（仮値・未確定）。"""
+    return float(getattr(settings, "OPENCV_DEDUP_IOU_THRESHOLD", _DEFAULT_DEDUP_IOU_THRESHOLD))
+
+
+def _dedup_center_dist_ratio() -> float:
+    """[性質] 準関数（settings 読取） / 重複統合の中心距離しきい比（仮値・未確定）。"""
+    return float(getattr(settings, "OPENCV_DEDUP_CENTER_DIST_RATIO", _DEFAULT_DEDUP_CENTER_DIST_RATIO))
+
 
 # ── 透視変換パラメータ ────────────────────────────────────
 _MIN_WARP_WIDTH = 100
@@ -41,11 +70,32 @@ _MIN_WARP_HEIGHT = 50
 _INVERTED_POLYGON_EXPAND_RATIO = 0.02   # 対角線長に対する拡張比率
 _INVERTED_POLYGON_EXPAND_MIN_PX = 10    # 拡張量の下限ピクセル（小さい polygon でも一定余白を確保）
 
+# 候補抽出を回すマスク名（順序固定）。
+_MASK_NAMES = ("diff", "edge", "sat")
+
+
+def results_from_debug_result(debug_result: dict) -> list[dict]:
+    """detect_cards_with_debug() の戻りから最終 attempt の検出結果（results）を取り出す。
+
+    [性質] 純関数（DB 操作なし・副作用なし）
+    [入力] debug_result: detect_cards_with_debug() の戻り値 dict
+    [出力] list[dict]: 最終 attempt の results。attempts が無ければ空リスト。
+
+    検出結果の在り処（attempts[-1]["results"]）を知る**唯一の窓口**。detect_cards() も
+    pipeline_coordinator もこの関数を通して results を受け取り、「results がどこにあるか」を
+    各所に重複させない。返り値構造を attempts[] へ変えたのに pipeline 側が旧トップレベル
+    results を読み続けて全件 garbage 化したバグ（1f9712f）の再発防止。
+    """
+    attempts = debug_result.get("attempts") or []
+    if not attempts:
+        return []
+    return attempts[-1].get("results") or []
+
 
 def detect_cards(image_path: str) -> list[dict]:
     """画像から名刺を検出し、透視変換済み画像（向き補正なし）と4隅座標を返す。
 
-    [性質] 純関数（ファイル読み取りのみ・DB 操作なし・副作用なし）
+    [性質] 純関数（ファイル読み取り・settings 読取のみ・DB 操作なし・副作用なし）
     [入力] image_path: 元画像のファイルパス
     [出力] CardDetectionResult のリスト。各要素は以下の形式：
       {
@@ -60,11 +110,7 @@ def detect_cards(image_path: str) -> list[dict]:
       検出失敗時は空リストを返す（例外を外に漏らさない）。
     """
     try:
-        debug_result = _detect_with_debug(image_path)
-        attempts = debug_result.get("attempts") or []
-        if not attempts:
-            return []
-        return attempts[-1].get("results", [])
+        return results_from_debug_result(_detect_with_debug(image_path))
     except Exception as e:
         logger.warning("detect_cards failed for %s: %s", image_path, e)
         return []
@@ -77,35 +123,34 @@ def detect_cards_with_debug(image_path: str) -> dict:
     反転リトライが走らなかった場合は attempts 配列が 1 要素のみ。
     走った場合は 2 要素（attempt_no=1 が通常、attempt_no=2 が反転後）。
 
-    [性質] 純関数（ファイル読み取りのみ・DB 操作なし・副作用なし）
+    rev2 方式では OR 合成を廃止し、各 attempt の中で diff/edge/sat を **マスク別**に
+    保持する（masks[<name>]）。各マスクは生（raw_image）とクロージング後（closed_image）の
+    両画像を持ち、候補フィルタ判定（candidates_filter）もマスク別に持つ。
+
+    [性質] 純関数（ファイル読み取り・settings 読取のみ・DB 操作なし・副作用なし）
     [入力] image_path: 元画像のファイルパス
     [出力] dict:
       {
         "image_size": {"width": int, "height": int, "area": int},
 
-        # 共通マスク（反転処理の影響を受けない 3 枚）
-        "masks": {
-            "diff": PIL.Image.Image,  # 輝度差マスク
-            "edge": PIL.Image.Image,  # Canny エッジマスク
-            "sat":  PIL.Image.Image,  # HSV 彩度マスク
-        },
-        "mask_white_ratios": {
-            "diff": float, "edge": float, "sat": float,  # mask>0 の比率
-        },
-
-        # 各試行ごとの中間データ
         "attempts": [
             {
                 "attempt_no": 1,            # 1=通常, 2=反転リトライ
                 "type": "normal",           # "normal" | "inverted"
                 "masks": {
-                    "or":     PIL.Image.Image,  # OR 合成マスク
-                    "closed": PIL.Image.Image,  # クローズ処理後の最終マスク
+                    "diff": {
+                        "raw_image":    PIL.Image.Image,  # 生マスク
+                        "closed_image": PIL.Image.Image,  # クロージング後マスク
+                        "raw_white_ratio":    float,
+                        "closed_white_ratio": float,
+                        "excluded":           bool,       # 候補抽出から除外したか（sat 暴走時の sat 等）
+                        "contours_count":     int,
+                        "candidates_filter":  list[dict],  # このマスクの全輪郭フィルタ判定（後述）
+                    },
+                    "edge": {...},
+                    "sat":  {...},
                 },
-                "mask_white_ratios": {"or": float, "closed": float},
-                "contours_count":    int,
-                "candidates_filter": list[dict],  # 全輪郭フィルタ判定結果（後述）
-                "candidates_dedup":  list[dict],  # 重複除去判定結果（後述）
+                "candidates_dedup":  list[dict],  # マスク横断 重複除去判定（後述）
                 "warp_failures":     list[dict],  # 透視変換サイズ未満候補（後述）
                 "results": [
                     {"polygon": dict, "warped_image": PIL.Image.Image},
@@ -115,25 +160,27 @@ def detect_cards_with_debug(image_path: str) -> dict:
             # attempt_no=2 は反転リトライが走った場合のみ
         ],
 
-        # candidates_filter の各要素：
+        # masks[*].candidates_filter の各要素：
         #   {area, area_ratio, rect_center, rect_size, rect_angle,
         #    aspect_ratio, passed, reject_reason}
-        #   reject_reason: "" | "area_too_small" | "area_too_large"
-        #                | "zero_size" | "aspect_invalid"
+        #   reject_reason: "" | "too_small" | "zero_size" | "aspect_invalid"
+        #   （rev2: area_too_small/area_too_large は廃止。サイズは絶対下限 too_small のみ）
         # candidates_dedup の各要素：
-        #   {bbox: [x,y,w,h], area, kept, overlap_with}
+        #   {bbox: [x,y,w,h], area, mask, kept, overlap_with}
+        #   mask: その候補がどのマスク由来か（"diff"|"edge"|"sat"）
         # warp_failures の各要素：
         #   {polygon, computed_width, computed_height, min_required: [100, 50]}
 
         "sat_fallback": {
             # mask_sat 暴走時のフォールバック判定結果（背景高彩度対策）。
+            # 発動時は sat マスクを「候補抽出から除外」する（マスク画像は記録する）。
             "triggered":       bool,
             "sat_white_ratio": float,
             "threshold":       float,
         },
 
         "or_inversion": {
-            # 反転リトライ判定結果。
+            # 反転リトライ判定結果（OR 廃止後も反転リトライ自体は残るためキー名は踏襲）。
             "attempted":     bool,
             "passed_before": int,
             "passed_after":  int,
@@ -170,32 +217,20 @@ def _detect_with_debug(image_path: str) -> dict:
     image_area = w * h
     gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
 
-    # ② マスク生成（中間マスクも収集）
-    masks_np = _build_mask(bgr, gray)
+    # ② マスク生成（生マスク 3 枚 ＋ sat 暴走フォールバック判定）。OR 合成はしない。
+    mask_data = _build_masks(bgr, gray)
+    raw_masks = mask_data["raw"]
+    sat_excluded = mask_data["sat_fallback"]["triggered"]
 
-    # ③〜⑦ 通常マスクで候補抽出・重複除去・透視変換（attempt_no=1）
-    pipeline_1 = _extract_from_closed_mask(masks_np["mask_closed"], np_rgb, image_area)
-    attempt_1 = {
-        "attempt_no": 1,
-        "type": "normal",
-        "masks": {
-            "or":     Image.fromarray(masks_np["mask_or"]),
-            "closed": Image.fromarray(masks_np["mask_closed"]),
-        },
-        "mask_white_ratios": {
-            "or":     _white_ratio(masks_np["mask_or"]),
-            "closed": _white_ratio(masks_np["mask_closed"]),
-        },
-        "contours_count":    pipeline_1["contours_count"],
-        "candidates_filter": pipeline_1["candidates_filter"],
-        "candidates_dedup":  pipeline_1["candidates_dedup"],
-        "warp_failures":     pipeline_1["warp_failures"],
-        "results":           pipeline_1["results"],
-    }
-    attempts = [attempt_1]
+    # ③ 通常 attempt：各マスク個別にクロージング → 候補抽出 → マスク横断重複除去 → 透視変換
+    attempt_1 = _run_attempt(
+        raw_masks, sat_excluded, np_rgb, image_area,
+        expand_ratio=0.0, expand_min_px=0,
+    )
+    attempts = [_attempt_dict(1, "normal", attempt_1)]
 
-    # ⑧ 反転リトライ判定：通常マスクで passed=0 のとき mask_or を反転して再試行
-    passed_before = sum(1 for c in pipeline_1["candidates_filter"] if c["passed"])
+    # ④ 反転リトライ判定：通常で passed=0 のとき各生マスクを反転して再試行（新方式に通す）
+    passed_before = attempt_1["passed_count_total"]
     or_inversion = {
         "attempted": False,
         "passed_before": passed_before,
@@ -205,18 +240,13 @@ def _detect_with_debug(image_path: str) -> dict:
     }
 
     if passed_before == 0:
-        mask_or_inv = cv2.bitwise_not(masks_np["mask_or"])
-        k_close = cv2.getStructuringElement(cv2.MORPH_RECT, _CLOSE_KERNEL)
-        mask_closed_inv = cv2.morphologyEx(
-            mask_or_inv, cv2.MORPH_CLOSE, k_close, iterations=2
-        )
-        pipeline_2 = _extract_from_closed_mask(
-            mask_closed_inv, np_rgb, image_area,
+        inv_masks = {name: cv2.bitwise_not(m) for name, m in raw_masks.items()}
+        attempt_2 = _run_attempt(
+            inv_masks, sat_excluded, np_rgb, image_area,
             expand_ratio=_INVERTED_POLYGON_EXPAND_RATIO,
             expand_min_px=_INVERTED_POLYGON_EXPAND_MIN_PX,
         )
-        passed_after = sum(1 for c in pipeline_2["candidates_filter"] if c["passed"])
-
+        passed_after = attempt_2["passed_count_total"]
         or_inversion = {
             "attempted": True,
             "passed_before": 0,
@@ -227,195 +257,39 @@ def _detect_with_debug(image_path: str) -> dict:
                 "min_px": _INVERTED_POLYGON_EXPAND_MIN_PX,
             },
         }
-
-        attempts.append({
-            "attempt_no": 2,
-            "type": "inverted",
-            "masks": {
-                "or":     Image.fromarray(mask_or_inv),
-                "closed": Image.fromarray(mask_closed_inv),
-            },
-            "mask_white_ratios": {
-                "or":     _white_ratio(mask_or_inv),
-                "closed": _white_ratio(mask_closed_inv),
-            },
-            "contours_count":    pipeline_2["contours_count"],
-            "candidates_filter": pipeline_2["candidates_filter"],
-            "candidates_dedup":  pipeline_2["candidates_dedup"],
-            "warp_failures":     pipeline_2["warp_failures"],
-            "results":           pipeline_2["results"],
-        })
+        attempts.append(_attempt_dict(2, "inverted", attempt_2))
 
     return {
         "image_size": {"width": int(w), "height": int(h), "area": int(image_area)},
-        "masks": {
-            "diff": Image.fromarray(masks_np["mask_diff"]),
-            "edge": Image.fromarray(masks_np["mask_edge"]),
-            "sat":  Image.fromarray(masks_np["mask_sat"]),
-        },
-        "mask_white_ratios": {
-            "diff": _white_ratio(masks_np["mask_diff"]),
-            "edge": _white_ratio(masks_np["mask_edge"]),
-            "sat":  _white_ratio(masks_np["mask_sat"]),
-        },
         "attempts": attempts,
-        "sat_fallback": masks_np["sat_fallback"],
+        "sat_fallback": mask_data["sat_fallback"],
         "or_inversion": or_inversion,
         "error_message": "",
     }
 
 
-def _extract_from_closed_mask(
-    mask_closed: np.ndarray, np_rgb: np.ndarray, image_area: int,
-    expand_ratio: float = 0.0, expand_min_px: int = 0,
-) -> dict:
-    """[性質] 純関数 / クローズ済みマスクから候補抽出・重複除去・透視変換を実行する。
-
-    通常マスク用の経路と反転リトライ経路で同じ処理を共有させるための内部ヘルパー。
-    フィルタ／重複除去／透視変換のロジック・パラメータは共通。
-
-    [入力]
-      mask_closed   : クローズ済み 2 値マスク (uint8 ndarray)
-      np_rgb        : 元画像 (RGB ndarray) — 透視変換のソース
-      image_area    : 画像面積 (w * h)
-      expand_ratio  : 0 より大なら透視変換直前に polygon を中心から外側へ拡張する。
-                      拡張量 = max(対角線長 × expand_ratio, expand_min_px) ピクセル。
-                      通常検出経路は 0.0（拡張なし）、反転リトライ経路は 0.02 を渡す。
-      expand_min_px : 拡張量の下限ピクセル（expand_ratio>0 のときのみ参照）。
-    [出力] dict:
-      {
-        "contours_count":    int,
-        "candidates_filter": list[dict],
-        "candidates_dedup":  list[dict],
-        "warp_failures":     list[dict],
-        "results":           list[dict],   # {"polygon", "warped_image"}
-      }
-    """
-    # ③ 輪郭検出
-    contours, _ = cv2.findContours(
-        mask_closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
-    )
-
-    # ④ 候補抽出（面積・アスペクト比フィルタ／全件記録）
-    candidates_filter: list[dict] = []
-    candidates: list = []
-    for cnt in contours:
-        area = float(cv2.contourArea(cnt))
-        area_ratio = (area / image_area) if image_area > 0 else 0.0
-
-        hull = cv2.convexHull(cnt)
-        rect = cv2.minAreaRect(hull)
-        (cx, cy), (rw, rh), angle = rect
-
-        passed = False
-        reject_reason = ""
-        aspect_ratio: float | None = None
-
-        if area_ratio < _AREA_MIN_RATIO:
-            reject_reason = "area_too_small"
-        elif area_ratio > _AREA_MAX_RATIO:
-            reject_reason = "area_too_large"
-        elif min(rw, rh) == 0:
-            reject_reason = "zero_size"
-        else:
-            aspect_ratio = max(rw, rh) / min(rw, rh)
-            if not (_ASPECT_MIN <= aspect_ratio <= _ASPECT_MAX):
-                reject_reason = "aspect_invalid"
-            else:
-                passed = True
-
-        candidates_filter.append({
-            "area": area,
-            "area_ratio": float(area_ratio),
-            "rect_center": [float(cx), float(cy)],
-            "rect_size":   [float(rw), float(rh)],
-            "rect_angle":  float(angle),
-            "aspect_ratio": aspect_ratio,
-            "passed": passed,
-            "reject_reason": reject_reason,
-        })
-
-        if not passed:
-            continue
-
-        box = cv2.boxPoints(rect).astype(np.float32)
-        bx, by, bw, bh = cv2.boundingRect(box.astype(np.int32))
-        candidates.append((area, box, bx, by, bw, bh))
-
-    # ⑤ 面積大きい順に重複除去（判定結果を全件記録）
-    candidates.sort(key=lambda c: c[0], reverse=True)
-    candidates_dedup: list[dict] = []
-    kept = []
-    kept_bboxes: list[tuple[int, int, int, int]] = []
-    for area, box, bx, by, bw, bh in candidates:
-        overlap_idx = _find_overlap_index(bx, by, bw, bh, kept_bboxes)
-        if overlap_idx is None:
-            candidates_dedup.append({
-                "bbox": [int(bx), int(by), int(bw), int(bh)],
-                "area": float(area),
-                "kept": True,
-                "overlap_with": None,
-            })
-            kept.append((box, bx, by))
-            kept_bboxes.append((bx, by, bw, bh))
-        else:
-            candidates_dedup.append({
-                "bbox": [int(bx), int(by), int(bw), int(bh)],
-                "area": float(area),
-                "kept": False,
-                "overlap_with": overlap_idx,
-            })
-
-    # ⑥ top-left の y 優先・x 次でソート（card_index の順序確定）
-    kept.sort(key=lambda r: (r[2], r[1]))
-
-    # ⑦ 透視変換（サイズ基準未満は warp_failures に記録）
-    # expand_ratio>0（反転リトライ経路）のときは polygon を外側に拡張してから warp
-    h_img, w_img = np_rgb.shape[:2]
-    results: list[dict] = []
-    warp_failures: list[dict] = []
-    for box, _bx, _by in kept:
-        sorted_pts = _sort_corners(box)
-        if expand_ratio > 0.0:
-            sorted_pts = _expand_polygon(
-                sorted_pts, expand_ratio, expand_min_px, w_img, h_img
-            )
-        warped_rgb, ww, hh = _warp_card(np_rgb, sorted_pts)
-        if warped_rgb is None:
-            warp_failures.append({
-                "polygon": _pts_to_polygon(sorted_pts),
-                "computed_width":  ww,
-                "computed_height": hh,
-                "min_required": [_MIN_WARP_WIDTH, _MIN_WARP_HEIGHT],
-            })
-            continue
-        results.append({
-            "polygon": _pts_to_polygon(sorted_pts),
-            "warped_image": Image.fromarray(warped_rgb),
-        })
-
+def _attempt_dict(attempt_no: int, type_: str, attempt: dict) -> dict:
+    """[性質] 純関数 / _run_attempt の戻り値を attempt メタ構造へ整える内部ヘルパー。"""
     return {
-        "contours_count": len(contours),
-        "candidates_filter": candidates_filter,
-        "candidates_dedup": candidates_dedup,
-        "warp_failures": warp_failures,
-        "results": results,
+        "attempt_no": attempt_no,
+        "type": type_,
+        "masks": attempt["mask_results"],
+        "candidates_dedup": attempt["candidates_dedup"],
+        "warp_failures": attempt["warp_failures"],
+        "results": attempt["results"],
     }
 
 
-def _build_mask(bgr: np.ndarray, gray: np.ndarray) -> dict:
-    """[性質] 純関数 / 3種マスクを OR 合成し、各中間マスクと最終マスクを dict で返す。
+def _build_masks(bgr: np.ndarray, gray: np.ndarray) -> dict:
+    """[性質] 純関数 / 生マスク 3 枚（diff/edge/sat）と sat 暴走フォールバック判定を返す。
 
-    mask_sat の白画素率が _SAT_WHITE_RATIO_MAX を超えた場合、mask_sat を OR 合成から
-    除外し mask_diff + mask_edge の 2 マスクで mask_or を構築する（背景高彩度対策）。
+    OR 合成・クロージングはここでは行わない（クロージングは attempt 内でマスク別に行う）。
+    mask_sat の白画素率が _SAT_WHITE_RATIO_MAX を超えた場合は sat を「候補抽出から除外」する
+    判定（triggered=True）を返す（背景高彩度対策）。除外しても sat マスク画像自体は記録する。
 
-    返却 dict のキー：
-      mask_diff   : 輝度差マスク（uint8 single-channel ndarray）
-      mask_edge   : Canny エッジマスク
-      mask_sat    : HSV 彩度マスク
-      mask_or     : OR 合成マスク（フォールバック発動時は mask_sat を除外した 2 マスクの OR）
-      mask_closed : クローズ処理後の最終マスク（呼び出し側はこれを使う）
-      sat_fallback: dict {triggered: bool, sat_white_ratio: float, threshold: float}
+    返却 dict：
+      raw: {"diff": ndarray, "edge": ndarray, "sat": ndarray}  # uint8 single-channel 生マスク
+      sat_fallback: {triggered: bool, sat_white_ratio: float, threshold: float}
     """
     # マスク1: グレースケール差分（白・黒など輝度差のあるカード）
     k_bg = cv2.getStructuringElement(cv2.MORPH_RECT, _ERODE_KERNEL)
@@ -440,25 +314,239 @@ def _build_mask(bgr: np.ndarray, gray: np.ndarray) -> dict:
     )
     sat_fallback_triggered = sat_white_ratio > _SAT_WHITE_RATIO_MAX
 
-    # OR 合成 → クローズで内部穴埋め・ノイズ除去
-    mask_or = cv2.bitwise_or(mask_diff, mask_edge)
-    if not sat_fallback_triggered:
-        mask_or = cv2.bitwise_or(mask_or, mask_sat)
-    k_close = cv2.getStructuringElement(cv2.MORPH_RECT, _CLOSE_KERNEL)
-    mask_closed = cv2.morphologyEx(mask_or, cv2.MORPH_CLOSE, k_close, iterations=2)
-
     return {
-        "mask_diff":   mask_diff,
-        "mask_edge":   mask_edge,
-        "mask_sat":    mask_sat,
-        "mask_or":     mask_or,
-        "mask_closed": mask_closed,
+        "raw": {
+            "diff": mask_diff,
+            "edge": mask_edge,
+            "sat":  mask_sat,
+        },
         "sat_fallback": {
             "triggered": sat_fallback_triggered,
             "sat_white_ratio": sat_white_ratio,
             "threshold": _SAT_WHITE_RATIO_MAX,
         },
     }
+
+
+def _close_mask(mask: np.ndarray) -> np.ndarray:
+    """[性質] 純関数 / マスクをクロージング（同一マスク内で割れた塊を繋ぐ・rev2 §1.2.5）。"""
+    k_close = cv2.getStructuringElement(cv2.MORPH_RECT, _CLOSE_KERNEL)
+    return cv2.morphologyEx(mask, cv2.MORPH_CLOSE, k_close, iterations=2)
+
+
+def _run_attempt(
+    raw_masks: dict, sat_excluded: bool, np_rgb: np.ndarray, image_area: int,
+    expand_ratio: float, expand_min_px: int,
+) -> dict:
+    """[性質] 純関数 / 1 試行ぶんの「各マスク個別抽出 → マスク横断重複除去 → 透視変換」を実行。
+
+    通常 attempt と反転リトライ attempt で共有する。各マスク（diff/edge/sat）について
+    クロージング → 候補抽出を独立に行い、合格候補をマスク横断で重複除去してから warp する。
+    sat_excluded=True のとき sat マスクは候補抽出から外す（マスク画像・白画素率は記録）。
+
+    [入力]
+      raw_masks     : {"diff", "edge", "sat"} の生マスク dict（反転 attempt では反転済み）
+      sat_excluded  : sat を候補抽出から除外するか（sat 暴走フォールバック）
+      np_rgb        : 元画像 (RGB ndarray) — 透視変換のソース
+      image_area    : 画像面積 (w * h)
+      expand_ratio  : 0 より大なら透視変換直前に polygon を外側へ拡張（反転リトライ経路）
+      expand_min_px : 拡張量の下限ピクセル（expand_ratio>0 のときのみ参照）
+    [出力] dict:
+      {
+        "mask_results": {<name>: {raw_image, closed_image, raw_white_ratio,
+                                  closed_white_ratio, excluded, contours_count,
+                                  candidates_filter}},
+        "candidates_dedup": list[dict],
+        "warp_failures":    list[dict],
+        "results":          list[dict],
+        "passed_count_total": int,   # 全マスク合算の passed 件数（反転リトライ判定に使用）
+      }
+    """
+    mask_results: dict = {}
+    passed_all: list = []  # (mask_name, area, box, bx, by, bw, bh)
+    passed_count_total = 0
+
+    for name in _MASK_NAMES:
+        raw = raw_masks[name]
+        closed = _close_mask(raw)
+        excluded = bool(name == "sat" and sat_excluded)
+
+        if excluded:
+            contours_count = 0
+            candidates_filter: list = []
+            passed: list = []
+        else:
+            contours_count, candidates_filter, passed = _extract_candidates_from_mask(
+                closed, image_area
+            )
+
+        mask_results[name] = {
+            "raw_image":    Image.fromarray(raw),
+            "closed_image": Image.fromarray(closed),
+            "raw_white_ratio":    _white_ratio(raw),
+            "closed_white_ratio": _white_ratio(closed),
+            "excluded":           excluded,
+            "contours_count":     contours_count,
+            "candidates_filter":  candidates_filter,
+        }
+        passed_count_total += len(passed)
+        for p in passed:
+            passed_all.append((name, *p))
+
+    candidates_dedup, kept = _dedup_candidates(passed_all)
+    results, warp_failures = _warp_kept(kept, np_rgb, expand_ratio, expand_min_px)
+
+    return {
+        "mask_results": mask_results,
+        "candidates_dedup": candidates_dedup,
+        "warp_failures": warp_failures,
+        "results": results,
+        "passed_count_total": passed_count_total,
+    }
+
+
+def _extract_candidates_from_mask(mask_closed: np.ndarray, image_area: int) -> tuple:
+    """[性質] 純関数 / クローズ済み 1 マスクから候補を抽出し、フィルタ判定を全件記録する。
+
+    採否の主基準は縦横比（_ASPECT_MIN〜_ASPECT_MAX）のみ。サイズは OCR 不能な極小を
+    落とす緩い絶対下限（_min_card_area_px）としてのみ使い、面積上限・面積比は使わない。
+    票数ルールは設けない（1 マスクで出ても比が範囲内なら合格・rev2 §1.2 の3）。
+
+    [出力] (contours_count, candidates_filter, passed)
+      candidates_filter: 全輪郭のフィルタ判定 dict のリスト
+      passed: 合格候補 (area, box, bx, by, bw, bh) のリスト
+    """
+    contours, _ = cv2.findContours(
+        mask_closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+    )
+
+    min_area = _min_card_area_px()
+    candidates_filter: list = []
+    passed: list = []
+    for cnt in contours:
+        area = float(cv2.contourArea(cnt))
+        area_ratio = (area / image_area) if image_area > 0 else 0.0
+
+        hull = cv2.convexHull(cnt)
+        rect = cv2.minAreaRect(hull)
+        (cx, cy), (rw, rh), angle = rect
+
+        passed_flag = False
+        reject_reason = ""
+        aspect_ratio: float | None = None
+
+        if min(rw, rh) == 0:
+            reject_reason = "zero_size"
+        elif area < min_area:
+            # OCR 不能な極小候補を落とす緩い絶対下限のみ（採否の主基準ではない・rev2 §1.2.4）
+            reject_reason = "too_small"
+        else:
+            aspect_ratio = max(rw, rh) / min(rw, rh)
+            if not (_ASPECT_MIN <= aspect_ratio <= _ASPECT_MAX):
+                reject_reason = "aspect_invalid"
+            else:
+                passed_flag = True
+
+        candidates_filter.append({
+            "area": area,
+            "area_ratio": float(area_ratio),
+            "rect_center": [float(cx), float(cy)],
+            "rect_size":   [float(rw), float(rh)],
+            "rect_angle":  float(angle),
+            "aspect_ratio": aspect_ratio,
+            "passed": passed_flag,
+            "reject_reason": reject_reason,
+        })
+
+        if not passed_flag:
+            continue
+
+        box = cv2.boxPoints(rect).astype(np.float32)
+        bx, by, bw, bh = cv2.boundingRect(box.astype(np.int32))
+        passed.append((area, box, bx, by, bw, bh))
+
+    return len(contours), candidates_filter, passed
+
+
+def _dedup_candidates(passed_all: list) -> tuple:
+    """[性質] 純関数 / マスク横断で重複候補を中心座標＋IoU で1件に統合する（rev2 §1.2 の4）。
+
+    面積降順で走査し、既採用矩形と「IoU がしきい値以上 かつ 中心距離が対角線比以内」の
+    候補を重複とみなして落とす。採用座標は当面「面積最大の候補」を採る（仮・rev2 §1.4 で未確定）。
+
+    [入力] passed_all: (mask_name, area, box, bx, by, bw, bh) のリスト
+    [出力] (candidates_dedup, kept)
+      candidates_dedup: {bbox, area, mask, kept, overlap_with} のリスト（全件記録）
+      kept: 採用候補 (mask_name, box, bx, by) のリスト（card_index 順にソート済み）
+    """
+    # 面積降順 → 最初に採用される＝面積最大の候補（採用座標の仮ルール・rev2 §1.4）
+    ordered = sorted(passed_all, key=lambda c: c[1], reverse=True)
+
+    iou_threshold = _dedup_iou_threshold()
+    center_dist_ratio = _dedup_center_dist_ratio()
+
+    candidates_dedup: list = []
+    kept: list = []           # (mask_name, box, bx, by)
+    kept_bboxes: list = []    # (bx, by, bw, bh)
+    for mask_name, area, box, bx, by, bw, bh in ordered:
+        dup_idx = _find_duplicate_index(
+            bx, by, bw, bh, kept_bboxes, iou_threshold, center_dist_ratio
+        )
+        if dup_idx is None:
+            candidates_dedup.append({
+                "bbox": [int(bx), int(by), int(bw), int(bh)],
+                "area": float(area),
+                "mask": mask_name,
+                "kept": True,
+                "overlap_with": None,
+            })
+            kept.append((mask_name, box, bx, by))
+            kept_bboxes.append((bx, by, bw, bh))
+        else:
+            candidates_dedup.append({
+                "bbox": [int(bx), int(by), int(bw), int(bh)],
+                "area": float(area),
+                "mask": mask_name,
+                "kept": False,
+                "overlap_with": dup_idx,
+            })
+
+    # top-left の y 優先・x 次でソート（card_index の順序確定）
+    kept.sort(key=lambda r: (r[3], r[2]))  # r = (mask, box, bx, by) → (by, bx)
+    return candidates_dedup, kept
+
+
+def _warp_kept(
+    kept: list, np_rgb: np.ndarray, expand_ratio: float, expand_min_px: int
+) -> tuple:
+    """[性質] 純関数 / 採用候補を透視変換し、(results, warp_failures) を返す。
+
+    expand_ratio>0（反転リトライ経路）のときは polygon を外側に拡張してから warp する。
+    サイズ基準未満（_MIN_WARP_WIDTH / _MIN_WARP_HEIGHT）は warp_failures に記録する。
+    """
+    h_img, w_img = np_rgb.shape[:2]
+    results: list = []
+    warp_failures: list = []
+    for _mask_name, box, _bx, _by in kept:
+        sorted_pts = _sort_corners(box)
+        if expand_ratio > 0.0:
+            sorted_pts = _expand_polygon(
+                sorted_pts, expand_ratio, expand_min_px, w_img, h_img
+            )
+        warped_rgb, ww, hh = _warp_card(np_rgb, sorted_pts)
+        if warped_rgb is None:
+            warp_failures.append({
+                "polygon": _pts_to_polygon(sorted_pts),
+                "computed_width":  ww,
+                "computed_height": hh,
+                "min_required": [_MIN_WARP_WIDTH, _MIN_WARP_HEIGHT],
+            })
+            continue
+        results.append({
+            "polygon": _pts_to_polygon(sorted_pts),
+            "warped_image": Image.fromarray(warped_rgb),
+        })
+    return results, warp_failures
 
 
 def _sort_corners(pts: np.ndarray) -> np.ndarray:
@@ -545,18 +633,30 @@ def _expand_polygon(
     return expanded
 
 
-def _find_overlap_index(x1, y1, w1, h1, kept_list: list) -> int | None:
-    """[性質] 純関数 / 新候補が保持済み矩形と 50% 以上重複するかを判定。
+def _find_duplicate_index(
+    x1, y1, w1, h1, kept_bboxes: list, iou_threshold: float, center_dist_ratio: float
+) -> int | None:
+    """[性質] 純関数 / 新候補が既採用矩形と「同一名刺」かを中心座標＋IoU で判定する。
 
-    重複した場合は kept_list 内の該当インデックスを返し、重複しない場合は None を返す。
+    判定条件（rev2 §1.2 の4・§1.3.2 #3。AND 併用は保守的＝過統合を避ける。しきい値・
+    AND/OR の別は未確定で評価基準で詰める・§1.4/§4.2）：
+      IoU ≥ iou_threshold  かつ  中心距離 ≤ center_dist_ratio × 既採用矩形の対角線長
+    一致した場合は kept_bboxes 内の該当インデックスを、しなければ None を返す。
     """
     a1 = w1 * h1
-    for idx, (x2, y2, w2, h2) in enumerate(kept_list):
+    c1x, c1y = x1 + w1 / 2.0, y1 + h1 / 2.0
+    for idx, (x2, y2, w2, h2) in enumerate(kept_bboxes):
         iw = min(x1 + w1, x2 + w2) - max(x1, x2)
         ih = min(y1 + h1, y2 + h2) - max(y1, y2)
-        if iw <= 0 or ih <= 0:
-            continue
-        min_area = min(a1, w2 * h2)
-        if min_area > 0 and (iw * ih) / min_area >= _OVERLAP_THRESHOLD:
+        inter = (iw * ih) if (iw > 0 and ih > 0) else 0.0
+        union = a1 + w2 * h2 - inter
+        iou = (inter / union) if union > 0 else 0.0
+
+        c2x, c2y = x2 + w2 / 2.0, y2 + h2 / 2.0
+        center_dist = ((c1x - c2x) ** 2 + (c1y - c2y) ** 2) ** 0.5
+        diag2 = (w2 * w2 + h2 * h2) ** 0.5
+        center_near = center_dist <= center_dist_ratio * diag2
+
+        if iou >= iou_threshold and center_near:
             return idx
     return None

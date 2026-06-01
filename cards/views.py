@@ -177,7 +177,11 @@ class OriginalDetailView(DetailView):
         return context
 
 
-_REJECT_REASONS_ORDER = ("area_too_small", "area_too_large", "zero_size", "aspect_invalid")
+# rev2 方式：area_too_small/area_too_large は廃止。サイズは絶対下限 too_small のみ。
+_REJECT_REASONS_ORDER = ("too_small", "zero_size", "aspect_invalid")
+
+# debug_json の attempt["masks"] のマスク名（順序固定）。
+_MASK_NAMES = ("diff", "edge", "sat")
 
 
 def _get_last_attempt(debug_json):
@@ -188,11 +192,38 @@ def _get_last_attempt(debug_json):
     return attempts[-1] if attempts else None
 
 
+def _flatten_attempt_candidates(attempt):
+    """[性質] 純関数 / attempt["masks"] のマスク別 candidates_filter を1リストに平坦化する。
+
+    各候補に由来マスク名 "mask" と、attempt 全体での連番 "index"（表示用の通し #）を付与する。
+    マスク内の元 index は "mask_index" として温存する。
+    """
+    out = []
+    masks = (attempt or {}).get("masks") or {}
+    gi = 0
+    for name in _MASK_NAMES:
+        mr = masks.get(name) or {}
+        for c in mr.get("candidates_filter") or []:
+            d = dict(c)
+            d["mask"] = name
+            d["mask_index"] = c.get("index")
+            d["index"] = gi
+            out.append(d)
+            gi += 1
+    return out
+
+
+def _attempt_contours_count(attempt):
+    """[性質] 純関数 / attempt の全マスク合算の輪郭数を返す。"""
+    masks = (attempt or {}).get("masks") or {}
+    return sum((masks.get(n) or {}).get("contours_count", 0) for n in _MASK_NAMES)
+
+
 def _build_debug_summary(debug_json, raw_json=None, bc_count=0):
     if not debug_json:
         return None
     last = _get_last_attempt(debug_json) or {}
-    cf = last.get("candidates_filter") or []
+    cf = _flatten_attempt_candidates(last)
     cd = last.get("candidates_dedup") or []
     results = last.get("results") or []
     wf = last.get("warp_failures") or []
@@ -217,7 +248,7 @@ def _build_debug_summary(debug_json, raw_json=None, bc_count=0):
 
     return {
         "image_size": debug_json.get("image_size") or {},
-        "contours_count": last.get("contours_count", 0) or 0,
+        "contours_count": _attempt_contours_count(last),
         "passed_count": sum(1 for x in cf if x.get("passed")),
         "candidates_total": len(cf),
         "kept_count": sum(1 for x in cd if x.get("kept")),
@@ -273,24 +304,25 @@ def _build_warning_stripe(debug_json, mask_white_ratios=None):
     last = _get_last_attempt(debug_json) or {}
     last_attempt_no = last.get("attempt_no")
 
-    # 条件1: 最終 attempt の closed マスク白画素率 ≥ 80%
+    # 条件1: 最終 attempt のクローズ後マスク白画素率 ≥ 80%（マスク別の最大で判定）
     mwr = mask_white_ratios or {}
-    closed_ratio = (mwr.get(last_attempt_no) or {}).get(DebugMask.MaskType.CLOSED)
-    if closed_ratio is not None and closed_ratio >= 0.80:
-        msgs.append(f"マスク白画素率が異常 ({closed_ratio * 100:.1f}%)")
+    last_ratios = mwr.get(last_attempt_no) or {}
+    closed_ratios = [
+        v for k, v in last_ratios.items()
+        if isinstance(k, str) and k.endswith("_closed") and v is not None
+    ]
+    if closed_ratios and max(closed_ratios) >= 0.80:
+        msgs.append(f"クローズ後マスク白画素率が異常 ({max(closed_ratios) * 100:.1f}%)")
 
     # 条件2: 最終 attempt の results が 0 件
     results = last.get("results") or []
     if len(results) == 0:
         msgs.append("最終検出 0 件")
 
-    # 条件3: 最終 attempt の area_too_large ≥ 1
-    cf = last.get("candidates_filter") or []
-    too_large = sum(1 for x in cf if x.get("reject_reason") == "area_too_large")
-    if too_large >= 1:
-        msgs.append(f"巨大候補が {too_large} 件")
+    # （rev2: area_too_large 廃止のため旧「巨大候補」条件は削除。巨大判定はオーバーレイ
+    #   _build_overlay_polygons の is_giant が担う）
 
-    # 条件4: 反転リトライが実施されたか
+    # 条件3: 反転リトライが実施されたか
     or_inv = debug_json.get("or_inversion") or {}
     if or_inv.get("attempted"):
         before = or_inv.get("passed_before", 0)
@@ -301,17 +333,19 @@ def _build_warning_stripe(debug_json, mask_white_ratios=None):
     return msgs
 
 
-_BLOCK1_MASK_TYPES = (
+# rev2 方式：マスク別（生 diff/edge/sat ＋ クローズ diff_closed/edge_closed/sat_closed）。
+# 各ブロック内は「生 3 → クローズ 3」の順で並べる（テンプレートは :3 / 3: でスライスする）。
+_RAW_MASK_TYPES = (
     DebugMask.MaskType.DIFF,
     DebugMask.MaskType.EDGE,
     DebugMask.MaskType.SAT,
-    DebugMask.MaskType.OR,
-    DebugMask.MaskType.CLOSED,
 )
-_BLOCK2_MASK_TYPES = (
-    DebugMask.MaskType.OR,
-    DebugMask.MaskType.CLOSED,
+_CLOSED_MASK_TYPES = (
+    DebugMask.MaskType.DIFF_CLOSED,
+    DebugMask.MaskType.EDGE_CLOSED,
+    DebugMask.MaskType.SAT_CLOSED,
 )
+_BLOCK_MASK_TYPES = _RAW_MASK_TYPES + _CLOSED_MASK_TYPES
 
 
 def _build_mask_url_blocks(debug_masks):
@@ -320,12 +354,11 @@ def _build_mask_url_blocks(debug_masks):
     [性質] 準関数（DebugMask の mask_image.url 参照のみ・DB 書込なし）
     [入力] debug_masks: DebugMask の iterable（同一 OriginalImage 配下）
     [出力] (block1, block2)
-      block1: 1 回目（attempt_no=1）の (label, url|None) リスト。長さ常に 5。
-              順序は diff → edge → sat → or → closed。
-      block2: 2 回目（attempt_no=2）の (label, url|None) リスト。
-              attempt_no=2 のレコードが 1 件も無ければ [] を返す。
-              ある場合は or → closed の 2 件固定。
-    label の "mask_N" の番号は MaskType.choices の定義順（1〜5）に合わせる。
+      block1: 1 回目（attempt_no=1）の (label, url|None) リスト。長さ常に 6。
+              順序は diff → edge → sat → diff_closed → edge_closed → sat_closed。
+      block2: 2 回目（attempt_no=2・反転リトライ）の (label, url|None) リスト。
+              attempt_no=2 のレコードが 1 件も無ければ [] を返す。ある場合は同 6 件。
+    label の "mask_N" の番号は MaskType.choices の定義順（1〜6）に合わせる。
     """
     by_key = {(m.mask_type, m.attempt_no): m for m in debug_masks}
     type_to_idx = {
@@ -340,10 +373,10 @@ def _build_mask_url_blocks(debug_masks):
         url = rec.mask_image.url if rec else None
         return (label, url)
 
-    block1 = [_entry(mt, 1) for mt in _BLOCK1_MASK_TYPES]
+    block1 = [_entry(mt, 1) for mt in _BLOCK_MASK_TYPES]
 
     has_attempt2 = any(m.attempt_no == 2 for m in debug_masks)
-    block2 = [_entry(mt, 2) for mt in _BLOCK2_MASK_TYPES] if has_attempt2 else []
+    block2 = [_entry(mt, 2) for mt in _BLOCK_MASK_TYPES] if has_attempt2 else []
 
     return block1, block2
 
@@ -390,7 +423,7 @@ def _format_candidate(c):
 
 def _candidates_passed(debug_json):
     last = _get_last_attempt(debug_json) or {}
-    cf = last.get("candidates_filter") or []
+    cf = _flatten_attempt_candidates(last)
     return [
         _format_candidate(c)
         for c in sorted(
@@ -401,9 +434,9 @@ def _candidates_passed(debug_json):
 
 
 def _candidates_all(debug_json):
-    """passed 優先 → area 降順。"""
+    """passed 優先 → area 降順。マスク別候補を平坦化したうえで並べる。"""
     last = _get_last_attempt(debug_json) or {}
-    cf = last.get("candidates_filter") or []
+    cf = _flatten_attempt_candidates(last)
     return [
         _format_candidate(c)
         for c in sorted(

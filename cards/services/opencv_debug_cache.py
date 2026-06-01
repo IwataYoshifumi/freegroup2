@@ -23,19 +23,20 @@ from cards.services.detectors.opencv_detector import detect_cards_with_debug
 
 logger = logging.getLogger(__name__)
 
-# 反転処理の影響を受けない共通マスク。常に attempt_no=1 で 1 件だけ保存する。
-# (api_key, mask_type) のタプル列挙。api_key は detect_cards_with_debug の masks dict のキー。
-_COMMON_MASKS = (
-    ("diff", DebugMask.MaskType.DIFF),
-    ("edge", DebugMask.MaskType.EDGE),
-    ("sat",  DebugMask.MaskType.SAT),
-)
-
-# 各 attempt ごとに保存するマスク（attempt_no を付けて保存）。
-_PER_ATTEMPT_MASKS = (
-    ("or",     DebugMask.MaskType.OR),
-    ("closed", DebugMask.MaskType.CLOSED),
-)
+# rev2 方式：OR 合成を廃止し、マスク別に「生」「クロージング後」を保存する。
+# attempt ごと（attempt_no を付けて）にマスク名 → MaskType を引く。
+# mask 名は detect_cards_with_debug の attempt["masks"] のキー（diff/edge/sat）。
+_MASK_TYPE_RAW = {
+    "diff": DebugMask.MaskType.DIFF,
+    "edge": DebugMask.MaskType.EDGE,
+    "sat":  DebugMask.MaskType.SAT,
+}
+_MASK_TYPE_CLOSED = {
+    "diff": DebugMask.MaskType.DIFF_CLOSED,
+    "edge": DebugMask.MaskType.EDGE_CLOSED,
+    "sat":  DebugMask.MaskType.SAT_CLOSED,
+}
+_MASK_NAMES = ("diff", "edge", "sat")
 
 
 def save_debug_data(original_image, debug_result: dict) -> None:
@@ -50,36 +51,30 @@ def save_debug_data(original_image, debug_result: dict) -> None:
     既存の DebugMask は一度削除してから新規作成する（idempotent）。
     削除時に post_delete シグナルで mask_image の FS 実体も削除される。
 
-    保存件数：
-      - 反転リトライなし：5 件（attempt_no=1: diff/edge/sat/or/closed）
-      - 反転リトライあり：7 件（上記 + attempt_no=2: or/closed）
+    保存件数（rev2 方式：マスク別 生＋クローズ）：
+      - 反転リトライなし：6 件（attempt_no=1: diff/edge/sat × 生・クローズ）
+      - 反転リトライあり：12 件（上記 + attempt_no=2 の同 6 件）
     """
     # 既存の DebugMask を削除（FS 実体は post_delete でクリーンアップ）
     original_image.debug_masks.all().delete()
 
-    common_masks = debug_result.get("masks") or {}
-    common_ratios = debug_result.get("mask_white_ratios") or {}
-    for api_key, mask_type in _COMMON_MASKS:
-        img = common_masks.get(api_key)
-        if img is None:
-            continue
-        _create_debug_mask(
-            original_image, mask_type, attempt_no=1, image=img,
-            white_ratio=common_ratios.get(api_key),
-        )
-
     for attempt in debug_result.get("attempts") or []:
         attempt_no = attempt.get("attempt_no") or 1
         attempt_masks = attempt.get("masks") or {}
-        attempt_ratios = attempt.get("mask_white_ratios") or {}
-        for api_key, mask_type in _PER_ATTEMPT_MASKS:
-            img = attempt_masks.get(api_key)
-            if img is None:
-                continue
-            _create_debug_mask(
-                original_image, mask_type, attempt_no=attempt_no, image=img,
-                white_ratio=attempt_ratios.get(api_key),
-            )
+        for name in _MASK_NAMES:
+            mr = attempt_masks.get(name) or {}
+            raw_img = mr.get("raw_image")
+            if raw_img is not None:
+                _create_debug_mask(
+                    original_image, _MASK_TYPE_RAW[name], attempt_no=attempt_no,
+                    image=raw_img, white_ratio=mr.get("raw_white_ratio"),
+                )
+            closed_img = mr.get("closed_image")
+            if closed_img is not None:
+                _create_debug_mask(
+                    original_image, _MASK_TYPE_CLOSED[name], attempt_no=attempt_no,
+                    image=closed_img, white_ratio=mr.get("closed_white_ratio"),
+                )
 
     original_image.debug_json = _build_debug_json(debug_result)
     original_image.save(update_fields=["debug_json"])
@@ -141,31 +136,39 @@ def _create_debug_mask(original_image, mask_type, attempt_no, image, white_ratio
 def _build_debug_json(debug_result: dict) -> dict:
     """[性質] 純関数 / detect_cards_with_debug() の戻り値を JSON 化可能な構造に整形する。
 
-    masks（PIL.Image 群）と results[*].warped_image は除外する。
-    mask_white_ratios は DebugMask.metadata に格納するため debug_json からは除外する。
-    各 attempt の candidates_filter には cross-reference 用の "index" を付与する。
+    rev2 方式：各 attempt の masks（PIL.Image 群）を除外し、マスク別（diff/edge/sat）に
+    candidates_filter・contours_count・excluded を残す。各 candidates_filter には
+    マスク内 cross-reference 用の "index" を付与する。
     results は card_index と polygon のみのメタ情報に縮約する（warped 画像本体は
-    BusinessCard.card_image 経由で参照可能）。
+    BusinessCard.card_image 経由で参照可能）。candidates_dedup は mask タグ付きで転記する。
     sat_fallback / or_inversion はそのまま転記する。
     """
     attempts_meta = []
     for attempt in debug_result.get("attempts") or []:
-        candidates_filter = [
-            {"index": i, **c}
-            for i, c in enumerate(attempt.get("candidates_filter") or [])
-        ]
+        attempt_masks = attempt.get("masks") or {}
+        masks_meta = {}
+        for name in _MASK_NAMES:
+            mr = attempt_masks.get(name) or {}
+            candidates_filter = [
+                {"index": i, **c}
+                for i, c in enumerate(mr.get("candidates_filter") or [])
+            ]
+            masks_meta[name] = {
+                "excluded":          bool(mr.get("excluded")),
+                "contours_count":    mr.get("contours_count", 0),
+                "candidates_filter": candidates_filter,
+            }
         results_meta = [
             {"card_index": card_index, "polygon": r.get("polygon")}
             for card_index, r in enumerate(attempt.get("results") or [])
         ]
         attempts_meta.append({
-            "attempt_no":        attempt.get("attempt_no"),
-            "type":              attempt.get("type"),
-            "contours_count":    attempt.get("contours_count", 0),
-            "candidates_filter": candidates_filter,
-            "candidates_dedup":  list(attempt.get("candidates_dedup") or []),
-            "warp_failures":     list(attempt.get("warp_failures") or []),
-            "results":           results_meta,
+            "attempt_no":       attempt.get("attempt_no"),
+            "type":             attempt.get("type"),
+            "masks":            masks_meta,
+            "candidates_dedup": list(attempt.get("candidates_dedup") or []),
+            "warp_failures":    list(attempt.get("warp_failures") or []),
+            "results":          results_meta,
         })
 
     return {

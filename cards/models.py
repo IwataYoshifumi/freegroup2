@@ -193,19 +193,21 @@ def _debug_mask_upload_path(instance, filename):
 
 
 class DebugMask(models.Model):
-    """OpenCV 検出のデバッグ用マスク画像（5種類）。
+    """OpenCV 検出のデバッグ用マスク画像（rev2 方式・マスク別 6 種類）。
 
     OriginalImage に紐付き、検出時に save_debug_data() から書き込まれる。
     DBが1次ソース、mask_image の FS 実体は post_delete シグナル経由で削除される。
-    白黒反転リトライが走った場合、attempt_no=2 の or / closed が追加で保存される。
+    rev2 では OR 合成を廃止し、diff/edge/sat それぞれの「生マスク」と「クロージング後マスク」を
+    マスク別に保存する。白黒反転リトライが走った場合、attempt_no=2 に同 6 種が追加で保存される。
     """
 
     class MaskType(models.TextChoices):
-        DIFF = "diff", "輝度差 (diff)"
-        EDGE = "edge", "エッジ (edge)"
-        SAT = "sat", "彩度 (sat)"
-        OR = "or", "OR 合成 (or)"
-        CLOSED = "closed", "クロージング (closed)"
+        DIFF = "diff", "輝度差 生 (diff)"
+        EDGE = "edge", "エッジ 生 (edge)"
+        SAT = "sat", "彩度 生 (sat)"
+        DIFF_CLOSED = "diff_closed", "輝度差 クローズ (diff_closed)"
+        EDGE_CLOSED = "edge_closed", "エッジ クローズ (edge_closed)"
+        SAT_CLOSED = "sat_closed", "彩度 クローズ (sat_closed)"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     original_image = models.ForeignKey(
@@ -213,7 +215,7 @@ class DebugMask(models.Model):
         on_delete=models.CASCADE,
         related_name="debug_masks",
     )
-    mask_type = models.CharField(max_length=10, choices=MaskType.choices)
+    mask_type = models.CharField(max_length=16, choices=MaskType.choices)
     attempt_no = models.IntegerField(default=1)
     mask_image = models.ImageField(upload_to=_debug_mask_upload_path)
     metadata = models.JSONField(default=dict, blank=True)

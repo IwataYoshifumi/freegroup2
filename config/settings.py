@@ -138,6 +138,14 @@ MEDIA_ROOT = BASE_DIR / "media"
 # Card detector backend ("opencv" | "ai")
 CARD_DETECTOR_BACKEND = os.getenv("CARD_DETECTOR_BACKEND", "opencv")
 
+# OpenCV 切り出し（rev2 方式）— 未確定パラメータ（評価基準で詰める・仮値）
+# 採否の主基準は縦横比（detector 側の確定値 1.6〜1.8）。以下はサイズ下限・統合の補助で、
+# いずれも仮値・未確定。正本 docs/OpenCV/名刺画像前処理_設計方針_OpenCV_OSD_rev2.md
+# §1.2.4（絶対下限）／§1.4・§3.2・§4.2（統合の IoU・採用座標）参照。値は後で調整する前提。
+OPENCV_MIN_CARD_AREA_PX = 8000           # OCR 不能な極小候補を落とす緩い絶対下限[px^2]（仮値・未確定）
+OPENCV_DEDUP_IOU_THRESHOLD = 0.30        # マスク横断 重複統合の IoU しきい値（仮値・未確定）
+OPENCV_DEDUP_CENTER_DIST_RATIO = 0.50    # 中心距離 ≤ ratio×対角線 を IoU と併用（仮値・未確定）
+
 # OCR pipeline: processing 状態が stuck と判断するまでの分数（stuck sweeper 用）
 OCR_STUCK_THRESHOLD_MINUTES = 30
 

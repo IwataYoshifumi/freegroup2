@@ -204,7 +204,21 @@
         <h3>2回目（反転リトライ）</h3>
         <div class="app-mask-grid">
           <div class="app-mask-grid__row">
-            {% for label, url in block2_mask_urls %}
+            {% for label, url in block2_mask_urls|slice:":3" %}
+              <div class="app-mask-grid__item">
+                <div class="app-mask-grid__label">{{ label }}</div>
+                {% if url %}
+                  <a href="{{ url }}" target="_blank" rel="noopener">
+                    <img class="app-mask-grid__img" src="{{ url }}" alt="{{ label }}">
+                  </a>
+                {% else %}
+                  <p class="app-muted">マスク画像なし</p>
+                {% endif %}
+              </div>
+            {% endfor %}
+          </div>
+          <div class="app-mask-grid__row">
+            {% for label, url in block2_mask_urls|slice:"3:" %}
               <div class="app-mask-grid__item">
                 <div class="app-mask-grid__label">{{ label }}</div>
                 {% if url %}
@@ -247,6 +261,7 @@
             <thead>
               <tr>
                 <th>#</th>
+                <th>マスク</th>
                 <th>面積 (比率)</th>
                 <th>中心 (x, y)</th>
                 <th>サイズ (W × H)</th>
@@ -260,6 +275,7 @@
               {% for c in candidates_all %}
                 <tr class="{% if not c.passed %}is-rejected{% endif %}">
                   <td>{{ c.index }}</td>
+                  <td>{{ c.mask }}</td>
                   <td>{{ c.area_str }} ({{ c.area_ratio_pct_str }}%)</td>
                   <td>({{ c.rect_cx_str }}, {{ c.rect_cy_str }})</td>
                   <td>{{ c.rect_w_str }} × {{ c.rect_h_str }}</td>
@@ -297,6 +313,7 @@
             <thead>
               <tr>
                 <th>#</th>
+                <th>マスク</th>
                 <th>bbox (x, y, w, h)</th>
                 <th>面積</th>
                 <th>結果</th>
@@ -307,6 +324,7 @@
               {% for d in candidates_dedup %}
                 <tr>
                   <td>{{ forloop.counter0 }}</td>
+                  <td>{{ d.mask }}</td>
                   <td>({{ d.bbox.0 }}, {{ d.bbox.1 }}, {{ d.bbox.2 }}, {{ d.bbox.3 }})</td>
                   <td>{{ d.area|floatformat:0 }}</td>
                   <td>
