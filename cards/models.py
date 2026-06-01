@@ -25,9 +25,14 @@ class OriginalImage(models.Model):
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    # 【検証用・一時的】このブランチ（feature/opencv-improvement）には認証が無く、
+    # 正規アップロードUIでは user を埋められないため null 許容にしている。
+    # main（認証あり＝user 必須の世界）と統合する際は null=True/blank=True を外して必須へ戻すこと。
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
+        null=True,
+        blank=True,
     )
     image_file = models.ImageField(upload_to="originals/%Y/%m/%d/")
     status = models.CharField(
