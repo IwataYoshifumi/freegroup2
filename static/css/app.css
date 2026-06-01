@@ -1389,6 +1389,56 @@ select.app-input {
   .app-mask-grid__row { grid-template-columns: 1fr; }
 }
 
+/* セクション 3: クローズ後マスクへの候補矩形オーバーレイ
+   （元画像オーバーレイ .app-original-overlay / .app-debug-polygon を踏襲・流用） */
+.app-mask-overlay {
+  position: relative;
+  display: inline-block;
+  max-width: 320px;
+  width: 100%;
+  line-height: 0;
+}
+
+.app-mask-overlay__svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+/* 採用=緑（.app-debug-polygon を流用）／惜しい棄却=赤／ノイズ=淡色。
+   base の .app-debug-polygon より後に定義し、同一詳細度で上書きする。 */
+.app-debug-polygon--near {
+  fill: rgba(244, 63, 94, 0.16);
+  stroke: rgb(244, 63, 94);
+  stroke-width: 3;
+}
+
+.app-debug-polygon--noise {
+  fill: none;
+  stroke: rgba(148, 163, 184, 0.9);
+  stroke-width: 2;
+}
+
+/* マスクサムネ用ラベル（元画像用 120px は過大なため font-size は inline style で上書き）。 */
+.app-debug-polygon__label--mask {
+  stroke-width: 1.5;
+}
+
+.app-debug-polygon__reason {
+  fill: #fee2e2;
+  stroke: rgba(120, 0, 30, 0.85);
+  stroke-width: 1;
+  paint-order: stroke;
+  font-size: 0.72em;
+  font-weight: 700;
+}
+
+/* zero_size・極小 too_small は既定非表示。セクション4トグル ON で表示（JS が is-show-rejected を付与）。 */
+.app-mask-cand--noise { display: none; }
+.app-mask-overlay.is-show-rejected .app-mask-cand--noise { display: inline; }
+
 /* セクション 4: 候補一覧テーブル + 除外候補トグル */
 .app-candidates-toolbar {
   display: flex;

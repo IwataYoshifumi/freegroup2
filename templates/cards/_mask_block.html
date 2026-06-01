@@ -1,0 +1,63 @@
+{% comment %}
+マスク画像ブロック（生 3 枚 + クローズ後 3 枚）。
+クローズ後マスク（候補抽出元）には、そのマスクが出した候補の回転矩形・番号・採否を SVG で重畳する。
+期待コンテキスト:
+  block      : 長さ 6 の dict リスト（_build_mask_blocks の 1 ブロック）
+  mask_w     : 元画像幅 px（= debug_json.image_size.width、SVG viewBox 用）
+  mask_h     : 元画像高 px（= debug_json.image_size.height）
+  label_font : ラベル文字サイズ（viewBox 単位、_overlay_label_font）
+番号 c.num はセクション4候補一覧テーブルの「#」列（全体通し番号）と一致する。
+{% endcomment %}
+<div class="app-mask-grid">
+  <div class="app-mask-grid__row">
+    {% for m in block|slice:":3" %}
+      <div class="app-mask-grid__item">
+        <div class="app-mask-grid__label">{{ m.label }}</div>
+        {% if m.url %}
+          <a href="{{ m.url }}" target="_blank" rel="noopener">
+            <img class="app-mask-grid__img" src="{{ m.url }}" alt="{{ m.label }}">
+          </a>
+        {% else %}
+          <p class="app-muted">マスク画像なし</p>
+        {% endif %}
+      </div>
+    {% endfor %}
+  </div>
+  <div class="app-mask-grid__row">
+    {% for m in block|slice:"3:" %}
+      <div class="app-mask-grid__item">
+        <div class="app-mask-grid__label">{{ m.label }}</div>
+        {% if m.url %}
+          {% if m.overlay and mask_w and mask_h %}
+            <div class="app-mask-overlay js-mask-overlay">
+              <a href="{{ m.url }}" target="_blank" rel="noopener">
+                <img class="app-mask-grid__img" src="{{ m.url }}" alt="{{ m.label }}">
+              </a>
+              <svg class="app-mask-overlay__svg"
+                   viewBox="0 0 {{ mask_w }} {{ mask_h }}"
+                   preserveAspectRatio="xMidYMid meet"
+                   xmlns="http://www.w3.org/2000/svg">
+                {% for c in m.overlay %}
+                  <g class="app-mask-cand app-mask-cand--{{ c.category }}">
+                    <polygon class="app-debug-polygon app-debug-polygon--{{ c.category }}"
+                             points="{{ c.points_str }}"></polygon>
+                    <text class="app-debug-polygon__label app-debug-polygon__label--mask"
+                          x="{{ c.cx|floatformat:1 }}" y="{{ c.cy|floatformat:1 }}"
+                          style="font-size:{{ label_font }}px"
+                          text-anchor="middle" dominant-baseline="central"><tspan>{{ c.num }}</tspan>{% if c.category == "near" %}<tspan class="app-debug-polygon__reason" x="{{ c.cx|floatformat:1 }}" dy="1.1em">{{ c.reason }}</tspan>{% endif %}</text>
+                  </g>
+                {% endfor %}
+              </svg>
+            </div>
+          {% else %}
+            <a href="{{ m.url }}" target="_blank" rel="noopener">
+              <img class="app-mask-grid__img" src="{{ m.url }}" alt="{{ m.label }}">
+            </a>
+          {% endif %}
+        {% else %}
+          <p class="app-muted">マスク画像なし</p>
+        {% endif %}
+      </div>
+    {% endfor %}
+  </div>
+</div>

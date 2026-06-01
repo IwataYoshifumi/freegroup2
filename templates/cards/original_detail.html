@@ -168,70 +168,18 @@
       <span class="app-collapsible__icon">▾</span>
     </button>
     <div class="app-collapsible-body">
+      <p class="app-muted" style="font-size:13px;margin-top:0;">
+        クローズ後マスクに候補矩形を重畳：<span style="color:rgb(34,197,94);font-weight:700;">緑=採用</span>
+        / <span style="color:rgb(244,63,94);font-weight:700;">赤=惜しい棄却</span>（aspect_invalid・面積比0.03以上のtoo_small／理由ラベル付き）。
+        zero_size・極小too_smallは既定非表示（セクション4の「除外候補も表示する」で全件表示）。
+        番号はセクション4テーブルの「#」と一致。
+      </p>
       <h3>1回目（通常処理）</h3>
-      <div class="app-mask-grid">
-        <div class="app-mask-grid__row">
-          {% for label, url in block1_mask_urls|slice:":3" %}
-            <div class="app-mask-grid__item">
-              <div class="app-mask-grid__label">{{ label }}</div>
-              {% if url %}
-                <a href="{{ url }}" target="_blank" rel="noopener">
-                  <img class="app-mask-grid__img" src="{{ url }}" alt="{{ label }}">
-                </a>
-              {% else %}
-                <p class="app-muted">マスク画像なし</p>
-              {% endif %}
-            </div>
-          {% endfor %}
-        </div>
-        <div class="app-mask-grid__row">
-          {% for label, url in block1_mask_urls|slice:"3:" %}
-            <div class="app-mask-grid__item">
-              <div class="app-mask-grid__label">{{ label }}</div>
-              {% if url %}
-                <a href="{{ url }}" target="_blank" rel="noopener">
-                  <img class="app-mask-grid__img" src="{{ url }}" alt="{{ label }}">
-                </a>
-              {% else %}
-                <p class="app-muted">マスク画像なし</p>
-              {% endif %}
-            </div>
-          {% endfor %}
-        </div>
-      </div>
+      {% include "cards/_mask_block.html" with block=block1_mask_urls mask_w=debug_json.image_size.width mask_h=debug_json.image_size.height label_font=mask_label_font %}
 
       {% if block2_mask_urls %}
         <h3>2回目（反転リトライ）</h3>
-        <div class="app-mask-grid">
-          <div class="app-mask-grid__row">
-            {% for label, url in block2_mask_urls|slice:":3" %}
-              <div class="app-mask-grid__item">
-                <div class="app-mask-grid__label">{{ label }}</div>
-                {% if url %}
-                  <a href="{{ url }}" target="_blank" rel="noopener">
-                    <img class="app-mask-grid__img" src="{{ url }}" alt="{{ label }}">
-                  </a>
-                {% else %}
-                  <p class="app-muted">マスク画像なし</p>
-                {% endif %}
-              </div>
-            {% endfor %}
-          </div>
-          <div class="app-mask-grid__row">
-            {% for label, url in block2_mask_urls|slice:"3:" %}
-              <div class="app-mask-grid__item">
-                <div class="app-mask-grid__label">{{ label }}</div>
-                {% if url %}
-                  <a href="{{ url }}" target="_blank" rel="noopener">
-                    <img class="app-mask-grid__img" src="{{ url }}" alt="{{ label }}">
-                  </a>
-                {% else %}
-                  <p class="app-muted">マスク画像なし</p>
-                {% endif %}
-              </div>
-            {% endfor %}
-          </div>
-        </div>
+        {% include "cards/_mask_block.html" with block=block2_mask_urls mask_w=debug_json.image_size.width mask_h=debug_json.image_size.height label_font=mask_label_font %}
       {% endif %}
     </div>
   </section>
@@ -496,16 +444,21 @@
   <script src="https://cdn.jsdelivr.net/npm/@andypf/json-viewer@2.4.0/dist/iife/index.js"></script>
   <script>
     (function () {
-      // 候補一覧テーブルの除外候補トグル
+      // 候補一覧テーブル＋マスクオーバーレイの除外候補トグル（連動）
       const toggle = document.querySelector('.js-show-rejected');
       const table = document.querySelector('.app-candidates-table');
       const visEl = document.querySelector('.js-candidates-visible');
-      if (toggle && table) {
-        const passedCount = parseInt(table.dataset.passedCount, 10) || 0;
-        const allCount = parseInt(table.dataset.allCount, 10) || 0;
+      const maskOverlays = document.querySelectorAll('.js-mask-overlay');
+      if (toggle) {
+        const passedCount = table ? (parseInt(table.dataset.passedCount, 10) || 0) : 0;
+        const allCount = table ? (parseInt(table.dataset.allCount, 10) || 0) : 0;
         toggle.addEventListener('change', function () {
-          table.classList.toggle('is-show-rejected', toggle.checked);
+          if (table) table.classList.toggle('is-show-rejected', toggle.checked);
           if (visEl) visEl.textContent = toggle.checked ? allCount : passedCount;
+          // マスク画像オーバーレイの zero_size / 極小 too_small も連動表示
+          maskOverlays.forEach(function (el) {
+            el.classList.toggle('is-show-rejected', toggle.checked);
+          });
         });
       }
 

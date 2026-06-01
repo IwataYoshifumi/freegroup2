@@ -6,6 +6,7 @@ View 層の責務は HTTP リクエスト/レスポンス処理とテンプレ�
 
 import json
 import logging
+import math
 import statistics
 from collections import Counter
 
@@ -157,7 +158,7 @@ class OriginalDetailView(DetailView):
         debug_json = self.object.debug_json
         debug_masks = list(self.object.debug_masks.all())
         mask_white_ratios = _build_mask_white_ratios(debug_masks)
-        block1_mask_urls, block2_mask_urls = _build_mask_url_blocks(debug_masks)
+        block1_mask_urls, block2_mask_urls = _build_mask_blocks(debug_masks, debug_json)
 
         last_attempt = _get_last_attempt(debug_json) or {}
 
@@ -167,6 +168,9 @@ class OriginalDetailView(DetailView):
         )
         context["block1_mask_urls"] = block1_mask_urls
         context["block2_mask_urls"] = block2_mask_urls
+        context["mask_label_font"] = _overlay_label_font(
+            (debug_json or {}).get("image_size")
+        )
         context["candidates_passed"] = _candidates_passed(debug_json)
         context["candidates_all"] = _candidates_all(debug_json)
         context["candidates_dedup"] = last_attempt.get("candidates_dedup") or []
@@ -347,17 +351,118 @@ _CLOSED_MASK_TYPES = (
 )
 _BLOCK_MASK_TYPES = _RAW_MASK_TYPES + _CLOSED_MASK_TYPES
 
+# MaskType → (マスク名, クローズ後か)。候補（candidates_filter）はクローズ後マスクから
+# 抽出される（opencv_detector._extract_candidates_from_mask）ため、矩形オーバーレイは
+# クローズ後マスク（is_closed=True）にのみ重ねる。
+_MASK_TYPE_TO_NAME = {
+    DebugMask.MaskType.DIFF:        ("diff", False),
+    DebugMask.MaskType.EDGE:        ("edge", False),
+    DebugMask.MaskType.SAT:         ("sat",  False),
+    DebugMask.MaskType.DIFF_CLOSED: ("diff", True),
+    DebugMask.MaskType.EDGE_CLOSED: ("edge", True),
+    DebugMask.MaskType.SAT_CLOSED:  ("sat",  True),
+}
 
-def _build_mask_url_blocks(debug_masks):
-    """マスク画像 (label, url) のリストを attempt ごとの 2 ブロックで返す。
+# 「惜しい棄却」を太字赤で出す閾値。too_small はこの面積比以上だけ near（緑採用品と同等規模）。
+_OVERLAY_NEAR_AREA_RATIO = 0.03
+
+
+def _rotated_rect_corners(cx, cy, w, h, angle_deg):
+    """[性質] 純関数 / minAreaRect (中心+W×H+角度) の 4 頂点を返す（cv2.boxPoints 相当）。
+
+    OpenCV cv::RotatedRect::points と同じ式。返り値は [(x,y), ...] ×4（元画像ピクセル座標）。
+    candidates_filter には四隅が保存されていない（中心+サイズ+角度のみ）ため、描画用にここで復元する。
+    """
+    rad = math.radians(angle_deg)
+    b = math.cos(rad) * 0.5
+    a = math.sin(rad) * 0.5
+    p0 = (cx - a * h - b * w, cy + b * h - a * w)
+    p1 = (cx + a * h - b * w, cy - b * h - a * w)
+    p2 = (2 * cx - p0[0], 2 * cy - p0[1])
+    p3 = (2 * cx - p1[0], 2 * cy - p1[1])
+    return [p0, p1, p2, p3]
+
+
+def _classify_overlay_candidate(c):
+    """[性質] 純関数 / 候補を描画カテゴリ "passed"/"near"/"noise" に分類する。
+
+    passed=true               → "passed"（緑・常時表示）
+    reject_reason=aspect_invalid、または too_small かつ area_ratio≥0.03 → "near"（赤・常時表示）
+    zero_size、または too_small かつ area_ratio<0.03 → "noise"（既定非表示・トグルで表示）
+    """
+    if c.get("passed"):
+        return "passed"
+    reason = c.get("reject_reason") or ""
+    if reason == "aspect_invalid":
+        return "near"
+    if reason == "too_small" and (c.get("area_ratio") or 0) >= _OVERLAY_NEAR_AREA_RATIO:
+        return "near"
+    return "noise"
+
+
+def _format_overlay_candidate(c, num):
+    """[性質] 純関数 / 1 候補を SVG 描画用 dict（points 文字列・ラベル位置・カテゴリ）に整形する。
+
+    num はセクション4テーブルと一致させる全体通し番号（diff→edge→sat を貫く index）。
+    """
+    rect_center = c.get("rect_center") or [0, 0]
+    rect_size = c.get("rect_size") or [0, 0]
+    cx = rect_center[0] if len(rect_center) > 0 else 0
+    cy = rect_center[1] if len(rect_center) > 1 else 0
+    w = rect_size[0] if len(rect_size) > 0 else 0
+    h = rect_size[1] if len(rect_size) > 1 else 0
+    corners = _rotated_rect_corners(cx, cy, w, h, c.get("rect_angle") or 0)
+    points_str = " ".join(f"{x:.1f},{y:.1f}" for x, y in corners)
+    return {
+        "num": num,
+        "points_str": points_str,
+        "cx": cx,
+        "cy": cy,
+        "category": _classify_overlay_candidate(c),
+        "reason": c.get("reject_reason") or "",
+    }
+
+
+def _build_attempt_overlays(attempt):
+    """[性質] 純関数 / 1 attempt の候補を {マスク名: [描画用候補]} に整形する。
+
+    全体通し番号（num）は _flatten_attempt_candidates と同じ規則（diff→edge→sat の順で
+    全候補を貫く連番）で振るため、セクション4テーブルの「#」列と一致する。
+    """
+    overlays = {name: [] for name in _MASK_NAMES}
+    masks = (attempt or {}).get("masks") or {}
+    gi = 0
+    for name in _MASK_NAMES:
+        mr = masks.get(name) or {}
+        for c in mr.get("candidates_filter") or []:
+            overlays[name].append(_format_overlay_candidate(c, gi))
+            gi += 1
+    return overlays
+
+
+def _overlay_label_font(image_size):
+    """[性質] 純関数 / マスクサムネ上のラベル文字サイズ（viewBox 単位）を返す。
+
+    マスク画像は約 320px 幅で表示されるため、画面上でおよそ 12px になるよう
+    画像幅に比例させる（既存の元画像オーバーレイ用 120px はサムネには過大なため別途算出）。
+    """
+    w = (image_size or {}).get("width") or 0
+    return max(12, round(w * 0.0375))
+
+
+def _build_mask_blocks(debug_masks, debug_json):
+    """マスク画像 dict のリストを attempt ごとの 2 ブロックで返す。
 
     [性質] 準関数（DebugMask の mask_image.url 参照のみ・DB 書込なし）
-    [入力] debug_masks: DebugMask の iterable（同一 OriginalImage 配下）
-    [出力] (block1, block2)
-      block1: 1 回目（attempt_no=1）の (label, url|None) リスト。長さ常に 6。
-              順序は diff → edge → sat → diff_closed → edge_closed → sat_closed。
-      block2: 2 回目（attempt_no=2・反転リトライ）の (label, url|None) リスト。
-              attempt_no=2 のレコードが 1 件も無ければ [] を返す。ある場合は同 6 件。
+    [入力]
+      debug_masks: DebugMask の iterable（同一 OriginalImage 配下）
+      debug_json:  OriginalImage.debug_json（候補のオーバーレイ元）
+    [出力] (block1, block2)。各ブロックは長さ 6 の dict リスト：
+      {label, url|None, mask_name, is_closed, overlay}
+      順序は diff → edge → sat → diff_closed → edge_closed → sat_closed。
+      overlay はクローズ後マスク（is_closed=True）にのみ入る（候補抽出元のため）。
+        block1 は attempt_no=1、block2 は attempt_no=2 の候補を載せる（取り違え防止）。
+      block2 は attempt_no=2 の DebugMask が無ければ []。
     label の "mask_N" の番号は MaskType.choices の定義順（1〜6）に合わせる。
     """
     by_key = {(m.mask_type, m.attempt_no): m for m in debug_masks}
@@ -365,18 +470,29 @@ def _build_mask_url_blocks(debug_masks):
         mt: idx for idx, (mt, _) in enumerate(DebugMask.MaskType.choices, start=1)
     }
     verbose_of = dict(DebugMask.MaskType.choices)
+    attempt_by_no = {
+        a.get("attempt_no"): a for a in (debug_json or {}).get("attempts") or []
+    }
 
-    def _entry(mask_type, attempt_no):
-        idx = type_to_idx[mask_type]
-        label = f"mask_{idx}: {verbose_of[mask_type]}"
-        rec = by_key.get((mask_type, attempt_no))
-        url = rec.mask_image.url if rec else None
-        return (label, url)
+    def _block(attempt_no):
+        overlays = _build_attempt_overlays(attempt_by_no.get(attempt_no))
+        slots = []
+        for mt in _BLOCK_MASK_TYPES:
+            mask_name, is_closed = _MASK_TYPE_TO_NAME[mt]
+            idx = type_to_idx[mt]
+            rec = by_key.get((mt, attempt_no))
+            slots.append({
+                "label": f"mask_{idx}: {verbose_of[mt]}",
+                "url": rec.mask_image.url if rec else None,
+                "mask_name": mask_name,
+                "is_closed": is_closed,
+                "overlay": overlays.get(mask_name, []) if is_closed else [],
+            })
+        return slots
 
-    block1 = [_entry(mt, 1) for mt in _BLOCK_MASK_TYPES]
-
+    block1 = _block(1)
     has_attempt2 = any(m.attempt_no == 2 for m in debug_masks)
-    block2 = [_entry(mt, 2) for mt in _BLOCK_MASK_TYPES] if has_attempt2 else []
+    block2 = _block(2) if has_attempt2 else []
 
     return block1, block2
 
