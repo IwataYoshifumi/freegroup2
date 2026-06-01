@@ -52,24 +52,45 @@ v1.4.2 既存 7 項目（name/organization/department/title/email/tel/address）
       {% endcomment %}
       <input type="hidden" name="status" value="active">
     {% else %}
-      <div class="app-form__group" style="grid-column: span 4;">
-        <label class="app-form__label">ステータス</label>
-        <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:center;">
-          <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
-            <input type="checkbox" name="status" value="active"
-                   {% if "active" in selected_statuses %}checked{% endif %}>
-            active
-          </label>
-          <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
-            <input type="checkbox" name="status" value="merged"
-                   {% if "merged" in selected_statuses %}checked{% endif %}>
-            merged
-          </label>
-          <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
-            <input type="checkbox" name="status" value="archived"
-                   {% if "archived" in selected_statuses %}checked{% endif %}>
-            archived
-          </label>
+      {% comment %}
+        persons 一覧のステータスフィルタ（HIG 原則4・4.1）。
+        - 表示文言は業務語（有効／マージ済み／アーカイブ）。送信値（internal）は active/merged/archived のまま。
+        - 複数選択トグル（app-radio-toggle + checkbox）。複数 ON を維持できる。
+        - 折りたたみ（app-collapsible）に格納し初期は閉。既定は「有効のみ」。
+        この枝は show_status_filter 未指定（=persons 一覧のみ）で描画される。
+      {% endcomment %}
+      <div class="app-collapsible app-person-filter-collapsible" style="grid-column: span 4;">
+        <button type="button" class="app-collapsible__header" data-action="toggle-collapsible"
+                aria-expanded="false">
+          <span>ステータス</span>
+          <span class="app-collapsible__icon">▸</span>
+        </button>
+        <div class="app-collapsible-body">
+          <div class="app-person-filter-box">
+            <ul class="app-radio-toggle">
+              <li>
+                <label>
+                  <input type="checkbox" name="status" value="active"
+                         {% if "active" in selected_statuses %}checked{% endif %}>
+                  有効
+                </label>
+              </li>
+              <li>
+                <label>
+                  <input type="checkbox" name="status" value="merged"
+                         {% if "merged" in selected_statuses %}checked{% endif %}>
+                  マージ済み
+                </label>
+              </li>
+              <li>
+                <label>
+                  <input type="checkbox" name="status" value="archived"
+                         {% if "archived" in selected_statuses %}checked{% endif %}>
+                  アーカイブ
+                </label>
+              </li>
+            </ul>
+          </div>
         </div>
       </div>
     {% endif %}

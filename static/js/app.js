@@ -1242,3 +1242,78 @@
     }
   });
 })();
+
+/* 人物一覧：列見出しクリックによる「現在ページ内のDOMソート」（クライアント側）。
+   - サーバー側の多段フォームソート（?sort=）とは完全に別系統。URLは書き換えず、サーバーにも送らず、
+     リロードもしない。旧 _sort_script の URL クエリ書き換え方式とは別物（混同しない）。
+   - 並べ替え対象は .js-person-page-sort テーブルの tbody 行（＝現在ページに出ている行）のみ。
+   - 状態遷移：昇順 → 降順 → 解除（解除でサーバー返却の元順へ戻す）の3状態。
+   - 値が両方とも数値とみなせる列は数値比較、それ以外は日本語ロケールの文字列比較。 */
+(function () {
+  function parseNum(s) {
+    if (!/^-?[\d,]+(\.\d+)?$/.test(s)) return null;
+    var n = Number(s.replace(/,/g, ''));
+    return isFinite(n) ? n : null;
+  }
+  function cellText(row, idx) {
+    var cell = row.cells[idx];
+    return cell ? cell.textContent.trim() : '';
+  }
+  function initTable(table) {
+    var tbody = table.tBodies[0];
+    if (!tbody) return;
+    // サーバー返却順を保存（解除時に戻すため）。
+    Array.prototype.forEach.call(tbody.rows, function (row, i) {
+      row.dataset.pageSortOrig = i;
+    });
+    var headers = Array.prototype.slice.call(table.querySelectorAll('th[data-sort-col]'));
+    var current = null; // { th, dir }
+
+    headers.forEach(function (th) {
+      th.addEventListener('click', function () {
+        var colIndex = th.cellIndex;
+        var dir;
+        if (current && current.th === th) {
+          dir = current.dir === 'asc' ? 'desc' : 'none';
+        } else {
+          dir = 'asc';
+        }
+        headers.forEach(function (h) { h.removeAttribute('data-sort-dir'); });
+
+        var rows = Array.prototype.slice.call(tbody.rows);
+        if (dir === 'none') {
+          rows.sort(function (a, b) {
+            return (+a.dataset.pageSortOrig) - (+b.dataset.pageSortOrig);
+          });
+          current = null;
+        } else {
+          th.setAttribute('data-sort-dir', dir);
+          var mul = dir === 'asc' ? 1 : -1;
+          rows.sort(function (a, b) {
+            var av = cellText(a, colIndex);
+            var bv = cellText(b, colIndex);
+            var an = parseNum(av);
+            var bn = parseNum(bv);
+            var cmp;
+            if (an !== null && bn !== null) {
+              cmp = an - bn;
+            } else {
+              cmp = av.localeCompare(bv, 'ja');
+            }
+            return cmp * mul;
+          });
+          current = { th: th, dir: dir };
+        }
+        rows.forEach(function (r) { tbody.appendChild(r); });
+      });
+    });
+  }
+  function init() {
+    document.querySelectorAll('.js-person-page-sort').forEach(initTable);
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+})();

@@ -328,6 +328,86 @@ class PersonListViewTests(TestCase):
         self.assertIn("(氏名なし)", body)
         self.assertNotIn("(primary_contact 未設定)", body)
 
+    # ---- v1.6 残UI改修：連絡先4列分割・住所列・ステータス業務語/トグル/折りたたみ・列見出しJSソート ----
+
+    def test_contact_columns_split_into_four_and_address(self):
+        """連絡先1列が メール/携帯電話/個人電話・FAX/会社電話・FAX の4列に分割され、住所列が増える。
+
+        電話・FAX セルは両値あれば「TEL ◯◯／FAX ◯◯」併記、片方だけならそれだけ出す（item 8）。
+        """
+        self._make_active_with_primary(
+            full_name="Carol Contact",
+            email="carol@ex.example",
+            mobile_phone="090-5555-6666",
+            org_phone="0561-00-0000",
+            org_fax="0561-11-1111",
+            personal_phone="052-2222-3333",
+            address="Aichi Toyota",
+        )
+        resp = self.client.get(self.url)
+        body = resp.content.decode("utf-8")
+        # 見出し（業務語・分割後）
+        for head in ("メール", "携帯電話", "個人電話・FAX", "会社電話・FAX", "住所"):
+            self.assertIn(head, body)
+        # 値（携帯・住所・会社電話/FAX 併記）
+        self.assertIn("090-5555-6666", body)
+        self.assertIn("Aichi Toyota", body)
+        self.assertIn("TEL 0561-00-0000／FAX 0561-11-1111", body)
+        # 個人は phone のみ → TEL のみ（FAX 併記なし）
+        self.assertIn("TEL 052-2222-3333", body)
+
+    def test_status_filter_japanese_business_words_and_toggle(self):
+        """ステータスフィルタが業務語（有効/マージ済み/アーカイブ）＋複数選択トグルで描画される。
+
+        表示は業務語、送信値（internal）は active/merged/archived のまま（item 2/3）。
+        """
+        resp = self.client.get(self.url)
+        body = resp.content.decode("utf-8")
+        for label in ("有効", "マージ済み", "アーカイブ"):
+            self.assertIn(label, body)
+        # 送信値は internal を維持
+        for value in ('value="active"', 'value="merged"', 'value="archived"'):
+            self.assertIn(value, body)
+        # 複数選択トグル（checkbox を app-radio-toggle でトグル化、name は維持）
+        self.assertIn("app-radio-toggle", body)
+        self.assertIn('name="status"', body)
+
+    def test_status_filter_collapsed_by_default(self):
+        """ステータスフィルタは折りたたみ（app-collapsible）に入り、初期は閉（item 4）。"""
+        resp = self.client.get(self.url)
+        body = resp.content.decode("utf-8")
+        self.assertIn("app-person-filter-collapsible", body)
+        # ステータス見出しの折りたたみは初期 aria-expanded=false（自動展開しない）
+        self.assertIn("<span>ステータス</span>", body)
+        self.assertIn('aria-expanded="false"', body)
+
+    def test_search_card_width_scoped_to_persons(self):
+        """検索カードに persons 専用の横幅スコープ class が付く（item 1・共有partを汚さない）。"""
+        resp = self.client.get(self.url)
+        self.assertContains(resp, "app-person-search")
+
+    def test_column_toggle_lists_new_columns_with_off_defaults(self):
+        """列切替メニューに新列が並び、増えた3列は data-default="0"（初期OFF）になる（item 9）。"""
+        resp = self.client.get(self.url)
+        body = resp.content.decode("utf-8")
+        for key in ("status", "email", "mobile_phone",
+                    "personal_contact", "org_contact", "address"):
+            self.assertIn('data-col-key="%s"' % key, body)
+        # 増設3列は初期OFF
+        for key in ("personal_contact", "org_contact", "address"):
+            self.assertIn('data-col-key="%s" data-default="0"' % key, body)
+
+    def test_page_sort_markers_present_and_not_url_rewrite(self):
+        """列見出しの現在ページ内JSソート用マーカーが出る一方、旧URL書き換え方式の痕跡は無い（item 11）。"""
+        resp = self.client.get(self.url)
+        body = resp.content.decode("utf-8")
+        # クライアント側DOMソートの目印
+        self.assertIn("js-person-page-sort", body)
+        self.assertIn("data-sort-col", body)
+        # 旧 URL クエリ書き換え方式（サーバー側ソートへの入力）と取り違えていないこと
+        self.assertNotIn("data-sort-key", body)
+        self.assertNotIn("__personSortHeaderInit", body)
+
 
 class PersonDetailViewTests(TestCase):
     """PersonDetailView の単体テスト（status による 4 分岐）。"""

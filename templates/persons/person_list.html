@@ -12,27 +12,34 @@
     </div>
   </div>
 
-  <section class="app-card">
+  <section class="app-card app-person-search">
     {% url 'persons:person_list' as reset_url %}
     {% include "persons/_search_form.html" with show_sort_control=True %}
   </section>
 
   <section class="app-card">
-    <div style="display:flex; justify-content:flex-end; margin-bottom:12px;">
+    {# HIG 3.1・原則7：表示列選択は表の左上に置く。 #}
+    <div style="display:flex; justify-content:flex-start; margin-bottom:12px;">
       {% include "persons/_column_toggle.html" %}
     </div>
     <div class="app-table-wrapper">
-      <table class="app-table app-table--nowrap">
+      {# js-person-page-sort：列見出しクリックの「現在ページ内DOMソート」対象（app.js）。
+         サーバー側多段フォームソート（?sort=）とは別系統で、URLは書き換えない。 #}
+      <table class="app-table app-table--nowrap js-person-page-sort">
         <thead>
           <tr>
             <th class="app-table__col--action">操作</th>
-            <th class="app-table__col--name" data-col-key="name">氏名</th>
-            <th class="app-table__col--status">状態</th>
-            <th class="app-table__col--organization" data-col-key="company">会社</th>
-            <th class="app-table__col--dept" data-col-key="title">役職</th>
-            <th class="app-table__col--email" data-col-key="email">連絡先</th>
-            <th data-col-key="active_count">アクティブ数</th>
-            <th class="app-table__col--date" data-col-key="updated_at">更新日時</th>
+            <th class="app-table__col--name" data-col-key="name" data-sort-col>氏名</th>
+            <th class="app-table__col--status" data-col-key="status" data-sort-col>状態</th>
+            <th class="app-table__col--organization" data-col-key="company" data-sort-col>会社</th>
+            <th class="app-table__col--dept" data-col-key="title" data-sort-col>役職</th>
+            <th class="app-table__col--email" data-col-key="email" data-sort-col>メール</th>
+            <th data-col-key="mobile_phone" data-sort-col>携帯電話</th>
+            <th data-col-key="personal_contact" data-sort-col>個人電話・FAX</th>
+            <th data-col-key="org_contact" data-sort-col>会社電話・FAX</th>
+            <th data-col-key="address" data-sort-col>住所</th>
+            <th data-col-key="active_count" data-sort-col>アクティブ数</th>
+            <th class="app-table__col--date" data-col-key="updated_at" data-sort-col>更新日時</th>
           </tr>
         </thead>
         <tbody>
@@ -45,7 +52,7 @@
               <td data-col-key="name">
                 {{ person.primary_contact.full_name|default:"(氏名なし)" }}
               </td>
-              <td>
+              <td data-col-key="status">
                 {% status_badge person %}
               </td>
               <td data-col-key="company">
@@ -53,19 +60,45 @@
                   <span class="app-ellipsis" data-tooltip="{{ person.primary_contact.organization }}">{{ person.primary_contact.organization|truncatechars:30 }}</span>
                 {% else %}-{% endif %}
               </td>
-              <td data-col-key="title">{{ person.primary_contact.title|default:"-" }}</td>
+              <td data-col-key="title">
+                {% if person.primary_contact.title %}
+                  <span class="app-ellipsis" data-tooltip="{{ person.primary_contact.title }}">{{ person.primary_contact.title|truncatechars:24 }}</span>
+                {% else %}-{% endif %}
+              </td>
               <td data-col-key="email">
-                {% if person.primary_contact.email %}<div>{{ person.primary_contact.email }}</div>{% endif %}
-                {% if person.primary_contact.mobile_phone %}<div>{{ person.primary_contact.mobile_phone }}</div>{% endif %}
-                {% if person.primary_contact.personal_phone %}<div>{{ person.primary_contact.personal_phone }}</div>{% endif %}
-                {% if person.primary_contact.personal_fax %}<div>FAX: {{ person.primary_contact.personal_fax }}</div>{% endif %}
-                {% if not person.primary_contact.email and not person.primary_contact.mobile_phone and not person.primary_contact.personal_phone and not person.primary_contact.personal_fax %}-{% endif %}
+                {% if person.primary_contact.email %}
+                  <span class="app-ellipsis" data-tooltip="{{ person.primary_contact.email }}">{{ person.primary_contact.email|truncatechars:32 }}</span>
+                {% else %}-{% endif %}
+              </td>
+              <td data-col-key="mobile_phone">{{ person.primary_contact.mobile_phone|default:"-" }}</td>
+              <td data-col-key="personal_contact">
+                {% if person.primary_contact.personal_phone and person.primary_contact.personal_fax %}
+                  TEL {{ person.primary_contact.personal_phone }}／FAX {{ person.primary_contact.personal_fax }}
+                {% elif person.primary_contact.personal_phone %}
+                  TEL {{ person.primary_contact.personal_phone }}
+                {% elif person.primary_contact.personal_fax %}
+                  FAX {{ person.primary_contact.personal_fax }}
+                {% else %}-{% endif %}
+              </td>
+              <td data-col-key="org_contact">
+                {% if person.primary_contact.org_phone and person.primary_contact.org_fax %}
+                  TEL {{ person.primary_contact.org_phone }}／FAX {{ person.primary_contact.org_fax }}
+                {% elif person.primary_contact.org_phone %}
+                  TEL {{ person.primary_contact.org_phone }}
+                {% elif person.primary_contact.org_fax %}
+                  FAX {{ person.primary_contact.org_fax }}
+                {% else %}-{% endif %}
+              </td>
+              <td data-col-key="address">
+                {% if person.primary_contact.address %}
+                  <span class="app-ellipsis" data-tooltip="{{ person.primary_contact.address }}">{{ person.primary_contact.address|truncatechars:30 }}</span>
+                {% else %}-{% endif %}
               </td>
               <td data-col-key="active_count">{{ person.active_count }}</td>
               <td data-col-key="updated_at">{{ person.updated_at|date:"Y/m/d H:i" }}</td>
             </tr>
           {% empty %}
-            <tr><td colspan="8" class="app-muted">
+            <tr><td colspan="12" class="app-muted">
               該当する人物がいません。新しい名刺を取り込めば人物が自動で作られます。
               <a href="{% url 'cards:card_upload' %}">名刺を取り込む →</a>
             </td></tr>

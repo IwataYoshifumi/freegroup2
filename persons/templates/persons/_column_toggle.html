@@ -3,8 +3,14 @@
 複製・persons 専用。共通化はしない）。
 
 ドロップダウン＋チェックボックスで列を表示/非表示し、localStorage に永続化する。
-氏名列は固定（disabled checked、非表示不可）。会社・役職・連絡先・アクティブ数・更新日時を
-切替可能。localStorage キーは persons 専用（person_list_visible_columns）で他画面と混ざらない。
+氏名列は固定（disabled checked、非表示不可）。状態・会社・役職・メール・携帯電話・
+個人電話/FAX・会社電話/FAX・住所・アクティブ数・更新日時を切替可能。localStorage キーは
+persons 専用（person_list_visible_columns）で他画面と混ざらない。
+
+既定表示（列が多いので初期は絞る）：
+  ON  = 状態・会社・役職・メール・携帯電話・アクティブ数・更新日時
+  OFF = 個人電話/FAX・会社電話/FAX・住所（data-default="0" で初期OFF）
+localStorage に保存済みのキーは保存値を優先、未保存キーは data-default（既定 ON、"0" なら OFF）。
 
 利用前提（呼び出し側）：
   <th data-col-key="company">会社</th>
@@ -21,7 +27,7 @@
     <i class="bi bi-layout-three-columns"></i> 表示列を選択
   </button>
   <div class="js-person-column-toggle__menu" hidden
-       style="position:absolute; top:100%; right:0; z-index:1000;
+       style="position:absolute; top:100%; left:0; z-index:1000;
               background:#fff; border:1px solid #cbd5e1; border-radius:6px;
               box-shadow:0 4px 12px rgba(0,0,0,0.12); padding:8px;
               min-width:200px; text-align:left;">
@@ -30,13 +36,28 @@
       <span style="color:#94a3b8; font-size:0.85em;">(必須)</span>
     </label>
     <label style="display:flex; align-items:center; gap:6px; padding:4px; cursor:pointer;">
+      <input type="checkbox" class="js-person-column-toggle__cb" data-col-key="status"> 状態
+    </label>
+    <label style="display:flex; align-items:center; gap:6px; padding:4px; cursor:pointer;">
       <input type="checkbox" class="js-person-column-toggle__cb" data-col-key="company"> 会社
     </label>
     <label style="display:flex; align-items:center; gap:6px; padding:4px; cursor:pointer;">
       <input type="checkbox" class="js-person-column-toggle__cb" data-col-key="title"> 役職
     </label>
     <label style="display:flex; align-items:center; gap:6px; padding:4px; cursor:pointer;">
-      <input type="checkbox" class="js-person-column-toggle__cb" data-col-key="email"> 連絡先
+      <input type="checkbox" class="js-person-column-toggle__cb" data-col-key="email"> メール
+    </label>
+    <label style="display:flex; align-items:center; gap:6px; padding:4px; cursor:pointer;">
+      <input type="checkbox" class="js-person-column-toggle__cb" data-col-key="mobile_phone"> 携帯電話
+    </label>
+    <label style="display:flex; align-items:center; gap:6px; padding:4px; cursor:pointer;">
+      <input type="checkbox" class="js-person-column-toggle__cb" data-col-key="personal_contact" data-default="0"> 個人電話・FAX
+    </label>
+    <label style="display:flex; align-items:center; gap:6px; padding:4px; cursor:pointer;">
+      <input type="checkbox" class="js-person-column-toggle__cb" data-col-key="org_contact" data-default="0"> 会社電話・FAX
+    </label>
+    <label style="display:flex; align-items:center; gap:6px; padding:4px; cursor:pointer;">
+      <input type="checkbox" class="js-person-column-toggle__cb" data-col-key="address" data-default="0"> 住所
     </label>
     <label style="display:flex; align-items:center; gap:6px; padding:4px; cursor:pointer;">
       <input type="checkbox" class="js-person-column-toggle__cb" data-col-key="active_count"> アクティブ数
@@ -78,7 +99,9 @@
       try { saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); } catch (e) { saved = {}; }
       cbs.forEach(function (cb) {
         var key = cb.dataset.colKey;
-        cb.checked = saved.hasOwnProperty(key) ? !!saved[key] : true;
+        // 保存済みキーは保存値を優先。未保存キーは data-default（"0"=初期OFF、それ以外=初期ON）。
+        var def = cb.dataset.default !== '0';
+        cb.checked = saved.hasOwnProperty(key) ? !!saved[key] : def;
         apply(cb);
       });
       cbs.forEach(function (cb) {

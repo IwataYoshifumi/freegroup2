@@ -12,7 +12,7 @@ hidden(name="sort") へ「優先順つきカンマ区切り・降順は先頭 -�
 name を持たせず、方向ラジオは送信直前に disabled にして、URL を sort 単一パラメータに保つ。
 新規 CSS/JS ファイルは作らず、既存 app-collapsible / app-radio-toggle と inline script で完結。
 {% endcomment %}
-<div class="app-collapsible js-person-sort-control{% if sort_is_active %} is-open{% endif %}"
+<div class="app-collapsible app-person-filter-collapsible js-person-sort-control{% if sort_is_active %} is-open{% endif %}"
      style="grid-column: span 4; margin-top: var(--app-space-sm);">
   <button type="button" class="app-collapsible__header" data-action="toggle-collapsible"
           aria-expanded="{% if sort_is_active %}true{% else %}false{% endif %}">
@@ -20,6 +20,7 @@ name を持たせず、方向ラジオは送信直前に disabled にして、UR
     <span class="app-collapsible__icon">{% if sort_is_active %}▾{% else %}▸{% endif %}</span>
   </button>
   <div class="app-collapsible-body">
+   <div class="app-person-filter-box">
     {# JS が送信直前に value を組み立てる。未ソート時は disabled で sort= を URL に出さない。 #}
     <input type="hidden" name="sort" class="js-person-sort-value"
            value="{{ sort_value }}"{% if not sort_is_active %} disabled{% endif %}>
@@ -59,6 +60,7 @@ name を持たせず、方向ラジオは送信直前に disabled にして、UR
     <p class="app-muted" style="margin:0; font-size:0.85em;">
       上の行ほど優先（第1キー→第2キー→第3キー）。「指定なし」の行は無視されます。
     </p>
+   </div>
   </div>
 </div>
 <script>
