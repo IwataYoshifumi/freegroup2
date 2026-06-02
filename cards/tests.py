@@ -235,12 +235,37 @@ class OsdUprightTests(TestCase):
         return PipelineCoordinator(oi)
 
     def test_apply_upright_direction_and_noop(self):
-        """apply_upright: 90 で寸法入替（CCW）、0 は同一オブジェクト返し。"""
+        """apply_upright: 90 で寸法入替、0 は同一オブジェクト返し（寸法のみ確認）。"""
         from cards.services.osd import apply_upright
         img = Image.new("RGB", (10, 4))
         self.assertIs(apply_upright(img, 0), img)            # 回転不要は素通し
         r = apply_upright(img, 90)
         self.assertEqual(r.size, (4, 10))                     # (10,4)→90回転→(4,10)
+
+    def test_apply_upright_restores_upright_all_quadrants(self):
+        """apply_upright が 0/90/180/270 の全分岐で正立画像へ戻すこと（方向＝CW の検証）。
+
+        Tesseract Rotate は「CW で正立させる度数」。入力を t°CW 倒したとき OSD が返すはずの値は
+        (360 - t) % 360。その値を apply_upright に与えると元の正立画像に一致する（90の倍数・
+        NEAREST 回転で無損失）。180°ずれのリグレッション番人。
+        """
+        from cards.services.osd import apply_upright
+        # 角ごとに異色の非対称な正立画像（回転方向の取り違えを画素で検知）
+        U = Image.new("RGB", (6, 4))
+        U.putpixel((0, 0), (255, 0, 0))      # 左上=赤
+        U.putpixel((5, 0), (0, 255, 0))      # 右上=緑
+        U.putpixel((0, 3), (0, 0, 255))      # 左下=青
+        U.putpixel((5, 3), (255, 255, 0))    # 右下=黄
+        expected = list(U.getdata())
+        for t in (0, 90, 180, 270):
+            tilted = U if t == 0 else U.rotate(-t, expand=True)   # -t = t°CW 倒し
+            osd_rotate = (360 - t) % 360                          # OSD が返すはずの CW-to-upright
+            out = apply_upright(tilted, osd_rotate)
+            self.assertEqual(out.size, U.size, f"t={t}: 寸法が正立画像と不一致")
+            self.assertEqual(
+                list(out.getdata()), expected,
+                f"t={t}: 画素が正立画像と不一致（回転方向の取り違え＝180°ずれの疑い）",
+            )
 
     def test_osd_success_passes_upright_image(self):
         """OSD 成功（rotate=90）→ run_ocr に渡るのは正立画像（寸法入替）。"""

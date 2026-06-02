@@ -5,11 +5,13 @@ script は使わず orientation（rotate 量）のみ使用。OSD 失敗（例�
 normal フォールバックする想定で、本モジュールの detect 関数は失敗を例外として送出する。
 
 [回転方向の規約]
-- Tesseract image_to_osd の "Rotate" は「正立させるための反時計回り回転量（度）」（本ブランチ規約・rev2 第2部）。
-- PIL.Image.rotate(θ, expand=True) は **反時計回り** に θ 回転する（実画像で確認済み：
+- Tesseract image_to_osd の "Rotate" は「**時計回り(CW)で正立させる度数**」（実機検証で確定：
+  card3 を 90°CW 倒した入力に OSD が Rotate=270 を返し、270°CW=90°CCW で正立する＝CW 基準）。
+- PIL.Image.rotate(θ, expand=True) は **反時計回り(CCW)** が正符号（実画像で確認済み：
   rotate(90,expand) で元の右上画素が左上へ移動＝CCW）。
-- よって正立化は image.rotate(rotate_deg, expand=True) を**そのまま**適用すればよい（CCW→CCW）。
-※ Tesseract 本体バイナリ未導入のため OSD 実値での端到端確認は未実施。設置後に実画像1枚で要確認。
+- 符号が逆のため、CW 度数 rotate_deg を PIL へは **符号反転して** 渡す：
+  image.rotate((360 - rotate_deg) % 360, expand=True)
+  （0→0 / 90→rotate(270) / 180→rotate(180) / 270→rotate(90)＝いずれも CW 回転）。
 """
 
 import logging
@@ -26,7 +28,7 @@ def detect_osd_rotation(image, timeout: float | None = None) -> int:
     """[性質] 副作用あり（外部プロセス Tesseract 呼び出し）/ 正立化に要する回転量（度）を返す。
 
     [入力] image: PIL.Image（名刺クロップ）、timeout: image_to_osd のタイムアウト秒
-    [出力] int: 正立化に必要な反時計回り回転量（0/90/180/270）
+    [出力] int: 正立化に必要な時計回り(CW)回転量（0/90/180/270。Tesseract Rotate そのまま）
     [例外] OSD 失敗（pytesseract 未導入・Tesseract 例外・Too few characters・timeout 等）は
            そのまま送出する（呼び出し側が捕捉して normal フォールバックする責務）。
     """
@@ -47,11 +49,12 @@ def detect_osd_rotation(image, timeout: float | None = None) -> int:
 
 
 def apply_upright(image, rotate_deg: int):
-    """[性質] 純関数（DB操作なし・副作用なし）/ rotate_deg ぶん反時計回りに回して正立画像を返す。
+    """[性質] 純関数（DB操作なし・副作用なし）/ rotate_deg（CW度数）ぶん時計回りに回して正立画像を返す。
 
     rotate_deg=0 のときは入力をそのまま返す。expand=True で角を切らない。
-    回転方向の規約は本モジュール docstring 参照（Tesseract Rotate＝CCW量、PIL.rotate＝CCW）。
+    Tesseract Rotate は時計回り(CW)基準、PIL.rotate は反時計回り(CCW)が正符号のため、
+    符号反転 (360 - rotate_deg) % 360 を PIL へ渡して CW 回転を実現する（本モジュール docstring 参照）。
     """
     if not rotate_deg % 360:
         return image
-    return image.rotate(rotate_deg % 360, expand=True)
+    return image.rotate((360 - rotate_deg % 360) % 360, expand=True)
