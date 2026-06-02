@@ -930,13 +930,16 @@ a { color: inherit; text-decoration: none; }
 }
 
 /* item11：列見出しクリックの現在ページ内DOMソート。クリック可カーソル＋方向インジケータ。
-   persons一覧（.js-person-page-sort）と contacts一覧（.js-contact-page-sort）で共通。 */
+   persons一覧（.js-person-page-sort）・contacts一覧（.js-contact-page-sort）・tags一覧（.js-tag-page-sort）で共通。 */
 .js-person-page-sort th[data-sort-col],
-.js-contact-page-sort th[data-sort-col] { cursor: pointer; user-select: none; }
+.js-contact-page-sort th[data-sort-col],
+.js-tag-page-sort th[data-sort-col] { cursor: pointer; user-select: none; }
 .js-person-page-sort th[data-sort-dir="asc"]::after,
-.js-contact-page-sort th[data-sort-dir="asc"]::after { content: " ▲"; font-size: 0.8em; color: var(--app-color-primary); }
+.js-contact-page-sort th[data-sort-dir="asc"]::after,
+.js-tag-page-sort th[data-sort-dir="asc"]::after { content: " ▲"; font-size: 0.8em; color: var(--app-color-primary); }
 .js-person-page-sort th[data-sort-dir="desc"]::after,
-.js-contact-page-sort th[data-sort-dir="desc"]::after { content: " ▼"; font-size: 0.8em; color: var(--app-color-primary); }
+.js-contact-page-sort th[data-sort-dir="desc"]::after,
+.js-tag-page-sort th[data-sort-dir="desc"]::after { content: " ▼"; font-size: 0.8em; color: var(--app-color-primary); }
 
 /* JSでbody直下に出すため、テーブルのoverflowに邪魔されない */
 .app-floating-tooltip {

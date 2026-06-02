@@ -196,3 +196,82 @@ class BulkTaggingViewTests(TestCase):
         back = resp.context["back"]
         urls = " ".join(entry.get("url", "") for entry in back.back_stack)
         self.assertIn(url, urls)
+
+
+class TagListViewSortTests(TestCase):
+    """TagListView の多段サーバー側ソート（Task G 横展開）。"""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="tag_list_sort_test_user", password="dummy"
+        )
+        self.client = Client()
+        self.client.force_login(self.user)
+        self.category = TagCategory.objects.create(name="業種", sort_order=1)
+        # 同一カテゴリ内・名前順が分かるよう Aaa/Bbb/Ccc を作成順とは別に作る。
+        self.tag_b = Tag.objects.create(
+            name="Bbb", category=self.category, created_by=self.user
+        )
+        self.tag_a = Tag.objects.create(
+            name="Aaa", category=self.category, created_by=self.user
+        )
+        self.tag_c = Tag.objects.create(
+            name="Ccc", category=self.category, created_by=self.user
+        )
+        self.url = reverse("tags:tag_list")
+
+    def test_sort_by_name_asc_and_desc(self):
+        """?sort=name 昇順 / ?sort=-name 降順でタグ名順に並ぶ。"""
+        resp = self.client.get(self.url, {"sort": "name"})
+        ids = [t.id for t in resp.context["tags"]]
+        self.assertLess(ids.index(self.tag_a.id), ids.index(self.tag_b.id))
+        self.assertLess(ids.index(self.tag_b.id), ids.index(self.tag_c.id))
+        self.assertTrue(resp.context["sort_is_active"])
+        self.assertEqual(resp.context["sort_rows"][0], {"key": "name", "dir": "asc"})
+
+        resp = self.client.get(self.url, {"sort": "-name"})
+        ids = [t.id for t in resp.context["tags"]]
+        self.assertLess(ids.index(self.tag_c.id), ids.index(self.tag_b.id))
+        self.assertLess(ids.index(self.tag_b.id), ids.index(self.tag_a.id))
+        self.assertEqual(resp.context["sort_rows"][0], {"key": "name", "dir": "desc"})
+
+    def test_invalid_sort_keys_fall_back_to_default(self):
+        """許可リスト外（description/status）・不正値のみなら sort 無効＝既定並びへ。"""
+        resp = self.client.get(self.url, {"sort": "description,status,bogus"})
+        self.assertFalse(resp.context["sort_is_active"])
+        self.assertEqual(resp.context["sort_value"], "")
+        self.assertTrue(all(r["key"] == "" for r in resp.context["sort_rows"]))
+
+    def test_invalid_key_mixed_keeps_valid_only(self):
+        """許可リスト外キーは無視され、有効キーだけ適用される。"""
+        resp = self.client.get(self.url, {"sort": "description,name"})
+        self.assertTrue(resp.context["sort_is_active"])
+        self.assertEqual(resp.context["sort_rows"][0], {"key": "name", "dir": "asc"})
+
+    def test_no_sort_param_keeps_default_order(self):
+        """sort 未指定なら既定並び（category__sort_order, name）を維持。"""
+        resp = self.client.get(self.url)
+        self.assertFalse(resp.context["sort_is_active"])
+        ids = [t.id for t in resp.context["tags"]]
+        self.assertEqual(ids, [self.tag_a.id, self.tag_b.id, self.tag_c.id])
+
+    def test_push_current_includes_sort(self):
+        """push_current の keys に sort が乗り、戻るでソート状態を復元できる。"""
+        resp = self.client.get(self.url, {"sort": "name"})
+        back = resp.context["back"]
+        urls = " ".join(entry.get("url", "") for entry in back.back_stack)
+        self.assertIn("sort=name", urls)
+
+    def test_sort_control_and_toggle_markers_rendered(self):
+        """ソートコントロール・列切替・補助JSソートの tags 用マーカーが描画される。"""
+        resp = self.client.get(self.url)
+        body = resp.content.decode("utf-8")
+        self.assertIn("js-tag-sort-control", body)
+        self.assertIn("js-tag-page-sort", body)
+        self.assertIn("js-tag-column-toggle", body)
+        self.assertIn("tag_list_visible_columns", body)
+        self.assertIn('name="sort"', body)
+        self.assertIn("並び替えを適用", body)
+        # ソート列ドロップダウンの5選択肢
+        for label in ("カテゴリ", "タグ名", "付与Person数", "作成者", "更新日時"):
+            self.assertIn(label, body)

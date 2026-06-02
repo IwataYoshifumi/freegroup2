@@ -42,6 +42,99 @@ def _archived_only(request):
     return request.GET.get("archived_only", "").lower() in ("1", "true", "on", "yes")
 
 
+# ----------------------------------------------------------------------
+# タグ一覧の多段サーバー側ソート（HIG v1.5 第6章。persons 実装を複製）。
+#
+# 「画面でソートできる列＝許可リストにあるキー」を一致させ、それ以外は無視＝既定の並びに戻す。
+# クエリは単一パラメータ sort に優先順つきカンマ区切り、降順は先頭 "-"。
+#   例 ?sort=category,-name,updated_at （第1=カテゴリ昇順 / 第2=タグ名降順 / 第3=更新日時昇順）
+# person_count は TagListView.get_queryset の annotate 済み集計をそのまま order_by する。
+# ----------------------------------------------------------------------
+
+TAG_LIST_SORT_FIELD_MAP = {
+    "category": "category__sort_order",   # カテゴリ（運用者が決めた並び順）
+    "name": "name",                       # タグ名
+    "person_count": "person_count",       # 付与 Person 数（annotate 済み）
+    "created_by": "created_by__username",  # 作成者
+    "updated_at": "updated_at",            # 更新日時
+}
+# 多段ソートの最大段数（ソートコントロールの行数と一致）。
+TAG_LIST_SORT_MAX_KEYS = 3
+
+
+def _parse_tag_sort(params):
+    """単一 sort パラメータ（例 "category,-name,updated_at"）を [(key, direction), ...] に解決する。
+
+    [性質] 純関数（DB 操作なし・副作用なし）
+    [入力] params: QueryDict 様（request.GET）
+    [出力] list[tuple[str, str]]（key は許可リスト内、direction は "asc" / "desc"）
+        - 先頭 "-" は降順、無印は昇順。
+        - 許可リスト外キー・空トークンは無視（不正値は黙って捨てる＝既定の並びに戻す）。
+        - 同一キーの二重指定は先勝ちで除外。最大 TAG_LIST_SORT_MAX_KEYS 段まで。
+    """
+    raw = params.get("sort") or ""
+    tokens = []
+    seen = set()
+    for chunk in raw.split(","):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        if chunk.startswith("-"):
+            direction = "desc"
+            key = chunk[1:]
+        else:
+            direction = "asc"
+            key = chunk
+        if key not in TAG_LIST_SORT_FIELD_MAP or key in seen:
+            continue
+        seen.add(key)
+        tokens.append((key, direction))
+        if len(tokens) >= TAG_LIST_SORT_MAX_KEYS:
+            break
+    return tokens
+
+
+def _apply_tag_list_sort(qs, params):
+    """Tag QuerySet に多段ソート（?sort=key,-key,...）を適用する（純関数）。
+
+    [性質] 純関数（QuerySet を加工して返すのみ・DB 操作なし）
+    有効トークンが無ければ qs をそのまま返す（呼び出し側の既定並びを温存）。
+    指定有りのときだけ許可リスト経由で order_by を多段で差し替える（末尾に pk で安定化）。
+    """
+    tokens = _parse_tag_sort(params)
+    if not tokens:
+        return qs
+    order = []
+    for key, direction in tokens:
+        prefix = "-" if direction == "desc" else ""
+        order.append(prefix + TAG_LIST_SORT_FIELD_MAP[key])
+    order.append("pk")
+    return qs.order_by(*order)
+
+
+def _tag_sort_context(params):
+    """ソート UI（絞り込みフォーム内の折りたたみ）の描画用 context を作る（純関数）。
+
+    [性質] 純関数（DB 操作なし・副作用なし）
+    [出力] dict:
+        sort_rows: TAG_LIST_SORT_MAX_KEYS 行分の [{"key", "dir"}]
+                   （未指定行は key="" / dir="asc"）。各行が列ドロップダウン＋方向トグルに対応。
+        sort_is_active: bool（有効トークンが 1 つでもあるか＝折りたたみの開閉初期状態の判定）。
+        sort_value: 正規化済み sort 文字列（hidden の初期値・no-JS 再送信用）。
+    """
+    tokens = _parse_tag_sort(params)
+    rows = [{"key": k, "dir": d} for (k, d) in tokens]
+    while len(rows) < TAG_LIST_SORT_MAX_KEYS:
+        rows.append({"key": "", "dir": "asc"})
+    return {
+        "sort_rows": rows,
+        "sort_is_active": bool(tokens),
+        "sort_value": ",".join(
+            ("-" + k if d == "desc" else k) for k, d in tokens
+        ),
+    }
+
+
 # ======================================================================
 # TagCategory CRUD（§6.2.5）
 # ======================================================================
@@ -241,12 +334,15 @@ class TagListView(LoginRequiredMixin, ListView):
                 filter=Q(assignments__person__status=Person.Status.ACTIVE),
             )
         )
-        return qs.order_by("category__sort_order", "name")
+        # 既定並びは category__sort_order, name。?sort= があれば許可リスト経由の多段ソートへ。
+        qs = qs.order_by("category__sort_order", "name")
+        return _apply_tag_list_sort(qs, self.request.GET)
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         back = BackNavigator(self.request)
-        back.push_current("", ["category", "page", "archived_only"])
+        # HIG 6.1：並び替え・ページ状態を戻るで復元するため sort を追加（dir は廃止形式）。
+        back.push_current("", ["category", "page", "archived_only", "sort"])
         context.update(
             {
                 "back": back,
@@ -259,6 +355,8 @@ class TagListView(LoginRequiredMixin, ListView):
                 "archived_only": _archived_only(self.request),
             }
         )
+        # 絞り込みフォーム内ソートコントロール用（sort_rows / sort_is_active / sort_value）。
+        context.update(_tag_sort_context(self.request.GET))
         return context
 
 

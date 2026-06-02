@@ -38,7 +38,7 @@
           <label for="id_category" style="white-space:nowrap; font-weight:600;">カテゴリで絞り込み</label>
           <select id="id_category" name="category" class="app-input"
                   style="width:300px; max-width:100%;"
-                  onchange="this.form.submit();">
+                  onchange="this.form.requestSubmit();">
             <option value="">全カテゴリ</option>
             {% for cat in categories %}
               <option value="{{ cat.id }}" {% if selected_category == cat.id|stringformat:"s" %}selected{% endif %}>{{ cat.name }}</option>
@@ -51,26 +51,40 @@
           </label>
           <input type="checkbox" id="id_archived_only" name="archived_only" value="1"
                  style="position:absolute; opacity:0; pointer-events:none;"
-                 onchange="this.form.submit();"
+                 onchange="this.form.requestSubmit();"
                  {% if archived_only %}checked{% endif %}>
+        </div>
+
+        {# 多段ソート（絞り込みと同一フォームで送信。カテゴリ/アーカイブ変更時も一緒に送られる）。 #}
+        <div style="margin-top:12px; max-width:520px;">
+          {% include "tags/_sort_control.html" %}
         </div>
       </form>
     </section>
 
     <section class="app-card">
       {% if tags %}
+        {# HIG §6：表示列選択は表の左上に置く。 #}
+        <div style="display:flex; justify-content:flex-start; margin-bottom:12px;">
+          {% include "tags/_column_toggle.html" %}
+        </div>
         <div class="app-table-wrapper">
-          <table class="app-table app-table--nowrap">
+          {% comment %}
+            js-tag-page-sort：列見出しクリックの「現在ページ内DOMソート」対象（app.js）。
+            サーバー側多段フォームソート（?sort=）とは別系統で、URLは書き換えない。
+            カテゴリ・付与Person数は data-sort-key に数値を持たせ、サーバー側（sort_order/数値）と並びを揃える。
+          {% endcomment %}
+          <table class="app-table app-table--nowrap js-tag-page-sort">
             <thead>
               <tr>
                 <th class="app-table__col--action">操作</th>
-                <th>カテゴリ</th>
-                <th>タグ名</th>
-                <th>付与 Person 数</th>
-                <th>説明</th>
-                <th>状態</th>
-                <th>作成者</th>
-                <th class="app-table__col--date">更新日時</th>
+                <th data-col-key="category" data-sort-col>カテゴリ</th>
+                <th data-col-key="name" data-sort-col>タグ名</th>
+                <th data-col-key="person_count" data-sort-col>付与 Person 数</th>
+                <th data-col-key="description">説明</th>
+                <th data-col-key="status">状態</th>
+                <th data-col-key="created_by" data-sort-col>作成者</th>
+                <th class="app-table__col--date" data-col-key="updated_at" data-sort-col>更新日時</th>
               </tr>
             </thead>
             <tbody>
@@ -84,19 +98,19 @@
                       <a href="{% append_back_url update_url back %}" class="app-btn app-btn--success app-btn--sm">編集</a>
                     {% endif %}
                   </td>
-                  <td>{{ tag.category.name }}</td>
-                  <td>{{ tag.name }}</td>
-                  <td>{{ tag.person_count }}</td>
-                  <td>{{ tag.description|default:"-"|truncatechars:60 }}</td>
-                  <td>
+                  <td data-col-key="category" data-sort-key="{{ tag.category.sort_order }}">{{ tag.category.name }}</td>
+                  <td data-col-key="name">{{ tag.name }}</td>
+                  <td data-col-key="person_count" data-sort-key="{{ tag.person_count }}">{{ tag.person_count }}</td>
+                  <td data-col-key="description">{{ tag.description|default:"-"|truncatechars:60 }}</td>
+                  <td data-col-key="status">
                     {% if tag.is_archived %}
                       <span class="app-status-badge app-status-badge--muted">アーカイブ済み</span>
                     {% else %}
                       <span class="app-status-badge app-status-badge--success">アクティブ</span>
                     {% endif %}
                   </td>
-                  <td>{{ tag.created_by.username|default:"-" }}</td>
-                  <td>{{ tag.updated_at|date:"Y/m/d H:i" }}</td>
+                  <td data-col-key="created_by">{{ tag.created_by.username|default:"-" }}</td>
+                  <td data-col-key="updated_at">{{ tag.updated_at|date:"Y/m/d H:i" }}</td>
                 </tr>
               {% endfor %}
             </tbody>

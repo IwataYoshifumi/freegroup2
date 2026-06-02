@@ -1314,9 +1314,9 @@
     });
   }
   function init() {
-    // persons 一覧（.js-person-page-sort）と contacts 一覧（.js-contact-page-sort）の
-    // 両テーブルに同じ現在ページ内DOMソートを適用する（フック追加のみ・挙動は共通）。
-    document.querySelectorAll('.js-person-page-sort, .js-contact-page-sort').forEach(initTable);
+    // persons / contacts / tags 一覧の各テーブルに同じ現在ページ内DOMソートを適用する
+    // （フック追加のみ・挙動は共通）。
+    document.querySelectorAll('.js-person-page-sort, .js-contact-page-sort, .js-tag-page-sort').forEach(initTable);
   }
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
