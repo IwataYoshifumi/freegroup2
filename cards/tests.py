@@ -27,6 +27,21 @@ from cards.services.detectors.opencv_detector import (
 )
 
 
+def _high_saturation_png_bytes(w=1000, h=800, rw=600, rh=360) -> bytes:
+    """[性質] 純関数 / 全面を高彩度の緑で塗り、低彩度（白）の名刺矩形を1枚置いた PNG バイト列。
+
+    緑デスク相当：背景が高彩度なので mask_sat の白画素率は旧 sat_fallback 閾値 0.50 を超える。
+    sat_fallback の除外撤廃（rev2）で sat が除外されず候補抽出されることの検証に使う。
+    """
+    arr = np.zeros((h, w, 3), dtype=np.uint8)
+    arr[:, :] = (0, 200, 0)  # 高彩度の緑（HSV 彩度 ≈ 255）で全面塗り
+    x0, y0 = (w - rw) // 2, (h - rh) // 2
+    arr[y0:y0 + rh, x0:x0 + rw] = 255  # 低彩度（白）の名刺
+    buf = io.BytesIO()
+    Image.fromarray(arr).save(buf, format="PNG")
+    return buf.getvalue()
+
+
 def _overlay_debug_json():
     """[性質] 純関数 / マスクオーバーレイ検証用の合成 debug_json（単一 attempt）。
 
@@ -94,6 +109,47 @@ _FAKE_OCR_RESULT = {
         }
     ],
 }
+
+
+class SatFallbackExclusionRemovedTests(TestCase):
+    """rev2: sat_fallback の除外動作撤廃の番人。
+
+    高彩度背景（緑デスク相当）で sat_white_ratio が旧閾値 0.50 を超えても、sat は
+    候補抽出から除外されない（excluded=False・候補が抽出される）ことを担保する。
+    triggered フラグ自体は診断情報として残るが、それで除外はしない。
+    """
+
+    def setUp(self):
+        self._tmp_media = tempfile.mkdtemp(prefix="fg2_test_media_")
+        self._override = override_settings(MEDIA_ROOT=self._tmp_media)
+        self._override.enable()
+        self.addCleanup(self._override.disable)
+        self.addCleanup(lambda: shutil.rmtree(self._tmp_media, ignore_errors=True))
+
+    def test_high_saturation_background_does_not_exclude_sat(self):
+        path = os.path.join(self._tmp_media, "green_desk.png")
+        with open(path, "wb") as f:
+            f.write(_high_saturation_png_bytes())
+
+        debug_result = detect_cards_with_debug(path)
+
+        # 前提：高彩度背景で sat_white_ratio は旧閾値 0.50 を超える（診断 triggered は立つ）
+        sat_fb = debug_result["sat_fallback"]
+        self.assertGreater(sat_fb["sat_white_ratio"], 0.50)
+        self.assertTrue(sat_fb["triggered"])
+
+        # 本題：それでも sat は除外されず、各 attempt で候補抽出される
+        attempts = debug_result.get("attempts") or []
+        self.assertGreaterEqual(len(attempts), 1)
+        for att in attempts:
+            sat = att["masks"]["sat"]
+            self.assertFalse(
+                sat["excluded"],
+                msg=f"attempt {att['attempt_no']}: sat が除外されている（撤廃したはず）",
+            )
+            # 除外されていれば contours=0/candidates=[] になる。抽出経路に入った証拠を見る。
+            self.assertGreater(sat["contours_count"], 0)
+            self.assertGreaterEqual(len(sat["candidates_filter"]), 1)
 
 
 class ResultsAccessorTests(TestCase):

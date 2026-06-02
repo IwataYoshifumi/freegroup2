@@ -28,7 +28,9 @@ _CANNY_LOW = 50
 _CANNY_HIGH = 150
 _CANNY_DILATE_KERNEL = (3, 3)
 _SAT_THRESHOLD = 40
-_SAT_WHITE_RATIO_MAX = 0.50  # mask_sat の白画素率がこれを超えたら sat を候補抽出から除外（背景高彩度対策）
+# 診断用しきい値：mask_sat の白画素率がこれを超えたら「高彩度背景」と記録する（sat_fallback.triggered）。
+# rev2 で OR 合成を廃止したため、この判定で sat を候補抽出から除外することはしない（診断情報のみ）。
+_SAT_WHITE_RATIO_MAX = 0.50
 
 # ── カードフィルタパラメータ ──────────────────────────────
 # 採否の主基準は縦横比のみ（rev2 §1.2.3）。範囲 1.6〜1.8 は名刺という物の形そのもので
@@ -172,8 +174,8 @@ def detect_cards_with_debug(image_path: str) -> dict:
         #   {polygon, computed_width, computed_height, min_required: [100, 50]}
 
         "sat_fallback": {
-            # mask_sat 暴走時のフォールバック判定結果（背景高彩度対策）。
-            # 発動時は sat マスクを「候補抽出から除外」する（マスク画像は記録する）。
+            # 高彩度背景の診断判定（sat_white_ratio が threshold 超で triggered=True）。
+            # rev2 では除外に使わない（診断情報のみ。OR 合成廃止に伴い除外動作は撤廃）。
             "triggered":       bool,
             "sat_white_ratio": float,
             "threshold":       float,
@@ -217,14 +219,13 @@ def _detect_with_debug(image_path: str) -> dict:
     image_area = w * h
     gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
 
-    # ② マスク生成（生マスク 3 枚 ＋ sat 暴走フォールバック判定）。OR 合成はしない。
+    # ② マスク生成（生マスク 3 枚 ＋ 高彩度背景の診断判定）。OR 合成はしない。
     mask_data = _build_masks(bgr, gray)
     raw_masks = mask_data["raw"]
-    sat_excluded = mask_data["sat_fallback"]["triggered"]
 
     # ③ 通常 attempt：各マスク個別にクロージング → 候補抽出 → マスク横断重複除去 → 透視変換
     attempt_1 = _run_attempt(
-        raw_masks, sat_excluded, np_rgb, image_area,
+        raw_masks, np_rgb, image_area,
         expand_ratio=0.0, expand_min_px=0,
     )
     attempts = [_attempt_dict(1, "normal", attempt_1)]
@@ -242,7 +243,7 @@ def _detect_with_debug(image_path: str) -> dict:
     if passed_before == 0:
         inv_masks = {name: cv2.bitwise_not(m) for name, m in raw_masks.items()}
         attempt_2 = _run_attempt(
-            inv_masks, sat_excluded, np_rgb, image_area,
+            inv_masks, np_rgb, image_area,
             expand_ratio=_INVERTED_POLYGON_EXPAND_RATIO,
             expand_min_px=_INVERTED_POLYGON_EXPAND_MIN_PX,
         )
@@ -281,11 +282,11 @@ def _attempt_dict(attempt_no: int, type_: str, attempt: dict) -> dict:
 
 
 def _build_masks(bgr: np.ndarray, gray: np.ndarray) -> dict:
-    """[性質] 純関数 / 生マスク 3 枚（diff/edge/sat）と sat 暴走フォールバック判定を返す。
+    """[性質] 純関数 / 生マスク 3 枚（diff/edge/sat）と高彩度背景の診断判定を返す。
 
     OR 合成・クロージングはここでは行わない（クロージングは attempt 内でマスク別に行う）。
-    mask_sat の白画素率が _SAT_WHITE_RATIO_MAX を超えた場合は sat を「候補抽出から除外」する
-    判定（triggered=True）を返す（背景高彩度対策）。除外しても sat マスク画像自体は記録する。
+    mask_sat の白画素率が _SAT_WHITE_RATIO_MAX を超えた場合は triggered=True を立てるが、
+    rev2 では除外には使わない（高彩度背景の診断情報としてのみ記録する）。
 
     返却 dict：
       raw: {"diff": ndarray, "edge": ndarray, "sat": ndarray}  # uint8 single-channel 生マスク
@@ -307,7 +308,7 @@ def _build_masks(bgr: np.ndarray, gray: np.ndarray) -> dict:
     sat = hsv[:, :, 1]
     _, mask_sat = cv2.threshold(sat, _SAT_THRESHOLD, 255, cv2.THRESH_BINARY)
 
-    # mask_sat 暴走時のフォールバック判定（背景高彩度対策）
+    # 高彩度背景の診断判定（sat_white_ratio を記録。rev2 では除外には使わない）
     sat_white_ratio = (
         float(np.count_nonzero(mask_sat)) / float(mask_sat.size)
         if mask_sat.size else 0.0
@@ -335,18 +336,18 @@ def _close_mask(mask: np.ndarray) -> np.ndarray:
 
 
 def _run_attempt(
-    raw_masks: dict, sat_excluded: bool, np_rgb: np.ndarray, image_area: int,
+    raw_masks: dict, np_rgb: np.ndarray, image_area: int,
     expand_ratio: float, expand_min_px: int,
 ) -> dict:
     """[性質] 純関数 / 1 試行ぶんの「各マスク個別抽出 → マスク横断重複除去 → 透視変換」を実行。
 
     通常 attempt と反転リトライ attempt で共有する。各マスク（diff/edge/sat）について
     クロージング → 候補抽出を独立に行い、合格候補をマスク横断で重複除去してから warp する。
-    sat_excluded=True のとき sat マスクは候補抽出から外す（マスク画像・白画素率は記録）。
+    rev2 では全マスクを常に候補抽出する（sat 除外フォールバックは撤廃。各 mask の
+    "excluded" は常に False）。
 
     [入力]
       raw_masks     : {"diff", "edge", "sat"} の生マスク dict（反転 attempt では反転済み）
-      sat_excluded  : sat を候補抽出から除外するか（sat 暴走フォールバック）
       np_rgb        : 元画像 (RGB ndarray) — 透視変換のソース
       image_area    : 画像面積 (w * h)
       expand_ratio  : 0 より大なら透視変換直前に polygon を外側へ拡張（反転リトライ経路）
@@ -369,23 +370,18 @@ def _run_attempt(
     for name in _MASK_NAMES:
         raw = raw_masks[name]
         closed = _close_mask(raw)
-        excluded = bool(name == "sat" and sat_excluded)
-
-        if excluded:
-            contours_count = 0
-            candidates_filter: list = []
-            passed: list = []
-        else:
-            contours_count, candidates_filter, passed = _extract_candidates_from_mask(
-                closed, image_area
-            )
+        # rev2: OR 合成廃止に伴い sat 除外フォールバックは撤廃。全マスクを常に候補抽出する
+        # （高彩度背景での sat 暴走＝机全面の巨大塊は縦横比フィルタ §1.2.3 が落とす）。
+        contours_count, candidates_filter, passed = _extract_candidates_from_mask(
+            closed, image_area
+        )
 
         mask_results[name] = {
             "raw_image":    Image.fromarray(raw),
             "closed_image": Image.fromarray(closed),
             "raw_white_ratio":    _white_ratio(raw),
             "closed_white_ratio": _white_ratio(closed),
-            "excluded":           excluded,
+            "excluded":           False,
             "contours_count":     contours_count,
             "candidates_filter":  candidates_filter,
         }
