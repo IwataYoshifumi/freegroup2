@@ -72,4 +72,11 @@ urlpatterns = [
     path("unassign/", views.TagUnassignView.as_view(), name="tag_unassign"),
     # 検索結果一括タグ付け（§6.2.6、URL 名はコード君A 判断）
     path("bulk-tagging/", views.BulkTaggingView.as_view(), name="bulk_tagging"),
+    # タグ固定モード：タグ詳細から「このタグを人に付与」で遷移。tag をパスに乗せる
+    # （クエリ/JS に依存させず固定を URL で保証）。pk があれば固定モード。
+    path(
+        "<uuid:pk>/bulk-tagging/",
+        views.BulkTaggingView.as_view(),
+        name="bulk_tagging_for_tag",
+    ),
 ]

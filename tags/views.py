@@ -330,8 +330,10 @@ class TagDetailView(LoginRequiredMixin, DetailView):
     タグ基本情報 + 付与 Person 一覧（ページネーション 20 件/ページ）を表示する。
     archived タグも閲覧可能（非アーカイブ化導線のため queryset は全件）。
 
-    BackNavigator は contacts/cards 慣例どおり詳細画面では push_current を呼ばず、
-    一覧画面で積まれたスタックをそのまま参照する。
+    BackNavigator：本画面はページネーション（?page=）を持ち、付与 Person 一覧から
+    人物詳細へ送り出す起点画面のため push_current を呼ぶ（HIG 3.2・付録 BackNavigator）。
+    これにより人物詳細から「戻る」でこのタグ詳細（ページ位置つき）に戻れる。
+    ※パラメータを持たない詳細（contacts/cards）は push_current 不要だが、本画面は該当しない。
     """
 
     model = Tag
@@ -357,9 +359,13 @@ class TagDetailView(LoginRequiredMixin, DetailView):
         paginator = Paginator(person_qs, 20)
         page_number = self.request.GET.get("page") or 1
         page_obj = paginator.get_page(page_number)
+        # ページネーションを持つ起点画面なので push_current でスタックに積む。
+        # ソート・検索条件は無いので page のみ（dir は HIG 廃止、sort も無し）。
+        back = BackNavigator(self.request)
+        back.push_current("", ["page"])
         context.update(
             {
-                "back": BackNavigator(self.request),
+                "back": back,
                 "active_app": "mailings",
                 "active_menu": "tags:tag_list",
                 "person_total": person_qs.count(),
@@ -505,26 +511,48 @@ class BulkTaggingView(LoginRequiredMixin, TemplateView):
 
     template_name = "tags/bulk_tagging.html"
 
+    def _get_fixed_tag(self, **kwargs):
+        """[性質] 準関数。固定モード時の対象 Tag を返す（pk なしなら None）。
+
+        URL パスに pk があれば固定モード（タグ詳細「このタグを人に付与」からの遷移）。
+        存在しない pk は 404（500 を返さない）。is_archived 問わず取得（表示用）。
+        """
+        pk = kwargs.get("pk")
+        if pk is None:
+            return None
+        return get_object_or_404(Tag, pk=pk)
+
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
+        fixed_tag = self._get_fixed_tag(**kwargs)
         back = BackNavigator(self.request)
         back.push_current(
             "",
             list(SEARCH_PARAMS) + ["status", "searched", "page"],
         )
+        # 固定モードは検索往復・リセットでもタグを URL パスで維持する。
+        if fixed_tag is not None:
+            reset_url = reverse_lazy(
+                "tags:bulk_tagging_for_tag", kwargs={"pk": fixed_tag.pk}
+            )
+        else:
+            reset_url = reverse_lazy("tags:bulk_tagging")
         context.update(
             {
                 "back": back,
                 "active_app": "mailings",
                 "active_menu": "tags:bulk_tagging",
                 "tags_by_category": _tags_grouped_by_category(),
-                "reset_url": reverse_lazy("tags:bulk_tagging"),
+                "reset_url": reset_url,
                 "submit_label": "検索",
                 "bulk_tagging_max_persons": BULK_TAGGING_MAX_PERSONS,
                 # Phase 1b-ε.1 追加修正：bulk_tagging のステータスフィルタを廃止し active 固定。
                 # 仕様書 §7.3 手順 3 / §11.7.1（マージ後表示は active のみ）と整合。
                 # merged / archived の TagAssignment 確認は Django admin（TagAdmin）で行う。
                 "selected_statuses": ["active"],
+                # 固定モード（タグ詳細からの遷移）。None なら従来モードで挙動不変。
+                "fixed_tag": fixed_tag,
+                "is_fixed_mode": fixed_tag is not None,
             }
         )
         # _search_form.html partial が参照するコンテキスト
@@ -544,8 +572,13 @@ class BulkTaggingView(LoginRequiredMixin, TemplateView):
     @method_decorator(login_required)
     @method_decorator(permission_required("tags.assign_tag", raise_exception=True))
     def post(self, request, *args, **kwargs):
+        fixed_tag = self._get_fixed_tag(**kwargs)
         person_ids = request.POST.getlist("person_ids")
-        tag_ids = request.POST.getlist("tag_ids")
+        # 固定モードは POST の tag_ids を信用せず、URL パスの固定タグ1件に強制する。
+        if fixed_tag is not None:
+            tag_ids = [str(fixed_tag.pk)]
+        else:
+            tag_ids = request.POST.getlist("tag_ids")
         if not person_ids or not tag_ids:
             return self.get(request, *args, **kwargs)
         # 上限チェック（config.constants.BULK_TAGGING_MAX_PERSONS = 500、誤操作で全 Person ×
@@ -561,6 +594,16 @@ class BulkTaggingView(LoginRequiredMixin, TemplateView):
         persons = list(Person.objects.filter(pk__in=person_ids))
         tags = list(Tag.objects.filter(pk__in=tag_ids, is_archived=False))
         created_count = _bulk_assign_tags(persons, tags, request.user)
+        # 固定モードは付与後にタグ詳細へ戻す（success メッセージ付き）。
+        if fixed_tag is not None:
+            from django.contrib import messages
+
+            messages.success(
+                request,
+                f"「{fixed_tag.name}」を {len(persons)} 人に付与しました"
+                f"（新規 {created_count} 件、既存重複はスキップ）。",
+            )
+            return redirect("tags:tag_detail", pk=fixed_tag.pk)
         context = self.get_context_data(**kwargs)
         context["bulk_result"] = {
             "person_count": len(persons),

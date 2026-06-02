@@ -10,7 +10,22 @@
       <div class="app-breadcrumb">検索＆一括タグ付け</div>
       <h1>検索＆一括タグ付け</h1>
     </div>
+    <div class="app-page-header__actions">
+      {% if is_fixed_mode %}
+        <a class="app-btn app-btn--secondary" href="{% url 'tags:tag_detail' pk=fixed_tag.id %}">戻る</a>
+      {% else %}
+        <a class="app-btn app-btn--secondary" href="{% url 'tags:tag_list' %}">戻る</a>
+      {% endif %}
+    </div>
   </div>
+
+  {% if is_fixed_mode %}
+    <section class="app-card">
+      <div class="app-message app-message--info">
+        付与するタグ：<strong>{{ fixed_tag.category.name }} ＞ {{ fixed_tag.name }}</strong>
+      </div>
+    </section>
+  {% endif %}
 
   {% if bulk_result %}
     <section class="app-card">
@@ -37,7 +52,7 @@
   </section>
 
   {% if has_results %}
-    <form method="post">
+    <form method="post"{% if is_fixed_mode %} action="{% url 'tags:bulk_tagging_for_tag' pk=fixed_tag.id %}"{% endif %}>
       {% csrf_token %}
 
       {# Step 2: 検索結果（選択チェックボックス付き） #}
@@ -75,40 +90,44 @@
         </div>
       </section>
 
-      {# Step 3: 付与するタグの選択 #}
-      <section class="app-card">
-        <h2 style="margin-bottom:12px;">Step 3：付与するタグを選択</h2>
-        {% if tags_by_category %}
-          <div class="app-form-grid" style="grid-template-columns: repeat(3, 1fr);">
-            {% for cat, tags_in_cat in tags_by_category %}
-              <div class="app-form__group">
-                <label class="app-form__label">{{ cat.name }}</label>
-                <div style="display:flex; flex-direction:column; gap:4px;">
-                  {% for tag in tags_in_cat %}
-                    <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
-                      <input type="checkbox" name="tag_ids" value="{{ tag.id }}">
-                      {{ tag.name }}
-                    </label>
-                  {% empty %}
-                    <span class="app-muted">（このカテゴリにタグなし）</span>
-                  {% endfor %}
+      {# Step 3: 付与するタグの選択（固定モードは選択UIを出さず hidden で固定タグに強制） #}
+      {% if is_fixed_mode %}
+        <input type="hidden" name="tag_ids" value="{{ fixed_tag.id }}">
+      {% else %}
+        <section class="app-card">
+          <h2 style="margin-bottom:12px;">Step 3：付与するタグを選択</h2>
+          {% if tags_by_category %}
+            <div class="app-form-grid" style="grid-template-columns: repeat(3, 1fr);">
+              {% for cat, tags_in_cat in tags_by_category %}
+                <div class="app-form__group">
+                  <label class="app-form__label">{{ cat.name }}</label>
+                  <div style="display:flex; flex-direction:column; gap:4px;">
+                    {% for tag in tags_in_cat %}
+                      <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+                        <input type="checkbox" name="tag_ids" value="{{ tag.id }}">
+                        {{ tag.name }}
+                      </label>
+                    {% empty %}
+                      <span class="app-muted">（このカテゴリにタグなし）</span>
+                    {% endfor %}
+                  </div>
                 </div>
-              </div>
-            {% endfor %}
-          </div>
-        {% else %}
-          <p class="app-muted">タグがまだ作成されていません。
-            <a href="{% url 'tags:tag_list' %}">タグ一覧画面</a>で作成してください。
-          </p>
-        {% endif %}
-      </section>
+              {% endfor %}
+            </div>
+          {% else %}
+            <p class="app-muted">タグがまだ作成されていません。
+              <a href="{% url 'tags:tag_list' %}">タグ一覧画面</a>で作成してください。
+            </p>
+          {% endif %}
+        </section>
+      {% endif %}
 
       <div class="app-action-area">
         <button type="submit" class="app-btn app-btn--primary"
                 onclick="return confirm('選択した Person に選択タグを一括付与します。よろしいですか？');">
           一括タグ付け実行
         </button>
-        {% url 'tags:bulk_tagging' as reset %}
+        {% if is_fixed_mode %}{% url 'tags:bulk_tagging_for_tag' pk=fixed_tag.id as reset %}{% else %}{% url 'tags:bulk_tagging' as reset %}{% endif %}
         <a href="{{ reset }}" class="app-btn app-btn--secondary">条件をリセット</a>
       </div>
     </form>
@@ -126,4 +145,13 @@
       })();
     </script>
   {% endif %}
+
+  {# 縦長画面の補助戻る（HIG 3.2・右下右寄せ）。上部ヘッダと同じ reverse 直リンク・常時表示。 #}
+  <div class="app-action-area" style="margin-top:16px; justify-content:flex-end;">
+    {% if is_fixed_mode %}
+      <a class="app-btn app-btn--secondary" href="{% url 'tags:tag_detail' pk=fixed_tag.id %}">戻る</a>
+    {% else %}
+      <a class="app-btn app-btn--secondary" href="{% url 'tags:tag_list' %}">戻る</a>
+    {% endif %}
+  </div>
 {% endblock %}
