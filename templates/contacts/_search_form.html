@@ -46,31 +46,40 @@ contact_list.html からインライン直書きを切り出したもの。検�
       <input type="text" id="id_address" name="address" value="{{ address }}" class="app-input">
     </div>
 
-    <div class="app-form__group" style="grid-column: span 4;">
-      <label class="app-form__label">ステータス</label>
-      <ul class="app-radio-toggle">
-        <li>
-          <label>
-            <input type="checkbox" name="status" value="primary"
-                   {% if "primary" in selected_statuses %}checked{% endif %}>
-            主コンタクト
-          </label>
-        </li>
-        <li>
-          <label>
-            <input type="checkbox" name="status" value="active"
-                   {% if "active" in selected_statuses %}checked{% endif %}>
-            有効
-          </label>
-        </li>
-        <li>
-          <label>
-            <input type="checkbox" name="status" value="inactive"
-                   {% if "inactive" in selected_statuses %}checked{% endif %}>
-            履歴
-          </label>
-        </li>
-      </ul>
+    {# ステータスフィルタ：persons と同じ app-collapsible 折りたたみ・初期閉（HIG 原則7）。業務語ラベルのみ、内部値/name/複数選択は不変。 #}
+    <div class="app-collapsible app-person-filter-collapsible">
+      <button type="button" class="app-collapsible__header" data-action="toggle-collapsible"
+              aria-expanded="false">
+        <span>ステータス</span>
+        <span class="app-collapsible__icon">▸</span>
+      </button>
+      <div class="app-collapsible-body">
+        <div class="app-person-filter-box">
+          <ul class="app-radio-toggle">
+            <li>
+              <label>
+                <input type="checkbox" name="status" value="primary"
+                       {% if "primary" in selected_statuses %}checked{% endif %}>
+                主コンタクト
+              </label>
+            </li>
+            <li>
+              <label>
+                <input type="checkbox" name="status" value="active"
+                       {% if "active" in selected_statuses %}checked{% endif %}>
+                有効
+              </label>
+            </li>
+            <li>
+              <label>
+                <input type="checkbox" name="status" value="inactive"
+                       {% if "inactive" in selected_statuses %}checked{% endif %}>
+                履歴
+              </label>
+            </li>
+          </ul>
+        </div>
+      </div>
     </div>
 
     {% include "persons/_sort_control.html" %}
