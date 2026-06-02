@@ -46,7 +46,8 @@ from .services.person_search import SEARCH_PARAMS, search_persons
 # ----------------------------------------------------------------------
 
 PERSON_LIST_SORT_FIELD_MAP = {
-    "name": "primary_contact__full_name",
+    # 氏名は読み（phonetic_name＝カタカナ）の五十音順で並べる（漢字コード順ではなく）。
+    "name": "primary_contact__phonetic_name",
     "company": "primary_contact__organization",
     "title": "primary_contact__title",
     "email": "primary_contact__email",

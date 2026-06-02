@@ -184,12 +184,13 @@ class PersonListViewTests(TestCase):
 
     def test_multi_key_sort_priority(self):
         """?sort=company,-name で 会社昇順 → 同社内は氏名降順（多段・全件）。"""
-        # 同じ会社 "Same" を持つ 2 人を氏名違いで作る
+        # 同じ会社 "Same" を持つ 2 人を氏名違いで作る。
+        # 氏名ソートは phonetic_name（読み）順なので、-name 降順で Zoe→Amy になるよう読みを付ける。
         p_same_z, _ = self._make_active_with_primary(
-            full_name="Zoe", organization="Same"
+            full_name="Zoe", organization="Same", phonetic_name="ゾエ"
         )
         p_same_a, _ = self._make_active_with_primary(
-            full_name="Amy", organization="Same"
+            full_name="Amy", organization="Same", phonetic_name="エイミー"
         )
         # 別会社（後ろに来る）
         p_other, _ = self._make_active_with_primary(
@@ -203,6 +204,33 @@ class PersonListViewTests(TestCase):
         # sort_rows が 2 段ぶん復元される
         self.assertEqual(resp.context["sort_rows"][0], {"key": "company", "dir": "asc"})
         self.assertEqual(resp.context["sort_rows"][1], {"key": "name", "dir": "desc"})
+
+    def test_name_sort_uses_phonetic_name(self):
+        """氏名ソート（?sort=name）は漢字コード順でなく phonetic_name（カタカナ読み）の五十音順。"""
+        # 漢字コード順と読み順が一致しない 3 人を用意（読み: サトウ < スズキ < タナカ）。
+        # 漢字順なら 佐(U+4F50) < 田(U+7530) < 鈴(U+9234) で sato→tanaka→suzuki になり、
+        # 読み順（sato→suzuki→tanaka）と食い違うため、読みで並んでいることを区別できる。
+        p_tanaka, _ = self._make_active_with_primary(
+            full_name="田中", phonetic_name="タナカ"
+        )
+        p_suzuki, _ = self._make_active_with_primary(
+            full_name="鈴木", phonetic_name="スズキ"
+        )
+        p_sato, _ = self._make_active_with_primary(
+            full_name="佐藤", phonetic_name="サトウ"
+        )
+
+        resp = self.client.get(self.url, {"sort": "name"})
+        ids = [p.id for p in resp.context["persons"]]
+        # 読み昇順：サトウ → スズキ → タナカ
+        self.assertLess(ids.index(p_sato.id), ids.index(p_suzuki.id))
+        self.assertLess(ids.index(p_suzuki.id), ids.index(p_tanaka.id))
+
+        resp = self.client.get(self.url, {"sort": "-name"})
+        ids = [p.id for p in resp.context["persons"]]
+        # 読み降順：タナカ → スズキ → サトウ
+        self.assertLess(ids.index(p_tanaka.id), ids.index(p_suzuki.id))
+        self.assertLess(ids.index(p_suzuki.id), ids.index(p_sato.id))
 
     def test_invalid_keys_ignored_in_multi(self):
         """許可リスト外キー（department/address）は無視され、有効キーだけ適用される。"""
@@ -258,8 +286,9 @@ class PersonListViewTests(TestCase):
         検索フォーム内のソートコントロール＋列切替が描画される。"""
         resp = self.client.get(self.url)
         body = resp.content.decode("utf-8")
-        # 列見出しソートは消えている
-        self.assertNotIn("data-sort-key", body)
+        # 旧・列見出しクリックの URL 書き換え式ソート（__personSortHeaderInit）は消えている。
+        # ※ data-sort-key は現在ページ内 DOM ソートの氏名 phonetic 比較用に正当に使うため、
+        #    「存在しないこと」のチェック対象からは外す（旧式の判定指標は __personSortHeaderInit）。
         self.assertNotIn("__personSortHeaderInit", body)
         # フォーム内ソートコントロール（折りたたみ＋4列ドロップダウン＋方向トグル）
         self.assertIn("js-person-sort-control", body)
@@ -404,8 +433,9 @@ class PersonListViewTests(TestCase):
         # クライアント側DOMソートの目印
         self.assertIn("js-person-page-sort", body)
         self.assertIn("data-sort-col", body)
-        # 旧 URL クエリ書き換え方式（サーバー側ソートへの入力）と取り違えていないこと
-        self.assertNotIn("data-sort-key", body)
+        # 旧 URL クエリ書き換え方式（サーバー側ソートへの入力）と取り違えていないこと。
+        # ※ data-sort-key は現在ページ内 DOM ソートの氏名 phonetic 比較用に正当に使うため、
+        #    取り違え検出の指標は __personSortHeaderInit（旧式 JS の初期化マーカー）の不在で判定する。
         self.assertNotIn("__personSortHeaderInit", body)
 
 

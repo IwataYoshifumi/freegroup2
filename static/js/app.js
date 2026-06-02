@@ -1257,7 +1257,12 @@
   }
   function cellText(row, idx) {
     var cell = row.cells[idx];
-    return cell ? cell.textContent.trim() : '';
+    if (!cell) return '';
+    // data-sort-key があれば比較に優先（例：氏名列はカタカナ読み phonetic_name で五十音順）。
+    // 無い列は従来どおり表示テキストで比較＝挙動不変。
+    var key = cell.getAttribute('data-sort-key');
+    if (key !== null) return key.trim();
+    return cell.textContent.trim();
   }
   function initTable(table) {
     var tbody = table.tBodies[0];
