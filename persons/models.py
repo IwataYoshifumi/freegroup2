@@ -19,7 +19,7 @@ class Person(models.Model):
         """Person のステータス（仕様書 §4.5.1 / 別表 C.11）。"""
 
         ACTIVE = "active", _("通常")
-        MERGED = "merged", _("統合済み")
+        MERGED = "merged", _("マージ済み")
         ARCHIVED = "archived", _("アーカイブ")
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

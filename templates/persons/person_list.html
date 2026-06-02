@@ -56,7 +56,7 @@
                 {{ person.primary_contact.full_name|default:"(氏名なし)" }}
               </td>
               <td data-col-key="status">
-                {% status_badge person %}
+                {% if person.status != "active" %}{% status_badge person %}{% endif %}
               </td>
               <td data-col-key="company">
                 {% if person.primary_contact.organization %}
@@ -118,7 +118,7 @@
             <strong>
               {{ person.primary_contact.full_name|default:"(氏名なし)" }}
             </strong>
-            {% status_badge person %}
+            {% if person.status != "active" %}{% status_badge person %}{% endif %}
             {% if person.primary_contact.organization %}<div>{{ person.primary_contact.organization }}</div>{% endif %}
             {% if person.primary_contact.title %}<div class="app-muted">{{ person.primary_contact.title }}</div>{% endif %}
           </div>

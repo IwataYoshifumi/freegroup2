@@ -47,7 +47,7 @@ class StatusBadgeTests(SimpleTestCase):
 
     def test_person_and_campaign_values(self):
         """Person / Campaign の代表値も display 変換＋色マップ命中する。"""
-        self.assertIn("統合済み", status_badge(Person(status="merged")))
+        self.assertIn("マージ済み", status_badge(Person(status="merged")))
         self.assertIn("app-status-badge--info", status_badge(Person(status="merged")))
 
         self.assertIn("配信失敗", status_badge(Campaign(status="failed")))

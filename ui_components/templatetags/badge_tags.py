@@ -51,7 +51,7 @@ _STATUS_BADGE_VARIANTS = {
     },
     ("Person", "status"): {
         "active": "success",    # 通常
-        "merged": "info",       # 統合済み
+        "merged": "info",       # マージ済み
         "archived": "muted",    # アーカイブ
     },
     ("Campaign", "status"): {
