@@ -271,6 +271,30 @@ class OsdUprightTests(TestCase):
         self.assertIs(out, warped)
 
 
+class OsdManagementCommandTests(TestCase):
+    """OSD 管理コマンドが Tesseract 未導入でも起動し、未導入を明示できることの確認。"""
+
+    def test_osd_check_runs_without_tesseract(self):
+        from io import StringIO
+        from django.core.management import call_command
+        out = StringIO()
+        # 例外を投げずに完走し、何らかの状態を出力する（pytesseract 未導入 or 本体未導入を明示）。
+        call_command("osd_check", stdout=out, stderr=StringIO())
+        text = out.getvalue()
+        self.assertIn("OSD 疎通確認", text)
+        # 未導入環境では pytesseract 未導入 か Tesseract 本体未検出 のどちらかを表示する。
+        self.assertTrue(
+            ("pytesseract" in text) or ("Tesseract" in text) or ("tesseract" in text)
+        )
+
+    def test_osd_verify_rotation_missing_image_errors_cleanly(self):
+        from django.core.management import call_command
+        from django.core.management.base import CommandError
+        # 存在しないパス指定 → CommandError（スタックトレースでなく明快なエラー）。
+        with self.assertRaises(CommandError):
+            call_command("osd_verify_rotation", "--image", "/no/such/file.png")
+
+
 def _poly(x, y, w, h):
     """[性質] 純関数 / 軸平行矩形の polygon dict（四隅）。テスト用。"""
     return {
