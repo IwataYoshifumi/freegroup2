@@ -23,8 +23,11 @@
       {% include "persons/_column_toggle.html" %}
     </div>
     <div class="app-table-wrapper">
-      {# js-person-page-sort：列見出しクリックの「現在ページ内DOMソート」対象（app.js）。
-         サーバー側多段フォームソート（?sort=）とは別系統で、URLは書き換えない。 #}
+      {% comment %}
+        js-person-page-sort：列見出しクリックの「現在ページ内DOMソート」対象（app.js）。
+        サーバー側多段フォームソート（?sort=）とは別系統で、URLは書き換えない。
+        ※複数行のメモは comment タグで囲む（波カッコ＃…＃の形は単一行専用で、複数行だと画面に漏れる）。
+      {% endcomment %}
       <table class="app-table app-table--nowrap js-person-page-sort">
         <thead>
           <tr>

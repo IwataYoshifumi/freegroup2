@@ -12,8 +12,7 @@ hidden(name="sort") へ「優先順つきカンマ区切り・降順は先頭 -�
 name を持たせず、方向ラジオは送信直前に disabled にして、URL を sort 単一パラメータに保つ。
 新規 CSS/JS ファイルは作らず、既存 app-collapsible / app-radio-toggle と inline script で完結。
 {% endcomment %}
-<div class="app-collapsible app-person-filter-collapsible js-person-sort-control{% if sort_is_active %} is-open{% endif %}"
-     style="grid-column: span 4; margin-top: var(--app-space-sm);">
+<div class="app-collapsible app-person-filter-collapsible js-person-sort-control{% if sort_is_active %} is-open{% endif %}">
   <button type="button" class="app-collapsible__header" data-action="toggle-collapsible"
           aria-expanded="{% if sort_is_active %}true{% else %}false{% endif %}">
     <span>ソート</span>

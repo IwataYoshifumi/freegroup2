@@ -14,7 +14,7 @@ v1.4.2 既存 7 項目（name/organization/department/title/email/tel/address）
 {% endcomment %}
 <form method="get" class="app-form-grid-edit">
   <input type="hidden" name="searched" value="1">
-  <div class="app-form-grid" style="grid-template-columns: repeat(4, 1fr);">
+  <div class="app-form-grid app-search-grid">
     <div class="app-form__group">
       <label class="app-form__label" for="id_name">氏名</label>
       <input type="text" id="id_name" name="name" value="{{ name }}" class="app-input">
@@ -59,7 +59,7 @@ v1.4.2 既存 7 項目（name/organization/department/title/email/tel/address）
         - 折りたたみ（app-collapsible）に格納し初期は閉。既定は「有効のみ」。
         この枝は show_status_filter 未指定（=persons 一覧のみ）で描画される。
       {% endcomment %}
-      <div class="app-collapsible app-person-filter-collapsible" style="grid-column: span 4;">
+      <div class="app-collapsible app-person-filter-collapsible">
         <button type="button" class="app-collapsible__header" data-action="toggle-collapsible"
                 aria-expanded="false">
           <span>ステータス</span>
