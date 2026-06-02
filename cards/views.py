@@ -229,7 +229,6 @@ def _build_debug_summary(debug_json, raw_json=None, bc_count=0):
     last = _get_last_attempt(debug_json) or {}
     cf = _flatten_attempt_candidates(last)
     cd = last.get("candidates_dedup") or []
-    results = last.get("results") or []
     wf = last.get("warp_failures") or []
 
     rejected = [x for x in cf if not x.get("passed")]
@@ -238,7 +237,11 @@ def _build_debug_summary(debug_json, raw_json=None, bc_count=0):
         f"{r}: {reason_counter.get(r, 0)}" for r in _REJECT_REASONS_ORDER
     )
 
-    results_count = len(results)
+    # 最終検出数は attempt 横断統合後（integrated_results）。旧 debug_json は最終 attempt にフォールバック。
+    integrated = debug_json.get("integrated_results")
+    if integrated is None:
+        integrated = last.get("results") or []
+    results_count = len(integrated)
     has_min_ng = _has_minimum_info_ng_count(raw_json)
     if has_min_ng is None:
         has_min_ng_str = "未実行（OCR 未走行）"
@@ -571,18 +574,23 @@ def _build_overlay_polygons(debug_json):
     is_giant: results 内の area_ratio 中央値の 1.5 倍以上のものに True。
               ただし results が 1 件以下の場合は判定スキップ（全て False）。
 
-    対象は最終 attempt の results（反転リトライがあれば 2 回目、なければ 1 回目）。
+    対象は attempt 横断統合の最終結果（integrated_results）。各要素の由来（origin）も付与する
+    （normal=通常 / inverted=反転）。integrated_results が無い旧 debug_json は最終 attempt に
+    フォールバックする。
     """
     if not debug_json:
         return []
-    last = _get_last_attempt(debug_json) or {}
     keys = ("top_left", "top_right", "bottom_right", "bottom_left")
     image_size = debug_json.get("image_size") or {}
     image_area = image_size.get("area") or 0
 
+    source = debug_json.get("integrated_results")
+    if source is None:
+        source = (_get_last_attempt(debug_json) or {}).get("results") or []
+
     # 各 polygon の座標と shoelace area を一旦計算
     raw = []
-    for r in last.get("results") or []:
+    for r in source:
         polygon = r.get("polygon") or {}
         coords = []
         for k in keys:
@@ -601,6 +609,7 @@ def _build_overlay_polygons(debug_json):
             "card_index": r.get("card_index"),
             "coords": coords,
             "area_ratio": area_ratio,
+            "origin": r.get("origin"),
         })
 
     # 巨大判定。results が 2 件以上のときのみ実施。
@@ -617,6 +626,9 @@ def _build_overlay_polygons(debug_json):
         cx = sum(c[0] for c in coords) / 4.0
         cy = sum(c[1] for c in coords) / 4.0
         is_giant = bool(threshold is not None and r["area_ratio"] >= threshold)
+        # 由来マーク：反転由来は "↺" を番号に添えて画面で判別可能にする（normal は無印）。
+        origin = r.get("origin")
+        origin_mark = "↺" if origin == "inverted" else ""
         items.append({
             "card_index": r["card_index"],
             "points_str": points_str,
@@ -624,6 +636,8 @@ def _build_overlay_polygons(debug_json):
             "centroid_y": cy,
             "is_giant": is_giant,
             "area_ratio": r["area_ratio"],
+            "origin": origin,
+            "origin_mark": origin_mark,
         })
     return items
 

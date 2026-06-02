@@ -32,6 +32,12 @@
     <div class="app-section__header">
       <h2>元画像</h2>
     </div>
+    {% if overlay_polygons %}
+      <p class="app-muted" style="font-size:13px;margin-top:0;">
+        通常・反転を統合した最終検出（{{ overlay_polygons|length }} 件）を重畳。番号末尾の
+        <strong>↺</strong> は反転由来（無印は通常由来）。
+      </p>
+    {% endif %}
     {% if original.image_file %}
       <div class="app-original-overlay">
         <img class="app-original-overlay__img" src="{{ original.image_file.url }}" alt="元画像">
@@ -47,7 +53,7 @@
                     x="{{ p.centroid_x|floatformat:1 }}"
                     y="{{ p.centroid_y|floatformat:1 }}"
                     text-anchor="middle"
-                    dominant-baseline="central">{{ p.card_index }}</text>
+                    dominant-baseline="central">{{ p.card_index }}{{ p.origin_mark }}</text>
             {% endfor %}
           </svg>
         {% endif %}

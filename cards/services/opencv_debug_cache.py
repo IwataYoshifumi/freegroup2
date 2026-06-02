@@ -141,6 +141,7 @@ def _build_debug_json(debug_result: dict) -> dict:
     マスク内 cross-reference 用の "index" を付与する。
     results は card_index と polygon のみのメタ情報に縮約する（warped 画像本体は
     BusinessCard.card_image 経由で参照可能）。candidates_dedup は mask タグ付きで転記する。
+    integrated_results（attempt 横断統合の最終結果）は card_index・polygon・origin に縮約する。
     sat_fallback / or_inversion はそのまま転記する。
     """
     attempts_meta = []
@@ -171,9 +172,20 @@ def _build_debug_json(debug_result: dict) -> dict:
             "results":          results_meta,
         })
 
+    # attempt 横断統合の最終結果（warped_image は除き polygon と origin のみ JSON 化）。
+    integrated_meta = [
+        {
+            "card_index": card_index,
+            "polygon": r.get("polygon"),
+            "origin": r.get("origin"),
+        }
+        for card_index, r in enumerate(debug_result.get("integrated_results") or [])
+    ]
+
     return {
         "image_size": debug_result.get("image_size"),
         "attempts": attempts_meta,
+        "integrated_results": integrated_meta,
         "sat_fallback": debug_result.get("sat_fallback"),
         "or_inversion": debug_result.get("or_inversion"),
         "error_message": debug_result.get("error_message", ""),

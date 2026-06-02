@@ -35,7 +35,7 @@ _SAT_WHITE_RATIO_MAX = 0.50
 # ── カードフィルタパラメータ ──────────────────────────────
 # 採否の主基準は縦横比のみ（rev2 §1.2.3）。範囲 1.6〜1.8 は名刺という物の形そのもので
 # 画像・解像度・撮影枚数によらない固定範囲＝確定値（日本標準 91×55≈1.65／欧米 89×51≈1.75）。
-_ASPECT_MIN = 1.6
+_ASPECT_MIN = 1.55
 _ASPECT_MAX = 1.8
 
 # ── 未確定パラメータ（settings から読む・仮値・評価基準で詰める） ──
@@ -77,17 +77,22 @@ _MASK_NAMES = ("diff", "edge", "sat")
 
 
 def results_from_debug_result(debug_result: dict) -> list[dict]:
-    """detect_cards_with_debug() の戻りから最終 attempt の検出結果（results）を取り出す。
+    """detect_cards_with_debug() の戻りから最終検出結果（統合 results）を取り出す。
 
     [性質] 純関数（DB 操作なし・副作用なし）
     [入力] debug_result: detect_cards_with_debug() の戻り値 dict
-    [出力] list[dict]: 最終 attempt の results。attempts が無ければ空リスト。
+    [出力] list[dict]: 通常・反転を attempt 横断統合した integrated_results。
+           （旧構造フォールバック：integrated_results が無ければ attempts[-1]["results"]。）
 
-    検出結果の在り処（attempts[-1]["results"]）を知る**唯一の窓口**。detect_cards() も
-    pipeline_coordinator もこの関数を通して results を受け取り、「results がどこにあるか」を
-    各所に重複させない。返り値構造を attempts[] へ変えたのに pipeline 側が旧トップレベル
-    results を読み続けて全件 garbage 化したバグ（1f9712f）の再発防止。
+    検出結果の在り処を知る**唯一の窓口**。detect_cards() も pipeline_coordinator も
+    この関数を通して results を受け取り、「results がどこにあるか」を各所に重複させない。
+    返り値構造を attempts[] へ変えたのに pipeline 側が旧トップレベル results を読み続けて
+    全件 garbage 化したバグ（1f9712f）の再発防止。
     """
+    # rev2: 通常・反転を常時両方走らせ attempt 横断統合した integrated_results が最終結果。
+    # 旧構造（attempts[-1].results）は integrated_results が無い場合のフォールバックとして残す。
+    if "integrated_results" in debug_result:
+        return debug_result["integrated_results"] or []
     attempts = debug_result.get("attempts") or []
     if not attempts:
         return []
@@ -159,7 +164,14 @@ def detect_cards_with_debug(image_path: str) -> dict:
                     ...
                 ],
             },
-            # attempt_no=2 は反転リトライが走った場合のみ
+            # attempt_no=2（反転）は常に実行される（rev2: passed==0 ゲート撤廃）
+        ],
+
+        # 通常・反転を attempt 横断統合した最終結果（通常優先で重複除去）。
+        # results_from_debug_result() はこれを返す。各要素に origin を付与。
+        "integrated_results": [
+            {"polygon": dict, "warped_image": PIL.Image.Image, "origin": "normal"|"inverted"},
+            ...
         ],
 
         # masks[*].candidates_filter の各要素：
@@ -228,41 +240,41 @@ def _detect_with_debug(image_path: str) -> dict:
         raw_masks, np_rgb, image_area,
         expand_ratio=0.0, expand_min_px=0,
     )
-    attempts = [_attempt_dict(1, "normal", attempt_1)]
 
-    # ④ 反転リトライ判定：通常で passed=0 のとき各生マスクを反転して再試行（新方式に通す）
+    # ④ 反転 attempt：通常の成否に関わらず常に実行する（rev2: 旧「passed==0 のとき」ゲートを撤廃）。
+    #    通常・反転は最後に attempt 横断で統合する（⑤）。反転側は polygon を外側へ拡張する。
+    inv_masks = {name: cv2.bitwise_not(m) for name, m in raw_masks.items()}
+    attempt_2 = _run_attempt(
+        inv_masks, np_rgb, image_area,
+        expand_ratio=_INVERTED_POLYGON_EXPAND_RATIO,
+        expand_min_px=_INVERTED_POLYGON_EXPAND_MIN_PX,
+    )
+    attempts = [
+        _attempt_dict(1, "normal", attempt_1),
+        _attempt_dict(2, "inverted", attempt_2),
+    ]
+
     passed_before = attempt_1["passed_count_total"]
+    passed_after = attempt_2["passed_count_total"]
     or_inversion = {
-        "attempted": False,
+        "attempted": True,
         "passed_before": passed_before,
-        "passed_after": passed_before,
-        "improved": False,
-        "polygon_expand": {"ratio": 0.0, "min_px": 0},
+        "passed_after": passed_after,
+        "improved": passed_after > 0,
+        "polygon_expand": {
+            "ratio":  _INVERTED_POLYGON_EXPAND_RATIO,
+            "min_px": _INVERTED_POLYGON_EXPAND_MIN_PX,
+        },
     }
 
-    if passed_before == 0:
-        inv_masks = {name: cv2.bitwise_not(m) for name, m in raw_masks.items()}
-        attempt_2 = _run_attempt(
-            inv_masks, np_rgb, image_area,
-            expand_ratio=_INVERTED_POLYGON_EXPAND_RATIO,
-            expand_min_px=_INVERTED_POLYGON_EXPAND_MIN_PX,
-        )
-        passed_after = attempt_2["passed_count_total"]
-        or_inversion = {
-            "attempted": True,
-            "passed_before": 0,
-            "passed_after": passed_after,
-            "improved": passed_after > 0,
-            "polygon_expand": {
-                "ratio":  _INVERTED_POLYGON_EXPAND_RATIO,
-                "min_px": _INVERTED_POLYGON_EXPAND_MIN_PX,
-            },
-        }
-        attempts.append(_attempt_dict(2, "inverted", attempt_2))
+    # ⑤ attempt 横断統合：通常(attempt1)優先で warp 済み結果を結合・重複除去する。
+    #    各 attempt 内の results は warp/拡張済み。ここでは結果レベルで横断 dedup する。
+    integrated_results = _integrate_results(attempt_1["results"], attempt_2["results"])
 
     return {
         "image_size": {"width": int(w), "height": int(h), "area": int(image_area)},
         "attempts": attempts,
+        "integrated_results": integrated_results,
         "sat_fallback": mask_data["sat_fallback"],
         "or_inversion": or_inversion,
         "error_message": "",
@@ -510,6 +522,56 @@ def _dedup_candidates(passed_all: list) -> tuple:
     # top-left の y 優先・x 次でソート（card_index の順序確定）
     kept.sort(key=lambda r: (r[3], r[2]))  # r = (mask, box, bx, by) → (by, bx)
     return candidates_dedup, kept
+
+
+def _bbox_from_polygon(polygon: dict) -> tuple:
+    """[性質] 純関数 / polygon dict（四隅 {x,y}）から軸平行 bbox (x, y, w, h) を返す。"""
+    keys = ("top_left", "top_right", "bottom_right", "bottom_left")
+    xs = [float((polygon.get(k) or {}).get("x", 0)) for k in keys]
+    ys = [float((polygon.get(k) or {}).get("y", 0)) for k in keys]
+    x0, y0 = min(xs), min(ys)
+    return (int(x0), int(y0), int(max(xs) - x0), int(max(ys) - y0))
+
+
+def _integrate_results(results_normal: list, results_inverted: list) -> list:
+    """[性質] 純関数 / 通常・反転の warp 済み結果を attempt 横断で統合する（通常優先）。
+
+    通常(attempt1)を反転(attempt2)より優先し、同一名刺の重複は通常側を残す。同一 origin 内では
+    面積最大優先（既存 _dedup_candidates と同じ rev2 §1.4 ルール）。重複判定は結果 polygon の
+    bbox で IoU＋中心距離（_find_duplicate_index）。
+
+    [入力] results_normal / results_inverted: {polygon, warped_image} の list（各 attempt の results）
+    [出力] list[dict]: 統合後の結果。各要素に "origin"（"normal"|"inverted"）を付与。
+           top-left の y 優先・x 次でソート（card_index の順序確定）。
+    """
+    iou_threshold = _dedup_iou_threshold()
+    center_dist_ratio = _dedup_center_dist_ratio()
+
+    # (origin_rank, -area, origin, result, bbox)。origin_rank 昇順＝通常優先、同 rank 内は面積降順。
+    tagged = []
+    for origin_rank, (origin, results) in enumerate(
+        (("normal", results_normal), ("inverted", results_inverted))
+    ):
+        for r in results or []:
+            bx, by, bw, bh = _bbox_from_polygon(r.get("polygon") or {})
+            tagged.append((origin_rank, -(bw * bh), origin, r, (bx, by, bw, bh)))
+    tagged.sort(key=lambda t: (t[0], t[1]))
+
+    kept = []          # (by, bx, result_with_origin)
+    kept_bboxes = []   # (bx, by, bw, bh)
+    for _rank, _neg_area, origin, r, bbox in tagged:
+        bx, by, bw, bh = bbox
+        dup_idx = _find_duplicate_index(
+            bx, by, bw, bh, kept_bboxes, iou_threshold, center_dist_ratio
+        )
+        if dup_idx is None:
+            out = dict(r)
+            out["origin"] = origin
+            kept.append((by, bx, out))
+            kept_bboxes.append(bbox)
+
+    kept.sort(key=lambda k: (k[0], k[1]))  # top-left y 優先・x 次
+    return [out for _by, _bx, out in kept]
 
 
 def _warp_kept(

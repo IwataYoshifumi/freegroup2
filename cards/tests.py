@@ -111,6 +111,69 @@ _FAKE_OCR_RESULT = {
 }
 
 
+def _poly(x, y, w, h):
+    """[性質] 純関数 / 軸平行矩形の polygon dict（四隅）。テスト用。"""
+    return {
+        "top_left":     {"x": x,     "y": y},
+        "top_right":    {"x": x + w, "y": y},
+        "bottom_right": {"x": x + w, "y": y + h},
+        "bottom_left":  {"x": x,     "y": y + h},
+    }
+
+
+class CrossAttemptIntegrationTests(TestCase):
+    """rev2: 反転常時化＋attempt横断統合dedup（通常優先）の番人。"""
+
+    def setUp(self):
+        self._tmp_media = tempfile.mkdtemp(prefix="fg2_test_media_")
+        self._override = override_settings(MEDIA_ROOT=self._tmp_media)
+        self._override.enable()
+        self.addCleanup(self._override.disable)
+        self.addCleanup(lambda: shutil.rmtree(self._tmp_media, ignore_errors=True))
+
+    def test_inversion_always_runs_two_attempts(self):
+        """通常で検出できても反転 attempt は常に走り、attempts は2要素・integrated_results を持つ。"""
+        path = os.path.join(self._tmp_media, "synthetic_card.png")
+        with open(path, "wb") as f:
+            f.write(_synthetic_card_png_bytes())
+
+        debug_result = detect_cards_with_debug(path)
+        self.assertEqual(len(debug_result["attempts"]), 2)
+        self.assertEqual(debug_result["attempts"][0]["type"], "normal")
+        self.assertEqual(debug_result["attempts"][1]["type"], "inverted")
+        self.assertTrue(debug_result["or_inversion"]["attempted"])
+        self.assertIn("integrated_results", debug_result)
+
+    def test_integrate_results_normal_priority_on_overlap(self):
+        """通常・反転が同一名刺で重複したら通常(normal)を残す。"""
+        from cards.services.detectors.opencv_detector import _integrate_results
+
+        normal = [{"polygon": _poly(100, 100, 600, 360), "warped_image": "N"}]
+        inverted = [{"polygon": _poly(105, 105, 600, 360), "warped_image": "I"}]
+        merged = _integrate_results(normal, inverted)
+
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0]["origin"], "normal")
+        self.assertEqual(merged[0]["warped_image"], "N")
+
+    def test_integrate_results_keeps_disjoint_from_both(self):
+        """重ならない通常・反転の検出は両方残り、origin が付く。"""
+        from cards.services.detectors.opencv_detector import _integrate_results
+
+        normal = [{"polygon": _poly(100, 100, 600, 360), "warped_image": "N"}]
+        inverted = [{"polygon": _poly(100, 1000, 600, 360), "warped_image": "I"}]
+        merged = _integrate_results(normal, inverted)
+
+        self.assertEqual(len(merged), 2)
+        origins = {m["origin"] for m in merged}
+        self.assertEqual(origins, {"normal", "inverted"})
+
+    def test_bbox_from_polygon(self):
+        from cards.services.detectors.opencv_detector import _bbox_from_polygon
+
+        self.assertEqual(_bbox_from_polygon(_poly(10, 20, 30, 40)), (10, 20, 30, 40))
+
+
 class SatFallbackExclusionRemovedTests(TestCase):
     """rev2: sat_fallback の除外動作撤廃の番人。
 
@@ -163,13 +226,13 @@ class ResultsAccessorTests(TestCase):
         self.addCleanup(lambda: shutil.rmtree(self._tmp_media, ignore_errors=True))
 
     def test_results_accessor_finds_detections_not_toplevel(self):
-        """検出結果は attempts[-1] にあり、results_from_debug_result が detect_cards と一致する。"""
+        """検出結果は integrated_results にあり、results_from_debug_result が detect_cards と一致する。"""
         path = os.path.join(self._tmp_media, "synthetic_card.png")
         with open(path, "wb") as f:
             f.write(_synthetic_card_png_bytes())
 
         debug_result = detect_cards_with_debug(path)
-        # バグの前提：トップレベルに results は無い（旧 pipeline はここを読んで常に空だった）
+        # バグの前提：トップレベルに生 results キーは無い（旧 pipeline はここを読んで常に空だった）
         self.assertNotIn("results", debug_result)
         accessor = results_from_debug_result(debug_result)
         self.assertGreaterEqual(len(accessor), 1)
