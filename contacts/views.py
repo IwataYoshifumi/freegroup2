@@ -50,6 +50,98 @@ from .models import Contact, ContactFieldConfidence, ContactSns
 User = get_user_model()
 
 
+# ----------------------------------------------------------------------
+# Contact 一覧の多段サーバー側ソート（HIG v1.5 §6.2、persons 実装に倣う）。
+#
+# 「画面でソートできる列＝許可リストにあるキー」を一致させ、それ以外は無視＝既定の並びに戻す。
+# クエリは単一パラメータ sort に優先順つきカンマ区切り、降順は先頭 "-"。
+#   例 ?sort=organization,-title,name （第1=会社昇順 / 第2=役職降順 / 第3=氏名昇順）
+# 氏名は読み（phonetic_name）の五十音順。Contact 自身のフィールドなので直参照（join 不要）。
+# ----------------------------------------------------------------------
+
+CONTACT_LIST_SORT_FIELD_MAP = {
+    "name": "phonetic_name",      # 氏名は読み（カタカナ）の五十音順
+    "company": "organization",
+    "title": "title",
+    "email": "email",             # 連絡先列のソートキー
+}
+# 多段ソートの最大段数（ソートコントロールの行数と一致）。
+CONTACT_LIST_SORT_MAX_KEYS = 3
+
+
+def _parse_contact_sort(params):
+    """単一 sort パラメータ（例 "company,-title,name"）を [(key, direction), ...] に解決する。
+
+    [性質] 純関数（DB 操作なし・副作用なし）
+    [入力] params: QueryDict 様（request.GET）
+    [出力] list[tuple[str, str]]（key は許可リスト内、direction は "asc" / "desc"）
+        - 先頭 "-" は降順、無印は昇順。
+        - 許可リスト外キー・空トークンは無視（不正値は黙って捨てる＝既定の並びに戻す）。
+        - 同一キーの二重指定は先勝ちで除外。最大 CONTACT_LIST_SORT_MAX_KEYS 段まで。
+    """
+    raw = params.get("sort") or ""
+    tokens = []
+    seen = set()
+    for chunk in raw.split(","):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        if chunk.startswith("-"):
+            direction = "desc"
+            key = chunk[1:]
+        else:
+            direction = "asc"
+            key = chunk
+        if key not in CONTACT_LIST_SORT_FIELD_MAP or key in seen:
+            continue
+        seen.add(key)
+        tokens.append((key, direction))
+        if len(tokens) >= CONTACT_LIST_SORT_MAX_KEYS:
+            break
+    return tokens
+
+
+def _apply_contact_list_sort(qs, params):
+    """Contact QuerySet に多段ソート（?sort=key,-key,...）を適用する（純関数）。
+
+    [性質] 純関数（QuerySet を加工して返すのみ・DB 操作なし）
+    有効トークンが無ければ qs をそのまま返す（呼び出し側の既定並びを温存）。
+    指定有りのときだけ許可リスト経由で order_by を多段で差し替える（末尾に pk で安定化）。
+    """
+    tokens = _parse_contact_sort(params)
+    if not tokens:
+        return qs
+    order = []
+    for key, direction in tokens:
+        prefix = "-" if direction == "desc" else ""
+        order.append(prefix + CONTACT_LIST_SORT_FIELD_MAP[key])
+    order.append("pk")
+    return qs.order_by(*order)
+
+
+def _contact_sort_context(params):
+    """ソート UI（検索フォーム内の折りたたみ）の描画用 context を作る（純関数）。
+
+    [性質] 純関数（DB 操作なし・副作用なし）
+    [出力] dict:
+        sort_rows: CONTACT_LIST_SORT_MAX_KEYS 行分の [{"key", "dir"}]
+                   （未指定行は key="" / dir="asc"）。各行が列ドロップダウン＋方向トグルに対応。
+        sort_is_active: bool（有効トークンが 1 つでもあるか＝折りたたみの開閉初期状態の判定）。
+        sort_value: 正規化済み sort 文字列（hidden の初期値・no-JS 再送信用）。
+    """
+    tokens = _parse_contact_sort(params)
+    rows = [{"key": k, "dir": d} for (k, d) in tokens]
+    while len(rows) < CONTACT_LIST_SORT_MAX_KEYS:
+        rows.append({"key": "", "dir": "asc"})
+    return {
+        "sort_rows": rows,
+        "sort_is_active": bool(tokens),
+        "sort_value": ",".join(
+            ("-" + k if d == "desc" else k) for k, d in tokens
+        ),
+    }
+
+
 def get_current_user(request):
     """認証未実装のための仮処理（既存 cards/views.py と同じ実装）。
 
@@ -127,7 +219,9 @@ class ContactListView(ListView):
         if p.get("address", "").strip():
             qs = qs.filter(address__icontains=p["address"].strip())
 
-        return qs.order_by("-updated_at", "-created_at")
+        # 既定の並びは更新日時降順。?sort= があれば許可リスト経由で多段ソートに差し替える。
+        qs = qs.order_by("-updated_at", "-created_at")
+        return _apply_contact_list_sort(qs, self.request.GET)
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -145,6 +239,8 @@ class ContactListView(ListView):
                 "address",
                 "status",
                 "searched",
+                # HIG §6.1：並び替え・ページ状態を戻るで復元するため sort を追加（単一パラメータ）。
+                "sort",
                 "page",
             ],
         )
@@ -156,6 +252,8 @@ class ContactListView(ListView):
             context[key] = self.request.GET.get(key, "")
         context["selected_statuses"] = self._get_selected_statuses()
         context["searched"] = self.request.GET.get("searched") == "1"
+        # 検索フォーム内ソートコントロール用（sort_rows / sort_is_active / sort_value）。
+        context.update(_contact_sort_context(self.request.GET))
         return context
 
 

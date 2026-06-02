@@ -1,0 +1,108 @@
+{% comment %}
+列表示切替 partial（タスクD-1。HIG v1.5 §6）。persons の _column_toggle.html を手本に
+contacts 用へ複製・contacts 専用。共有化はしない（localStorage キー・列構成が異なるため）。
+
+ドロップダウン＋チェックボックスで列を表示/非表示し、localStorage に永続化する。
+氏名列は固定（disabled checked、非表示不可）。status・会社・役職・連絡先・更新日時を切替可能。
+localStorage キーは contacts 専用（contact_list_visible_columns）で persons と混ざらない。
+
+今回は列の中身（連絡先分割・住所追加など）には踏み込まず、現状の表示列の ON/OFF のみ。
+列数が少なく冗長列もないため既定は全 ON（data-default 未指定＝既定 ON）。
+
+利用前提（呼び出し側）：
+  <th data-col-key="company">会社</th>
+  <td data-col-key="company">...</td>
+{% endcomment %}
+<div class="js-contact-column-toggle" style="position:relative; display:inline-block;">
+  <button type="button" class="app-btn app-btn--outline-secondary app-btn--sm js-contact-column-toggle__btn"
+          aria-haspopup="true" aria-expanded="false">
+    <i class="bi bi-layout-three-columns"></i> 表示列を選択
+  </button>
+  <div class="js-contact-column-toggle__menu" hidden
+       style="position:absolute; top:100%; left:0; z-index:1000;
+              background:#fff; border:1px solid #cbd5e1; border-radius:6px;
+              box-shadow:0 4px 12px rgba(0,0,0,0.12); padding:8px;
+              min-width:200px; text-align:left;">
+    <label style="display:flex; align-items:center; gap:6px; padding:4px;">
+      <input type="checkbox" disabled checked> 氏名
+      <span style="color:#94a3b8; font-size:0.85em;">(必須)</span>
+    </label>
+    <label style="display:flex; align-items:center; gap:6px; padding:4px; cursor:pointer;">
+      <input type="checkbox" class="js-contact-column-toggle__cb" data-col-key="status"> status
+    </label>
+    <label style="display:flex; align-items:center; gap:6px; padding:4px; cursor:pointer;">
+      <input type="checkbox" class="js-contact-column-toggle__cb" data-col-key="company"> 会社
+    </label>
+    <label style="display:flex; align-items:center; gap:6px; padding:4px; cursor:pointer;">
+      <input type="checkbox" class="js-contact-column-toggle__cb" data-col-key="title"> 役職
+    </label>
+    <label style="display:flex; align-items:center; gap:6px; padding:4px; cursor:pointer;">
+      <input type="checkbox" class="js-contact-column-toggle__cb" data-col-key="email"> 連絡先
+    </label>
+    <label style="display:flex; align-items:center; gap:6px; padding:4px; cursor:pointer;">
+      <input type="checkbox" class="js-contact-column-toggle__cb" data-col-key="updated_at"> 更新日時
+    </label>
+  </div>
+</div>
+<script>
+  (function () {
+    if (window.__contactColumnToggleInit) return;
+    window.__contactColumnToggleInit = true;
+    var STORAGE_KEY = 'contact_list_visible_columns';
+    // この partial はテーブルより上（ツールバー）に置かれるため初期化を遅延する。
+    // 即時実行だと初期 apply() の時点でテーブルの [data-col-key] 要素が未生成で、
+    // localStorage 復元状態がテーブルに反映されない（再読込時に列が消えないバグ）。
+    function init() {
+    document.querySelectorAll('.js-contact-column-toggle').forEach(function (wrap) {
+      var btn = wrap.querySelector('.js-contact-column-toggle__btn');
+      var menu = wrap.querySelector('.js-contact-column-toggle__menu');
+      var cbs = wrap.querySelectorAll('.js-contact-column-toggle__cb');
+
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var opening = menu.hidden;
+        menu.hidden = !opening;
+        btn.setAttribute('aria-expanded', opening ? 'true' : 'false');
+      });
+      document.addEventListener('click', function (e) {
+        if (menu.hidden) return;
+        if (!menu.contains(e.target) && e.target !== btn && !btn.contains(e.target)) {
+          menu.hidden = true;
+          btn.setAttribute('aria-expanded', 'false');
+        }
+      });
+
+      var saved = {};
+      try { saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); } catch (e) { saved = {}; }
+      cbs.forEach(function (cb) {
+        var key = cb.dataset.colKey;
+        // 保存済みキーは保存値を優先。未保存キーは data-default（"0"=初期OFF、それ以外=初期ON）。
+        var def = cb.dataset.default !== '0';
+        cb.checked = saved.hasOwnProperty(key) ? !!saved[key] : def;
+        apply(cb);
+      });
+      cbs.forEach(function (cb) {
+        cb.addEventListener('change', function () { apply(cb); save(); });
+      });
+
+      function apply(cb) {
+        var key = cb.dataset.colKey;
+        var visible = cb.checked;
+        document.querySelectorAll('[data-col-key="' + key + '"]').forEach(function (el) {
+          el.style.display = visible ? '' : 'none';
+        });
+      }
+      function save() {
+        var state = {};
+        cbs.forEach(function (cb) { state[cb.dataset.colKey] = cb.checked; });
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) { /* ignore quota */ }
+      }
+    });
+    }
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', init);
+    } else {
+      init();
+    }
+  })();
+</script>

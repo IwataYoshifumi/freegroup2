@@ -1545,6 +1545,143 @@ class ContactListViewTests(TestCase):
         resp = c.get(self.url)
         self.assertEqual(resp.status_code, 200)
 
+    # ---- HIG v1.5 §6.2：多段サーバー側ソート（単一 sort パラメータ、例 ?sort=company,-title,name）----
+
+    def test_single_key_sort_asc_and_desc(self):
+        """?sort=company（昇順）/ ?sort=-company（降順）で会社順に並ぶ。"""
+        c_c = self._make_primary(full_name="C", organization="Cccorp")
+        c_a = self._make_primary(full_name="A", organization="Aaacorp")
+        c_b = self._make_primary(full_name="B", organization="Bbbcorp")
+
+        resp = self.client.get(self.url, {"sort": "company"})
+        ids = [c.id for c in resp.context["contacts"]]
+        self.assertLess(ids.index(c_a.id), ids.index(c_b.id))
+        self.assertLess(ids.index(c_b.id), ids.index(c_c.id))
+        self.assertTrue(resp.context["sort_is_active"])
+        self.assertEqual(resp.context["sort_rows"][0], {"key": "company", "dir": "asc"})
+
+        resp = self.client.get(self.url, {"sort": "-company"})
+        ids = [c.id for c in resp.context["contacts"]]
+        self.assertLess(ids.index(c_c.id), ids.index(c_b.id))
+        self.assertLess(ids.index(c_b.id), ids.index(c_a.id))
+        self.assertEqual(resp.context["sort_rows"][0], {"key": "company", "dir": "desc"})
+
+    def test_multi_key_sort_priority(self):
+        """?sort=company,-name で 会社昇順 → 同社内は氏名（読み）降順（多段・全件）。"""
+        # 同じ会社 "Same" の 2 人。氏名ソートは phonetic_name 順なので読みを付ける。
+        c_same_z = self._make_primary(
+            full_name="Zoe", organization="Same", phonetic_name="ゾエ"
+        )
+        c_same_a = self._make_primary(
+            full_name="Amy", organization="Same", phonetic_name="エイミー"
+        )
+        c_other = self._make_primary(
+            full_name="Mike", organization="Zzcorp", phonetic_name="マイク"
+        )
+        resp = self.client.get(self.url, {"sort": "company,-name"})
+        ids = [c.id for c in resp.context["contacts"]]
+        # 会社 "Same" グループが "Zzcorp" より前、グループ内は読み降順 ゾエ→エイミー
+        self.assertLess(ids.index(c_same_z.id), ids.index(c_same_a.id))
+        self.assertLess(ids.index(c_same_a.id), ids.index(c_other.id))
+        self.assertEqual(resp.context["sort_rows"][0], {"key": "company", "dir": "asc"})
+        self.assertEqual(resp.context["sort_rows"][1], {"key": "name", "dir": "desc"})
+
+    def test_name_sort_uses_phonetic_name(self):
+        """氏名ソート（?sort=name）は漢字コード順でなく phonetic_name（カタカナ読み）の五十音順。"""
+        # 漢字順なら 佐(U+4F50) < 田(U+7530) < 鈴(U+9234) で sato→tanaka→suzuki になり、
+        # 読み順（sato→suzuki→tanaka）と食い違うため、読みで並んでいることを区別できる。
+        c_tanaka = self._make_primary(full_name="田中", phonetic_name="タナカ")
+        c_suzuki = self._make_primary(full_name="鈴木", phonetic_name="スズキ")
+        c_sato = self._make_primary(full_name="佐藤", phonetic_name="サトウ")
+
+        resp = self.client.get(self.url, {"sort": "name"})
+        ids = [c.id for c in resp.context["contacts"]]
+        self.assertLess(ids.index(c_sato.id), ids.index(c_suzuki.id))
+        self.assertLess(ids.index(c_suzuki.id), ids.index(c_tanaka.id))
+
+        resp = self.client.get(self.url, {"sort": "-name"})
+        ids = [c.id for c in resp.context["contacts"]]
+        self.assertLess(ids.index(c_tanaka.id), ids.index(c_suzuki.id))
+        self.assertLess(ids.index(c_suzuki.id), ids.index(c_sato.id))
+
+    def test_invalid_keys_ignored_in_multi(self):
+        """許可リスト外キー（department/address）は無視され、有効キーだけ適用される。"""
+        c_z = self._make_primary(full_name="Z", organization="Zzcorp")
+        c_a = self._make_primary(full_name="A", organization="Aaacorp")
+        resp = self.client.get(self.url, {"sort": "department,company,address"})
+        ids = [c.id for c in resp.context["contacts"]]
+        self.assertLess(ids.index(c_a.id), ids.index(c_z.id))
+        self.assertTrue(resp.context["sort_is_active"])
+        self.assertEqual(resp.context["sort_rows"][0], {"key": "company", "dir": "asc"})
+
+    def test_all_invalid_or_empty_sort_keeps_default(self):
+        """全キーが不正（or 空）なら sort 無効＝既定の並び（-updated_at,-created_at）を維持。"""
+        resp = self.client.get(self.url, {"sort": "department,address"})
+        self.assertFalse(resp.context["sort_is_active"])
+        self.assertEqual(resp.context["sort_value"], "")
+        self.assertTrue(all(r["key"] == "" for r in resp.context["sort_rows"]))
+
+        resp_empty = self.client.get(self.url, {"sort": ""})
+        self.assertFalse(resp_empty.context["sort_is_active"])
+
+    def test_no_sort_param_keeps_default_order(self):
+        """sort 未指定なら既定並び（updated_at 降順）を維持し、折りたたみは閉じ判定。"""
+        from datetime import timedelta
+
+        c_old = self._make_primary(full_name="Old", organization="ZZZ")
+        c_new = self._make_primary(full_name="New", organization="AAA")
+        now = timezone.now()
+        Contact.objects.filter(pk=c_old.pk).update(updated_at=now - timedelta(hours=1))
+        Contact.objects.filter(pk=c_new.pk).update(updated_at=now)
+
+        resp = self.client.get(self.url)
+        ids = [c.id for c in resp.context["contacts"]]
+        # 会社順ではなく updated_at 降順（new が old より前）
+        self.assertLess(ids.index(c_new.id), ids.index(c_old.id))
+        self.assertFalse(resp.context["sort_is_active"])
+        self.assertEqual(resp.context["sort_value"], "")
+
+    def test_duplicate_key_first_wins(self):
+        """同一キーの二重指定は先勝ち（?sort=-company,company → company 降順のみ）。"""
+        resp = self.client.get(self.url, {"sort": "-company,company"})
+        rows = resp.context["sort_rows"]
+        self.assertEqual(rows[0], {"key": "company", "dir": "desc"})
+        self.assertEqual(rows[1]["key"], "")
+
+    def test_sort_control_and_page_sort_markers_rendered(self):
+        """検索フォーム内ソートコントロール＋補助JSソート＋列切替のマーカーが描画される。"""
+        resp = self.client.get(self.url)
+        body = resp.content.decode("utf-8")
+        # 検索フォーム内ソートコントロール（共有 _sort_control.html）
+        self.assertIn("js-person-sort-control", body)
+        self.assertIn('name="sort"', body)
+        for label in ("指定なし", "氏名", "会社", "役職", "連絡先"):
+            self.assertIn(label, body)
+        # 補助JSソート（contacts 用フック）＋氏名セルの読みキー
+        self.assertIn("js-contact-page-sort", body)
+        self.assertIn("data-sort-col", body)
+        self.assertIn("data-sort-key", body)
+        # 列切替（contacts 専用 localStorage キー）
+        self.assertIn("data-col-key", body)
+        self.assertIn("contact_list_visible_columns", body)
+
+    def test_pagination_preserves_sort_query(self):
+        """ソート状態でページ送りしても sort が失われない（共有 _pagination.html）。"""
+        for i in range(25):
+            self._make_primary(full_name=f"pp-{i:02d}", organization=f"org{i:02d}")
+        resp = self.client.get(self.url, {"sort": "-company"})
+        self.assertTrue(resp.context["is_paginated"])
+        body = resp.content.decode("utf-8")
+        self.assertTrue("sort=-company" in body or "sort=%2Dcompany" in body)
+
+    def test_push_current_captures_sort(self):
+        """戻る復元用に push_current が sort を取り込む（HIG §6.1）。"""
+        resp = self.client.get(self.url, {"sort": "company,-title"})
+        back = resp.context["back"]
+        urls = " ".join(entry.get("url", "") for entry in back.back_stack)
+        self.assertIn("sort=", urls)
+        self.assertIn("company", urls)
+
 
 # ======================================================================
 # D-Form ステップ1：ContactBaseForm / ContactUpdateForm /
