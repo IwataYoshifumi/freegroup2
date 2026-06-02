@@ -27,6 +27,71 @@ from cards.services.detectors.opencv_detector import (
 )
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 検出評価の物差し（rev2 §3.2「正解枚数ベース・第1段」）。
+# 座標 IoU 照合は行わない簡易版＝「枚数の一致／過不足」のみで測る（正解4点は後日）。
+# 各値は実物画像で確定済み。
+# ─────────────────────────────────────────────────────────────────────────────
+DETECTION_GROUND_TRUTH = {
+    "296f9aef-68ea-49e8-9482-2683405039cb": 6,   # ①
+    "602e1478-3b8e-49be-9900-a551978846f2": 0,   # ②（人物写真・名刺なし＝ゴースト判定用）
+    "9ddc2224-4420-4336-953b-a234c897a333": 8,   # ③
+    "9c4ca714-637e-4dfd-8892-97c05c81044b": 4,   # ④（白名刺2枚落ち）
+    "67a044a2-47f0-4c29-b860-1bda870675f2": 1,   # ⑤（白名刺・検出0）
+    # ⑥ 実物は8枚。設計方針rev2.md:84「名刺6枚」は誤記（rev2 本体は正式化時に修正）。
+    "4d04ea8b-d61e-4528-8271-39c7f483cb84": 8,   # ⑥（緑机）
+}
+
+
+def score_detection_counts(ground_truth: dict, detected_counts: dict) -> dict:
+    """[性質] 純関数（DB操作なし・副作用なし）/ 正解枚数と検出枚数から枚数ベースの簡易スコアを出す。
+
+    座標を持たないため個々の検出が正解名刺に対応するかの IoU 照合は行わない簡易版。
+    1画像の「正しく拾えた枚数」は min(検出, 正解)、「過検出」は max(0, 検出 - 正解) で近似する。
+
+    [入力]
+      ground_truth:    {uuid: 正解枚数}
+      detected_counts: {uuid: 現状検出枚数（統合結果の件数）}
+    [出力] dict:
+      per_image:        [{uuid, truth, detected, diff, matched, over, short, is_ghost, ghost_hits}]
+      truth_total:      正解総数（検出率の分母）
+      matched_total:    正しく拾えた枚数の合計（Σ min(検出,正解)）
+      detection_rate:   matched_total / truth_total（truth_total=0 なら None）
+      over_total:       過検出件数の合計（Σ max(0, 検出-正解)）
+      ghost_detections: {uuid: 検出数}（正解0＝名刺なし画像で1件以上出たもの）
+    """
+    per_image = []
+    truth_total = 0
+    matched_total = 0
+    over_total = 0
+    ghost_detections = {}
+    for uuid, truth in ground_truth.items():
+        det = detected_counts.get(uuid, 0)
+        matched = min(det, truth)
+        over = max(0, det - truth)
+        short = max(0, truth - det)
+        is_ghost = (truth == 0)
+        truth_total += truth
+        matched_total += matched
+        over_total += over
+        if is_ghost and det > 0:
+            ghost_detections[uuid] = det
+        per_image.append({
+            "uuid": uuid, "truth": truth, "detected": det,
+            "diff": det - truth, "matched": matched, "over": over,
+            "short": short, "is_ghost": is_ghost,
+            "ghost_hits": det if is_ghost else 0,
+        })
+    return {
+        "per_image": per_image,
+        "truth_total": truth_total,
+        "matched_total": matched_total,
+        "detection_rate": (matched_total / truth_total) if truth_total else None,
+        "over_total": over_total,
+        "ghost_detections": ghost_detections,
+    }
+
+
 def _high_saturation_png_bytes(w=1000, h=800, rw=600, rh=360) -> bytes:
     """[性質] 純関数 / 全面を高彩度の緑で塗り、低彩度（白）の名刺矩形を1枚置いた PNG バイト列。
 
@@ -109,6 +174,38 @@ _FAKE_OCR_RESULT = {
         }
     ],
 }
+
+
+class DetectionScoringHelperTests(TestCase):
+    """rev2 §3.2 枚数ベース採点ヘルパー（score_detection_counts）が動くことの確認。
+
+    ベースラインの良し悪しは判定しない（検出率100%を要求しない）。採点ロジック自体の番人。
+    """
+
+    def test_scoring_basic_counts(self):
+        gt = {"a": 6, "b": 0, "c": 4}
+        det = {"a": 4, "b": 1, "c": 5}
+        r = score_detection_counts(gt, det)
+        # 正解総数 6+0+4=10
+        self.assertEqual(r["truth_total"], 10)
+        # 正しく拾えた枚数 min(4,6)+min(1,0)+min(5,4)=4+0+4=8
+        self.assertEqual(r["matched_total"], 8)
+        self.assertAlmostEqual(r["detection_rate"], 0.8)
+        # 過検出 max(0,4-6)+max(0,1-0)+max(0,5-4)=0+1+1=2
+        self.assertEqual(r["over_total"], 2)
+        # ゴースト（正解0で検出>0）は b の1件
+        self.assertEqual(r["ghost_detections"], {"b": 1})
+
+    def test_scoring_missing_uuid_counts_as_zero(self):
+        r = score_detection_counts({"x": 3}, {})  # 検出データ無し→0扱い
+        self.assertEqual(r["matched_total"], 0)
+        self.assertEqual(r["per_image"][0]["short"], 3)
+        self.assertEqual(r["over_total"], 0)
+
+    def test_ground_truth_ledger_has_six_entries(self):
+        self.assertEqual(len(DETECTION_GROUND_TRUTH), 6)
+        # ② は名刺なし（ゴースト判定の基準）
+        self.assertEqual(DETECTION_GROUND_TRUTH["602e1478-3b8e-49be-9900-a551978846f2"], 0)
 
 
 def _poly(x, y, w, h):
