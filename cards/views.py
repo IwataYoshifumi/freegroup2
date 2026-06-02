@@ -185,7 +185,7 @@ class OriginalDetailView(DetailView):
 _REJECT_REASONS_ORDER = ("too_small", "zero_size", "aspect_invalid")
 
 # debug_json の attempt["masks"] のマスク名（順序固定）。
-_MASK_NAMES = ("diff", "edge", "sat")
+_MASK_NAMES = ("diff", "edge", "sat", "adaptive")
 
 
 def _get_last_attempt(debug_json):
@@ -346,11 +346,13 @@ _RAW_MASK_TYPES = (
     DebugMask.MaskType.DIFF,
     DebugMask.MaskType.EDGE,
     DebugMask.MaskType.SAT,
+    DebugMask.MaskType.ADAPTIVE,
 )
 _CLOSED_MASK_TYPES = (
     DebugMask.MaskType.DIFF_CLOSED,
     DebugMask.MaskType.EDGE_CLOSED,
     DebugMask.MaskType.SAT_CLOSED,
+    DebugMask.MaskType.ADAPTIVE_CLOSED,
 )
 _BLOCK_MASK_TYPES = _RAW_MASK_TYPES + _CLOSED_MASK_TYPES
 
@@ -358,12 +360,14 @@ _BLOCK_MASK_TYPES = _RAW_MASK_TYPES + _CLOSED_MASK_TYPES
 # 抽出される（opencv_detector._extract_candidates_from_mask）ため、矩形オーバーレイは
 # クローズ後マスク（is_closed=True）にのみ重ねる。
 _MASK_TYPE_TO_NAME = {
-    DebugMask.MaskType.DIFF:        ("diff", False),
-    DebugMask.MaskType.EDGE:        ("edge", False),
-    DebugMask.MaskType.SAT:         ("sat",  False),
-    DebugMask.MaskType.DIFF_CLOSED: ("diff", True),
-    DebugMask.MaskType.EDGE_CLOSED: ("edge", True),
-    DebugMask.MaskType.SAT_CLOSED:  ("sat",  True),
+    DebugMask.MaskType.DIFF:            ("diff", False),
+    DebugMask.MaskType.EDGE:            ("edge", False),
+    DebugMask.MaskType.SAT:             ("sat",  False),
+    DebugMask.MaskType.ADAPTIVE:        ("adaptive", False),
+    DebugMask.MaskType.DIFF_CLOSED:     ("diff", True),
+    DebugMask.MaskType.EDGE_CLOSED:     ("edge", True),
+    DebugMask.MaskType.SAT_CLOSED:      ("sat",  True),
+    DebugMask.MaskType.ADAPTIVE_CLOSED: ("adaptive", True),
 }
 
 # 「惜しい棄却」を太字赤で出す閾値。too_small はこの面積比以上だけ near（緑採用品と同等規模）。
@@ -460,13 +464,13 @@ def _build_mask_blocks(debug_masks, debug_json):
     [入力]
       debug_masks: DebugMask の iterable（同一 OriginalImage 配下）
       debug_json:  OriginalImage.debug_json（候補のオーバーレイ元）
-    [出力] (block1, block2)。各ブロックは長さ 6 の dict リスト：
+    [出力] (block1, block2)。各ブロックは長さ 8 の dict リスト：
       {label, url|None, mask_name, is_closed, overlay}
-      順序は diff → edge → sat → diff_closed → edge_closed → sat_closed。
+      順序は diff → edge → sat → adaptive → diff_closed → edge_closed → sat_closed → adaptive_closed。
       overlay はクローズ後マスク（is_closed=True）にのみ入る（候補抽出元のため）。
         block1 は attempt_no=1、block2 は attempt_no=2 の候補を載せる（取り違え防止）。
       block2 は attempt_no=2 の DebugMask が無ければ []。
-    label の "mask_N" の番号は MaskType.choices の定義順（1〜6）に合わせる。
+    label の "mask_N" の番号は MaskType.choices の定義順（1〜8）に合わせる。
     """
     by_key = {(m.mask_type, m.attempt_no): m for m in debug_masks}
     type_to_idx = {

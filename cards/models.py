@@ -210,9 +210,11 @@ class DebugMask(models.Model):
         DIFF = "diff", "輝度差 生 (diff)"
         EDGE = "edge", "エッジ 生 (edge)"
         SAT = "sat", "彩度 生 (sat)"
+        ADAPTIVE = "adaptive", "局所二値化 生 (adaptive)"
         DIFF_CLOSED = "diff_closed", "輝度差 クローズ (diff_closed)"
         EDGE_CLOSED = "edge_closed", "エッジ クローズ (edge_closed)"
         SAT_CLOSED = "sat_closed", "彩度 クローズ (sat_closed)"
+        ADAPTIVE_CLOSED = "adaptive_closed", "局所二値化 クローズ (adaptive_closed)"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     original_image = models.ForeignKey(

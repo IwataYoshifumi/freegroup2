@@ -465,22 +465,25 @@ class MaskOverlayHelperTests(TestCase):
             _fake(DebugMask.MaskType.DIFF, 1),
             _fake(DebugMask.MaskType.EDGE, 1),
             _fake(DebugMask.MaskType.SAT, 1),
+            _fake(DebugMask.MaskType.ADAPTIVE, 1),
             _fake(DebugMask.MaskType.DIFF_CLOSED, 1),
             _fake(DebugMask.MaskType.EDGE_CLOSED, 1),
             _fake(DebugMask.MaskType.SAT_CLOSED, 1),
+            _fake(DebugMask.MaskType.ADAPTIVE_CLOSED, 1),
         ]
         block1, block2 = _build_mask_blocks(masks, _overlay_debug_json())
 
-        self.assertEqual(len(block1), 6)
+        self.assertEqual(len(block1), 8)
         self.assertEqual(block2, [])
         by_name = {(s["mask_name"], s["is_closed"]): s for s in block1}
         # 生マスクは overlay 無し
         self.assertEqual(by_name[("diff", False)]["overlay"], [])
         self.assertEqual(by_name[("edge", False)]["overlay"], [])
-        # クローズ後マスクは overlay 有り（diff=3件, edge=1件, sat=0件）
+        # クローズ後マスクは overlay 有り（diff=3件, edge=1件, sat=0件, adaptive=0件）
         self.assertEqual(len(by_name[("diff", True)]["overlay"]), 3)
         self.assertEqual(len(by_name[("edge", True)]["overlay"]), 1)
         self.assertEqual(by_name[("sat", True)]["overlay"], [])
+        self.assertEqual(by_name[("adaptive", True)]["overlay"], [])
 
     def test_build_mask_blocks_block2_uses_attempt2_candidates(self):
         """反転リトライ時、block2 は attempt_no=2 の候補を載せる（attempt 取り違え防止）。"""

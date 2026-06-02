@@ -2,7 +2,7 @@
 
 3種のマスク（輝度差 diff・Canny edge・HSV彩度 sat）を **OR 合成せず**、
 マスクごとにクロージング → findContours → minAreaRect まで回して候補を出し、
-名刺らしい縦横比（1.6〜1.8）の候補だけを残す。マスク横断で中心座標＋IoU が
+名刺らしい縦横比（1.52〜1.8）の候補だけを残す。マスク横断で中心座標＋IoU が
 近い候補を1件に統合（重複除去）する。採否の主基準は縦横比のみで、サイズは
 OCR 不能な極小を落とす緩い絶対下限としてのみ使う。
 
@@ -31,11 +31,15 @@ _SAT_THRESHOLD = 40
 # 診断用しきい値：mask_sat の白画素率がこれを超えたら「高彩度背景」と記録する（sat_fallback.triggered）。
 # rev2 で OR 合成を廃止したため、この判定で sat を候補抽出から除外することはしない（診断情報のみ）。
 _SAT_WHITE_RATIO_MAX = 0.50
+# 局所二値化（adaptiveThreshold）マスク。低コントラスト背景上の白名刺の縁を救済する目的の4本目。
+# blockSize は奇数。初期値は一般値から開始（評価基準で詰める前提）。
+_ADAPTIVE_BLOCK_SIZE = 51
+_ADAPTIVE_C = 10
 
 # ── カードフィルタパラメータ ──────────────────────────────
-# 採否の主基準は縦横比のみ（rev2 §1.2.3）。範囲 1.6〜1.8 は名刺という物の形そのもので
-# 画像・解像度・撮影枚数によらない固定範囲＝確定値（日本標準 91×55≈1.65／欧米 89×51≈1.75）。
-_ASPECT_MIN = 1.55
+# 採否の主基準は縦横比のみ（rev2 §1.2.3）。名刺の物理比は 1.65〜1.75（日本標準 91×55≈1.65／
+# 欧米 89×51≈1.75）。下限は白名刺が反転 adaptive で 1.53 前後に出るのを救済するため 1.52 に拡張。
+_ASPECT_MIN = 1.52
 _ASPECT_MAX = 1.8
 
 # ── 未確定パラメータ（settings から読む・仮値・評価基準で詰める） ──
@@ -72,8 +76,8 @@ _MIN_WARP_HEIGHT = 50
 _INVERTED_POLYGON_EXPAND_RATIO = 0.02   # 対角線長に対する拡張比率
 _INVERTED_POLYGON_EXPAND_MIN_PX = 10    # 拡張量の下限ピクセル（小さい polygon でも一定余白を確保）
 
-# 候補抽出を回すマスク名（順序固定）。
-_MASK_NAMES = ("diff", "edge", "sat")
+# 候補抽出を回すマスク名（順序固定）。adaptive は局所二値化（白名刺救済）。
+_MASK_NAMES = ("diff", "edge", "sat", "adaptive")
 
 
 def results_from_debug_result(debug_result: dict) -> list[dict]:
@@ -294,14 +298,15 @@ def _attempt_dict(attempt_no: int, type_: str, attempt: dict) -> dict:
 
 
 def _build_masks(bgr: np.ndarray, gray: np.ndarray) -> dict:
-    """[性質] 純関数 / 生マスク 3 枚（diff/edge/sat）と高彩度背景の診断判定を返す。
+    """[性質] 純関数 / 生マスク 4 枚（diff/edge/sat/adaptive）と高彩度背景の診断判定を返す。
 
     OR 合成・クロージングはここでは行わない（クロージングは attempt 内でマスク別に行う）。
     mask_sat の白画素率が _SAT_WHITE_RATIO_MAX を超えた場合は triggered=True を立てるが、
     rev2 では除外には使わない（高彩度背景の診断情報としてのみ記録する）。
+    adaptive は局所二値化（白名刺の縁溶け救済目的の4本目。既存3本は差し替えず無傷）。
 
     返却 dict：
-      raw: {"diff": ndarray, "edge": ndarray, "sat": ndarray}  # uint8 single-channel 生マスク
+      raw: {"diff": ndarray, "edge": ndarray, "sat": ndarray, "adaptive": ndarray}  # uint8 生マスク
       sat_fallback: {triggered: bool, sat_white_ratio: float, threshold: float}
     """
     # マスク1: グレースケール差分（白・黒など輝度差のあるカード）
@@ -320,6 +325,12 @@ def _build_masks(bgr: np.ndarray, gray: np.ndarray) -> dict:
     sat = hsv[:, :, 1]
     _, mask_sat = cv2.threshold(sat, _SAT_THRESHOLD, 255, cv2.THRESH_BINARY)
 
+    # マスク4: 局所二値化（adaptiveThreshold）。低コントラスト背景上の白名刺の縁を拾う。
+    mask_adaptive = cv2.adaptiveThreshold(
+        gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY,
+        _ADAPTIVE_BLOCK_SIZE, _ADAPTIVE_C,
+    )
+
     # 高彩度背景の診断判定（sat_white_ratio を記録。rev2 では除外には使わない）
     sat_white_ratio = (
         float(np.count_nonzero(mask_sat)) / float(mask_sat.size)
@@ -332,6 +343,7 @@ def _build_masks(bgr: np.ndarray, gray: np.ndarray) -> dict:
             "diff": mask_diff,
             "edge": mask_edge,
             "sat":  mask_sat,
+            "adaptive": mask_adaptive,
         },
         "sat_fallback": {
             "triggered": sat_fallback_triggered,

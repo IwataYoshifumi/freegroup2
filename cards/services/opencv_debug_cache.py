@@ -30,13 +30,15 @@ _MASK_TYPE_RAW = {
     "diff": DebugMask.MaskType.DIFF,
     "edge": DebugMask.MaskType.EDGE,
     "sat":  DebugMask.MaskType.SAT,
+    "adaptive": DebugMask.MaskType.ADAPTIVE,
 }
 _MASK_TYPE_CLOSED = {
     "diff": DebugMask.MaskType.DIFF_CLOSED,
     "edge": DebugMask.MaskType.EDGE_CLOSED,
     "sat":  DebugMask.MaskType.SAT_CLOSED,
+    "adaptive": DebugMask.MaskType.ADAPTIVE_CLOSED,
 }
-_MASK_NAMES = ("diff", "edge", "sat")
+_MASK_NAMES = ("diff", "edge", "sat", "adaptive")
 
 
 def save_debug_data(original_image, debug_result: dict) -> None:

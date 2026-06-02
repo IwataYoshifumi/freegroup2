@@ -10,7 +10,7 @@
 {% endcomment %}
 <div class="app-mask-grid">
   <div class="app-mask-grid__row">
-    {% for m in block|slice:":3" %}
+    {% for m in block|slice:":4" %}
       <div class="app-mask-grid__item">
         <div class="app-mask-grid__label">{{ m.label }}</div>
         {% if m.url %}
@@ -24,7 +24,7 @@
     {% endfor %}
   </div>
   <div class="app-mask-grid__row">
-    {% for m in block|slice:"3:" %}
+    {% for m in block|slice:"4:" %}
       <div class="app-mask-grid__item">
         <div class="app-mask-grid__label">{{ m.label }}</div>
         {% if m.url %}
