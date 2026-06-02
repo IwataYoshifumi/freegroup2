@@ -208,6 +208,69 @@ class DetectionScoringHelperTests(TestCase):
         self.assertEqual(DETECTION_GROUND_TRUTH["602e1478-3b8e-49be-9900-a551978846f2"], 0)
 
 
+class OsdUprightTests(TestCase):
+    """rev2 第2部: OCR 前 OSD 正立化の分岐（成功＝正立化 / 失敗＝normal フォールバック）の番人。
+
+    image_to_osd は detect_osd_rotation でラップしており、本テストはそこをモックして
+    成功（rotate 値を返す）／失敗（例外）の両経路を担保する（環境に Tesseract 本体は不要）。
+    """
+
+    def setUp(self):
+        self._tmp_media = tempfile.mkdtemp(prefix="fg2_test_media_")
+        self._override = override_settings(MEDIA_ROOT=self._tmp_media)
+        self._override.enable()
+        self.addCleanup(self._override.disable)
+        self.addCleanup(lambda: shutil.rmtree(self._tmp_media, ignore_errors=True))
+        self.user = get_user_model().objects.create_superuser(
+            username="osd_test", email="osd@example.com", password="x"
+        )
+
+    def _coordinator(self):
+        from cards.tasks.pipeline_coordinator import PipelineCoordinator
+        oi = OriginalImage(user=self.user, status=OriginalImage.STATUS_PROCESSING)
+        oi.image_file.save(
+            f"{oi.id}.png", ContentFile(_synthetic_card_png_bytes()), save=False
+        )
+        oi.save()
+        return PipelineCoordinator(oi)
+
+    def test_apply_upright_direction_and_noop(self):
+        """apply_upright: 90 で寸法入替（CCW）、0 は同一オブジェクト返し。"""
+        from cards.services.osd import apply_upright
+        img = Image.new("RGB", (10, 4))
+        self.assertIs(apply_upright(img, 0), img)            # 回転不要は素通し
+        r = apply_upright(img, 90)
+        self.assertEqual(r.size, (4, 10))                     # (10,4)→90回転→(4,10)
+
+    def test_osd_success_passes_upright_image(self):
+        """OSD 成功（rotate=90）→ run_ocr に渡るのは正立画像（寸法入替）。"""
+        coord = self._coordinator()
+        warped = Image.new("RGB", (12, 4))  # 非正方で回転を寸法で検知
+        with patch("cards.tasks.pipeline_coordinator.detect_osd_rotation", return_value=90):
+            out = coord._upright_with_osd(warped, 0)
+        self.assertIsNot(out, warped)        # 別画像（正立化された）
+        self.assertEqual(out.size, (4, 12))  # 90度回転で寸法入替
+
+    def test_osd_rotate_zero_returns_original(self):
+        """OSD 成功だが rotate=0（既に正立）→ 元 warped をそのまま返す（保存なし）。"""
+        coord = self._coordinator()
+        warped = Image.new("RGB", (12, 4))
+        with patch("cards.tasks.pipeline_coordinator.detect_osd_rotation", return_value=0):
+            out = coord._upright_with_osd(warped, 0)
+        self.assertIs(out, warped)
+
+    def test_osd_failure_falls_back_to_normal(self):
+        """OSD 失敗（image_to_osd 例外）→ 回転せず元 warped をそのまま返す（例外を漏らさない）。"""
+        coord = self._coordinator()
+        warped = Image.new("RGB", (12, 4))
+        with patch(
+            "cards.tasks.pipeline_coordinator.detect_osd_rotation",
+            side_effect=RuntimeError("Too few characters"),
+        ):
+            out = coord._upright_with_osd(warped, 0)
+        self.assertIs(out, warped)
+
+
 def _poly(x, y, w, h):
     """[性質] 純関数 / 軸平行矩形の polygon dict（四隅）。テスト用。"""
     return {

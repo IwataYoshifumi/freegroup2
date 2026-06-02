@@ -28,6 +28,7 @@ from cards.services.json_normalizer import (
     normalize_to_contact_dict,
 )
 from cards.services.opencv_debug_cache import save_debug_data
+from cards.services.osd import apply_upright, detect_osd_rotation
 from cards.tasks.card_cropper import save_card_image_tmp
 from cards.tasks.ocr_service import OcrService
 
@@ -164,9 +165,14 @@ class PipelineCoordinator:
         # ① DEBUG 保存
         self._save_dev_image(warped_image, card_index)
 
+        # ①.5 Tesseract OSD で正立化（rev2 第2部）。成功時のみ正立画像を OCR に渡し別パスへ保存、
+        #      元クロップ(warped_image)は残す。失敗（例外・timeout）は normal フォールバック＝元画像のまま。
+        ocr_input_image = self._upright_with_osd(warped_image, card_index)
+
         # ② OCR（想定外の例外も含め全て捕捉し 1 card の失敗が全体に波及しないようにする）
+        #    run_ocr は 1 回のみ（2回OCR はしない）。
         try:
-            ocr_result = self._ocr_service.run_ocr(warped_image)
+            ocr_result = self._ocr_service.run_ocr(ocr_input_image)
         except Exception as e:
             self.error_messages.append(f"card_index={card_index}: OCR失敗 ({type(e).__name__}: {e})")
             return
@@ -301,6 +307,52 @@ class PipelineCoordinator:
                     os.unlink(tmp_abs)
                 except OSError as ue:
                     logger.warning("tmp cleanup failed for %s: %s", tmp_abs, ue)
+
+    def _upright_with_osd(self, warped_image, card_index):
+        """[性質] 副作用あり（外部プロセス呼び出し・ファイル書き込み）/ OSD で正立化した画像を返す。
+
+        [入力] warped_image: 透視変換済みクロップ（PIL.Image）、card_index: int
+        [出力] PIL.Image: 正立化した画像（成功かつ回転要時）。OSD 失敗・回転不要時は warped_image をそのまま。
+        [方針] image_to_osd の全例外・timeout は捕捉して normal フォールバック（回転せず元画像）。
+               script は使わず rotate 量のみ使用。confidence では分岐しない（成功/例外でのみ分岐）。
+               正立画像は別パスへ非破壊保存し、元クロップ（warped_image）は変更しない。
+        """
+        try:
+            rotate_deg = detect_osd_rotation(warped_image)
+        except Exception as e:
+            logger.info(
+                "OSD 失敗→normal フォールバック card_index=%s: %s: %s",
+                card_index, type(e).__name__, e,
+            )
+            return warped_image
+
+        if not rotate_deg % 360:
+            return warped_image  # 既に正立（rotate=0）
+
+        upright = apply_upright(warped_image, rotate_deg)
+        self._save_upright_image(upright, card_index, rotate_deg)
+        return upright
+
+    def _save_upright_image(self, upright_image, card_index, rotate_deg):
+        """[性質] 副作用あり（ファイル書き込み）/ OSD 正立化画像を非破壊保存する。
+
+        保存先命名規則：MEDIA_ROOT/corrected/YYYY/MM/DD/<original_image_id>-<card_index>-osd<deg>.jpg
+        失敗しても OCR を止めない（補正画像は副次情報のため warning ログのみ）。
+        """
+        try:
+            now = datetime.now()
+            rel = (
+                f"corrected/{now.strftime('%Y')}/{now.strftime('%m')}/"
+                f"{now.strftime('%d')}/{self.original_image.id}-{card_index}-osd{rotate_deg}.jpg"
+            )
+            abs_path = os.path.join(settings.MEDIA_ROOT, rel)
+            os.makedirs(os.path.dirname(abs_path), exist_ok=True)
+            upright_image.convert("RGB").save(abs_path, format="JPEG", quality=95)
+            logger.debug("osd upright image saved: %s", rel)
+        except Exception as e:
+            logger.warning(
+                "osd upright image save failed for card_index=%s: %s", card_index, e
+            )
 
     def _save_dev_image(self, warped_image, card_index):
         """[性質] 副作用あり（ファイル書き込み）/ DEBUG=True のときのみ保存する。"""

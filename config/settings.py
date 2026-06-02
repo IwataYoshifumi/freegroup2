@@ -149,6 +149,13 @@ OPENCV_DEDUP_CENTER_DIST_RATIO = 0.50    # 中心距離 ≤ ratio×対角線 を
 # OCR pipeline: processing 状態が stuck と判断するまでの分数（stuck sweeper 用）
 OCR_STUCK_THRESHOLD_MINUTES = 30
 
+# Tesseract OSD（向き判定・rev2 第2部）。OCR 前に名刺クロップを正立化する。
+# TESSERACT_CMD: tesseract 実行ファイルのパス。空なら pytesseract の既定（PATH 上の tesseract）を使う。
+#   コードに固定パスを書かず、ここ（環境変数 TESSERACT_CMD）で与える。
+TESSERACT_CMD = os.getenv("TESSERACT_CMD", "")
+# image_to_osd のタイムアウト秒。
+OSD_TIMEOUT_SEC = float(os.getenv("OSD_TIMEOUT_SEC", "10"))
+
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/6.0/ref/settings/#default-auto-field
