@@ -890,13 +890,14 @@ a { color: inherit; text-decoration: none; }
 .app-person-search input[name="email"] { max-width: 340px; }
 .app-person-search input[name="address"] { max-width: 100%; }
 
-/* item4/5：ステータス・ソートの折りたたみバーを短く（1/4〜1/3幅）、操作部を枠で囲う。
-   幅はブロック全体に掛け、バー（ヘッダ）と展開部（枠）の左右端を一致させる。
-   グリッド配置（横並び/縦積み）もここで制御する（旧インライン grid-column を CSS へ移管）。
-   .app-person-search で1段詳しくして、.app-form-grid>*{max-width:100%} に勝たせる（320px を確実に効かせる）。 */
+/* item4/5：ステータス・ソートの折りたたみ。操作部を枠で囲い、バー（ヘッダ）と展開部（枠）の
+   左右端を一致させる。グリッド配置（横並び/縦積み）もここで制御する（旧インライン grid-column を CSS へ移管）。
+   デスクトップ（≥769px）は max-width 固定を外し、grid-column: span 2 のセル幅（上段4列グリッドの2列分）
+   いっぱいに広げる。これでステータス＝左2列分・ソート＝右2列分となり、上段入力欄と左右端が揃う。
+   バー幅＝枠幅は「2列分の幅」で一致（ヘッダ width:100% と枠 block 幅がともにセル2列分を満たす）。
+   ※スマホ幅の 320px 揃えは下の @media 側に移設（縦積み時のみ 320px）。 */
 .app-person-search .app-person-filter-collapsible {
-  max-width: 320px;
-  grid-column: span 2;   /* デスクトップ（≥769px）：4カラム中2カラム＝ステータス左・ソート右の横並び */
+  grid-column: span 2;   /* デスクトップ（≥769px）：4カラム中2カラム＝ステータス左・ソート右の横並び（幅も2列分） */
 }
 .app-person-filter-collapsible .app-collapsible__header {
   margin-bottom: var(--app-space-sm);
@@ -915,11 +916,13 @@ a { color: inherit; text-decoration: none; }
 
 /* スマホ幅（≤768px）：persons一覧のステータス/ソートを縦1列に積み（grid-column 1/-1）、
    あわせて検索フォーム上段（.app-search-grid）を4列→2列に折り返す。同一 @media にまとめる。
-   ・縦積みでも .app-person-filter-collapsible の max-width:320px は維持＝バー幅＝枠幅の揃いは不変。
+   ・縦積み時は従来どおり max-width:320px で揃える（バー幅＝枠幅の揃いは 320px のまま不変）。
+     ※デスクトップの「2列分幅」はこの @media には及ばないので、狭幅は従来挙動を維持する。
    ・上段2列で各欄は概ね200px弱を確保。ブレークポイントは今回 768px を直書き。 */
 @media (max-width: 768px) {
   .app-person-search .app-person-filter-collapsible {
     grid-column: 1 / -1;
+    max-width: 320px;
   }
   .app-search-grid {
     grid-template-columns: repeat(2, 1fr);
