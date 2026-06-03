@@ -4034,6 +4034,120 @@ class EmailContextPrepareProductionTests(_Phase3TestBase):
             ctx.to_email = "evil@example.com"  # type: ignore[misc]
 
 
+class EmailContextSettingsMergeTests(_Phase3TestBase):
+    """{{Settings.xxx}}（会社情報）差し込みの展開（仕様書 §7.4.8.2、特電法フッター）。
+
+    記法は仕様確定文言（旧称 Settings）のまま、実体は MailingConfig（§4.13）。
+    生値置換段階（ステップ①、HTML エスケープ前）で展開し、mode 非依存・空値除去とする。
+    """
+
+    _FOOTER_BODY = (
+        "本文です。\n\n--\n"
+        "{{Settings.company_name}}\n"
+        "{{Settings.company_address}}\n\n"
+        "配信停止に関するお問い合わせ：{{Settings.unsubscribe_contact}}\n"
+    )
+
+    def _make_footer_campaign(self):
+        tpl = EmailTemplate.objects.create(
+            name="T_FOOTER", subject="件名", body=self._FOOTER_BODY,
+            created_by=self.user,
+        )
+        return Campaign.objects.create(
+            name="C_FOOTER",
+            template=tpl,
+            mailing_list=self.mailing_list,
+            scheduled_at=timezone.now(),
+            created_by=self.user,
+        )
+
+    def test_settings_three_keys_expand(self):
+        # (a) フッター入りテンプレで Settings 3 キーが MailingConfig 値に展開される。
+        person = self._make_person()
+        campaign = self._make_footer_campaign()
+        ctx = EmailContext.prepare(campaign, person, EmailMode.PRODUCTION)
+        self.assertIn("株式会社サンプル", ctx.body_html)
+        self.assertIn("東京都千代田区1-1-1", ctx.body_html)
+        self.assertIn("unsubscribe@example.com", ctx.body_html)
+        # 記法そのものは残らない。
+        self.assertNotIn("{{Settings.company_name}}", ctx.body_html)
+        self.assertNotIn("{{Settings.company_address}}", ctx.body_html)
+        self.assertNotIn("{{Settings.unsubscribe_contact}}", ctx.body_html)
+
+    def test_settings_empty_value_removes_placeholder(self):
+        # (b) MailingConfig の値が空のとき、記法ごと空文字で消える（既存 18 変数と同じ挙動）。
+        self.config.company_name = ""
+        self.config.company_address = ""
+        self.config.unsubscribe_contact = ""
+        self.config.save(
+            update_fields=["company_name", "company_address", "unsubscribe_contact"]
+        )
+        person = self._make_person()
+        campaign = self._make_footer_campaign()
+        ctx = EmailContext.prepare(campaign, person, EmailMode.PRODUCTION)
+        self.assertNotIn("{{Settings.company_name}}", ctx.body_html)
+        self.assertNotIn("{{Settings.company_address}}", ctx.body_html)
+        self.assertNotIn("{{Settings.unsubscribe_contact}}", ctx.body_html)
+        # ラベルの固定文字列は残る（記法だけが消える）。
+        self.assertIn("配信停止に関するお問い合わせ：", ctx.body_html)
+
+    def test_settings_expand_in_all_modes(self):
+        # (c) 本番送信・テスト配信・プレビューのどの mode でも同じく展開される（mode 非依存）。
+        person = self._make_person()
+        campaign = self._make_footer_campaign()
+        for mode in (EmailMode.PRODUCTION, EmailMode.TEST, EmailMode.PREVIEW):
+            with self.subTest(mode=mode):
+                ctx = EmailContext.prepare(campaign, person, mode)
+                self.assertIn("株式会社サンプル", ctx.body_html)
+                self.assertIn("東京都千代田区1-1-1", ctx.body_html)
+                self.assertIn("unsubscribe@example.com", ctx.body_html)
+                self.assertNotIn("{{Settings.", ctx.body_html)
+
+    def test_settings_expand_in_subject(self):
+        # 件名（HTML 化しない）でも Settings が展開される（_render_subject も config 経由）。
+        tpl = EmailTemplate.objects.create(
+            name="T_SUBJ", subject="{{Settings.company_name}}からのご案内",
+            body="本文", created_by=self.user,
+        )
+        campaign = Campaign.objects.create(
+            name="C_SUBJ", template=tpl, mailing_list=self.mailing_list,
+            scheduled_at=timezone.now(), created_by=self.user,
+        )
+        person = self._make_person()
+        ctx = EmailContext.prepare(campaign, person, EmailMode.PRODUCTION)
+        self.assertIn("株式会社サンプルからのご案内", ctx.subject_rendered)
+        self.assertNotIn("{{Settings.company_name}}", ctx.subject_rendered)
+
+    def test_settings_coexist_with_contact_vars_and_custom_tags(self):
+        # (d) 既存 18 変数・カスタムタグと共存しても相互に壊れない。
+        tpl = EmailTemplate.objects.create(
+            name="T_MIX",
+            subject="件名",
+            body=(
+                "{{会社名}} {{フルネーム}} 様\n"
+                "発行元：{{Settings.company_name}}\n"
+                "詳細：{% tracked_link %}https://example.com/{% endtracked_link %}\n"
+                "{% unsubscribe_link %}"
+            ),
+            created_by=self.user,
+        )
+        campaign = Campaign.objects.create(
+            name="C_MIX", template=tpl, mailing_list=self.mailing_list,
+            scheduled_at=timezone.now(), created_by=self.user,
+        )
+        person = self._make_person()
+        ctx = EmailContext.prepare(campaign, person, EmailMode.PRODUCTION)
+        # 既存 18 変数は健在。
+        self.assertIn("Acme", ctx.body_html)
+        self.assertIn("Alice Tanaka", ctx.body_html)
+        # Settings も展開。
+        self.assertIn("株式会社サンプル", ctx.body_html)
+        # カスタムタグは <a> 化され build される（壊れていない）。
+        self.assertIn("<a href=", ctx.body_html)
+        self.assertEqual(len(ctx.tracking_links), 1)
+        self.assertEqual(len(ctx.unsubscribe_links), 1)
+
+
 class EmailContextPrepareTestPreviewTests(_Phase3TestBase):
     def test_test_mode_no_token_generation(self):
         person = self._make_person()

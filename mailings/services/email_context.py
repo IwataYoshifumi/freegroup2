@@ -14,7 +14,7 @@ mode 3 値（EmailMode、§7.4.2）：
   PREVIEW    ：プレビュー。同上
 
 処理順は §7.4.4.5 厳守（リンク壊れ事故防止）：
-  1. _render_merge_field（差し込み 18 変数の生値置換、HTML エスケープしない）
+  1. _render_merge_field（差し込み 18 変数 + Settings 3 変数の生値置換、HTML エスケープしない）
   2. プレーンテキスト全体を HTML エスケープ + 改行 → <br>
   3. カスタムタグ {% tracked_link %} / {% unsubscribe_link %} を <a> に変換
 
@@ -73,21 +73,36 @@ _MERGE_FIELDS_CONTACT: tuple[tuple[str, str], ...] = (
 )
 
 
-def _render_merge_field(body: str, contact, sender) -> str:
+# Settings（システム会社情報）差し込みの対応表（仕様書 §7.4.8.2、特電法フッター用）。
+# (記法, MailingConfig 属性名) のタプル。記法の "Settings." は仕様確定文言のため変えず、
+# 実体モデルは MailingConfig（旧称 Settings、§4.13）。受信者非依存の固定値。
+_MERGE_FIELDS_CONFIG: tuple[tuple[str, str], ...] = (
+    ("{{Settings.company_name}}", "company_name"),
+    ("{{Settings.company_address}}", "company_address"),
+    ("{{Settings.unsubscribe_contact}}", "unsubscribe_contact"),
+)
+
+
+def _render_merge_field(body: str, contact, sender, config) -> str:
     """差し込み変数を生値置換する（§7.4.4、prepare 専用、モジュール非公開）。
 
     [性質] 純関数（DB 操作なし、文字列処理のみ）
-    [入力] body: str（テンプレ本文）、contact: Contact、sender: CustomUser
+    [入力] body: str（テンプレ本文）、contact: Contact、sender: CustomUser、
+           config: MailingConfig（システム会社情報、§4.13。prepare が 1 回取得して渡す）
     [出力] str（置換後の本文）
 
-    18 変数（§7.4.4.3.1）。値が空（None/空文字）でも記法を空文字で置換して本文から
-    {{...}} を消す（未設定項目の記法が受信者に生のまま届くのを防ぐ）。
-    HTML エスケープは行わない（プレーンテキストのまま）。エスケープは prepare の処理順
-    ステップ 2 で全体に一括適用する（§7.4.4.5）。
+    18 変数（§7.4.4.3.1）＋ Settings 3 変数（§7.4.8.2、特電法フッター用）。値が空
+    （None/空文字）でも記法を空文字で置換して本文から {{...}} を消す（未設定項目の記法が
+    受信者に生のまま届くのを防ぐ）。HTML エスケープは行わない（プレーンテキストのまま）。
+    エスケープは prepare の処理順ステップ 2 で全体に一括適用する（§7.4.4.5）。
     """
     for tag, attr in _MERGE_FIELDS_CONTACT:
         # 空（None/空文字）でも空文字で置換して記法を消す。
         value = getattr(contact, attr, "") or ""
+        body = body.replace(tag, value)
+    # Settings 3 変数（受信者非依存）。記法は {{Settings.xxx}} 固定、実体は MailingConfig。
+    for tag, attr in _MERGE_FIELDS_CONFIG:
+        value = getattr(config, attr, "") or ""
         body = body.replace(tag, value)
     sender_full_name = (sender.get_full_name() if sender else "") or ""
     body = body.replace("{{差出人の氏名}}", sender_full_name)
@@ -261,14 +276,14 @@ def _render_custom_tags_test_or_preview(body: str) -> str:
     return body
 
 
-def _render_subject(subject: str, contact, sender) -> str:
+def _render_subject(subject: str, contact, sender, config) -> str:
     """件名の差し込み展開（プレーンテキストのまま、HTML 化しない、§7.4.4.4）。
 
     [性質] 純関数
-    [入力] subject: str、contact: Contact、sender: CustomUser
+    [入力] subject: str、contact: Contact、sender: CustomUser、config: MailingConfig
     [出力] str
     """
-    return _render_merge_field(subject, contact, sender)
+    return _render_merge_field(subject, contact, sender, config)
 
 
 @dataclass(frozen=True)
@@ -316,7 +331,8 @@ class EmailContext:
         [出力] EmailContext（frozen=True、後段の bulk_create 用 build 済みリンクを抱える）
 
         処理順（§7.4.4.5）：
-          1. _render_merge_field で差し込み 18 変数の生値置換（HTML エスケープしない）
+          1. _render_merge_field で差し込み 18 変数 + Settings 3 変数の生値置換
+             （HTML エスケープしない）
           2. プレーンテキスト全体を HTML エスケープ + 改行 → <br>
           3. カスタムタグを <a> に変換（PRODUCTION なら build でトークン付き、
              TEST/PREVIEW なら素リンク）
@@ -335,14 +351,22 @@ class EmailContext:
         sender = campaign.created_by
         template = campaign.template
 
+        # Settings（会社情報）は受信者非依存のため prepare 1 回につき 1 回だけ取得し、
+        # 件名・本文の生値置換に使い回す（受信者ごとに get_or_create を繰り返さない、§4.13）。
+        from mailings.services.list_freeze import (
+            get_or_create_singleton_mailing_config,
+        )
+
+        config = get_or_create_singleton_mailing_config()
+
         # 件名：差し込みのみ（HTML 化しない、§7.4.4.4）。
-        subject_rendered = _render_subject(template.subject, contact, sender)
+        subject_rendered = _render_subject(template.subject, contact, sender, config)
 
         # to_email を先に確定（UnsubscribeLink.target_email へ焼き込むため、rev15 §4.5A）
         to_email = contact.email if contact else ""
 
         # 本文：処理順 ① 差し込み生値置換
-        body = _render_merge_field(template.body, contact, sender)
+        body = _render_merge_field(template.body, contact, sender, config)
         # 処理順 ② プレーンテキスト全体を HTML エスケープ + 改行 → <br>
         body = _escape_and_brify(body)
         # 処理順 ③ カスタムタグを <a> に変換
