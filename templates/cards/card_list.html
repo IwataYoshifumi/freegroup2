@@ -107,6 +107,10 @@
                       </span>
                     {% endif %}
                     {% ocr_result_badge card %}
+                    {% if debug %}
+                      {# OSD 向き判定のデバッグ表示（DEBUG時のみ）。Claude orientation とは別物。 #}
+                      <span>{% osd_debug_badge card %}</span>
+                    {% endif %}
                   </div>
                 </div>
               </td>
@@ -141,6 +145,10 @@
             <strong>{% if card.has_low %}🔴{% elif card.has_medium %}🟡{% endif %}{{ card.contact.full_name|default:"(氏名なし)" }}</strong>
             {% if card.contact.company %}<div>{{ card.contact.company }}</div>{% endif %}
             {% if card.contact.title %}<div class="app-muted">{{ card.contact.title }}</div>{% endif %}
+            {% if debug %}
+              {# OSD 向き判定のデバッグ表示（DEBUG時のみ） #}
+              <div>{% osd_debug_badge card %}</div>
+            {% endif %}
           </div>
           <div class="app-list-card__sub">
             <span>

@@ -162,20 +162,34 @@ def _words_from_data(data: dict) -> list:
 
 
 def run_tesseract_ocr(image, lang: str | None = None, timeout: float | None = None) -> dict:
-    """[性質] 副作用あり（外部プロセス Tesseract 呼び出し）/ OCR テキストと単語データを返す（記録・分析用）。
+    """[性質] 副作用あり（DEBUG 時のみ外部プロセス Tesseract 呼び出し）/ OCR 記録 dict を返す（記録・分析用）。
 
-    image_to_string（全文テキスト）と image_to_data（単語ごと bbox/conf）を取得する。
+    text / data（特に data＝word 単位配列）は raw_json に 1 カードあたり最大十数 KB 積み上がるが、
+    本番では使わない。よって **settings.DEBUG が真のときだけ** image_to_string / image_to_data を
+    呼んで text / data を載せる。偽のときはフル OCR 自体を呼ばず {"lang": lang} のみ返す
+    （保存サイズとローカル Tesseract の CPU 負荷を削減）。lang は OCR に渡す設定文字列で、
+    呼び出し前に決まる値のためフル OCR を呼ばなくても常時残せる。
     OCR テキスト・confidence は記録専用で、向き判定・クロップ採否には使わない。
+    OSD の判定値（rotate / orientation_conf / script）は image_to_osd 由来の別系統（detect_osd_info）で、
+    本関数の DEBUG 分岐とは独立（巻き添えにならない）。
     [入力] image: PIL.Image、lang: 既定 settings.TESSERACT_OCR_LANG or "jpn+jpn_vert"、timeout 秒
-    [出力] dict: {"lang": str, "text": str, "data": list[dict]（_words_from_data 整形済み）}
-    [例外] Tesseract 失敗（未導入・言語データ欠落・timeout 等）はそのまま送出する
-           （呼び出し側が捕捉して記録する責務）。
+    [出力] dict:
+      - DEBUG 真: {"lang": str, "text": str, "data": list[dict]（_words_from_data 整形済み）}
+      - DEBUG 偽: {"lang": str}（text / data は持たない・フル OCR 未実行）
+    [例外] DEBUG 真で Tesseract 失敗（未導入・言語データ欠落・timeout 等）はそのまま送出する
+           （呼び出し側が捕捉して記録する責務）。DEBUG 偽では Tesseract を呼ばないため送出しない。
     """
-    import pytesseract  # 遅延 import
-
-    _set_tesseract_cmd(pytesseract)
+    # lang は設定文字列。pytesseract を import せず・フル OCR を呼ばずとも常時確定できる。
     if lang is None:
         lang = getattr(settings, "TESSERACT_OCR_LANG", "") or _DEFAULT_OCR_LANG
+
+    # 非 DEBUG：フル OCR（image_to_string / image_to_data）を呼ばず lang のみ返す。
+    if not settings.DEBUG:
+        return {"lang": lang}
+
+    import pytesseract  # 遅延 import（DEBUG 時のみ。未導入環境でモジュール import を壊さない）
+
+    _set_tesseract_cmd(pytesseract)
     if timeout is None:
         timeout = float(getattr(settings, "OSD_TIMEOUT_SEC", 10))
 

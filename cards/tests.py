@@ -771,21 +771,64 @@ class TesseractRecordTests(TestCase):
         )
         self.assertEqual(words[0]["line_num"], 1)
 
-    def test_run_tesseract_ocr_returns_text_and_filtered_words(self):
-        """run_tesseract_ocr: text と word データ（フィルタ済み）を返す。"""
+    @override_settings(DEBUG=True)
+    def test_run_tesseract_ocr_debug_true_returns_text_and_filtered_words(self):
+        """DEBUG=真: run_tesseract_ocr は従来どおり lang / text / word データ（フィルタ済み）を返す。"""
         from cards.services.osd import run_tesseract_ocr
         data = {
             "level": [5], "text": ["meishi"], "conf": ["88.0"],
             "left": [1], "top": [2], "width": [3], "height": [4],
             "block_num": [1], "par_num": [1], "line_num": [1], "word_num": [1],
         }
-        with patch("pytesseract.image_to_string", return_value="meishi\n"), \
-             patch("pytesseract.image_to_data", return_value=data):
+        with patch("pytesseract.image_to_string", return_value="meishi\n") as m_str, \
+             patch("pytesseract.image_to_data", return_value=data) as m_data:
             res = run_tesseract_ocr(Image.new("RGB", (8, 8)))
         self.assertEqual(res["lang"], "jpn+jpn_vert")
         self.assertEqual(res["text"], "meishi\n")
         self.assertEqual(len(res["data"]), 1)
         self.assertEqual(res["data"][0]["text"], "meishi")
+        m_str.assert_called_once()    # DEBUG 時はフル OCR を呼ぶ
+        m_data.assert_called_once()
+
+    @override_settings(DEBUG=False)
+    def test_run_tesseract_ocr_debug_false_returns_lang_only_without_calling_ocr(self):
+        """DEBUG=偽: lang のみ返し、image_to_string / image_to_data を一切呼ばない（CPU 節約）。"""
+        from cards.services.osd import run_tesseract_ocr
+        with patch("pytesseract.image_to_string") as m_str, \
+             patch("pytesseract.image_to_data") as m_data:
+            res = run_tesseract_ocr(Image.new("RGB", (8, 8)))
+        self.assertEqual(res, {"lang": "jpn+jpn_vert"})  # lang は常時残る・text/data は無し
+        self.assertNotIn("text", res)
+        self.assertNotIn("data", res)
+        m_str.assert_not_called()     # フル OCR を呼ばない＝CPU 節約が効く
+        m_data.assert_not_called()
+
+    @override_settings(DEBUG=False)
+    def test_lang_only_record_validates_against_schema(self):
+        """DEBUG=偽の tesseract_ocr（lang のみ・text/data なし）が combined スキーマを通る。"""
+        import jsonschema
+        coord = self._coordinator()
+        card = {
+            "card_meta": {"is_business_card": True, "orientation": "normal"},
+            "fields": {"full_name": {"value": "name", "confidence": "high"}},
+            "fields_array": {},
+        }
+        coord._cards_by_index = {0: card}
+        coord._tesseract_by_index = {0: {
+            "osd": {"orientation_deg": 0, "rotate": 0, "orientation_conf": 1.0,
+                    "script": "Japanese", "script_conf": 2.0},
+            "tesseract_ocr": {"lang": "jpn+jpn_vert"},   # text/data を持たない非 DEBUG 形
+        }}
+        payload = coord._cards_payload(1)
+        self.assertEqual(payload[0]["tesseract_ocr"], {"lang": "jpn+jpn_vert"})
+        jsonschema.validate(instance=payload[0], schema=coord._load_card_item_schema())
+        raw = {
+            "schema_version": "1.3.0",
+            "ocr_meta": {"timestamp": "2026-06-03T00:00:00+00:00"},
+            "api_response": {"model": "m", "stop_reason": "end_turn", "usage": {}},
+            "cards": payload,
+        }
+        jsonschema.validate(instance=raw, schema=coord._load_combined_schema())
 
     def test_collect_tesseract_record_captures_errors(self):
         """OSD/OCR が例外を投げても record に error として残り、pipeline を止めない。"""
@@ -918,3 +961,65 @@ class TesseractRecordTests(TestCase):
         coord._cards_by_index = {0: None}
         coord._tesseract_by_index = {0: {"osd": {"rotate": 90}, "tesseract_ocr": {}}}
         self.assertIsNone(coord._cards_payload(1)[0])
+
+
+class OsdDebugBadgeTests(TestCase):
+    """名刺一覧の OSD デバッグバッジ（osd_debug_badge）と DEBUG ゲートの番人。"""
+
+    def setUp(self):
+        self._tmp_media = tempfile.mkdtemp(prefix="fg2_test_media_")
+        self._override = override_settings(MEDIA_ROOT=self._tmp_media)
+        self._override.enable()
+        self.addCleanup(self._override.disable)
+        self.addCleanup(lambda: shutil.rmtree(self._tmp_media, ignore_errors=True))
+        self.user = get_user_model().objects.create_superuser(
+            username="badge_test", email="b@example.com", password="x"
+        )
+
+    def _bc(self, osd):
+        """card_index=0 の BusinessCard を作る。osd=None なら cards[0] に osd を入れない。"""
+        oi = OriginalImage(user=self.user, status=OriginalImage.STATUS_EXTRACTED)
+        oi.image_file.save(
+            f"{oi.id}.png", ContentFile(_synthetic_card_png_bytes()), save=False
+        )
+        card_entry = {"osd": osd} if osd is not None else {}
+        oi.raw_json = {
+            "schema_version": "1.3.0",
+            "ocr_meta": {"timestamp": "t"},
+            "api_response": {},
+            "cards": [card_entry],
+        }
+        oi.save()
+        return BusinessCard.objects.create(original_image=oi, card_index=0)
+
+    def test_badge_shows_rotate_and_conf_not_script(self):
+        from cards.templatetags.ui_tags import osd_debug_badge
+        bc = self._bc({"rotate": 90, "orientation_deg": 270, "orientation_conf": 1.5,
+                       "script": "Japanese"})
+        html = osd_debug_badge(bc)
+        self.assertIn("OSD rot 90", html)
+        self.assertIn("conf 1.5", html)
+        self.assertNotIn("Japanese", html)   # script は出さない
+        self.assertNotIn("script", html)
+
+    def test_badge_shows_error_reason_verbatim(self):
+        from cards.templatetags.ui_tags import osd_debug_badge
+        bc = self._bc({"error": "TesseractError: Too few characters"})
+        html = osd_debug_badge(bc)
+        self.assertIn("OSD失敗", html)
+        self.assertIn("Too few characters", html)   # 理由文字列をそのまま添える
+
+    def test_badge_empty_when_no_osd(self):
+        from cards.templatetags.ui_tags import osd_debug_badge
+        bc = self._bc(None)   # cards[0] に osd なし
+        self.assertEqual(osd_debug_badge(bc), "")
+
+    def test_debug_gate_on_and_off(self):
+        """{% if debug %} ゲート：debug=True で出る、debug=False で出ない。"""
+        from django.template import Template, Context
+        bc = self._bc({"rotate": 0, "orientation_conf": 2.0})
+        tpl = Template("{% load ui_tags %}{% if debug %}{% osd_debug_badge card %}{% endif %}")
+        on = tpl.render(Context({"card": bc, "debug": True}))
+        off = tpl.render(Context({"card": bc, "debug": False}))
+        self.assertIn("OSD rot 0", on)
+        self.assertEqual(off.strip(), "")
