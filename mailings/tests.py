@@ -3883,8 +3883,9 @@ class EmailContextPrepareProductionTests(_Phase3TestBase):
         self.assertIn("山田 太郎", ctx.body_html)
         self.assertIn("株式会社サンプル", ctx.body_html)
 
-    def test_empty_value_leaves_placeholder_intact(self):
-        # branch=空のテンプレに「{{支店}}」を入れた場合、Sansan 互換で記法が残る（§7.4.5）
+    def test_empty_value_removes_placeholder(self):
+        # branch=空のテンプレに「{{支店}}」を入れた場合、空文字置換で記法ごと消える
+        # （未設定項目の {{...}} を受信者に届けない、空文字置換への変更）。
         person = self._make_person()
         person.primary_contact.branch = ""
         person.primary_contact.save(update_fields=["branch"])
@@ -3899,9 +3900,9 @@ class EmailContextPrepareProductionTests(_Phase3TestBase):
             created_by=self.user,
         )
         ctx = EmailContext.prepare(campaign, person, EmailMode.PRODUCTION)
-        # {{支店}} が HTML エスケープされて &lbrace; 等にはならず、{ } のまま残る
-        # （html.escape は { } をエスケープしない）
-        self.assertIn("{{支店}}", ctx.body_html)
+        # {{支店}} は空文字に置換されて本文から消える（「支店：」だけ残る）。
+        self.assertNotIn("{{支店}}", ctx.body_html)
+        self.assertIn("支店：", ctx.body_html)
 
     def test_production_builds_tokens_and_links(self):
         person = self._make_person()
@@ -6838,19 +6839,17 @@ class CampaignPreviewViewTests(_PhaseCTestBase):
         self.assertEqual(response.context["from_email"], self.user.email)
 
     def test_unrendered_merge_tag_highlighted_with_warning_class(self):
-        # 値が空のフィールドを使う差し込み変数 {{支店}} 等は値あり/なしで挙動が分かれる。
-        # 確実に空にするため Person.primary_contact.branch を空にして {{支店}} 残存を作る。
-        self.person.primary_contact.branch = ""
-        self.person.primary_contact.save(update_fields=["branch"])
-        # テンプレ本文に {{支店}} を入れる
-        self.template.body = "支店：{{支店}} です"
+        # 対応キーの空値は空文字置換で消えるため、「残る {{...}}」の例には差し込み対応表に
+        # 無い未対応タグ（タイポ/未実装 {{Settings.xxx}} 等）を使う。prepare 後も残り、
+        # プレビュー表示層が警告色 wrap する（仕様書 §7.7.1.3）。
+        self.template.body = "発行元：{{未対応タグ}} です"
         self.template.save(update_fields=["body"])
         response = self.client.get(self._preview_url())
         self.assertEqual(response.status_code, 200)
         body = response.content.decode("utf-8")
         # 警告色 wrap が出力される
         self.assertIn('<span class="app-preview__missing">', body)
-        self.assertIn("{{支店}}", body)
+        self.assertIn("{{未対応タグ}}", body)
 
     def test_preview_does_not_persist_tracking_or_unsubscribe_links(self):
         """プレビューは mode=PREVIEW で build を呼ばず、TrackingLink/UnsubscribeLink を DB 保存しない

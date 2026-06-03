@@ -80,21 +80,20 @@ def _render_merge_field(body: str, contact, sender) -> str:
     [入力] body: str（テンプレ本文）、contact: Contact、sender: CustomUser
     [出力] str（置換後の本文）
 
-    18 変数（§7.4.4.3.1）。値が空（None/空文字）なら記法をそのまま残す（Sansan 互換、§7.4.5）。
+    18 変数（§7.4.4.3.1）。値が空（None/空文字）でも記法を空文字で置換して本文から
+    {{...}} を消す（未設定項目の記法が受信者に生のまま届くのを防ぐ）。
     HTML エスケープは行わない（プレーンテキストのまま）。エスケープは prepare の処理順
     ステップ 2 で全体に一括適用する（§7.4.4.5）。
     """
     for tag, attr in _MERGE_FIELDS_CONTACT:
+        # 空（None/空文字）でも空文字で置換して記法を消す。
         value = getattr(contact, attr, "") or ""
-        if value:
-            body = body.replace(tag, value)
-    sender_full_name = sender.get_full_name() if sender else ""
-    if sender_full_name:
-        body = body.replace("{{差出人の氏名}}", sender_full_name)
-    sender_signature = getattr(sender, "signature", "") if sender else ""
-    if sender_signature:
-        # signature 内に差し込み変数があっても再帰展開しない（プレーン固定文字列、§7.4.4.3.1）。
-        body = body.replace("{{差出人の署名}}", sender_signature)
+        body = body.replace(tag, value)
+    sender_full_name = (sender.get_full_name() if sender else "") or ""
+    body = body.replace("{{差出人の氏名}}", sender_full_name)
+    # signature 内に差し込み変数があっても再帰展開しない（プレーン固定文字列、§7.4.4.3.1）。
+    sender_signature = (getattr(sender, "signature", "") if sender else "") or ""
+    body = body.replace("{{差出人の署名}}", sender_signature)
     return body
 
 
