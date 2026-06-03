@@ -877,3 +877,44 @@ class TesseractRecordTests(TestCase):
         payload = coord._cards_payload(1)
         self.assertEqual(payload[0]["osd"]["rotate"], 0)
         self.assertEqual(payload[0]["tesseract_ocr"]["lang"], "jpn+jpn_vert")
+
+    def test_run_opencv_stage_creates_bc_with_osd_and_no_ocr(self):
+        """第1段 run_opencv_stage：run_ocr を呼ばず BC 作成＋osd を raw_json に格納し EXTRACTED。"""
+        from cards.tasks.pipeline_coordinator import PipelineCoordinator
+        oi = OriginalImage(user=self.user, status=OriginalImage.STATUS_PROCESSING)
+        oi.image_file.save(
+            f"{oi.id}.png", ContentFile(_synthetic_card_png_bytes()), save=False
+        )
+        oi.save()
+        with patch("cards.tasks.pipeline_coordinator.OcrService") as MockOcr, \
+             patch("cards.tasks.pipeline_coordinator.detect_osd_rotation", return_value=0), \
+             patch("cards.tasks.pipeline_coordinator.detect_osd_info",
+                   return_value={"orientation_deg": 0, "rotate": 0, "orientation_conf": 0.5,
+                                 "script": "Japanese", "script_conf": 1.0}), \
+             patch("cards.tasks.pipeline_coordinator.run_tesseract_ocr",
+                   return_value={"lang": "jpn+jpn_vert", "text": "", "data": []}):
+            coord = PipelineCoordinator(oi)
+            coord.run_opencv_stage()
+            # OCR（Claude API）は一切呼ばれない＝課金ゼロ
+            MockOcr.return_value.run_ocr.assert_not_called()
+
+        oi.refresh_from_db()
+        self.assertEqual(oi.status, OriginalImage.STATUS_EXTRACTED)
+        self.assertGreaterEqual(oi.detected_count, 1)
+        # 検出ぶん BC が作られる（card_image は正立後画像。rotate=0 なので元クロップ同一）
+        self.assertEqual(
+            BusinessCard.objects.filter(original_image=oi).count(), oi.detected_count
+        )
+        cards = oi.raw_json["cards"]
+        self.assertEqual(cards[0]["osd"]["rotate"], 0)
+        self.assertEqual(cards[0]["osd"]["orientation_conf"], 0.5)
+        # OCR 由来データは無い（osd / tesseract_ocr のみの最小カード）
+        self.assertNotIn("card_meta", cards[0])
+
+    def test_opencv_only_false_keeps_none_card_as_none(self):
+        """通常時（_opencv_only=False）は card_data=None の検出に osd を足さず None のまま（回帰）。"""
+        coord = self._coordinator()
+        coord._opencv_only = False
+        coord._cards_by_index = {0: None}
+        coord._tesseract_by_index = {0: {"osd": {"rotate": 90}, "tesseract_ocr": {}}}
+        self.assertIsNone(coord._cards_payload(1)[0])

@@ -54,9 +54,10 @@ class PipelineCoordinator:
         self._combined_schema = None
         self._last_api_response = None
         self._card_item_schema_cache = None
+        self._opencv_only = False    # True=第1段(OpenCV検出＋OSD正立化のみ・OCR未実行)
 
     def run_pipeline(self):
-        """OriginalImage の切り出し処理を実行する。
+        """OriginalImage の切り出し＋OCR を通しで実行する（stage1＋stage2）。
 
         [性質] 副作用あり（DB 書き込み・ファイル書き込み・API 呼び出し）
         [入力] なし（self.original_image を使う）
@@ -66,18 +67,42 @@ class PipelineCoordinator:
                正常・異常いずれのパスでも processing → extracted/garbage/failed に遷移する。
                pending に戻る経路はない。
         """
+        self._run(self._process_card, opencv_only=False)
+
+    def run_opencv_stage(self):
+        """OpenCV 検出＋OSD 正立化のみ実行する（第1段・OCR/課金なし）。
+
+        [性質] 副作用あり（DB 書き込み・ファイル書き込み・外部プロセス OSD 呼び出し）
+        [出力] None（status / detected_count / raw_json["cards"][*]["osd"] を保存）
+        [方針] run_ocr は呼ばない。検出由来（stage1）のみで BC を作成し card_image に正立後画像を格納、
+               osd を raw_json に残して EXTRACTED にする。状態管理の正式化は第2段（main の ocr_status）。
+        """
+        self._run(
+            lambda warped, idx, polygon: self._process_card_stage1(warped, idx),
+            opencv_only=True,
+        )
+
+    def _run(self, per_card, opencv_only):
+        """[性質] 副作用あり（DB/ファイル/外部プロセス・条件により API）/ 検出→per_card ループ→保存の共通土台。
+
+        per_card(warped_image, card_index, polygon) を各検出に適用する。run_pipeline と
+        run_opencv_stage の足回り（防御チェック・検出・debug_json 保存・raw_json 組立・status 遷移・保存）
+        を共有し、カードごとの処理だけを差し替える。
+        """
+        self._opencv_only = opencv_only
+
         # === 防御チェック（v1.3.1 追加） ===
         if self.original_image.status != OriginalImage.STATUS_PROCESSING:
             current_status = self.original_image.status
             logger.error(
-                "run_pipeline called with status=%s, expected processing. Aborting. "
+                "_run called with status=%s, expected processing. Aborting. "
                 "OriginalImage %s",
                 current_status,
                 self.original_image.id,
             )
             self.original_image.status = OriginalImage.STATUS_FAILED
             self.original_image.error_message = (
-                f"run_pipeline が status={current_status} で呼ばれました。"
+                f"パイプラインが status={current_status} で呼ばれました。"
                 "CAS が成立していない可能性があります。"
             )
             with transaction.atomic():
@@ -94,7 +119,7 @@ class PipelineCoordinator:
             detections = results_from_debug_result(debug_result)
             self.original_image.detected_count = len(detections)
 
-            # debug_json 保存は失敗しても OCR を止めない（debug は副次情報のため）
+            # debug_json 保存は失敗しても処理を止めない（debug は副次情報のため）
             try:
                 save_debug_data(self.original_image, debug_result)
             except Exception as e:
@@ -111,26 +136,13 @@ class PipelineCoordinator:
                 self._cards_by_index[i] = None
 
             for card_index, detection in enumerate(detections):
-                self._process_card(
+                per_card(
                     detection["warped_image"],
                     card_index,
                     detection["polygon"],
                 )
 
-            raw_json = {
-                "schema_version": "1.3.0",
-                "ocr_meta": {
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                },
-                "api_response": self._last_api_response or {},
-                "cards": self._cards_payload(len(detections)),
-            }
-            if self._last_api_response:
-                try:
-                    jsonschema.validate(instance=raw_json, schema=self._load_combined_schema())
-                except jsonschema.ValidationError as e:
-                    logger.warning("raw_json スキーマ検証失敗（保存続行）: %s", e.message)
-            self.original_image.raw_json = raw_json
+            self.original_image.raw_json = self._build_raw_json(len(detections))
             self.original_image.status = OriginalImage.STATUS_EXTRACTED
 
         except Exception as e:
@@ -143,14 +155,7 @@ class PipelineCoordinator:
             # 処理済み card が存在する場合は部分的な raw_json を組み立てて保存する。
             # raw_json=None のまま BusinessCard が残ると不変条件が壊れるため。
             if self._cards_by_index:
-                self.original_image.raw_json = {
-                    "schema_version": "1.3.0",
-                    "ocr_meta": {
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                    },
-                    "api_response": self._last_api_response or {},
-                    "cards": self._cards_payload(len(detections)),
-                }
+                self.original_image.raw_json = self._build_raw_json(len(detections))
         finally:
             self.original_image.error_message = "\n".join(self.error_messages)
             with transaction.atomic():
@@ -164,25 +169,68 @@ class PipelineCoordinator:
                     ]
                 )
 
+    def _build_raw_json(self, n):
+        """[性質] 純関数寄り（DB操作なし）/ raw_json dict を組み立てる。
+
+        OCR 実行時（_last_api_response あり）のみ JSON Schema で再検証する。第1段（OCR前）は
+        cards が OCR 形を満たさないため検証をスキップする（osd だけ持つ最小カードを許す）。
+        """
+        raw_json = {
+            "schema_version": "1.3.0",
+            "ocr_meta": {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
+            "api_response": self._last_api_response or {},
+            "cards": self._cards_payload(n),
+        }
+        if self._last_api_response:
+            try:
+                jsonschema.validate(instance=raw_json, schema=self._load_combined_schema())
+            except jsonschema.ValidationError as e:
+                logger.warning("raw_json スキーマ検証失敗（保存続行）: %s", e.message)
+        return raw_json
+
     def _process_card(self, warped_image, card_index, polygon):
-        """[性質] 副作用あり（API 呼び出し・DB 書き込み・ファイル書き込み）"""
+        """[性質] 副作用あり（API 呼び出し・DB 書き込み・ファイル書き込み）/ stage1＋stage2 の通し。"""
+        business_card, upright_image = self._process_card_stage1(warped_image, card_index)
+        if business_card is None:
+            return  # stage1 で BC 作成失敗（DB エラー等）→ OCR に進まない
+        self._process_card_stage2(business_card, upright_image, card_index)
+
+    def _process_card_stage1(self, warped_image, card_index):
+        """[性質] 副作用あり（外部プロセス OSD・DB 書き込み・ファイル書き込み）/ 検出由来の処理。
+
+        クロップ → OSD 正立化 → BC 作成（card_image=正立後画像）→ osd 記録。run_ocr は呼ばない。
+        [入力] warped_image: 透視変換済みクロップ（PIL.Image）、card_index: int
+        [出力] (BusinessCard or None, upright_image)。BC 作成失敗時は (None, upright_image)。
+        [方針] OCR 前なので orientation=normal・ocr_result は既定（第1段は検証用と割り切る）。
+        """
         # ① DEBUG 保存
         self._save_dev_image(warped_image, card_index)
 
-        # ①.5 Tesseract OSD で正立化（rev2 第2部）。成功時のみ正立画像を OCR に渡し別パスへ保存、
-        #      元クロップ(warped_image)は残す。失敗（例外・timeout）は normal フォールバック＝元画像のまま。
-        ocr_input_image = self._upright_with_osd(warped_image, card_index)
+        # ①.5 Tesseract OSD で正立化（成功かつ rotate≠0 のときのみ回す。失敗・rotate=0 は元クロップ）。
+        upright_image = self._upright_with_osd(warped_image, card_index)
 
-        # ①.6 Tesseract OSD/OCR の出力を記録（分析用）。向き判定・クロップ採否には使わない。
-        #      全例外を捕捉し、失敗しても pipeline を止めない（記録は副次情報）。
+        # ①.6 Tesseract OSD/OCR の出力を記録（osd を含む。Tesseract はローカル＝課金ゼロ）。
+        #      向き判定・クロップ採否には使わない。全例外を捕捉し、失敗しても処理を止めない。
         self._tesseract_by_index[card_index] = self._collect_tesseract_record(
-            warped_image, ocr_input_image, card_index
+            warped_image, upright_image, card_index
         )
 
+        # ② BC 作成（card_image=正立後画像）。OCR 由来の値は stage2 で確定する。
+        business_card = self._create_card_with_image(card_index, upright_image)
+        return business_card, upright_image
+
+    def _process_card_stage2(self, business_card, upright_image, card_index):
+        """[性質] 副作用あり（API 呼び出し・DB 書き込み）/ OCR 由来の処理。stage1 作成済み BC を更新する。
+
+        run_ocr → card_data 抽出 → schema 検証 → ocr_result 確定 → has_minimum_info →
+        Contact / Person 作成。第1段（run_opencv_stage）では実行しない。
+        """
         # ② OCR（想定外の例外も含め全て捕捉し 1 card の失敗が全体に波及しないようにする）
         #    run_ocr は 1 回のみ（2回OCR はしない）。
         try:
-            ocr_result = self._ocr_service.run_ocr(ocr_input_image)
+            ocr_result = self._ocr_service.run_ocr(upright_image)
         except Exception as e:
             self.error_messages.append(f"card_index={card_index}: OCR失敗 ({type(e).__name__}: {e})")
             return
@@ -235,18 +283,12 @@ class PipelineCoordinator:
             else:
                 ocr_result_value = BusinessCard.OcrResult.BUSINESS_CARD
 
-        # ⑩ DB先・ファイル後：card_image=None で DB 先行作成 → 一時ファイル保存 → on_commit でリネーム
-        # contact_dict が None の場合は Contact / Person を作成しない（BC のみ残置）
-        tmp_abs = None
+        # ⑦ stage1 作成済み BC を更新し、Contact / Person を作成（contact_dict=None なら BC のみ）
         try:
             with transaction.atomic():
-                business_card = BusinessCard.objects.create(
-                    original_image=self.original_image,
-                    card_image=None,
-                    card_index=card_index,
-                    orientation=orientation,
-                    ocr_result=ocr_result_value,
-                )
+                business_card.orientation = orientation
+                business_card.ocr_result = ocr_result_value
+                business_card.save(update_fields=["orientation", "ocr_result", "updated_at"])
                 if contact_dict is not None:
                     person = Person.objects.create()
                     contact = Contact.objects.create(
@@ -261,11 +303,32 @@ class PipelineCoordinator:
                                 field_name=field_name,
                                 confidence=conf,
                             )
+        except Exception as e:
+            self.failed_db_count += 1
+            self.error_messages.append(
+                f"card_index={card_index}: DB保存失敗 ({type(e).__name__}: {e})"
+            )
 
-                # 一時パスに JPEG を書き込む（DB コミット前）
+    def _create_card_with_image(self, card_index, image):
+        """[性質] 副作用あり（DB 書き込み・ファイル書き込み）/ BC を作成し card_image に image を保存する。
+
+        DB 先・ファイル後：card_image=None で BC 作成 → 一時ファイル保存 → on_commit でリネーム。
+        orientation / ocr_result はモデル既定のまま（OCR 由来の確定は stage2 が担う）。
+        [出力] BusinessCard or None（作成失敗時 None・error_messages に理由）。
+        """
+        tmp_abs = None
+        try:
+            with transaction.atomic():
+                business_card = BusinessCard.objects.create(
+                    original_image=self.original_image,
+                    card_image=None,
+                    card_index=card_index,
+                )
+
+                # 一時パスに JPEG を書き込む（DB コミット前）。image は正立後画像。
                 try:
                     crop_success, tmp_abs, final_rel, crop_error = save_card_image_tmp(
-                        warped_image, str(self.original_image.id), card_index,
+                        image, str(self.original_image.id), card_index,
                     )
                 except Exception as e:
                     crop_success, tmp_abs, final_rel, crop_error = False, None, None, str(e)
@@ -305,6 +368,7 @@ class PipelineCoordinator:
                     tmp_abs = None  # on_commit に委譲済みなので例外ハンドラではクリーンアップ不要
 
             self.created_count += 1
+            return business_card
 
         except Exception as e:
             self.failed_db_count += 1
@@ -317,6 +381,7 @@ class PipelineCoordinator:
                     os.unlink(tmp_abs)
                 except OSError as ue:
                     logger.warning("tmp cleanup failed for %s: %s", tmp_abs, ue)
+            return None
 
     def _upright_with_osd(self, warped_image, card_index):
         """[性質] 副作用あり（外部プロセス呼び出し・ファイル書き込み）/ OSD で正立化した画像を返す。
@@ -395,7 +460,10 @@ class PipelineCoordinator:
     def _cards_payload(self, n):
         """[性質] 純関数（DB操作なし・副作用なし）/ cards 配列に OSD/OCR 記録を非破壊で合成して返す。
 
-        cards[i] が dict のとき osd / tesseract_ocr サブセクションを足す（None の検出には足さない）。
+        cards[i] が dict（OCR 由来 card_data）のとき osd / tesseract_ocr サブセクションを足す。
+        OCR 実行時（通常）は card_data が None の検出には足さない（従来どおり None のまま）。
+        第1段（self._opencv_only=True・OCR前）に限り、card_data が None でも osd / tesseract_ocr
+        のみの最小カードを残す（詳細画面で OSD 値を表示するため）。
         元の card_data は変更しない（{**card, **record} で新 dict を作る）。
         """
         cards = []
@@ -404,6 +472,10 @@ class PipelineCoordinator:
             record = self._tesseract_by_index.get(i)
             if card is not None and record:
                 card = {**card, **record}
+            elif card is None and record and self._opencv_only:
+                # 第1段（OCR前）：card_data が無いので osd / tesseract_ocr のみの最小カードを残す。
+                # OCR 形スキーマは満たさないが、_build_raw_json が OCR 前は検証をスキップする。
+                card = dict(record)
             cards.append(card)
         return cards
 

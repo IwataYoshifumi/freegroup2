@@ -59,6 +59,36 @@
             </div>
           </div>
 
+          {# OSD 向き判定（Tesseract 由来・OCR前）。上の Claude orientation バッジとは別物。 #}
+          <div class="app-detail-item">
+            <div class="app-detail-label">OSD 向き判定（Tesseract・Claude orientation とは別）</div>
+            {% if osd %}
+              <div class="app-detail-value" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                {% if osd.error %}
+                  <span class="app-status-badge app-status-badge--error">OSD失敗</span>
+                  <span class="app-muted">{{ osd.error }}</span>
+                {% else %}
+                  <span>rotate: <strong>{{ osd.rotate|default_if_none:"—" }}°</strong></span>
+                  <span class="app-muted">
+                    現在角 {{ osd.orientation_deg|default_if_none:"—" }}°
+                    / conf {{ osd.orientation_conf|default_if_none:"—" }}
+                    {% if osd.script %}/ script {{ osd.script }}{% endif %}
+                  </span>
+                  {% if osd_rotate_zero %}
+                    <span class="app-status-badge app-status-badge--info">回さない判定 (rotate=0)</span>
+                    <span class="app-status-badge app-status-badge--warning">conf を確認（低conf＝逆さ誤判定の疑い）</span>
+                  {% endif %}
+                {% endif %}
+              </div>
+              <div class="app-muted" style="font-size:12px;margin-top:4px;">
+                ※ これは Tesseract OSD の判定値で、card_image は OSD 正立化後の画像。
+                上のアップロード日時欄の向きバッジは Claude の card_meta.orientation であり別物。
+              </div>
+            {% else %}
+              <div class="app-detail-value app-muted">OSD 情報なし（未処理 or 記録なし）</div>
+            {% endif %}
+          </div>
+
           </div>
       </div>
 

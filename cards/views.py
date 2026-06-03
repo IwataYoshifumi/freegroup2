@@ -821,11 +821,19 @@ class CardDetailView(DetailView):
 
         raw_json = self.object.original_image.raw_json
         card_json_str = None
+        osd = None
         if raw_json:
             cards = raw_json.get("cards", [])
             idx = self.object.card_index
             if 0 <= idx < len(cards):
-                card_json_str = json.dumps(cards[idx], ensure_ascii=False, indent=2)
+                card_entry = cards[idx]
+                card_json_str = json.dumps(card_entry, ensure_ascii=False, indent=2)
+                if isinstance(card_entry, dict) and isinstance(card_entry.get("osd"), dict):
+                    osd = card_entry["osd"]
         context["card_json_str"] = card_json_str
+        # OSD 値（Tesseract 由来・Claude の card_meta.orientation とは別物）。
+        # rotate=0 かつ低 conf は「倒れているのに回さない誤判定」の疑いなので目視で拾えるよう渡す。
+        context["osd"] = osd
+        context["osd_rotate_zero"] = bool(osd) and osd.get("rotate") == 0
 
         return context
