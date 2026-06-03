@@ -4148,6 +4148,73 @@ class EmailContextSettingsMergeTests(_Phase3TestBase):
         self.assertEqual(len(ctx.unsubscribe_links), 1)
 
 
+class MailingSiteUrlConfigTests(TestCase):
+    """メール埋め込みリンクのベースURL（MAILING_SITE_URL）の .env 化（§7.4.6.4 / §8.1）。
+
+    config/constants.py が os.getenv("MAILING_SITE_URL", "http://localhost:8000").rstrip("/")
+    で供給する。email_context の3ヘルパーはこの定数からリンクを組み立てる（テスト/プレビュー
+    /本番cron で分岐なし、依存は定数1本に集約）。
+    """
+
+    def test_constant_has_no_trailing_slash(self):
+        # ベースURLは末尾スラッシュ無し規約（ヘルパーが "/t/<token>/" で先頭付与するため）。
+        from config.constants import MAILING_SITE_URL
+
+        self.assertFalse(MAILING_SITE_URL.endswith("/"))
+
+    def test_helpers_build_urls_from_base(self):
+        # (c) 3ヘルパーが正しいベースURLからリンクを組む。二重スラッシュは生じない。
+        from config.constants import MAILING_SITE_URL
+        from mailings.services.email_context import (
+            _track_url,
+            _unsubscribe_url,
+            _unsubscribe_url_tokenless,
+        )
+
+        self.assertEqual(_track_url("abc123"), f"{MAILING_SITE_URL}/t/abc123/")
+        self.assertEqual(_unsubscribe_url("xyz789"), f"{MAILING_SITE_URL}/u/xyz789/")
+        self.assertEqual(_unsubscribe_url_tokenless(), f"{MAILING_SITE_URL}/u/")
+        # スキーム部の "//" を除いた残りに "//" が現れない（パス側の二重スラッシュ無し）。
+        path_part = _track_url("abc123").split("://", 1)[1]
+        self.assertNotIn("//", path_part)
+
+    def test_default_fallback_when_env_missing(self):
+        # (b) 環境変数未設定時は http://localhost:8000 にフォールバック（example.com に戻さない）。
+        import importlib
+        import os
+
+        from config import constants
+
+        original = os.environ.pop("MAILING_SITE_URL", None)
+        try:
+            importlib.reload(constants)
+            self.assertEqual(constants.MAILING_SITE_URL, "http://localhost:8000")
+        finally:
+            # 環境変数を復元し、定数モジュールを元の状態に戻す（後続テストへの影響防止）。
+            if original is not None:
+                os.environ["MAILING_SITE_URL"] = original
+            importlib.reload(constants)
+
+    def test_trailing_slash_in_env_is_normalized(self):
+        # .env 側に末尾スラッシュを付けても rstrip で除去される（二重スラッシュ防止）。
+        import importlib
+        import os
+
+        from config import constants
+
+        original = os.environ.get("MAILING_SITE_URL")
+        os.environ["MAILING_SITE_URL"] = "https://mail.example.test/"
+        try:
+            importlib.reload(constants)
+            self.assertEqual(constants.MAILING_SITE_URL, "https://mail.example.test")
+        finally:
+            if original is not None:
+                os.environ["MAILING_SITE_URL"] = original
+            else:
+                os.environ.pop("MAILING_SITE_URL", None)
+            importlib.reload(constants)
+
+
 class EmailContextPrepareTestPreviewTests(_Phase3TestBase):
     def test_test_mode_no_token_generation(self):
         person = self._make_person()

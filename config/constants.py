@@ -4,6 +4,8 @@
 モデル固有の選択肢は各モデルの内部クラスとして定義する（仕様書 §14.4）。
 """
 
+import os
+
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 
@@ -146,8 +148,12 @@ CLICK_LOG_IP_RETENTION_DAYS = 90
 
 # 配信メール内のリンクのベース URL（仕様書 v1.6 §7.4.6.4 / §8.1）。
 # TrackingLink: {MAILING_SITE_URL}/t/<token>/、UnsubscribeLink: {MAILING_SITE_URL}/u/<token>/
-# Phase 8 で .env / settings 経由の環境別管理に切り替える想定。Phase 3 ではここを正本とする。
-MAILING_SITE_URL = "https://freegroup2.example.com"
+# .env の MAILING_SITE_URL から取得する（settings.py の load_dotenv が先行読込済みのため
+# constants 読込時には os.environ に反映されている）。環境別管理を前倒しで導入。
+# 末尾スラッシュは email_context のヘルパーが "/t/<token>/" の形で先頭に付けるため、
+# 二重スラッシュ防止に rstrip("/") で正規化する（.env 側に付けても安全）。
+# 未設定時は runserver 既定の http://localhost:8000 にフォールバック（example.com には戻さない）。
+MAILING_SITE_URL = os.getenv("MAILING_SITE_URL", "http://localhost:8000").rstrip("/")
 
 # ======================================================================
 # v1.6 クリックトラッキング系（Phase 4、仕様書 §8.2.1）
