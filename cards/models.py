@@ -193,6 +193,9 @@ class BusinessCard(models.Model):
     )
     raw_json_1 = models.JSONField(null=True, blank=True)
     raw_json_2 = models.JSONField(null=True, blank=True)
+    # OSD（Tesseract image_to_osd）の前段正立補正の出力を記録する（分析用）。
+    # OCR 判定の orientation（BC.orientation）・raw_json_1/2 とは独立。未処理時は None。
+    osd_json = models.JSONField(null=True, blank=True)
     claimed_at = models.DateTimeField(null=True, blank=True, default=None)
     error_message = models.TextField(blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
@@ -270,6 +273,12 @@ class DebugMask(models.Model):
         SAT = "sat", "彩度 (sat)"
         OR = "or", "OR 合成 (or)"
         CLOSED = "closed", "クロージング (closed)"
+        # OSD/rev2 検出方式（マスク別 生＋クローズ）で使う追加値。既存5値はそのまま残す。
+        ADAPTIVE = "adaptive", "局所二値化 生 (adaptive)"
+        DIFF_CLOSED = "diff_closed", "輝度差 クローズ (diff_closed)"
+        EDGE_CLOSED = "edge_closed", "エッジ クローズ (edge_closed)"
+        SAT_CLOSED = "sat_closed", "彩度 クローズ (sat_closed)"
+        ADAPTIVE_CLOSED = "adaptive_closed", "局所二値化 クローズ (adaptive_closed)"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     original_image = models.ForeignKey(
@@ -277,7 +286,7 @@ class DebugMask(models.Model):
         on_delete=models.CASCADE,
         related_name="debug_masks",
     )
-    mask_type = models.CharField(max_length=10, choices=MaskType.choices)
+    mask_type = models.CharField(max_length=16, choices=MaskType.choices)
     attempt_no = models.IntegerField(default=1)
     mask_image = models.ImageField(upload_to=_debug_mask_upload_path)
     metadata = models.JSONField(default=dict, blank=True)
