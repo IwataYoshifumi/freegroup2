@@ -5831,8 +5831,9 @@ class _Phase5AdminBase(_Phase5UIBase):
     def setUp(self):
         super().setUp()
         admin = User.objects.create_user(username="phase5_admin", password="x")
-        perm = Permission.objects.get(codename="manage_suppressed_email")
-        admin.user_permissions.add(perm)
+        # Phase 7 ⑤：No.57/58 GET は view_suppressedemail、No.58 POST/No.59 は manage。
+        for _cn in ("manage_suppressed_email", "view_suppressedemail"):
+            admin.user_permissions.add(Permission.objects.get(codename=_cn))
         self.admin = admin
         self.admin_client = Client()
         self.admin_client.force_login(admin)
@@ -6181,6 +6182,10 @@ class _Phase6TestBase(TestCase):
             mailing_list=self.mailing_list,
             created_by=self.other_user,
         )
+        # Phase 7 ⑤：閲覧/CSV の粗い Permission を付与（所有者性は created_by=self.user で担保。
+        # view_all_campaigns は付けない＝「自分のみ vs 全件」の境界テストを壊さないため）。
+        for _cn in ("view_campaign", "export_report"):
+            self.user.user_permissions.add(Permission.objects.get(codename=_cn))
         self.client.force_login(self.user)
 
     def _make_person(self, full_name, email, organization=""):
@@ -6662,6 +6667,9 @@ class _PhaseCTestBase(_Phase3TestBase):
 
     def setUp(self):
         super().setUp()
+        # Phase 7 ⑤：テンプレ編集 manage_template、プレビュー view_campaign（＋所有者性）。
+        for _cn in ("manage_template", "view_campaign"):
+            self.user.user_permissions.add(Permission.objects.get(codename=_cn))
         self.client.force_login(self.user)
         # _Phase3TestBase.setUp が self.template / self.mailing_list / self.config / self.user を作る。
         # _make_campaign を呼ぶと別の template が生成されるため、self.template を直接紐付ける
@@ -6846,6 +6854,15 @@ class _PhaseBTestBase(_Phase3TestBase):
 
     def setUp(self):
         super().setUp()
+        # Phase 7 ⑤：Campaign 操作系の粗い Permission を付与（所有者性は created_by=self.user）。
+        for _cn in (
+            "view_campaign",
+            "add_campaign",
+            "change_campaign",
+            "delete_campaign",
+            "send_campaign",
+        ):
+            self.user.user_permissions.add(Permission.objects.get(codename=_cn))
         self.client.force_login(self.user)
         # _Phase3TestBase の self.template を使って draft Campaign を 1 個作る。
         self.campaign = Campaign.objects.create(
@@ -7413,3 +7430,239 @@ class CampaignDetailNewListButtonTests(_PhaseBTestBase):
         response = self.client.get(f"/mailings/campaigns/{self.campaign.pk}/")
         body = response.content.decode("utf-8")
         self.assertNotIn("新規リストを作成して紐づける", body)
+
+
+class Phase7ViewAuthorizationTests(TestCase):
+    """Phase 7 ⑤：mailings / tags View の認可（粗い Permission ＋所有者 Mixin）。
+
+    代表 View で 本人=200 / 他人=403 / view_all=200 / 未ログイン=リダイレクト、
+    一覧の絞り込み、所有者を付けない View（Suppressed / tags）の粗い Permission を検証。
+    """
+
+    def setUp(self):
+        self.owner = User.objects.create_user(
+            username="p7_owner", password="x", email="owner@example.com"
+        )
+        self.other = User.objects.create_user(username="p7_other", password="x")
+        self.viewall = User.objects.create_user(username="p7_viewall", password="x")
+        self.template = EmailTemplate.objects.create(
+            name="T", subject="s", body="b", created_by=self.owner
+        )
+        self.mailing_list = MailingList.objects.create(name="ML", created_by=self.owner)
+        self.campaign = Campaign.objects.create(
+            name="C",
+            template=self.template,
+            mailing_list=self.mailing_list,
+            status=Campaign.Status.DRAFT,
+            created_by=self.owner,
+        )
+        coarse = [
+            "view_campaign",
+            "change_campaign",
+            "delete_campaign",
+            "send_campaign",
+            "export_report",
+        ]
+        self._grant(self.owner, *coarse)
+        self._grant(self.other, *coarse)
+        self._grant(self.viewall, "view_campaign", "view_all_campaigns", "export_report")
+
+    def _grant(self, user, *codenames):
+        from django.contrib.auth.models import Permission
+
+        for cn in codenames:
+            user.user_permissions.add(Permission.objects.get(codename=cn))
+
+    def _client(self, user=None):
+        c = Client()
+        if user is not None:
+            c.force_login(User.objects.get(pk=user.pk))
+        return c
+
+    # ---- Detail（view_campaign + owner）----
+    def test_detail_owner_200(self):
+        r = self._client(self.owner).get(
+            reverse("mailings:campaign_detail", args=[self.campaign.pk])
+        )
+        self.assertEqual(r.status_code, 200)
+
+    def test_detail_other_403(self):
+        r = self._client(self.other).get(
+            reverse("mailings:campaign_detail", args=[self.campaign.pk])
+        )
+        self.assertEqual(r.status_code, 403)
+
+    def test_detail_viewall_200(self):
+        r = self._client(self.viewall).get(
+            reverse("mailings:campaign_detail", args=[self.campaign.pk])
+        )
+        self.assertEqual(r.status_code, 200)
+
+    def test_detail_anonymous_redirect(self):
+        r = self._client().get(
+            reverse("mailings:campaign_detail", args=[self.campaign.pk])
+        )
+        self.assertEqual(r.status_code, 302)
+
+    # ---- Update（change_campaign + owner）----
+    def test_update_owner_200(self):
+        r = self._client(self.owner).get(
+            reverse("mailings:campaign_update", args=[self.campaign.pk])
+        )
+        self.assertEqual(r.status_code, 200)
+
+    def test_update_other_403(self):
+        r = self._client(self.other).get(
+            reverse("mailings:campaign_update", args=[self.campaign.pk])
+        )
+        self.assertEqual(r.status_code, 403)
+
+    # ---- Report（view_campaign + owner）----
+    def test_report_owner_200(self):
+        r = self._client(self.owner).get(
+            reverse("mailings:campaign_report", args=[self.campaign.pk])
+        )
+        self.assertEqual(r.status_code, 200)
+
+    def test_report_other_403(self):
+        r = self._client(self.other).get(
+            reverse("mailings:campaign_report", args=[self.campaign.pk])
+        )
+        self.assertEqual(r.status_code, 403)
+
+    def test_report_viewall_200(self):
+        r = self._client(self.viewall).get(
+            reverse("mailings:campaign_report", args=[self.campaign.pk])
+        )
+        self.assertEqual(r.status_code, 200)
+
+    # ---- CSV（export_report + owner）----
+    def test_csv_owner_200(self):
+        r = self._client(self.owner).get(
+            reverse("mailings:campaign_report_csv", args=[self.campaign.pk])
+        )
+        self.assertEqual(r.status_code, 200)
+
+    def test_csv_other_403(self):
+        r = self._client(self.other).get(
+            reverse("mailings:campaign_report_csv", args=[self.campaign.pk])
+        )
+        self.assertEqual(r.status_code, 403)
+
+    def test_csv_requires_export_report_even_for_owner(self):
+        u = User.objects.create_user(username="p7_noexport", password="x")
+        self._grant(u, "view_campaign")
+        c = Campaign.objects.create(
+            name="C2",
+            template=EmailTemplate.objects.create(
+                name="T2", subject="s", body="b", created_by=u
+            ),
+            mailing_list=self.mailing_list,
+            status=Campaign.Status.DRAFT,
+            created_by=u,
+        )
+        r = self._client(u).get(reverse("mailings:campaign_report_csv", args=[c.pk]))
+        self.assertEqual(r.status_code, 403)
+
+    # ---- TestSend（send_campaign + owner）----
+    def test_test_send_other_403(self):
+        r = self._client(self.other).post(
+            reverse("mailings:campaign_test_send", args=[self.campaign.pk])
+        )
+        self.assertEqual(r.status_code, 403)
+
+    def test_test_send_owner_not_forbidden(self):
+        r = self._client(self.owner).post(
+            reverse("mailings:campaign_test_send", args=[self.campaign.pk])
+        )
+        self.assertNotEqual(r.status_code, 403)
+        self.assertEqual(r.status_code, 302)
+
+    # ---- Schedule（change_campaign + owner）----
+    def test_schedule_other_403(self):
+        r = self._client(self.other).post(
+            reverse("mailings:campaign_schedule", args=[self.campaign.pk])
+        )
+        self.assertEqual(r.status_code, 403)
+
+    # ---- Create（add_campaign、所有者なし）----
+    def test_create_requires_add_campaign(self):
+        u = User.objects.create_user(username="p7_creator", password="x")
+        url = reverse("mailings:campaign_create")
+        self.assertEqual(self._client(u).get(url).status_code, 403)
+        self._grant(u, "add_campaign")
+        self.assertEqual(self._client(u).get(url).status_code, 200)
+
+    # ---- List（view_campaign coarse + visible_campaigns_for 絞り込み）----
+    def test_list_owner_sees_only_own(self):
+        other_campaign = Campaign.objects.create(
+            name="C_other",
+            template=EmailTemplate.objects.create(
+                name="T_o", subject="s", body="b", created_by=self.other
+            ),
+            mailing_list=self.mailing_list,
+            status=Campaign.Status.DRAFT,
+            created_by=self.other,
+        )
+        r = self._client(self.owner).get(reverse("mailings:campaign_list"))
+        self.assertEqual(r.status_code, 200)
+        pks = {c.pk for c in r.context["campaigns"]}
+        self.assertIn(self.campaign.pk, pks)
+        self.assertNotIn(other_campaign.pk, pks)
+
+    def test_list_viewall_sees_all(self):
+        other_campaign = Campaign.objects.create(
+            name="C_other2",
+            template=EmailTemplate.objects.create(
+                name="T_o2", subject="s", body="b", created_by=self.other
+            ),
+            mailing_list=self.mailing_list,
+            status=Campaign.Status.DRAFT,
+            created_by=self.other,
+        )
+        r = self._client(self.viewall).get(reverse("mailings:campaign_list"))
+        self.assertEqual(r.status_code, 200)
+        pks = {c.pk for c in r.context["campaigns"]}
+        self.assertIn(self.campaign.pk, pks)
+        self.assertIn(other_campaign.pk, pks)
+
+    # ---- Suppressed（所有者なし、粗い Perm のみ）----
+    def test_suppressed_list_requires_view_suppressedemail(self):
+        u = User.objects.create_user(username="p7_sup", password="x")
+        url = reverse("mailings:suppressed_list")
+        self.assertEqual(self._client(u).get(url).status_code, 403)
+        self._grant(u, "view_suppressedemail")
+        self.assertEqual(self._client(u).get(url).status_code, 200)
+
+    def test_suppressed_detail_get_view_post_manage(self):
+        from .models import SuppressedEmail
+
+        sup = SuppressedEmail.objects.create(
+            email="x@example.com", source=SuppressedEmail.Source.MANUAL
+        )
+        u = User.objects.create_user(username="p7_supdet", password="x")
+        self._grant(u, "view_suppressedemail")
+        detail = reverse("mailings:suppressed_detail", args=[sup.pk])
+        self.assertEqual(self._client(u).get(detail).status_code, 200)
+        self.assertEqual(self._client(u).post(detail).status_code, 403)
+        self._grant(u, "manage_suppressed_email")
+        self.assertEqual(self._client(u).post(detail).status_code, 302)
+
+    # ---- tags（標準 CRUD、所有者なし）----
+    def test_tag_list_requires_view_tag(self):
+        u = User.objects.create_user(username="p7_tag", password="x")
+        url = reverse("tags:tag_list")
+        self.assertEqual(self._client(u).get(url).status_code, 403)
+        self._grant(u, "view_tag")
+        self.assertEqual(self._client(u).get(url).status_code, 200)
+
+    def test_tag_delete_requires_delete_tag(self):
+        from tags.models import Tag, TagCategory
+
+        cat = TagCategory.objects.create(name="cat", sort_order=1)
+        tag = Tag.objects.create(name="t1", category=cat, created_by=self.owner)
+        u = User.objects.create_user(username="p7_tagdel", password="x")
+        url = reverse("tags:tag_delete", args=[tag.pk])
+        self.assertEqual(self._client(u).post(url).status_code, 403)
+        self._grant(u, "delete_tag")
+        self.assertEqual(self._client(u).post(url).status_code, 302)

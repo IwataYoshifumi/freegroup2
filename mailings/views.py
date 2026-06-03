@@ -12,7 +12,8 @@ import json
 import uuid
 
 from django.contrib.auth.decorators import login_required, permission_required
-from django.contrib.auth.mixins import LoginRequiredMixin
+from django.contrib.auth.mixins import LoginRequiredMixin, PermissionRequiredMixin
+from django.core.exceptions import PermissionDenied
 from django.db import transaction
 from django.db.models import Q
 from django.http import JsonResponse
@@ -55,6 +56,32 @@ def _archived_only(request):
     `tags.views._archived_only` と同じ流儀（apps 間 import 回避のため独立定義）。
     """
     return request.GET.get("archived_only", "").lower() in ("1", "true", "on", "yes")
+
+
+class CampaignOwnerRequiredMixin:
+    """Campaign の所有者詳細判定を View に乗せる共通 Mixin（Phase 7 ⑤、rev20 §14.5）。
+
+    判定ロジックは持たず、URL kwargs の `pk` から Campaign を取り
+    services.permissions.can_view_campaign(user, campaign) を呼ぶだけ（正本は④の関数、
+    ここに二重に書かない）。所有者でなければ PermissionDenied(403)。
+
+    MRO 上は LoginRequiredMixin → PermissionRequiredMixin の後・本体 View の前に置く
+    （認証 → 粗い Permission → 所有者判定 → 本体 の順）。所有者判定が必要な全 View
+    （Detail/Update/Schedule/CancelSchedule/TestSend/Report 系/CSV/Preview/Archive）は
+    URL に `<uuid:pk>`（= Campaign）を持つため一様に適用できる。
+
+    アーカイブ済みの可否や 404 セマンティクスは各 View 自身の get_object /
+    get_object_or_404 に委ねる（本 Mixin は所有者判定のみを担う）。
+    """
+
+    def dispatch(self, request, *args, **kwargs):
+        from .models import Campaign as _Campaign
+        from .services.permissions import can_view_campaign
+
+        campaign = get_object_or_404(_Campaign, pk=kwargs.get("pk"))
+        if not can_view_campaign(request.user, campaign):
+            raise PermissionDenied
+        return super().dispatch(request, *args, **kwargs)
 
 
 # ======================================================================
@@ -2177,13 +2204,16 @@ class PreviewV2View(LoginRequiredMixin, View):
 # ======================================================================
 
 
-class MailingConfigEditView(LoginRequiredMixin, View):
+class MailingConfigEditView(LoginRequiredMixin, PermissionRequiredMixin, View):
     """シングルトン MailingConfig の編集画面。
 
     初回アクセス時は get_or_create で id=1 のレコード自動作成（§3-3 / 1b-α list_freeze.py）。
     GET: フォーム表示。POST: 検証 → 保存 → 同画面リダイレクト（success_url なし、PRG パターン）。
+
+    認可（Phase 7 ⑤）：mailings.change_mailingconfig（admin 専用、rev20 §14.1.2）。
     """
 
+    permission_required = "mailings.change_mailingconfig"
     template_name = "mailings/mailing_config_form.html"
 
     def get(self, request):
@@ -2675,19 +2705,16 @@ class PersonCancelUnsubscribeView(LoginRequiredMixin, View):
 # ----------------------------------------------------------------------
 
 
-@method_decorator(
-    permission_required(
-        "mailings.manage_suppressed_email", raise_exception=True
-    ),
-    name="dispatch",
-)
-class SuppressedEmailListView(LoginRequiredMixin, ListView):
-    """GET /mailings/suppressed/：配信拒否メアド一覧（§5.1 No.17、Phase 5）。"""
+class SuppressedEmailListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
+    """GET /mailings/suppressed/：配信拒否メアド一覧（rev19 No.57、Phase 5）。
+
+    認可（Phase 7 ⑤）：mailings.view_suppressedemail（全員＝閲覧専用ロールも可）。
+    """
 
     template_name = "mailings/suppressed_list.html"
     context_object_name = "suppressed_emails"
     paginate_by = 50
-
+    permission_required = "mailings.view_suppressedemail"
     def get_queryset(self):
         from .models import SuppressedEmail
 
@@ -2703,19 +2730,20 @@ class SuppressedEmailListView(LoginRequiredMixin, ListView):
         return ctx
 
 
-@method_decorator(
-    permission_required(
-        "mailings.manage_suppressed_email", raise_exception=True
-    ),
-    name="dispatch",
-)
 class SuppressedEmailDetailView(LoginRequiredMixin, View):
-    """GET/POST /mailings/suppressed/<uuid:pk>/：詳細表示＋解除（§5.1 No.18、Phase 5）。
+    """GET/POST /mailings/suppressed/<uuid:pk>/：詳細表示＋解除（rev19 No.58、Phase 5）。
 
     POST で cancelled_at = now() / cancelled_by = request.user に更新（論理削除、§4.8.1）。
     解除後、同一メアド宛配信が解禁される。
+
+    認可（Phase 7 ⑤、rev19 No.58）：GET=mailings.view_suppressedemail（全員）／
+        POST=mailings.manage_suppressed_email（admin）。GET と POST で粗い Permission が
+        異なるため dispatch 一括ではなくメソッド単位で付与する。
     """
 
+    @method_decorator(
+        permission_required("mailings.view_suppressedemail", raise_exception=True)
+    )
     def get(self, request, pk):
         from django.shortcuts import get_object_or_404, render
 
@@ -2732,6 +2760,9 @@ class SuppressedEmailDetailView(LoginRequiredMixin, View):
             },
         )
 
+    @method_decorator(
+        permission_required("mailings.manage_suppressed_email", raise_exception=True)
+    )
     def post(self, request, pk):
         from django.contrib import messages
         from django.shortcuts import get_object_or_404, redirect
@@ -2816,8 +2847,8 @@ class SuppressedEmailCreateView(LoginRequiredMixin, View):
 # ======================================================================
 
 
-class CampaignListView(LoginRequiredMixin, ListView):
-    """GET /mailings/campaigns/（§5.1 No.6、Phase 6 新規）。
+class CampaignListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
+    """GET /mailings/campaigns/（rev19 No.46、Phase 6 新規）。
 
     集計値カードを付したキャンペーン一覧。view_all_campaigns 持ちは全件、それ以外は
     自分のキャンペーンのみ。各行に Campaign.total_count / sent_count（フィールド参照）
@@ -2826,21 +2857,24 @@ class CampaignListView(LoginRequiredMixin, ListView):
     N+1 対策：QuerySet レベルで campaign を取得し、テンプレート側で
     get_campaign_summary を呼ぶ際に毎回 3 クエリ発生する素朴実装は避け、View 側で
     一括集計してから渡す。
+
+    認可（Phase 7 ⑤）：粗い Permission は mailings.view_campaign。表示範囲の絞り込みは
+        ④ services.permissions.visible_campaigns_for に委譲（view_all_campaigns 持ちは
+        全件、でなければ作成者本人のみ。QuerySet レベルで絞り N+1 を作らない）。
     """
 
     template_name = "mailings/campaign_list.html"
     context_object_name = "campaigns"
     paginate_by = 50
-
+    permission_required = "mailings.view_campaign"
     def get_queryset(self):
         from .models import Campaign
+        from .services.permissions import visible_campaigns_for
 
         qs = Campaign.objects.select_related("template", "mailing_list").order_by(
             "-created_at"
         )
-        if not self.request.user.has_perm("mailings.view_all_campaigns"):
-            qs = qs.filter(created_by=self.request.user)
-        return qs
+        return visible_campaigns_for(self.request.user, qs)
 
     def get_context_data(self, **kwargs):
         from mailings.services.report_aggregation import get_campaign_summary
@@ -2862,15 +2896,20 @@ class CampaignListView(LoginRequiredMixin, ListView):
         return ctx
 
 
-class CampaignReportView(LoginRequiredMixin, View):
-    """GET /mailings/campaigns/<uuid:pk>/report/（§5.1 No.12、Phase 6 新規）。
+class CampaignReportView(
+    LoginRequiredMixin, PermissionRequiredMixin, CampaignOwnerRequiredMixin, View
+):
+    """GET /mailings/campaigns/<uuid:pk>/report/（rev19 No.52、Phase 6 新規）。
 
     配信レポート詳細：基本情報 + 集計値カード + リンク別表 + 一覧導線 + CSV リンク
-    （§6.2.2）。閲覧権限は campaign.has_view_permission(user)（§4.2.1）。
+    （§6.2.2）。
+
+    認可（Phase 7 ⑤）：mailings.view_campaign ＋ 所有者判定（CampaignOwnerRequiredMixin
+        が④ can_view_campaign を呼ぶ。本人 or view_all_campaigns 持ち）。
     """
 
+    permission_required = "mailings.view_campaign"
     def get(self, request, pk):
-        from django.http import HttpResponseForbidden
         from django.shortcuts import get_object_or_404, render
 
         from mailings.services.report_aggregation import (
@@ -2884,9 +2923,6 @@ class CampaignReportView(LoginRequiredMixin, View):
             _Campaign.objects.select_related("template", "mailing_list", "created_by"),
             pk=pk,
         )
-        if not campaign.has_view_permission(request.user):
-            return HttpResponseForbidden()
-
         return render(
             request,
             "mailings/campaign_report.html",
@@ -2900,27 +2936,28 @@ class CampaignReportView(LoginRequiredMixin, View):
         )
 
 
-class _CampaignReportFilteredListBaseView(LoginRequiredMixin, View):
+class _CampaignReportFilteredListBaseView(
+    LoginRequiredMixin, PermissionRequiredMixin, CampaignOwnerRequiredMixin, View
+):
     """3 つの絞り込み一覧（クリック / バウンス / 配信停止）の共通基底（§6.2.3）。
 
     サブクラスが `template_name` と `aggregator` を提供する。aggregator は
     campaign を受けて List[dict(person, last_action_at)] を返す関数。
+
+    認可（Phase 7 ⑤、rev19 No.53-55）：mailings.view_campaign ＋ 所有者判定
+        （CampaignOwnerRequiredMixin）。3 サブクラス共通のため基底に集約する。
     """
 
     template_name: str = ""
     aggregator = None  # 型は Callable[[Campaign], List[dict]]
     page_title: str = ""
-
+    permission_required = "mailings.view_campaign"
     def get(self, request, pk):
-        from django.http import HttpResponseForbidden
         from django.shortcuts import get_object_or_404, render
 
         from .models import Campaign as _Campaign
 
         campaign = get_object_or_404(_Campaign.objects.select_related("template"), pk=pk)
-        if not campaign.has_view_permission(request.user):
-            return HttpResponseForbidden()
-
         rows = self.__class__.aggregator(campaign)
         return render(
             request,
@@ -2974,19 +3011,21 @@ class CampaignReportUnsubscribedListView(_CampaignReportFilteredListBaseView):
         return get_unsubscribed_persons(campaign)
 
 
-class CampaignReportCSVView(LoginRequiredMixin, View):
-    """GET/POST /mailings/campaigns/<uuid:pk>/report/csv/（§5.1 No.16 / §13.2、Phase 6）。
+class CampaignReportCSVView(
+    LoginRequiredMixin, PermissionRequiredMixin, CampaignOwnerRequiredMixin, View
+):
+    """GET/POST /mailings/campaigns/<uuid:pk>/report/csv/（rev19 No.56 / §13.2、Phase 6）。
 
     GET：項目選択フォームを表示（チェックボックス）。
     POST：選択された項目で CSV を生成しダウンロードを返す（UTF-8 BOM 付き、§13.2）。
 
-    閲覧権限は campaign.has_view_permission(user)。GET / POST ともに権限チェック。
+    認可（Phase 7 ⑤）：mailings.export_report ＋ 所有者判定（CampaignOwnerRequiredMixin）。
+        GET / POST ともに dispatch で一括判定される。
     """
 
     http_method_names = ["get", "post"]
-
+    permission_required = "mailings.export_report"
     def get(self, request, pk):
-        from django.http import HttpResponseForbidden
         from django.shortcuts import get_object_or_404, render
 
         from mailings.services.report_aggregation import CSV_AVAILABLE_FIELDS
@@ -2994,8 +3033,6 @@ class CampaignReportCSVView(LoginRequiredMixin, View):
         from .models import Campaign as _Campaign
 
         campaign = get_object_or_404(_Campaign, pk=pk)
-        if not campaign.has_view_permission(request.user):
-            return HttpResponseForbidden()
         return render(
             request,
             "mailings/campaign_report_csv_form.html",
@@ -3011,7 +3048,7 @@ class CampaignReportCSVView(LoginRequiredMixin, View):
         import csv
         import io
 
-        from django.http import HttpResponse, HttpResponseForbidden
+        from django.http import HttpResponse
         from django.shortcuts import get_object_or_404
 
         from mailings.services.report_aggregation import (
@@ -3022,9 +3059,6 @@ class CampaignReportCSVView(LoginRequiredMixin, View):
         from .models import Campaign as _Campaign
 
         campaign = get_object_or_404(_Campaign, pk=pk)
-        if not campaign.has_view_permission(request.user):
-            return HttpResponseForbidden()
-
         selected = [f for f in request.POST.getlist("fields") if f in CSV_AVAILABLE_KEYS]
         if not selected:
             from django.contrib import messages
@@ -3085,8 +3119,8 @@ def _highlight_unrendered_merge_tags(html_text):
     return re.sub(r"\{\{[^}]+\}\}", _wrap, html_text)
 
 
-class EmailTemplateUpdateView(LoginRequiredMixin, UpdateView):
-    """EmailTemplate 編集画面（仕様書 §4.3 / §6.1 No.44 / §12.2、URL一覧 rev17 No.44）。
+class EmailTemplateUpdateView(LoginRequiredMixin, PermissionRequiredMixin, UpdateView):
+    """EmailTemplate 編集画面（仕様書 §4.3 / §6.1 No.44 / §12.2、URL一覧 rev19 No.44）。
 
     指示書 (c) §3.2 で確定した 2 ボタン方式：
       - 「保存して戻る」（name="action" value="save_return"）→ DB 保存 →
@@ -3099,14 +3133,14 @@ class EmailTemplateUpdateView(LoginRequiredMixin, UpdateView):
 
     Campaign の特定：rev18 OneToOneField の逆引き `self.object.campaign` で取得。
 
-    TODO(Phase 7): `mailings.manage_template` Permission と所有者判定（紐付く
-        Campaign の所有者か `view_all_campaigns` 持ちか）を追加する（指示書 §3.3 / §7）。
+    認可（Phase 7 ⑤）：mailings.manage_template のみ。権限者は誰のテンプレートでも
+        編集可（rev20 §14.4.2）。所有者判定は付けない。
     """
 
     model = EmailTemplate
     form_class = EmailTemplateForm
     template_name = "mailings/email_template_update.html"
-
+    permission_required = "mailings.manage_template"
     def form_valid(self, form):
         # ModelForm の save をまず実行（updated_at 含めて DB 反映）。
         self.object = form.save()
@@ -3149,8 +3183,10 @@ class EmailTemplateUpdateView(LoginRequiredMixin, UpdateView):
         return context
 
 
-class CampaignPreviewView(LoginRequiredMixin, View):
-    """キャンペーンプレビュー View（仕様書 §7.7.1、URL一覧 rev17 No.82）。
+class CampaignPreviewView(
+    LoginRequiredMixin, PermissionRequiredMixin, CampaignOwnerRequiredMixin, View
+):
+    """キャンペーンプレビュー View（仕様書 §7.7.1、URL一覧 rev19 No.82）。
 
     Ajax モーダルに差し込む HTML 断片を返す。`EmailContext.prepare(mode=PREVIEW)`
     を直接呼び、3 処理単位（cron 入口・オーケストレーション・1 受信者処理）を
@@ -3164,9 +3200,11 @@ class CampaignPreviewView(LoginRequiredMixin, View):
     呼び出し元（編集画面・ステップ画面）が増えても URL/引数/prepare 呼び出しは
     同一（仕様書 §7.7.1.1 rev17 拡張）。
 
-    TODO(Phase 7): `mailings.view_campaign` Permission と所有者判定を追加する。
+    認可（Phase 7 ⑤、rev19 No.82）：mailings.view_campaign ＋ 所有者判定
+        （CampaignOwnerRequiredMixin が URL の <uuid:pk> から Campaign を取り判定）。
     """
 
+    permission_required = "mailings.view_campaign"
     def get(self, request, pk, person_id):
         from django.utils.safestring import mark_safe
 
@@ -3197,24 +3235,24 @@ class CampaignPreviewView(LoginRequiredMixin, View):
 # (b) Campaign UI 全般（仕様書 §4.2 / §6.1 No.7-11 / §6.2.1 / §6.2.1.1 / §7.2.5
 # / §7.7 / §7.8 / §12.4、URL一覧表 rev17 No.7-11）。
 # 詳細画面をハブにした単一ページ完結フロー。ステップ画面化は v1.6 後半/v1.7+（指示書 §3.3）。
-# 全 View に LoginRequiredMixin のみ。PermissionRequiredMixin・所有者判定は (d) Phase 7
-# で一括追加（指示書 §3.4、各 docstring に TODO(Phase 7) を明記）。
+# Phase 7 ⑤ で各 View に PermissionRequiredMixin（粗い Permission）＋所有者判定
+# （CampaignOwnerRequiredMixin、rev20 §14.5）を付与済み。
 # ======================================================================
 
 
-class CampaignCreateView(LoginRequiredMixin, CreateView):
-    """Campaign 新規作成（URL一覧 rev17 No.7、(b) §5.1）。
+class CampaignCreateView(LoginRequiredMixin, PermissionRequiredMixin, CreateView):
+    """Campaign 新規作成（URL一覧 rev19 No.47、(b) §5.1）。
 
     create_campaign_with_template で Campaign + 空 EmailTemplate を atomic 生成。
     成功時は詳細画面へリダイレクト（PRG）。
 
-    TODO(Phase 7): mailings.create_campaign + 所有者判定（既存ユーザのみ作成可）を追加。
+    認可（Phase 7 ⑤）：mailings.add_campaign（新規作成に所有者判定はなし）。
     """
 
     model = Campaign
     form_class = CampaignForm
     template_name = "mailings/campaign_form.html"
-
+    permission_required = "mailings.add_campaign"
     def get_form_kwargs(self):
         kwargs = super().get_form_kwargs()
         # 新規作成画面は name のみ表示する（CampaignForm 側の出し分け）。
@@ -3248,20 +3286,22 @@ class CampaignCreateView(LoginRequiredMixin, CreateView):
         return context
 
 
-class CampaignDetailView(LoginRequiredMixin, DetailView):
-    """Campaign 詳細画面（ハブ、URL一覧 rev17 No.8、(b) §5.2）。
+class CampaignDetailView(
+    LoginRequiredMixin, PermissionRequiredMixin, CampaignOwnerRequiredMixin, DetailView
+):
+    """Campaign 詳細画面（ハブ、URL一覧 rev19 No.48、(b) §5.2）。
 
     1 画面に基本情報・メール内容・宛先サマリー・テスト送信・status 別アクションを集約。
     ステップ画面化（仕様書 §6.2.1）は v1.6 後半/v1.7+（指示書 §3.3）。
 
-    TODO(Phase 7): mailings.view_campaign + 所有者判定（既存 has_view_permission との
-        統合方針を確定。現状は LoginRequiredMixin のみで素通り）。
+    認可（Phase 7 ⑤）：mailings.view_campaign ＋ 所有者判定（CampaignOwnerRequiredMixin
+        が④ can_view_campaign を呼ぶ。本人 or view_all_campaigns 持ち）。
     """
 
     model = Campaign
     template_name = "mailings/campaign_detail.html"
     context_object_name = "campaign"
-
+    permission_required = "mailings.view_campaign"
     def get_queryset(self):
         # アーカイブ済み Campaign は詳細画面に出さない（is_archived=True は 404）
         return Campaign.objects.select_related(
@@ -3299,33 +3339,44 @@ class CampaignDetailView(LoginRequiredMixin, DetailView):
         return context
 
 
-class CampaignUpdateView(LoginRequiredMixin, UpdateView):
-    """Campaign 編集画面（基本情報のみ、URL一覧 rev17 No.9、(b) §5.3）。
+class CampaignUpdateView(
+    LoginRequiredMixin, PermissionRequiredMixin, CampaignOwnerRequiredMixin, UpdateView
+):
+    """Campaign 編集画面（基本情報のみ、URL一覧 rev19 No.49、(b) §5.3）。
 
     draft のみ編集可。それ以外は詳細画面へ redirect + warning。
     件名・本文は本画面では編集しない（(c) の EmailTemplateUpdateView で行う、
     指示書 Q3 確定の動線 2 分割）。
 
-    TODO(Phase 7): mailings.create_campaign + 所有者判定を追加。
+    認可（Phase 7 ⑤）：mailings.change_campaign ＋ 所有者判定（CampaignOwnerRequiredMixin）。
     """
 
     model = Campaign
     form_class = CampaignForm
     template_name = "mailings/campaign_form.html"
-
-    def dispatch(self, request, *args, **kwargs):
-        campaign = get_object_or_404(
-            Campaign, pk=kwargs.get("pk"), is_archived=False
-        )
+    permission_required = "mailings.change_campaign"
+    def _redirect_if_not_draft(self):
+        # draft 以外は編集不可。詳細画面へ warning 付きでリダイレクト。
+        # 認可（Login→Permission→Owner）を先に通すため dispatch ではなく get/post で
+        # 評価する（未認証・無権限・非所有者を status 判定より先に弾く）。
+        campaign = self.get_object()
         if campaign.status != Campaign.Status.DRAFT:
             from django.contrib import messages
 
             messages.warning(
-                request,
+                self.request,
                 "下書き状態のキャンペーンのみ編集できます。",
             )
             return redirect("mailings:campaign_detail", pk=campaign.pk)
-        return super().dispatch(request, *args, **kwargs)
+        return None
+
+    def get(self, request, *args, **kwargs):
+        guard = self._redirect_if_not_draft()
+        return guard if guard is not None else super().get(request, *args, **kwargs)
+
+    def post(self, request, *args, **kwargs):
+        guard = self._redirect_if_not_draft()
+        return guard if guard is not None else super().post(request, *args, **kwargs)
 
     def get_queryset(self):
         return Campaign.objects.filter(is_archived=False)
@@ -3348,10 +3399,16 @@ class CampaignUpdateView(LoginRequiredMixin, UpdateView):
         return context
 
 
-class _CampaignActionBaseView(LoginRequiredMixin, View):
+class _CampaignActionBaseView(
+    LoginRequiredMixin, PermissionRequiredMixin, CampaignOwnerRequiredMixin, View
+):
     """schedule / cancel_schedule / test_send 共通基底：POST のみ・status 検査・PRG。
 
     エラー時は django.contrib.messages.error でフラッシュして詳細画面へ戻す。
+
+    認可（Phase 7 ⑤）：所有者判定（CampaignOwnerRequiredMixin）は共通。粗い Permission
+        はアクションごとに異なるため各サブクラスが permission_required を設定する
+        （schedule / cancel_schedule = change_campaign、test_send = send_campaign）。
     """
 
     def get(self, request, pk):
@@ -3364,10 +3421,12 @@ class _CampaignActionBaseView(LoginRequiredMixin, View):
 
 
 class CampaignScheduleView(_CampaignActionBaseView):
-    """予約アクション：DRAFT → SCHEDULED（URL一覧 rev17 No.10、(b) §5.4）。
+    """予約アクション：DRAFT → SCHEDULED（URL一覧 rev19 No.50、(b) §5.4）。
 
-    TODO(Phase 7): mailings.send_campaign + 所有者判定を追加。
+    認可（Phase 7 ⑤）：mailings.change_campaign ＋ 所有者判定（基底 Mixin）。
     """
+
+    permission_required = "mailings.change_campaign"
 
     def post(self, request, pk):
         from django.contrib import messages
@@ -3390,8 +3449,11 @@ class CampaignScheduleView(_CampaignActionBaseView):
 class CampaignCancelScheduleView(_CampaignActionBaseView):
     """予約取消アクション：SCHEDULED → DRAFT 復帰、scheduled_at 維持（(b) §5.5、§7.2.5）。
 
-    TODO(Phase 7): mailings.send_campaign + 所有者判定を追加。
+    認可（Phase 7 ⑤）：mailings.change_campaign ＋ 所有者判定（基底 Mixin）。状態遷移
+        であり送信ではないため change_campaign（send_campaign ではない、rev20 CRUD 区分）。
     """
+
+    permission_required = "mailings.change_campaign"
 
     def post(self, request, pk):
         from django.contrib import messages
@@ -3410,15 +3472,19 @@ class CampaignCancelScheduleView(_CampaignActionBaseView):
         return self._redirect_detail(pk)
 
 
-class CampaignArchiveView(LoginRequiredMixin, View):
+class CampaignArchiveView(
+    LoginRequiredMixin, PermissionRequiredMixin, CampaignOwnerRequiredMixin, View
+):
     """論理削除（(b) §5.6、仕様書 §12.4）。
 
     GET = 確認画面、POST = 実行（draft のみ可、Campaign + EmailTemplate を同一 atomic で
     is_archived=True）。MailingListDeleteView 流儀踏襲（指示書 Q4 確定）。
 
-    TODO(Phase 7): mailings.create_campaign + 所有者判定を追加。
+    認可（Phase 7 ⑤）：mailings.delete_campaign ＋ 所有者判定（CampaignOwnerRequiredMixin）。
+        論理削除＝rev20 の delete 区分。
     """
 
+    permission_required = "mailings.delete_campaign"
     def get(self, request, pk):
         campaign = get_object_or_404(Campaign, pk=pk, is_archived=False)
         return render(
@@ -3454,8 +3520,10 @@ class CampaignTestSendView(_CampaignActionBaseView):
     送信先は request.user.email 固定（指示書 §3.2、第三者悪用経路の構造的防止）。
     POST のみ、PRG で詳細画面へ戻して結果メッセージをフラッシュ表示。
 
-    TODO(Phase 7): mailings.send_campaign + 所有者判定を追加。
+    認可（Phase 7 ⑤）：mailings.send_campaign ＋ 所有者判定（基底 Mixin）。
     """
+
+    permission_required = "mailings.send_campaign"
 
     def post(self, request, pk):
         from django.contrib import messages

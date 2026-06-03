@@ -310,7 +310,9 @@ class TagCategoryReorderView(LoginRequiredMixin, View):
 # ======================================================================
 
 
-class TagListView(LoginRequiredMixin, ListView):
+class TagListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
+    # 認可（Phase 7 ⑤、rev19 No.63）：tags.view_tag（全員）。所有者判定なし。
+    permission_required = "tags.view_tag"
     model = Tag
     template_name = "tags/tag_list.html"
     context_object_name = "tags"
@@ -360,7 +362,9 @@ class TagListView(LoginRequiredMixin, ListView):
         return context
 
 
-class TagCreateView(LoginRequiredMixin, CreateView):
+class TagCreateView(LoginRequiredMixin, PermissionRequiredMixin, CreateView):
+    # 認可（Phase 7 ⑤、rev19 No.64）：tags.add_tag（admin/sales）。所有者判定なし。
+    permission_required = "tags.add_tag"
     model = Tag
     form_class = TagForm
     template_name = "tags/tag_form.html"
@@ -390,7 +394,9 @@ class TagCreateView(LoginRequiredMixin, CreateView):
         return context
 
 
-class TagUpdateView(LoginRequiredMixin, UpdateView):
+class TagUpdateView(LoginRequiredMixin, PermissionRequiredMixin, UpdateView):
+    # 認可（Phase 7 ⑤、rev19 No.66）：tags.change_tag（admin/sales）。所有者判定なし。
+    permission_required = "tags.change_tag"
     model = Tag
     form_class = TagForm
     template_name = "tags/tag_form.html"
@@ -422,7 +428,7 @@ class TagUpdateView(LoginRequiredMixin, UpdateView):
         return context
 
 
-class TagDetailView(LoginRequiredMixin, DetailView):
+class TagDetailView(LoginRequiredMixin, PermissionRequiredMixin, DetailView):
     """タグ詳細（Phase 1b-δ 追加、§5.1 No.22）。
 
     タグ基本情報 + 付与 Person 一覧（ページネーション 20 件/ページ）を表示する。
@@ -437,6 +443,8 @@ class TagDetailView(LoginRequiredMixin, DetailView):
     model = Tag
     template_name = "tags/tag_detail.html"
     context_object_name = "tag"
+    # 認可（Phase 7 ⑤、rev19 No.65）：tags.view_tag（全員）。所有者判定なし。
+    permission_required = "tags.view_tag"
 
     def get_queryset(self):
         return Tag.objects.select_related("category", "created_by")
@@ -475,11 +483,16 @@ class TagDetailView(LoginRequiredMixin, DetailView):
         return context
 
 
+@method_decorator(
+    permission_required("tags.delete_tag", raise_exception=True), name="dispatch"
+)
 class TagDeleteView(LoginRequiredMixin, View):
     """論理アーカイブ化（is_archived=True、§11.2.4）。物理削除はしない。
 
     Phase 1b-δ で UI ラベルを「削除」→「アーカイブ化」に統一したが、コード内表現
     （URL 名・View 名）は維持する方針（指示書準拠）。
+
+    認可（Phase 7 ⑤、rev19 No.67）：tags.delete_tag（admin）。所有者判定なし。
     """
 
     def post(self, request, pk):

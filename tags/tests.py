@@ -202,9 +202,13 @@ class TagListViewSortTests(TestCase):
     """TagListView の多段サーバー側ソート（Task G 横展開）。"""
 
     def setUp(self):
+        from django.contrib.auth.models import Permission
+
         self.user = User.objects.create_user(
             username="tag_list_sort_test_user", password="dummy"
         )
+        # Phase 7 ⑤：TagListView は tags.view_tag を要求する。
+        self.user.user_permissions.add(Permission.objects.get(codename="view_tag"))
         self.client = Client()
         self.client.force_login(self.user)
         self.category = TagCategory.objects.create(name="業種", sort_order=1)
