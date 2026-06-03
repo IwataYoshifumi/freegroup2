@@ -10,20 +10,24 @@ import statistics
 from collections import Counter
 
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
 from django.core.files.base import ContentFile
 from django.db.models import Count, Exists, OuterRef, Q
 from django.http import HttpResponse, HttpResponseRedirect
-from django.shortcuts import get_object_or_404, redirect
+from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils.dateparse import parse_date
 from django.views import View
-from django.views.generic import DetailView, FormView, ListView
+from django.views.generic import DetailView, ListView
 
 from back_navigator.back_navigator import BackNavigator
 
-from .forms import UploadForm
 from .models import BusinessCard, DebugMask, OriginalImage
-from .services.image_processor import convert_to_jpeg, extract_exif_to_json
+from .services.image_processor import (
+    convert_to_jpeg,
+    extract_exif_to_json,
+    validate_image,
+)
 from .services.opencv_debug_cache import recalc_opencv_debug
 from config.constants import DUPLICATE_CHECK_FIELDS
 from contacts.models import Contact, ContactFieldConfidence
@@ -48,40 +52,98 @@ def placeholder_view(request):
     return HttpResponse("準備中", content_type="text/plain; charset=utf-8")
 
 
-class UploadView(FormView):
+class UploadView(View):
+    """名刺画像アップロード画面（複数ファイル + ドラッグ&ドロップ対応）。
+
+    GET：ドロップゾーン付きフォームを表示。
+    POST：複数選択 / D&D の ``images`` と、後方互換の単一 ``image`` の両方を受け取り、
+      各ファイルに validate_image を **個別適用** する。1 ファイル = 1 OriginalImage を厳守し
+      （複数を 1 レコードにまとめない。process_opencv / detected_count 集計を壊さないため）、
+      通ったファイルごとに独立した OriginalImage（status=pending）を作成する。弾いた
+      ファイルは作成せず、理由つきでスキップ一覧に積む（部分成功・全件巻き戻しはしない）。
+      OCR / OpenCV はこの View では走らせない（既存方針：View 層は pending 作成までに限定）。
+
+    後方互換：成功 1 件・スキップ 0 のときは従来どおり当該 OriginalImage 詳細へ 302 redirect
+      （単一ファイルアップロードの既存挙動・既存テストを維持）。複数 / 部分失敗時はアップロード
+      画面に結果サマリ（成功 N 件 / スキップ M 件と理由）を表示する。
+    """
+
     template_name = "cards/upload.html"
-    form_class = UploadForm
 
-    def form_valid(self, form):
-        uploaded_file = form.cleaned_data["image"]
+    def get(self, request):
+        return render(request, self.template_name, self._context(request))
 
-        # EXIF 抽出は convert_to_jpeg の exif_transpose で EXIF が失われる前のタイミング
-        # で行う（仕様書 v1.6.1 統合版 §7.2）。両者は独立して動く。
-        exif_json = extract_exif_to_json(uploaded_file)
-        jpeg_bytes = convert_to_jpeg(uploaded_file)
+    def post(self, request):
+        # 複数選択 / D&D は name="images"、後方互換の単一は name="image"。両方拾う。
+        files = request.FILES.getlist("images") + request.FILES.getlist("image")
+        if not files:
+            return render(
+                request,
+                self.template_name,
+                self._context(request, form_error="ファイルが選択されていません。"),
+            )
 
-        user = get_current_user(self.request)
-        original = OriginalImage(
-            user=user,
-            status=OriginalImage.STATUS_PENDING,
-            exif_json=exif_json,
+        user = get_current_user(request)
+        created = []
+        skipped = []
+        for uploaded_file in files:
+            # ① 既存バリデーション（拡張子 JPEG/PNG・5MB）を 1 ファイル単位で適用。
+            try:
+                validate_image(uploaded_file)
+            except ValidationError as exc:
+                skipped.append(
+                    {"name": uploaded_file.name, "reason": " ".join(exc.messages)}
+                )
+                continue
+            # ② EXIF 抽出は convert_to_jpeg の exif_transpose 前に行う（§7.2）。
+            #    画像として開けない（拡張子詐称等）ものはここで弾いてスキップ扱いにする。
+            try:
+                exif_json = extract_exif_to_json(uploaded_file)
+                jpeg_bytes = convert_to_jpeg(uploaded_file)
+            except Exception:
+                logger.warning(
+                    "UploadView: 画像変換失敗のためスキップ: %s", uploaded_file.name
+                )
+                skipped.append(
+                    {"name": uploaded_file.name, "reason": "画像として読み込めませんでした。"}
+                )
+                continue
+            # ③ 1 ファイル = 1 OriginalImage（status=pending）。OCR/OpenCV は走らせない。
+            original = OriginalImage(
+                user=user,
+                status=OriginalImage.STATUS_PENDING,
+                exif_json=exif_json,
+            )
+            original.image_file.save(
+                f"{original.id}.jpg", ContentFile(jpeg_bytes), save=False
+            )
+            original.save()
+            created.append(original)
+
+        # 後方互換：成功 1 件・スキップ 0 → 従来どおり当該詳細へ 302 redirect。
+        if len(created) == 1 and not skipped:
+            back = BackNavigator(request)
+            target_url = reverse(
+                "originals:original_detail", kwargs={"pk": created[0].id}
+            )
+            return HttpResponseRedirect(back.append_url(target_url))
+
+        # 複数 / 部分失敗 → 結果サマリを表示。
+        return render(
+            request,
+            self.template_name,
+            self._context(request, created=created, skipped=skipped),
         )
-        filename = f"{original.id}.jpg"
-        original.image_file.save(filename, ContentFile(jpeg_bytes), save=False)
-        original.save()
-        back = BackNavigator(self.request)
-        target_url = reverse(
-            "originals:original_detail",
-            kwargs={"pk": original.id},
-        )
-        return HttpResponseRedirect(back.append_url(target_url))
 
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        context["active_app"] = "cards"
-        context["active_menu"] = "cards:card_upload"
-        context["back"] = BackNavigator(self.request)
-        return context
+    def _context(self, request, *, created=None, skipped=None, form_error=None):
+        return {
+            "active_app": "cards",
+            "active_menu": "cards:card_upload",
+            "back": BackNavigator(request),
+            "created": created or [],
+            "skipped": skipped or [],
+            "form_error": form_error,
+        }
 
 
 class OriginalListView(ListView):

@@ -4,7 +4,7 @@
 {% block title %}名刺アップロード — FreeGroup2{% endblock %}
 
 {% block content %}
-  <div class="app-page-header">
+  <div class="app-page-header" style="max-width:760px;">
     <div>
       <div class="app-breadcrumb">名刺管理 / アップロード</div>
       <h1>名刺アップロード</h1>
@@ -19,32 +19,77 @@
     </div>
   </div>
 
-  <section class="app-card">
-    <p class="app-muted">対応形式: JPEG / PNG（5MB まで）</p>
-    <form method="post" enctype="multipart/form-data">
-      {% csrf_token %}
-      {% hidden_back_field back %}
-
-      <div class="app-form-grid">
-        <div class="app-form__group app-form__group--full">
-          <label class="app-form__label" for="{{ form.image.id_for_label }}">{{ form.image.label }}</label>
-          {{ form.image }}
-          {% if form.image.errors %}
-            <div class="app-form__error">
-              {% for error in form.image.errors %}{{ error }}<br>{% endfor %}
-            </div>
-          {% endif %}
+  {# 取り込み結果サマリ（POST 後のみ表示） #}
+  {% if created or skipped %}
+    {% with c=created|length s=skipped|length %}
+    {% with total=c|add:s %}
+    <section class="app-card" style="max-width:760px; margin-bottom:var(--app-space-md);">
+      {% if c and s %}
+        <div class="app-message app-form-note--success">
+          全{{ total }}件中 {{ c }}件を取り込みました（OCR待ち）。残り{{ s }}件は取り込めませんでした。
         </div>
-      </div>
-
-      {% if form.non_field_errors %}
+      {% elif c %}
+        <div class="app-message app-form-note--success">
+          {{ c }}件を取り込みました（OCR待ち）。
+        </div>
+      {% else %}
         <div class="app-message app-message--warning">
-          {{ form.non_field_errors }}
+          取り込めたファイルがありませんでした（{{ s }}件すべてスキップ）。
         </div>
       {% endif %}
 
+      {% if created %}
+        <ul style="list-style:none; padding:0; margin:8px 0 0;">
+          {% for original in created %}
+            {% url 'originals:original_detail' pk=original.id as original_url %}
+            <li style="padding:4px 0;">
+              <a href="{% append_back_url original_url back %}">取り込んだ画像 {{ forloop.counter }} の詳細へ</a>
+            </li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+
+      {% if skipped %}
+        <div class="app-muted" style="margin-top:var(--app-space-sm); font-size:13px;">取り込めなかったファイル：</div>
+        <ul style="padding-left:1.2em; margin:4px 0 0;">
+          {% for item in skipped %}
+            <li style="padding:2px 0;"><strong>{{ item.name }}</strong> — {{ item.reason }}</li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+    </section>
+    {% endwith %}
+    {% endwith %}
+  {% endif %}
+
+  <section class="app-card" style="max-width:760px;">
+    <p class="app-muted">対応形式: JPEG / PNG（5MB まで）。複数ファイルをまとめて取り込めます。</p>
+
+    <form method="post" enctype="multipart/form-data" class="js-upload-form">
+      {% csrf_token %}
+      {% hidden_back_field back %}
+
+      {% if form_error %}
+        <div class="app-form__error">{{ form_error }}</div>
+      {% endif %}
+
+      {# ドロップゾーン：クリック / D&D で複数選択。dragover 強調は JS で style 直接トグル（CLAUDE.md §7） #}
+      <div class="js-upload-dropzone"
+           style="border:2px dashed #cbd5e1; border-radius:var(--app-radius); padding:32px 16px; text-align:center; cursor:pointer; transition:background .15s, border-color .15s;">
+        <div class="app-icon--upload" style="font-size:28px;"></div>
+        <p style="margin:8px 0 4px; font-weight:600;">ここに画像をドラッグ&ドロップ</p>
+        <p class="app-muted" style="margin:0 0 16px; font-size:13px;">または</p>
+        <button type="button" class="app-btn app-btn--secondary js-upload-trigger">ファイルを選択</button>
+        <input type="file" name="images" accept="image/jpeg,image/png" multiple
+               class="js-upload-input" style="display:none;">
+      </div>
+
+      {# 選択中のファイル名一覧（JS が描画） #}
+      <ul class="js-upload-filelist app-muted"
+          style="list-style:none; padding:0; margin:12px 0 0; font-size:13px;"></ul>
+
       <div class="app-action-area">
-        <button type="submit" class="app-btn app-btn--primary">アップロード</button>
+        <button type="submit" class="app-btn app-btn--primary">取り込む</button>
         {% if back.back_exist %}
           <a href="{% back_url back %}" class="app-btn app-btn--secondary">戻る</a>
         {% endif %}
@@ -54,4 +99,75 @@
       </div>
     </form>
   </section>
+
+  {# ドロップゾーンの D&D・ファイル選択結線（新規 JS ファイルは作らずインラインで完結、CLAUDE.md §7） #}
+  <script>
+    (function () {
+      function init() {
+        var form = document.querySelector('.js-upload-form');
+        if (!form) return;
+        var dropzone = form.querySelector('.js-upload-dropzone');
+        var input = form.querySelector('.js-upload-input');
+        var trigger = form.querySelector('.js-upload-trigger');
+        var filelist = form.querySelector('.js-upload-filelist');
+        if (!dropzone || !input) return;
+
+        function renderList() {
+          filelist.innerHTML = '';
+          var files = input.files;
+          if (!files || !files.length) return;
+          for (var i = 0; i < files.length; i++) {
+            var li = document.createElement('li');
+            li.style.padding = '2px 0';
+            li.textContent = '• ' + files[i].name;
+            filelist.appendChild(li);
+          }
+        }
+
+        function openDialog(event) {
+          if (event) event.preventDefault();
+          input.click();
+        }
+
+        if (trigger) trigger.addEventListener('click', openDialog);
+        dropzone.addEventListener('click', function (event) {
+          // 「ファイルを選択」ボタン経由のクリックは trigger 側で処理済み（二重ダイアログ回避）。
+          if (event.target === trigger) return;
+          openDialog(event);
+        });
+        input.addEventListener('change', renderList);
+
+        ['dragenter', 'dragover'].forEach(function (ev) {
+          dropzone.addEventListener(ev, function (event) {
+            event.preventDefault();
+            event.stopPropagation();
+            dropzone.style.background = '#f1f5f9';
+            dropzone.style.borderColor = '#2563eb';
+          });
+        });
+        ['dragleave', 'drop'].forEach(function (ev) {
+          dropzone.addEventListener(ev, function (event) {
+            event.preventDefault();
+            event.stopPropagation();
+            dropzone.style.background = '';
+            dropzone.style.borderColor = '';
+          });
+        });
+        dropzone.addEventListener('drop', function (event) {
+          var dt = event.dataTransfer;
+          if (dt && dt.files && dt.files.length) {
+            input.files = dt.files;  // ドロップされた FileList を input に割り当てて送信対象にする
+            renderList();
+          }
+        });
+      }
+
+      // 要素が確実に存在してから結線する（実行タイミングに依存しない防御）。
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+      } else {
+        init();
+      }
+    })();
+  </script>
 {% endblock %}
