@@ -430,10 +430,12 @@ class Campaign(models.Model):
         [出力] bool
 
         view_all_campaigns 持ち、または作成者本人なら True。
+        判定ロジックの正本は services.permissions.can_view_campaign（rev20 §14.5.2）で、
+        本メソッドはその薄いラッパ（ロジックを二重に持たない）。
         """
-        if user.has_perm("mailings.view_all_campaigns"):
-            return True
-        return self.created_by_id == user.id
+        from mailings.services.permissions import can_view_campaign
+
+        return can_view_campaign(user, self)
 
 
 class DeliveryHistory(models.Model):

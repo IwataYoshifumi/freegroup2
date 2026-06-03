@@ -3262,6 +3262,117 @@ class CampaignHasViewPermissionTests(_Phase2ModelTestBase):
         self.assertTrue(c.has_view_permission(other))
 
 
+class CampaignPermissionServiceTests(_Phase2ModelTestBase):
+    """services.permissions の所有者判定（can_view_campaign / visible_campaigns_for）。
+
+    3 パターン（作成者本人 / view_all_campaigns 持ち / 無権限）で単一判定とリスト
+    フィルタの双方を検証し、has_view_permission が can_view_campaign を呼ぶラッパで
+    あること、リストフィルタが QuerySet レベル（単一クエリ＝N+1 なし）であることを確認。
+    """
+
+    def _grant_view_all(self, user):
+        perm = Permission.objects.get(
+            content_type=ContentType.objects.get_for_model(Campaign),
+            codename="view_all_campaigns",
+        )
+        user.user_permissions.add(perm)
+        # has_perm キャッシュ回避のため再取得
+        return User.objects.get(pk=user.pk)
+
+    def _make_campaign_by(self, creator):
+        template = EmailTemplate.objects.create(
+            name=f"T_{uuid.uuid4().hex[:8]}",
+            subject="件名",
+            body="本文",
+            created_by=creator,
+        )
+        return Campaign.objects.create(
+            name="C_by",
+            template=template,
+            mailing_list=self.mailing_list,
+            status=Campaign.Status.DRAFT,
+            created_by=creator,
+        )
+
+    # ---- 単一判定 can_view_campaign（正本） ----
+    def test_can_view_campaign_creator(self):
+        from mailings.services.permissions import can_view_campaign
+
+        c = self._make_campaign()  # created_by=self.user
+        self.assertTrue(can_view_campaign(self.user, c))
+
+    def test_can_view_campaign_other_without_perm(self):
+        from mailings.services.permissions import can_view_campaign
+
+        c = self._make_campaign()
+        self.assertFalse(can_view_campaign(self.other_user, c))
+
+    def test_can_view_campaign_view_all_holder(self):
+        from mailings.services.permissions import can_view_campaign
+
+        other = self._grant_view_all(self.other_user)
+        c = self._make_campaign()  # created_by=self.user（他人の Campaign）
+        self.assertTrue(can_view_campaign(other, c))
+
+    # ---- has_view_permission が can_view_campaign を呼ぶラッパであること ----
+    def test_has_view_permission_delegates_to_can_view_campaign(self):
+        from mailings.services import permissions as perm_mod
+
+        c = self._make_campaign()
+        called = {}
+        original = perm_mod.can_view_campaign
+
+        def spy(user, campaign):
+            called["args"] = (user, campaign)
+            return original(user, campaign)
+
+        perm_mod.can_view_campaign = spy
+        try:
+            result = c.has_view_permission(self.user)
+        finally:
+            perm_mod.can_view_campaign = original
+        self.assertTrue(result)
+        self.assertEqual(called["args"], (self.user, c))
+
+    # ---- リストフィルタ visible_campaigns_for ----
+    def test_visible_campaigns_for_creator_sees_only_own(self):
+        from mailings.services.permissions import visible_campaigns_for
+
+        mine = self._make_campaign()  # created_by=self.user
+        theirs = self._make_campaign_by(self.other_user)
+        qs = visible_campaigns_for(self.user, Campaign.objects.all())
+        self.assertIn(mine, qs)
+        self.assertNotIn(theirs, qs)
+
+    def test_visible_campaigns_for_other_without_perm_excluded(self):
+        from mailings.services.permissions import visible_campaigns_for
+
+        self._make_campaign()  # created_by=self.user
+        qs = visible_campaigns_for(self.other_user, Campaign.objects.all())
+        self.assertEqual(qs.count(), 0)
+
+    def test_visible_campaigns_for_view_all_holder_sees_all(self):
+        from mailings.services.permissions import visible_campaigns_for
+
+        other = self._grant_view_all(self.other_user)
+        mine = self._make_campaign()  # created_by=self.user
+        theirs = self._make_campaign_by(other)
+        qs = visible_campaigns_for(other, Campaign.objects.all())
+        self.assertIn(mine, qs)
+        self.assertIn(theirs, qs)
+
+    def test_visible_campaigns_for_is_single_query_no_n_plus_1(self):
+        # QuerySet レベルで絞っており、N 件でも評価は単一クエリ（N+1 を作らない）。
+        from mailings.services.permissions import visible_campaigns_for
+
+        for _ in range(3):
+            self._make_campaign()
+        user = User.objects.get(pk=self.user.pk)
+        user.has_perm("mailings.view_all_campaigns")  # perm キャッシュを先に温める
+        with self.assertNumQueries(1):
+            list(visible_campaigns_for(user, Campaign.objects.all()))
+
+
 class DeliveryHistoryModelTests(_Phase2ModelTestBase):
     def test_create_with_snapshot_fields(self):
         c = self._make_campaign()
