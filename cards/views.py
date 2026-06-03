@@ -736,4 +736,16 @@ class CardDetailView(DetailView):
         context["raw_json_1"] = self.object.raw_json_1
         context["raw_json_2"] = self.object.raw_json_2
 
+        # OSD（Tesseract 由来・OCR前）デバッグ表示用。第2段OSD移植で OSD は
+        # BusinessCard.osd_json（{"schema_version","osd":{...},"tesseract_ocr":{...}}）に格納される
+        # （移植元は OriginalImage.raw_json 起点だったが現行 data model へ読み替え）。
+        # rotate=0 かつ低 conf は「倒れているのに回さない誤判定」の疑いなので目視で拾えるよう渡す。
+        # Claude の card_meta.orientation（BC.orientation バッジ）とは別系統。
+        osd = None
+        osd_json = self.object.osd_json
+        if isinstance(osd_json, dict) and isinstance(osd_json.get("osd"), dict):
+            osd = osd_json["osd"]
+        context["osd"] = osd
+        context["osd_rotate_zero"] = bool(osd) and osd.get("rotate") == 0
+
         return context
