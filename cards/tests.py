@@ -694,3 +694,186 @@ class OriginalDetailMaskOverlayRenderTests(TestCase):
         self.assertIn("<tspan>3</tspan>", body)
         # SVG は overlay 非空のクローズ後マスク（diff_closed, edge_closed）の 2 枚のみ
         self.assertEqual(body.count("app-mask-overlay__svg"), 2)
+
+
+class TesseractRecordTests(TestCase):
+    """OSD/OCR 出力の raw_json 記録（osd / tesseract_ocr サブセクション）の番人。
+
+    Tesseract 本体は不要：osd.py の image_to_osd / image_to_string / image_to_data を
+    モックして、パース・フィルタ・raw_json への合成・スキーマ適合を担保する。
+    記録は分析専用であり、向き判定・採否ロジックには使わないこと（本テストの対象外）。
+    """
+
+    def setUp(self):
+        self._tmp_media = tempfile.mkdtemp(prefix="fg2_test_media_")
+        self._override = override_settings(MEDIA_ROOT=self._tmp_media)
+        self._override.enable()
+        self.addCleanup(self._override.disable)
+        self.addCleanup(lambda: shutil.rmtree(self._tmp_media, ignore_errors=True))
+        self.user = get_user_model().objects.create_superuser(
+            username="tess_test", email="tess@example.com", password="x"
+        )
+
+    def _coordinator(self):
+        from cards.tasks.pipeline_coordinator import PipelineCoordinator
+        oi = OriginalImage(user=self.user, status=OriginalImage.STATUS_PROCESSING)
+        oi.image_file.save(
+            f"{oi.id}.png", ContentFile(_synthetic_card_png_bytes()), save=False
+        )
+        oi.save()
+        return PipelineCoordinator(oi)
+
+    _OSD_SAMPLE = (
+        "Page number: 0\n"
+        "Orientation in degrees: 90\n"
+        "Rotate: 270\n"
+        "Orientation confidence: 12.34\n"
+        "Script: Japanese\n"
+        "Script confidence: 5.67\n"
+    )
+
+    def test_detect_osd_info_parses_all_fields(self):
+        """image_to_osd の全 5 項目を型付きで拾う（rotate は %360）。"""
+        from cards.services.osd import detect_osd_info
+        with patch("pytesseract.image_to_osd", return_value=self._OSD_SAMPLE):
+            info = detect_osd_info(Image.new("RGB", (8, 8)))
+        self.assertEqual(info, {
+            "orientation_deg": 90,
+            "rotate": 270,
+            "orientation_conf": 12.34,
+            "script": "Japanese",
+            "script_conf": 5.67,
+        })
+
+    def test_words_from_data_keeps_only_nonempty_words(self):
+        """_words_from_data: level=5 かつ非空のみ残す（container 行・空白語は落とす）。"""
+        from cards.services.osd import _words_from_data
+        data = {
+            "level":     [1, 2, 3, 4, 5, 5],
+            "text":      ["", "", "", "", "Hello", "   "],
+            "conf":      ["-1", "-1", "-1", "-1", "95.5", "-1"],
+            "left":      [0, 0, 0, 0, 10, 0],
+            "top":       [0, 0, 0, 0, 20, 0],
+            "width":     [0, 0, 0, 0, 30, 0],
+            "height":    [0, 0, 0, 0, 12, 0],
+            "block_num": [0, 1, 1, 1, 1, 1],
+            "par_num":   [0, 0, 1, 1, 1, 1],
+            "line_num":  [0, 0, 0, 1, 1, 1],
+            "word_num":  [0, 0, 0, 0, 1, 2],
+        }
+        words = _words_from_data(data)
+        self.assertEqual(len(words), 1)              # 空白のみの level5 と container 行は除外
+        self.assertEqual(words[0]["text"], "Hello")
+        self.assertEqual(words[0]["conf"], 95.5)
+        self.assertEqual(
+            (words[0]["left"], words[0]["top"], words[0]["width"], words[0]["height"]),
+            (10, 20, 30, 12),
+        )
+        self.assertEqual(words[0]["line_num"], 1)
+
+    def test_run_tesseract_ocr_returns_text_and_filtered_words(self):
+        """run_tesseract_ocr: text と word データ（フィルタ済み）を返す。"""
+        from cards.services.osd import run_tesseract_ocr
+        data = {
+            "level": [5], "text": ["meishi"], "conf": ["88.0"],
+            "left": [1], "top": [2], "width": [3], "height": [4],
+            "block_num": [1], "par_num": [1], "line_num": [1], "word_num": [1],
+        }
+        with patch("pytesseract.image_to_string", return_value="meishi\n"), \
+             patch("pytesseract.image_to_data", return_value=data):
+            res = run_tesseract_ocr(Image.new("RGB", (8, 8)))
+        self.assertEqual(res["lang"], "jpn+jpn_vert")
+        self.assertEqual(res["text"], "meishi\n")
+        self.assertEqual(len(res["data"]), 1)
+        self.assertEqual(res["data"][0]["text"], "meishi")
+
+    def test_collect_tesseract_record_captures_errors(self):
+        """OSD/OCR が例外を投げても record に error として残り、pipeline を止めない。"""
+        coord = self._coordinator()
+        warped = Image.new("RGB", (120, 80))
+        with patch(
+            "cards.tasks.pipeline_coordinator.detect_osd_info",
+            side_effect=RuntimeError("Too few characters"),
+        ), patch(
+            "cards.tasks.pipeline_coordinator.run_tesseract_ocr",
+            side_effect=RuntimeError("tesseract not found"),
+        ):
+            rec = coord._collect_tesseract_record(warped, warped, 0)
+        self.assertIn("Too few characters", rec["osd"]["error"])
+        self.assertIn("tesseract not found", rec["tesseract_ocr"]["error"])
+
+    def test_cards_payload_merges_record_and_keeps_none(self):
+        """_cards_payload: dict カードには osd/tesseract_ocr を非破壊合成、None には足さない。"""
+        coord = self._coordinator()
+        card0 = {
+            "card_meta": {"is_business_card": True, "orientation": "normal"},
+            "fields": {}, "fields_array": {},
+        }
+        coord._cards_by_index = {0: card0, 1: None}
+        coord._tesseract_by_index = {
+            0: {"osd": {"rotate": 0}, "tesseract_ocr": {"lang": "jpn", "text": "a", "data": []}},
+            1: {"osd": {"rotate": 90}, "tesseract_ocr": {"lang": "jpn", "text": "b", "data": []}},
+        }
+        payload = coord._cards_payload(2)
+        self.assertEqual(payload[0]["osd"], {"rotate": 0})
+        self.assertEqual(payload[0]["tesseract_ocr"]["text"], "a")
+        self.assertEqual(payload[0]["card_meta"]["is_business_card"], True)  # 既存キー保持
+        self.assertNotIn("osd", card0)                       # 元 dict は不変
+        self.assertIsNone(payload[1])                        # None には足さない
+
+    def test_attached_card_validates_against_schema(self):
+        """osd/tesseract_ocr を足した raw_json が combined スキーマに適合する。"""
+        import jsonschema
+        coord = self._coordinator()
+        card = {
+            "card_meta": {"is_business_card": True, "orientation": "normal"},
+            "fields": {"full_name": {"value": "name", "confidence": "high"}},
+            "fields_array": {},
+        }
+        coord._cards_by_index = {0: card}
+        coord._tesseract_by_index = {0: {
+            "osd": {"orientation_deg": 0, "rotate": 0, "orientation_conf": 1.0,
+                    "script": "Japanese", "script_conf": 2.0},
+            "tesseract_ocr": {"lang": "jpn+jpn_vert", "text": "name",
+                              "data": [{"text": "name", "conf": 90.0, "left": 1, "top": 2,
+                                        "width": 3, "height": 4, "block_num": 1, "par_num": 1,
+                                        "line_num": 1, "word_num": 1}]},
+        }}
+        payload = coord._cards_payload(1)
+        # card 単体スキーマ・combined スキーマ双方で検証エラーが出ないこと
+        jsonschema.validate(instance=payload[0], schema=coord._load_card_item_schema())
+        raw = {
+            "schema_version": "1.3.0",
+            "ocr_meta": {"timestamp": "2026-06-03T00:00:00+00:00"},
+            "api_response": {"model": "m", "stop_reason": "end_turn", "usage": {}},
+            "cards": payload,
+        }
+        jsonschema.validate(instance=raw, schema=coord._load_combined_schema())
+
+    def test_process_card_populates_tesseract_record(self):
+        """_process_card の通しで _tesseract_by_index が埋まり、payload に反映される（配線確認）。"""
+        coord = self._coordinator()
+        warped = Image.new("RGB", (120, 80))
+        card = {
+            "card_meta": {"is_business_card": False, "orientation": "normal"},
+            "fields": {}, "fields_array": {},
+        }
+        ocr_result = {
+            "cards": [card],
+            "api_response": {"model": "m", "stop_reason": "end_turn", "usage": {}},
+        }
+        with patch("cards.tasks.pipeline_coordinator.detect_osd_rotation", return_value=0), \
+             patch("cards.tasks.pipeline_coordinator.detect_osd_info",
+                   return_value={"orientation_deg": 0, "rotate": 0, "orientation_conf": 1.0,
+                                 "script": "Japanese", "script_conf": 2.0}), \
+             patch("cards.tasks.pipeline_coordinator.run_tesseract_ocr",
+                   return_value={"lang": "jpn+jpn_vert", "text": "X", "data": []}), \
+             patch.object(coord._ocr_service, "run_ocr", return_value=ocr_result):
+            coord._process_card(warped, 0, _poly(0, 0, 120, 80))
+
+        rec = coord._tesseract_by_index[0]
+        self.assertEqual(rec["osd"]["script"], "Japanese")
+        self.assertEqual(rec["tesseract_ocr"]["text"], "X")
+        payload = coord._cards_payload(1)
+        self.assertEqual(payload[0]["osd"]["rotate"], 0)
+        self.assertEqual(payload[0]["tesseract_ocr"]["lang"], "jpn+jpn_vert")

@@ -28,7 +28,12 @@ from cards.services.json_normalizer import (
     normalize_to_contact_dict,
 )
 from cards.services.opencv_debug_cache import save_debug_data
-from cards.services.osd import apply_upright, detect_osd_rotation
+from cards.services.osd import (
+    apply_upright,
+    detect_osd_info,
+    detect_osd_rotation,
+    run_tesseract_ocr,
+)
 from cards.tasks.card_cropper import save_card_image_tmp
 from cards.tasks.ocr_service import OcrService
 
@@ -45,6 +50,7 @@ class PipelineCoordinator:
         self.failed_db_count = 0
         self._ocr_service = OcrService()
         self._cards_by_index = {}   # {card_index: card_data or None}
+        self._tesseract_by_index = {}   # {card_index: {"osd": ..., "tesseract_ocr": ...}}（記録用）
         self._combined_schema = None
         self._last_api_response = None
         self._card_item_schema_cache = None
@@ -117,7 +123,7 @@ class PipelineCoordinator:
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                 },
                 "api_response": self._last_api_response or {},
-                "cards": [self._cards_by_index.get(i) for i in range(len(detections))],
+                "cards": self._cards_payload(len(detections)),
             }
             if self._last_api_response:
                 try:
@@ -143,9 +149,7 @@ class PipelineCoordinator:
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                     },
                     "api_response": self._last_api_response or {},
-                    "cards": [
-                        self._cards_by_index.get(i) for i in range(len(detections))
-                    ],
+                    "cards": self._cards_payload(len(detections)),
                 }
         finally:
             self.original_image.error_message = "\n".join(self.error_messages)
@@ -168,6 +172,12 @@ class PipelineCoordinator:
         # ①.5 Tesseract OSD で正立化（rev2 第2部）。成功時のみ正立画像を OCR に渡し別パスへ保存、
         #      元クロップ(warped_image)は残す。失敗（例外・timeout）は normal フォールバック＝元画像のまま。
         ocr_input_image = self._upright_with_osd(warped_image, card_index)
+
+        # ①.6 Tesseract OSD/OCR の出力を記録（分析用）。向き判定・クロップ採否には使わない。
+        #      全例外を捕捉し、失敗しても pipeline を止めない（記録は副次情報）。
+        self._tesseract_by_index[card_index] = self._collect_tesseract_record(
+            warped_image, ocr_input_image, card_index
+        )
 
         # ② OCR（想定外の例外も含め全て捕捉し 1 card の失敗が全体に波及しないようにする）
         #    run_ocr は 1 回のみ（2回OCR はしない）。
@@ -353,6 +363,49 @@ class PipelineCoordinator:
             logger.warning(
                 "osd upright image save failed for card_index=%s: %s", card_index, e
             )
+
+    def _collect_tesseract_record(self, warped_image, ocr_input_image, card_index):
+        """[性質] 副作用あり（外部プロセス Tesseract 呼び出し）/ OSD/OCR 出力を記録 dict で返す。
+
+        [入力] warped_image: 元クロップ（OSD は検出時点の向きを記録するため元クロップに対して取る）、
+               ocr_input_image: 正立化後の画像（テキスト品質のため OCR はこちらに対して取る）、card_index
+        [出力] dict: {"osd": {...}, "tesseract_ocr": {...}}（各々失敗時は {"error": "..."}）
+        [方針] 記録・分析専用。向き判定やクロップ採否のロジックには一切使わない。
+               OSD/OCR の全例外を捕捉し、error として残して pipeline を止めない。
+        """
+        record = {}
+        try:
+            record["osd"] = detect_osd_info(warped_image)
+        except Exception as e:
+            record["osd"] = {"error": f"{type(e).__name__}: {e}"}
+            logger.info(
+                "OSD info 取得失敗（記録のみ・無視）card_index=%s: %s: %s",
+                card_index, type(e).__name__, e,
+            )
+        try:
+            record["tesseract_ocr"] = run_tesseract_ocr(ocr_input_image)
+        except Exception as e:
+            record["tesseract_ocr"] = {"error": f"{type(e).__name__}: {e}"}
+            logger.info(
+                "Tesseract OCR 取得失敗（記録のみ・無視）card_index=%s: %s: %s",
+                card_index, type(e).__name__, e,
+            )
+        return record
+
+    def _cards_payload(self, n):
+        """[性質] 純関数（DB操作なし・副作用なし）/ cards 配列に OSD/OCR 記録を非破壊で合成して返す。
+
+        cards[i] が dict のとき osd / tesseract_ocr サブセクションを足す（None の検出には足さない）。
+        元の card_data は変更しない（{**card, **record} で新 dict を作る）。
+        """
+        cards = []
+        for i in range(n):
+            card = self._cards_by_index.get(i)
+            record = self._tesseract_by_index.get(i)
+            if card is not None and record:
+                card = {**card, **record}
+            cards.append(card)
+        return cards
 
     def _save_dev_image(self, warped_image, card_index):
         """[性質] 副作用あり（ファイル書き込み）/ DEBUG=True のときのみ保存する。"""

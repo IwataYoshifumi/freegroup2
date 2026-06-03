@@ -155,6 +155,9 @@ OCR_STUCK_THRESHOLD_MINUTES = 30
 TESSERACT_CMD = os.getenv("TESSERACT_CMD", "")
 # image_to_osd のタイムアウト秒。
 OSD_TIMEOUT_SEC = float(os.getenv("OSD_TIMEOUT_SEC", "10"))
+# Tesseract OCR 記録用言語（image_to_string / image_to_data）。縦書き名刺があるため vertical も併用。
+# 記録・分析専用であり、向き判定やクロップ採否のロジックには使わない。
+TESSERACT_OCR_LANG = os.getenv("TESSERACT_OCR_LANG", "jpn+jpn_vert")
 
 
 # Default primary key field type

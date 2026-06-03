@@ -52,12 +52,53 @@
             }
           },
           "fields":       { "$ref": "#/$defs/Fields" },
-          "fields_array": { "$ref": "#/$defs/FieldsArray" }
+          "fields_array": { "$ref": "#/$defs/FieldsArray" },
+          "osd":           { "$ref": "#/$defs/OsdInfo" },
+          "tesseract_ocr": { "$ref": "#/$defs/TesseractOcr" }
         }
       }
     }
   },
   "$defs": {
+    "OsdInfo": {
+      "description": "Tesseract image_to_osd 由来の記録（分析用。向き判定・採否には使わない）。失敗時は error のみ。",
+      "type": "object",
+      "properties": {
+        "orientation_deg":  { "type": ["integer", "null"] },
+        "rotate":           { "type": ["integer", "null"] },
+        "orientation_conf": { "type": ["number", "null"] },
+        "script":           { "type": ["string", "null"] },
+        "script_conf":      { "type": ["number", "null"] },
+        "error":            { "type": "string" }
+      }
+    },
+    "TesseractOcr": {
+      "description": "Tesseract image_to_string / image_to_data 由来の記録（分析用）。失敗時は error のみ。",
+      "type": "object",
+      "properties": {
+        "lang": { "type": "string" },
+        "text": { "type": "string" },
+        "data": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "text":      { "type": "string" },
+              "conf":      { "type": ["number", "null"] },
+              "left":      { "type": ["integer", "null"] },
+              "top":       { "type": ["integer", "null"] },
+              "width":     { "type": ["integer", "null"] },
+              "height":    { "type": ["integer", "null"] },
+              "block_num": { "type": ["integer", "null"] },
+              "par_num":   { "type": ["integer", "null"] },
+              "line_num":  { "type": ["integer", "null"] },
+              "word_num":  { "type": ["integer", "null"] }
+            }
+          }
+        },
+        "error": { "type": "string" }
+      }
+    },
     "ConfidenceValue": {
       "type": "object",
       "required": ["value", "confidence"],
