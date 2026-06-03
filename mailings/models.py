@@ -330,7 +330,9 @@ class Campaign(models.Model):
         verbose_name = "キャンペーン"
         verbose_name_plural = "キャンペーン"
         permissions = [
+            ("send_campaign", "メール配信を実行できる（不可逆操作のため CRUD から分離、§14.1.2）"),
             ("view_all_campaigns", "他人の配信キャンペーン・配信レポートを閲覧できる"),
+            ("export_report", "配信レポート CSV をダウンロードできる（§14.1.2）"),
         ]
 
     def __str__(self):
