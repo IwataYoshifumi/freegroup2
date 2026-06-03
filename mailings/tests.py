@@ -4139,6 +4139,41 @@ class RecipientExtractionTests(_Phase3TestBase):
         result = list(extract_recipients(campaign).values_list("id", flat=True))
         self.assertEqual(result, [p1.id])
 
+    def test_primary_contact_null_member_excluded(self):
+        """3f：primary_contact=NULL のメンバーは抽出から除外（手順7）。
+
+        空メアド除外（test_empty_email_excluded）とは別経路。primary_contact 自体が
+        None の Person（例：archived 化で primary_contact が外れた等）が母集合に居ても
+        宛先に出ない（送信時に primary_contact を参照するため null は構造的に送れない）。
+        """
+        p1 = self._make_person("Alice")  # primary_contact あり
+        p_nullpc = Person.objects.create(status="active")  # primary_contact = NULL
+        self.assertIsNone(p_nullpc.primary_contact_id)
+        self._add_member(self.mailing_list, p1)
+        self._add_member(self.mailing_list, p_nullpc)
+        campaign = self._make_campaign()
+        result = list(extract_recipients(campaign).values_list("id", flat=True))
+        self.assertEqual(result, [p1.id])
+
+
+class GetPendingForCampaignSkipLockedTests(_Phase2ModelTestBase):
+    """1d：配信受信者取得が skip_locked で行ロックを掴むことの回帰防止。
+
+    本来の意図は「ロック済み DeliveryHistory を二つ目のワーカーが拾わず二重送信が
+    起きない」こと（§7.2.1、PostgreSQL 前提）。開発/テスト DB は sqlite で行ロックを
+    強制しないため挙動の再現はできない。そこで「skip_locked 付き select_for_update が
+    クエリに確実に組み込まれている（＝ロック済み行がクエリ対象から外れる仕組みの配線）」
+    ことを query 属性で検証する粒度に留める。skip_locked=True の取りこぼし（誰かが
+    select_for_update を外す/skip_locked を落とす）を構造的に検出する。
+    """
+
+    def test_query_is_select_for_update_with_skip_locked(self):
+        campaign = self._make_campaign()
+        qs = DeliveryHistory.get_pending_for_campaign(campaign, limit=10)
+        # qs は遅延評価。sqlite で評価すると NotSupportedError になるため list() しない。
+        self.assertTrue(qs.query.select_for_update)
+        self.assertTrue(qs.query.select_for_update_skip_locked)
+
 
 class ValidateSenderDomainTests(_Phase3TestBase):
     def test_creator_mode_skip(self):
