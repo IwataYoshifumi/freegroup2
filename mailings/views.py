@@ -89,7 +89,9 @@ class CampaignOwnerRequiredMixin:
 # ======================================================================
 
 
-class MailingListListView(LoginRequiredMixin, ListView):
+class MailingListListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
+    # 認可（Phase 7 ⑤-B-1、rev19 No.70）：mailings.view_mailinglist（全員）。所有者判定なし。
+    permission_required = "mailings.view_mailinglist"
     model = MailingList
     template_name = "mailings/mailing_list_list.html"
     context_object_name = "mailing_lists"
@@ -122,16 +124,19 @@ class MailingListListView(LoginRequiredMixin, ListView):
         return context
 
 
-class MailingListCreateView(LoginRequiredMixin, CreateView):
+class MailingListCreateView(LoginRequiredMixin, PermissionRequiredMixin, CreateView):
     """配信リスト新規作成（name / description のみ）。
 
     作成後はリスト編集画面（mailing_list_update）にリダイレクトし、そこでタグ選択・
     プレビュー・凍結を行う。Phase 1 のフロー（§11.4.1）の [1]〜[4] を 2 画面で実装。
+
+    認可（Phase 7 ⑤-B-1、rev19 No.71）：mailings.add_mailinglist。所有者判定なし。
     """
 
     model = MailingList
     form_class = MailingListForm
     template_name = "mailings/mailing_list_form.html"
+    permission_required = "mailings.add_mailinglist"
 
     def form_valid(self, form):
         form.instance.created_by = self.request.user
@@ -153,7 +158,9 @@ class MailingListCreateView(LoginRequiredMixin, CreateView):
         return context
 
 
-class MailingListDetailView(LoginRequiredMixin, DetailView):
+class MailingListDetailView(LoginRequiredMixin, PermissionRequiredMixin, DetailView):
+    # 認可（Phase 7 ⑤-B-1、rev19 No.72）：mailings.view_mailinglist（全員）。所有者判定なし。
+    permission_required = "mailings.view_mailinglist"
     model = MailingList
     template_name = "mailings/mailing_list_detail.html"
     context_object_name = "mailing_list"
@@ -191,16 +198,19 @@ class MailingListDetailView(LoginRequiredMixin, DetailView):
         return context
 
 
-class MailingListUpdateView(LoginRequiredMixin, UpdateView):
+class MailingListUpdateView(LoginRequiredMixin, PermissionRequiredMixin, UpdateView):
     """リスト編集画面（name/description）+ メンバー組成 UI（タグ選択・凍結 or 対象外）。
 
     凍結前（members_frozen_at が NULL）：タグ選択 + プレビュー + 凍結ボタン
     凍結後：メンバー一覧 + 対象外 AJAX（個別物理削除、§11.7.2.1 増やす方向は実装しない）
+
+    認可（Phase 7 ⑤-B-1、rev19 No.73）：mailings.change_mailinglist。所有者判定なし。
     """
 
     model = MailingList
     form_class = MailingListForm
     template_name = "mailings/mailing_list_form.html"
+    permission_required = "mailings.change_mailinglist"
 
     def dispatch(self, request, *args, **kwargs):
         # Phase 1b-ε.5：アーカイブ済みは編集禁止（詳細画面に redirect + warning、tag 側流儀踏襲）。
@@ -261,7 +271,7 @@ class MailingListUpdateView(LoginRequiredMixin, UpdateView):
         return context
 
 
-class MailingListDeleteView(LoginRequiredMixin, View):
+class MailingListDeleteView(LoginRequiredMixin, PermissionRequiredMixin, View):
     """論理アーカイブ化（is_archived=True、§11.3.4）。GET で確認画面、POST で実行。
 
     物理削除しない理由：Campaign の mailing_list FK が PROTECT（§4.2）のため
@@ -269,7 +279,11 @@ class MailingListDeleteView(LoginRequiredMixin, View):
 
     Phase 1b-δ で UI ラベルは「削除」→「アーカイブ化」に統一したが、コード内表現
     （URL 名・View 名）は維持する方針（指示書準拠）。
+
+    認可（Phase 7 ⑤-B-1、rev19 No.74）：mailings.delete_mailinglist。所有者判定なし。
     """
+
+    permission_required = "mailings.delete_mailinglist"
 
     def get(self, request, pk):
         mailing_list = get_object_or_404(MailingList, pk=pk, is_archived=False)
@@ -282,12 +296,16 @@ class MailingListDeleteView(LoginRequiredMixin, View):
         return redirect("mailings:mailing_list_list")
 
 
-class MailingListUnarchiveView(LoginRequiredMixin, View):
+class MailingListUnarchiveView(LoginRequiredMixin, PermissionRequiredMixin, View):
     """配信リスト非アーカイブ化（is_archived=False、Phase 1b-δ 追加）。POST 専用。
 
     archived な MailingList を元に戻す。リダイレクト先は呼び出し元
     （back スタックがあればそこへ、無ければ詳細画面）。
+
+    認可（Phase 7 ⑤-B-1）：mailings.change_mailinglist（状態変更）。所有者判定なし。
     """
+
+    permission_required = "mailings.change_mailinglist"
 
     def post(self, request, pk):
         mailing_list = get_object_or_404(MailingList, pk=pk)
@@ -321,7 +339,7 @@ def _render_delete_confirm(request, mailing_list):
 
 
 @method_decorator(require_POST, name="dispatch")
-class MailingListFreezeView(LoginRequiredMixin, View):
+class MailingListFreezeView(LoginRequiredMixin, PermissionRequiredMixin, View):
     """リスト保存 AJAX（rev14.1 §11.4.3、Phase 1b-ε.6 追補で「凍結保存」→「保存」）。
 
     タグ ID リストを受け取り extract_persons_by_tags → freeze_members で
@@ -332,7 +350,11 @@ class MailingListFreezeView(LoginRequiredMixin, View):
     POST: form-encoded or JSON {"mailing_list_id": uuid, "tag_ids": [uuid, ...]}
     レスポンス成功: {"ok": true, "member_count": int}
     レスポンス凍結: HTTP 409 {"ok": false, "error": "frozen", "message": str}
+
+    認可（Phase 7 ⑤-B-1）：mailings.change_mailinglist（既存リストの状態変更）。所有者判定なし。
     """
+
+    permission_required = "mailings.change_mailinglist"
 
     def post(self, request):
         mailing_list_id, tag_ids = _parse_freeze_payload(request)
@@ -358,7 +380,7 @@ class MailingListFreezeView(LoginRequiredMixin, View):
 
 
 @method_decorator(require_POST, name="dispatch")
-class MailingListUpdateMetaView(LoginRequiredMixin, View):
+class MailingListUpdateMetaView(LoginRequiredMixin, PermissionRequiredMixin, View):
     """リスト本体（name / description）の AJAX 自動保存（Phase 1b-ε.6 追補、修正 4）。
 
     rev14.1 §11.3.6：凍結後もリスト本体の編集は可能。本 View は archived のみ拒否し、
@@ -368,7 +390,11 @@ class MailingListUpdateMetaView(LoginRequiredMixin, View):
     レスポンス成功: {"ok": true, "name": str, "description": str, "updated_at": iso8601}
     レスポンス失敗: HTTP 400 {"ok": false, "errors": {field: [msg, ...]}}
     レスポンス archived: HTTP 404 {"ok": false, "error": "archived"}
+
+    認可（Phase 7 ⑤-B-1）：mailings.change_mailinglist。所有者判定なし。
     """
+
+    permission_required = "mailings.change_mailinglist"
 
     def post(self, request, pk):
         mailing_list = get_object_or_404(MailingList, pk=pk)
@@ -402,12 +428,16 @@ class MailingListUpdateMetaView(LoginRequiredMixin, View):
 
 
 @method_decorator(require_POST, name="dispatch")
-class MailingListPreviewView(LoginRequiredMixin, View):
+class MailingListPreviewView(LoginRequiredMixin, PermissionRequiredMixin, View):
     """プレビュー AJAX。タグ ID リストの抽出結果件数 + 先頭サンプル（10 件）を返す。
 
     POST: form-encoded or JSON {"tag_ids": [uuid, ...]}
     レスポンス: {"ok": true, "count": int, "samples": [{"id": uuid, "name": str, "org": str}, ...]}
+
+    認可（Phase 7 ⑤-B-1）：mailings.view_mailinglist（読み取り専用プレビュー）。所有者判定なし。
     """
+
+    permission_required = "mailings.view_mailinglist"
 
     def post(self, request):
         _, tag_ids = _parse_freeze_payload(request)
@@ -431,7 +461,7 @@ class MailingListPreviewView(LoginRequiredMixin, View):
 
 
 @method_decorator(require_POST, name="dispatch")
-class MailingListAddMemberView(LoginRequiredMixin, View):
+class MailingListAddMemberView(LoginRequiredMixin, PermissionRequiredMixin, View):
     """メンバー追加 AJAX（rev14.1 §5.1 No.32、Phase 1b-ε.6 追加）。
 
     リスト編集中（未凍結）の手動メンバー追加。凍結済み（members_frozen_at IS NOT NULL）
@@ -441,7 +471,11 @@ class MailingListAddMemberView(LoginRequiredMixin, View):
     レスポンス成功: {"ok": true, "created_count": int, "members": [{member_id, person_id, name, org, title, email}]}
     レスポンス凍結: HTTP 409 {"ok": false, "error": "frozen", "message": str}
     レスポンス archived: HTTP 404 {"ok": false, "error": "archived"}
+
+    認可（Phase 7 ⑤-B-1、rev19 No.75）：mailings.change_mailinglist。所有者判定なし。
     """
+
+    permission_required = "mailings.change_mailinglist"
 
     def post(self, request, pk):
         mailing_list = get_object_or_404(MailingList, pk=pk)
@@ -497,7 +531,7 @@ class MailingListAddMemberView(LoginRequiredMixin, View):
 
 
 @method_decorator(require_POST, name="dispatch")
-class MailingListRemoveMemberView(LoginRequiredMixin, View):
+class MailingListRemoveMemberView(LoginRequiredMixin, PermissionRequiredMixin, View):
     """メンバー削除 AJAX（rev14.1 §5.1 No.33、Phase 1b-ε.6 追加）。
 
     リスト編集中（未凍結）の手動メンバー削除。凍結済みは HTTP 409 で弾く（§11.3.6）。
@@ -506,7 +540,11 @@ class MailingListRemoveMemberView(LoginRequiredMixin, View):
     レスポンス成功: {"ok": true, "removed_member_id": uuid}
     レスポンス凍結: HTTP 409 {"ok": false, "error": "frozen", "message": str}
     レスポンス archived: HTTP 404 {"ok": false, "error": "archived"}
+
+    認可（Phase 7 ⑤-B-1、rev19 No.76）：mailings.change_mailinglist。所有者判定なし。
     """
+
+    permission_required = "mailings.change_mailinglist"
 
     def post(self, request, pk):
         mailing_list = get_object_or_404(MailingList, pk=pk)
@@ -536,14 +574,18 @@ class MailingListRemoveMemberView(LoginRequiredMixin, View):
 
 
 @method_decorator(require_POST, name="dispatch")
-class MailingListMemberRemoveView(LoginRequiredMixin, View):
+class MailingListMemberRemoveView(LoginRequiredMixin, PermissionRequiredMixin, View):
     """対象外 AJAX。凍結後の MailingListMember を物理削除する（§11.7.2.1 / 過去発注書）。
 
     増やす方向は実装しない（凍結思想に反する）。members_frozen_at は更新しない。
 
+    認可（Phase 7 ⑤-B-1）：mailings.change_mailinglist。所有者判定なし。
+
     POST: form-encoded or JSON {"member_id": uuid}
     レスポンス: {"ok": true, "member_id": uuid}
     """
+
+    permission_required = "mailings.change_mailinglist"
 
     def post(self, request):
         member_id = _parse_member_id(request)
@@ -784,7 +826,7 @@ def _commit_url_name(mode):
     return "mailings:list_member_commit_add" if mode == "add" else "mailings:list_member_commit_remove"
 
 
-class _MemberSelectionView(LoginRequiredMixin, View):
+class _MemberSelectionView(LoginRequiredMixin, PermissionRequiredMixin, View):
     """個別追加・個別削除 選択画面の共通基底（仕様書 §3.2 / §3.4）。
 
     mode 属性で 'add' / 'remove' を分岐。母集合 SQL のみ mode で違い、それ以外
@@ -795,6 +837,8 @@ class _MemberSelectionView(LoginRequiredMixin, View):
     POST: 選択された person_ids を session に保存し確認画面へ 302（PRG）。
     """
 
+    # 認可（Phase 7 ⑤-B-1）：メンバー編集フローは mailings.change_mailinglist。所有者判定なし。
+    permission_required = "mailings.change_mailinglist"
     mode = None  # 'add' or 'remove'
     template_name = "mailings/_member_selection.html"
 
@@ -903,13 +947,16 @@ class MemberRemoveView(_MemberSelectionView):
     mode = "remove"
 
 
-class _MemberConfirmView(LoginRequiredMixin, View):
+class _MemberConfirmView(LoginRequiredMixin, PermissionRequiredMixin, View):
     """個別追加・個別削除 確認画面の共通基底（仕様書 §3.3 / §3.5、GET 専用）。
 
     session から snapshot を取り出して表示する。session 空時は対応する選択画面へ
     302 で差し戻し（§6.5、直叩き / 期限切れフォールバック）。
+
+    認可（Phase 7 ⑤-B-1）：mailings.change_mailinglist。所有者判定なし。
     """
 
+    permission_required = "mailings.change_mailinglist"
     mode = None
     template_name = "mailings/_member_confirmation.html"
 
@@ -966,13 +1013,16 @@ class MemberRemoveConfirmView(_MemberConfirmView):
 
 
 @method_decorator(require_POST, name="dispatch")
-class _MemberCommitView(LoginRequiredMixin, View):
+class _MemberCommitView(LoginRequiredMixin, PermissionRequiredMixin, View):
     """個別追加・個別削除 確定エンドポイント（仕様書 §3.4 / §3.6、POST 専用）。
 
     session の snapshot を DB に反映し、session クリア後に詳細画面へ 302（PRG）。
     確定処理は atomic ブロック内で実行する（§6.8）。
+
+    認可（Phase 7 ⑤-B-1）：mailings.change_mailinglist。所有者判定なし。
     """
 
+    permission_required = "mailings.change_mailinglist"
     mode = None
 
     def post(self, request, pk):
@@ -1047,7 +1097,7 @@ def _add_by_tag_session_key(mailing_list_pk):
     return f"{ADD_BY_TAG_SESSION_PREFIX}{mailing_list_pk}{ADD_BY_TAG_SESSION_SUFFIX}"
 
 
-class MemberAddByTagView(LoginRequiredMixin, View):
+class MemberAddByTagView(LoginRequiredMixin, PermissionRequiredMixin, View):
     """1-H：タグで追加 画面（仕様書 §4.6.1）。
 
     GET：current_conditions を session から復元してテンプレ描画
@@ -1057,8 +1107,11 @@ class MemberAddByTagView(LoginRequiredMixin, View):
 
     snapshot は「抽出 − 既登録」のみ。退会者は含める（is_unsubscribed フィルタは
     抽出層・本層で適用しない、§9.2-30）。
+
+    認可（Phase 7 ⑤-B-1）：mailings.change_mailinglist。所有者判定なし。
     """
 
+    permission_required = "mailings.change_mailinglist"
     template_name = "mailings/_tag_selection.html"
 
     def get(self, request, pk):
@@ -1143,13 +1196,16 @@ class MemberAddByTagView(LoginRequiredMixin, View):
         )
 
 
-class MemberAddByTagConfirmView(LoginRequiredMixin, View):
+class MemberAddByTagConfirmView(LoginRequiredMixin, PermissionRequiredMixin, View):
     """1-K：タグで追加 確認画面（仕様書 §4.6.2、GET 専用）。
 
     session が空なら 1-H に 302 差し戻し（§9.2-45）。
     snapshot の Person を一覧描画 + Before/After 件数 + 重複除外説明。
+
+    認可（Phase 7 ⑤-B-1）：mailings.change_mailinglist。所有者判定なし。
     """
 
+    permission_required = "mailings.change_mailinglist"
     template_name = "mailings/_member_confirmation.html"
 
     def get(self, request, pk):
@@ -1215,12 +1271,16 @@ class MemberAddByTagConfirmView(LoginRequiredMixin, View):
 
 
 @method_decorator(require_POST, name="dispatch")
-class MemberAddByTagCommitView(LoginRequiredMixin, View):
+class MemberAddByTagCommitView(LoginRequiredMixin, PermissionRequiredMixin, View):
     """タグで追加 確定エンドポイント（仕様書 §4.6.2、POST 専用、PRG）。
 
     session の snapshot を bulk_create + ignore_conflicts で一括登録（個別追加
     confirm-add と同じ作法、§3.6）。確定後 session クリア → 詳細画面に 302。
+
+    認可（Phase 7 ⑤-B-1）：mailings.change_mailinglist。所有者判定なし。
     """
+
+    permission_required = "mailings.change_mailinglist"
 
     def post(self, request, pk):
         from django.contrib import messages
@@ -1284,7 +1344,7 @@ def _remove_by_tag_session_key(mailing_list_pk):
     return f"{REMOVE_BY_TAG_SESSION_PREFIX}{mailing_list_pk}{REMOVE_BY_TAG_SESSION_SUFFIX}"
 
 
-class MemberRemoveByTagView(LoginRequiredMixin, View):
+class MemberRemoveByTagView(LoginRequiredMixin, PermissionRequiredMixin, View):
     """1-L：タグで除外 画面（仕様書 §4.6.5.2）。
 
     GET：current_conditions を session から復元してテンプレ描画
@@ -1296,8 +1356,11 @@ class MemberRemoveByTagView(LoginRequiredMixin, View):
     退会者も snapshot に含める（個別削除と整合、§9.2-30）。archived Person は
     preview-v2 が active のみ抽出するため、結果として snapshot に入らない
     （タグ経由では外せない、個別削除で対応、§4.6.5.5）。
+
+    認可（Phase 7 ⑤-B-1）：mailings.change_mailinglist。所有者判定なし。
     """
 
+    permission_required = "mailings.change_mailinglist"
     template_name = "mailings/_tag_selection.html"
 
     def get(self, request, pk):
@@ -1384,15 +1447,18 @@ class MemberRemoveByTagView(LoginRequiredMixin, View):
         )
 
 
-class MemberRemoveByTagConfirmView(LoginRequiredMixin, View):
+class MemberRemoveByTagConfirmView(LoginRequiredMixin, PermissionRequiredMixin, View):
     """1-M：タグで除外 確認画面（仕様書 §4.6.5.3、GET 専用）。
 
     session が空なら 1-L に 302 差し戻し（§9.2-45）。
     snapshot の Person を一覧描画 + Before/After「-N 件」+ 範囲説明。
     確定ボタン押下時の二重確認ダイアログは _member_confirmation.html 側で
     submit 時に confirm() を出す（§4.6.5.4-8）。
+
+    認可（Phase 7 ⑤-B-1）：mailings.change_mailinglist。所有者判定なし。
     """
 
+    permission_required = "mailings.change_mailinglist"
     template_name = "mailings/_member_confirmation.html"
 
     def get(self, request, pk):
@@ -1457,12 +1523,16 @@ class MemberRemoveByTagConfirmView(LoginRequiredMixin, View):
 
 
 @method_decorator(require_POST, name="dispatch")
-class MemberRemoveByTagCommitView(LoginRequiredMixin, View):
+class MemberRemoveByTagCommitView(LoginRequiredMixin, PermissionRequiredMixin, View):
     """タグで除外 確定エンドポイント（仕様書 §4.6.5.3、POST 専用、PRG）。
 
     session の snapshot を bulk_delete で一括除外（add の bulk_create と対）。
     確定後 session クリア → 詳細画面に 302。
+
+    認可（Phase 7 ⑤-B-1）：mailings.change_mailinglist。所有者判定なし。
     """
+
+    permission_required = "mailings.change_mailinglist"
 
     def post(self, request, pk):
         from django.contrib import messages
@@ -1638,7 +1708,7 @@ def _conditions_is_empty(conditions):
     return not has_effective and not has_global
 
 
-class NewListMetaView(LoginRequiredMixin, View):
+class NewListMetaView(LoginRequiredMixin, PermissionRequiredMixin, View):
     """1-B：リスト名・備考入力画面（仕様書 §4.5.2）。
 
     GET：session を初期化（step='meta'、name/description クリア）してフォーム表示。
@@ -1647,8 +1717,11 @@ class NewListMetaView(LoginRequiredMixin, View):
     【作業5】 ?campaign=<uuid> でクエリパラメータが渡されたら、紐づけ対象の Campaign を
     検証して session に campaign_id を埋め込む。Commit 時に NewListCommitView が拾って
     Campaign.mailing_list を新リストに差し替え、Campaign 詳細画面へ戻る。
+
+    認可（Phase 7 ⑤-B-1）：新規リスト作成フローのため mailings.add_mailinglist（入口で弾く）。
     """
 
+    permission_required = "mailings.add_mailinglist"
     template_name = "mailings/new_list_meta.html"
 
     def get(self, request):
@@ -1703,7 +1776,7 @@ class NewListMetaView(LoginRequiredMixin, View):
         )
 
 
-class NewListTagSelectionView(LoginRequiredMixin, View):
+class NewListTagSelectionView(LoginRequiredMixin, PermissionRequiredMixin, View):
     """1-C：タグ選択画面（新規作成モード）（仕様書 §4.5.3 / §4.4）。
 
     GET：ガード（name 必須）→ session 復元してテンプレ描画。
@@ -1713,8 +1786,11 @@ class NewListTagSelectionView(LoginRequiredMixin, View):
     JS による動的更新（プレビュー AJAX・警告ダイアログ・備考プリセット）は β-2b
     でコード君B が実装する。β-2a はテンプレ骨格（カテゴリブロック・含む/除外/演算
     UI の DOM 構造と data-* / id フックポイント）まで完成させる。
+
+    認可（Phase 7 ⑤-B-1）：新規リスト作成フローのため mailings.add_mailinglist。
     """
 
+    permission_required = "mailings.add_mailinglist"
     template_name = "mailings/_tag_selection.html"
 
     def get(self, request):
@@ -1779,14 +1855,17 @@ class NewListTagSelectionView(LoginRequiredMixin, View):
         )
 
 
-class NewListConfirmView(LoginRequiredMixin, View):
+class NewListConfirmView(LoginRequiredMixin, PermissionRequiredMixin, View):
     """1-D：新規作成確認画面（仕様書 §4.5.4、GET 専用）。
 
     ガード：name かつ snapshot_person_ids が無ければ 1-B / 1-C に 302（§9.2-45）。
     表示はリスト名・備考 + 「対象 N 件でリストを作成します」のみ（§9.2-42、Person
     一覧は出さない）。
+
+    認可（Phase 7 ⑤-B-1）：新規リスト作成フローのため mailings.add_mailinglist。
     """
 
+    permission_required = "mailings.add_mailinglist"
     template_name = "mailings/_new_list_confirmation.html"
 
     def get(self, request):
@@ -1814,12 +1893,16 @@ class NewListConfirmView(LoginRequiredMixin, View):
 
 
 @method_decorator(require_POST, name="dispatch")
-class NewListCommitView(LoginRequiredMixin, View):
+class NewListCommitView(LoginRequiredMixin, PermissionRequiredMixin, View):
     """新規作成確定エンドポイント（仕様書 §4.5.4、POST 専用、PRG）。
 
     snapshot から MailingList + MailingListMember を一括作成し、session を
     クリアして詳細画面に 302（§9.2-27 PRG パターン）。
+
+    認可（Phase 7 ⑤-B-1）：新規リスト作成フローのため mailings.add_mailinglist。
     """
+
+    permission_required = "mailings.add_mailinglist"
 
     def post(self, request):
         guard = _new_list_guard(
@@ -1937,8 +2020,10 @@ def _preview_v2_error(error_code, message, *, status):
 
 
 @method_decorator(require_POST, name="dispatch")
-class PreviewV2View(LoginRequiredMixin, View):
+class PreviewV2View(LoginRequiredMixin, PermissionRequiredMixin, View):
     """新プレビュー API（仕様書 §4.3、Phase 1c-β-1）。
+
+    認可（Phase 7 ⑤-B-1）：mailings.view_mailinglist（読み取り専用プレビュー）。所有者判定なし。
 
     POST /mailings/lists/preview-v2/（application/json）
 
@@ -1952,6 +2037,8 @@ class PreviewV2View(LoginRequiredMixin, View):
     存在しない / archived な tag_id / category_id は silently ignore し、
     レスポンスの invalid_tag_ids / invalid_category_ids で通知（§4.3.5）。
     """
+
+    permission_required = "mailings.view_mailinglist"
 
     def post(self, request):
         # ---------- リクエスト body 解析 ----------

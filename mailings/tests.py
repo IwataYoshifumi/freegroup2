@@ -32,7 +32,17 @@ class _MemberEditTestBase(TestCase):
     """個別追加・個別削除テストの共通基底。"""
 
     def setUp(self):
+        from django.contrib.auth.models import Permission
+
         self.user = User.objects.create_user(username="me_test", password="x")
+        # Phase 7 ⑤-B-1：MailingList 系 View の粗い Permission（所有者判定なし＝全社共有）。
+        for _cn in (
+            "view_mailinglist",
+            "add_mailinglist",
+            "change_mailinglist",
+            "delete_mailinglist",
+        ):
+            self.user.user_permissions.add(Permission.objects.get(codename=_cn))
         self.client = Client()
         self.client.force_login(self.user)
 
@@ -959,7 +969,17 @@ class _TagExtractionTestBase(TestCase):
     """β-1 テストの共通基底：カテゴリ / タグ / Person × Tag 付与のヘルパー。"""
 
     def setUp(self):
+        from django.contrib.auth.models import Permission
+
         self.user = User.objects.create_user(username="be_test", password="x")
+        # Phase 7 ⑤-B-1：PreviewV2(view)/NewList(add)/ByTag(change) 系 View の粗い Permission。
+        for _cn in (
+            "view_mailinglist",
+            "add_mailinglist",
+            "change_mailinglist",
+            "delete_mailinglist",
+        ):
+            self.user.user_permissions.add(Permission.objects.get(codename=_cn))
         self.client = Client()
         self.client.force_login(self.user)
         # 2 カテゴリ × 3 タグずつ、合計 6 タグ
@@ -6855,12 +6875,17 @@ class _PhaseBTestBase(_Phase3TestBase):
     def setUp(self):
         super().setUp()
         # Phase 7 ⑤：Campaign 操作系の粗い Permission を付与（所有者性は created_by=self.user）。
+        # ⑤-B-1：一部テストが MailingList 一覧/新規作成ウィザード導線を踏むため list 系も付与。
         for _cn in (
             "view_campaign",
             "add_campaign",
             "change_campaign",
             "delete_campaign",
             "send_campaign",
+            "view_mailinglist",
+            "add_mailinglist",
+            "change_mailinglist",
+            "delete_mailinglist",
         ):
             self.user.user_permissions.add(Permission.objects.get(codename=_cn))
         self.client.force_login(self.user)
@@ -7666,3 +7691,105 @@ class Phase7ViewAuthorizationTests(TestCase):
         self.assertEqual(self._client(u).post(url).status_code, 403)
         self._grant(u, "delete_tag")
         self.assertEqual(self._client(u).post(url).status_code, 302)
+
+
+class Phase7MailingListViewAuthTests(TestCase):
+    """Phase 7 ⑤-B-1：MailingList 系 View の粗い Permission（所有者判定なし＝全社共有）。
+
+    read=view_mailinglist / 変更=change_mailinglist / 作成フロー=add_mailinglist /
+    削除=delete_mailinglist。viewer は閲覧のみ通る・変更/作成は 403、未ログインはリダイレクト。
+    """
+
+    def setUp(self):
+        self.creator = User.objects.create_user(username="mll_creator", password="x")
+        self.mailing_list = MailingList.objects.create(
+            name="ML", created_by=self.creator
+        )
+
+    def _grant(self, user, *codenames):
+        from django.contrib.auth.models import Permission
+
+        for cn in codenames:
+            user.user_permissions.add(Permission.objects.get(codename=cn))
+
+    def _client(self, user=None):
+        c = Client()
+        if user is not None:
+            c.force_login(User.objects.get(pk=user.pk))
+        return c
+
+    def _user(self, *codenames):
+        import uuid as _uuid
+
+        u = User.objects.create_user(username=f"mll_{_uuid.uuid4().hex[:8]}", password="x")
+        if codenames:
+            self._grant(u, *codenames)
+        return u
+
+    # ---- read: view_mailinglist ----
+    def test_list_requires_view_mailinglist(self):
+        no = self._user()
+        url = reverse("mailings:mailing_list_list")
+        self.assertEqual(self._client(no).get(url).status_code, 403)
+        viewer = self._user("view_mailinglist")
+        self.assertEqual(self._client(viewer).get(url).status_code, 200)
+
+    def test_list_anonymous_redirect(self):
+        r = self._client().get(reverse("mailings:mailing_list_list"))
+        self.assertEqual(r.status_code, 302)
+
+    def test_detail_requires_view_mailinglist(self):
+        url = reverse("mailings:mailing_list_detail", args=[self.mailing_list.pk])
+        self.assertEqual(self._client(self._user()).get(url).status_code, 403)
+        viewer = self._user("view_mailinglist")
+        self.assertEqual(self._client(viewer).get(url).status_code, 200)
+
+    def test_preview_v2_requires_view_mailinglist(self):
+        url = reverse("mailings:mailing_list_preview_v2")
+        body = json.dumps({"conditions": {"categories": [], "global_exclude_tag_ids": []}})
+        self.assertEqual(
+            self._client(self._user()).post(
+                url, data=body, content_type="application/json"
+            ).status_code,
+            403,
+        )
+        viewer = self._user("view_mailinglist")
+        self.assertEqual(
+            self._client(viewer).post(
+                url, data=body, content_type="application/json"
+            ).status_code,
+            200,
+        )
+
+    # ---- 作成フロー: add_mailinglist（入口で弾く）----
+    def test_create_requires_add_mailinglist(self):
+        url = reverse("mailings:mailing_list_create")
+        # viewer（view のみ）は作成不可
+        viewer = self._user("view_mailinglist")
+        self.assertEqual(self._client(viewer).get(url).status_code, 403)
+        editor = self._user("add_mailinglist")
+        self.assertEqual(self._client(editor).get(url).status_code, 200)
+
+    def test_new_list_meta_entry_requires_add_mailinglist(self):
+        url = reverse("mailings:new_list_meta")
+        viewer = self._user("view_mailinglist")
+        self.assertEqual(self._client(viewer).get(url).status_code, 403)
+        editor = self._user("add_mailinglist")
+        self.assertEqual(self._client(editor).get(url).status_code, 200)
+
+    # ---- 変更: change_mailinglist ----
+    def test_update_requires_change_mailinglist(self):
+        url = reverse("mailings:mailing_list_update", args=[self.mailing_list.pk])
+        viewer = self._user("view_mailinglist")
+        self.assertEqual(self._client(viewer).get(url).status_code, 403)
+        editor = self._user("change_mailinglist")
+        self.assertEqual(self._client(editor).get(url).status_code, 200)
+
+    def test_add_member_requires_change_mailinglist(self):
+        url = reverse("mailings:list_add_member", args=[self.mailing_list.pk])
+        # viewer は変更不可（POST AJAX）
+        viewer = self._user("view_mailinglist")
+        self.assertEqual(self._client(viewer).post(url).status_code, 403)
+        # editor は認可通過（person_ids 無しでも 403 ではない＝Mixin を抜ける）
+        editor = self._user("change_mailinglist")
+        self.assertNotEqual(self._client(editor).post(url).status_code, 403)
