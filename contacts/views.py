@@ -19,13 +19,14 @@ D-3c で追加した AJAX 2 エンドポイント、および D-3b で追加し�
 
 import json
 
+from django.contrib import messages
 from django.contrib.auth import get_user_model
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Q
 from django.http import Http404, HttpResponseRedirect, JsonResponse
-from django.shortcuts import get_object_or_404, render
+from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils.decorators import method_decorator
 from django.views import View
@@ -33,6 +34,8 @@ from django.views.decorators.http import require_POST
 from django.views.generic import DetailView, ListView, UpdateView
 
 from back_navigator.back_navigator import BackNavigator
+from cards.models import BusinessCard
+from cards.tasks.ocr_pipeline import _update_original_image_status
 from config.constants import PersonChangeReason
 from duplicates.models import DuplicateCandidate, PersonMergeLog
 from duplicates.services.duplicate_detection import find_duplicate_contacts
@@ -667,17 +670,22 @@ def _fix_with_salutation_flag(contact, form, user):
 
 
 @transaction.atomic
-def _create_person_and_contact(form, user):
+def _create_person_and_contact(form, user, business_card=None):
     """新規 Person + primary Contact を 1 トランザクションで作成（仕様書 §11.4.4）。
 
     [性質] 副作用あり（DB 書込：Person 1 件 + Contact 1 件 + Person.primary_contact 更新）
     [入力] form: ContactCreateForm（バリデーション済み、get_update_contact() を持つ）
            user: 操作実行者（Contact.created_by / updated_by に記録）
+           business_card: BusinessCard | None（名刺詳細からの手動作成経路で、save 前に
+              Contact.business_card へ OneToOne 紐づけする。画像なし従来作成は None）
     [出力] Contact（新規作成された primary Contact、保存済み）
 
     set_primary_contact() の内部 transaction.atomic は外側の atomic とネスト可能
     （Django 標準動作、savepoint 経由）。Person モデルは created_by / updated_by を
     持たない（persons/models.py 現状）ので Person.objects.create() には渡さない。
+
+    business_card は v1.7 で追加した任意引数（後方互換：未指定なら従来どおり None）。
+    BC の done 化・OriginalImage 集計遷移は呼び出し側（View）が同一トランザクション内で行う。
     """
     person = Person.objects.create(status=Person.Status.ACTIVE)
     contact = form.get_update_contact()
@@ -685,12 +693,36 @@ def _create_person_and_contact(form, user):
     contact.status = Contact.Status.PRIMARY
     contact.created_by = user
     contact.updated_by = user
+    # 名刺詳細からの手動作成経路は save 前に BC を OneToOne 紐づけする（指示書 §3-1）。
+    if business_card is not None:
+        contact.business_card = business_card
     # §3.6：宛名がフォームで編集されていれば手動扱い（save 前に立てて自動再計算を抑止）。
     if _salutation_name_edited(form):
         contact.salutation_name_is_manual = True
     contact.save()
     person.set_primary_contact(contact)
     return contact
+
+
+def _confirm_business_card_as_done(business_card):
+    """手動作成した Contact の元 BC を done / business_card で確定する（指示書 §3-2,3-3、v1.7）。
+
+    [性質] 副作用あり（DB 書込：BusinessCard 更新 + OriginalImage 集計遷移）
+    [入力] business_card: BusinessCard（Contact 紐づけ済み、未 done を想定）
+    [出力] None
+
+    呼び出し側の transaction.atomic 内で Contact 作成と同一トランザクションで実行すること。
+    BC を done 化しないまま Contact だけ作ると process_ocr が pending の BC を再度拾い、
+    Contact を二重生成する（指示書「最大の地雷」）。OriginalImage.status は自前で書かず、
+    既存集計ロジック _update_original_image_status に委ねる（全 BC 完了で extracted へ遷移）。
+    """
+    business_card.ocr_status = BusinessCard.OcrStatus.DONE
+    business_card.ocr_result = BusinessCard.OcrResult.BUSINESS_CARD
+    business_card.claimed_at = None
+    business_card.save(
+        update_fields=["ocr_status", "ocr_result", "claimed_at", "updated_at"]
+    )
+    _update_original_image_status(business_card.original_image_id)
 
 
 @transaction.atomic
@@ -731,10 +763,13 @@ class ContactCreateView(LoginRequiredMixin, View):
       1. フォーム検証 → NG なら同じテンプレートでエラー再表示
       2. 検証 OK なら find_duplicate_contacts() で重複候補取得
       3. 候補のうち rank ∈ (exact_match, possible_high) がある → 確認画面表示
-         （上位 5 件 + 「+他 N 件」、強制作成はステップ3b で実装、本ステップでは
-         disabled プレースホルダー）
+         （上位 5 件 + 「+他 N 件」、強制作成は force_create フラグで再 POST）
       4. 候補なし → 1 トランザクションで Person + primary Contact を作成、
          Contact 詳細画面（11 番）へリダイレクト
+
+    v1.7：名刺詳細から business_card クエリ付きで遷移してきた場合、その BC（未紐づけ）
+    に Contact を OneToOne 紐づけし、保存と同一トランザクションで BC を done 確定する。
+    business_card が無い従来の画像なし手動作成は完全に後方互換（指示書「やらないこと」）。
 
     OCR を経由しないユーザー直接入力のため ContactFieldConfidence は作らない
     （仕様書 §10.6.4、PersonAddAdditionalRoleView と同じ流儀）。
@@ -744,13 +779,22 @@ class ContactCreateView(LoginRequiredMixin, View):
     duplicates_template_name = "contacts/contact_create_duplicates.html"
 
     def get(self, request):
+        business_card, err = self._resolve_business_card(request)
+        if err is not None:
+            return err
         form = ContactCreateForm()
         sns_formset = build_contact_sns_formset(instance=None, prefix="sns")
         return render(
-            request, self.template_name, self._context(request, form, sns_formset)
+            request,
+            self.template_name,
+            self._context(request, form, sns_formset, business_card),
         )
 
     def post(self, request):
+        business_card, err = self._resolve_business_card(request)
+        if err is not None:
+            return err
+
         form = ContactCreateForm(request.POST)
         sns_formset = build_contact_sns_formset(
             data=request.POST, instance=None, prefix="sns"
@@ -759,21 +803,16 @@ class ContactCreateView(LoginRequiredMixin, View):
             return render(
                 request,
                 self.template_name,
-                self._context(request, form, sns_formset),
+                self._context(request, form, sns_formset, business_card),
             )
 
         # 強制作成フラグ：重複検出をスキップして即保存（仕様書 §11.4.4、ステップ3b 論点1 案 B）。
         # 強制作成された Contact は後の cron で重複候補として再検出される。
         if "force_create" in request.POST:
-            with transaction.atomic():
-                new_contact = _create_person_and_contact(form, request.user)
-                _create_sns_from_formset(new_contact, sns_formset)
-            back = BackNavigator(request)
-            target_url = reverse(
-                "contacts:contact_detail",
-                kwargs={"pk": new_contact.pk},
+            new_contact = self._save_contact(
+                request, form, sns_formset, business_card
             )
-            return HttpResponseRedirect(back.append_url(target_url))
+            return self._redirect_to_detail(request, new_contact)
 
         # 検証 OK：未保存 Contact を生成して重複検出
         prospective = form.get_update_contact()
@@ -792,7 +831,7 @@ class ContactCreateView(LoginRequiredMixin, View):
             top5 = critical_sorted[:5]
             extra_count = max(0, len(critical_sorted) - 5)
             # 重複確認画面でも入力済み ContactSns 行を hidden で持ち回す（強制作成再 POST 用）。
-            ctx = self._context(request, form, sns_formset)
+            ctx = self._context(request, form, sns_formset, business_card)
             ctx.update(
                 {
                     "top5": top5,
@@ -802,9 +841,51 @@ class ContactCreateView(LoginRequiredMixin, View):
             return render(request, self.duplicates_template_name, ctx)
 
         # 候補なし：保存して Contact 詳細画面へリダイレクト
+        new_contact = self._save_contact(request, form, sns_formset, business_card)
+        return self._redirect_to_detail(request, new_contact)
+
+    def _resolve_business_card(self, request):
+        """business_card クエリ/hidden から BC を解決・検証する（指示書 §2、GET/POST 共通）。
+
+        [性質] 副作用あり（検証失敗時 messages.error）。DB 読み取りのみ
+        [出力] (business_card, error_response)
+          - パラメータ無し          → (None, None)（画像なし従来作成、後方互換）
+          - BC 不在 / id 不正        → (None, redirect 名刺一覧)
+          - 既に Contact 紐づけ済み  → (None, redirect 名刺詳細)
+          - 有効な未紐づけ BC        → (bc, None)
+
+        GET は query、POST（force_create 再 POST は action 固定で query 無し）は body から読む
+        ため、両方を or で拾う。
+        """
+        bc_id = request.GET.get("business_card") or request.POST.get("business_card")
+        if not bc_id:
+            return None, None
+        try:
+            bc = BusinessCard.objects.select_related("contact").get(pk=bc_id)
+        except (BusinessCard.DoesNotExist, ValidationError, ValueError):
+            messages.error(request, "指定された名刺が見つかりません。")
+            return None, redirect("cards:card_list")
+        # 既に Contact が紐づく BC への二重作成を弾く（指示書 §2 検証）。
+        if getattr(bc, "contact", None) is not None:
+            messages.error(request, "この名刺には既にコンタクトが紐づいています。")
+            return None, redirect("cards:card_detail", pk=bc.pk)
+        return bc, None
+
+    def _save_contact(self, request, form, sns_formset, business_card):
+        """Person + Contact 作成・SNS 作成・BC done 確定を 1 トランザクションで実行する。
+
+        [性質] 副作用あり（DB 書込）。business_card が None なら従来どおり BC 処理はスキップ。
+        """
         with transaction.atomic():
-            new_contact = _create_person_and_contact(form, request.user)
+            new_contact = _create_person_and_contact(
+                form, request.user, business_card=business_card
+            )
             _create_sns_from_formset(new_contact, sns_formset)
+            if business_card is not None:
+                _confirm_business_card_as_done(business_card)
+        return new_contact
+
+    def _redirect_to_detail(self, request, new_contact):
         back = BackNavigator(request)
         target_url = reverse(
             "contacts:contact_detail",
@@ -812,12 +893,13 @@ class ContactCreateView(LoginRequiredMixin, View):
         )
         return HttpResponseRedirect(back.append_url(target_url))
 
-    def _context(self, request, form, sns_formset=None):
+    def _context(self, request, form, sns_formset=None, business_card=None):
         back = BackNavigator(request)
         return {
             "form": form,
             "sns_formset": sns_formset,
             "back": back,
+            "business_card": business_card,
             "active_app": "contacts",
             "active_menu": "contacts:contact_create",
         }

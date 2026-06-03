@@ -83,6 +83,11 @@
     {% csrf_token %}
     {% hidden_back_field back %}
 
+    {# 名刺詳細からの作成経路は BC id も hidden で持ち回す（v1.7、強制作成再 POST 用） #}
+    {% if business_card %}
+      <input type="hidden" name="business_card" value="{{ business_card.id }}">
+    {% endif %}
+
     {# 入力された全フィールド値を hidden field で保持（ステップ3b の強制作成再 POST 用） #}
     {% for field in form.visible_fields %}
       <input type="hidden" name="{{ field.html_name }}" value="{{ field.value|default_if_none:'' }}">

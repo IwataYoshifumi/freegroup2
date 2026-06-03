@@ -25,6 +25,14 @@
     </div>
   </div>
 
+  {% if messages %}
+    <div style="max-width:1100px; margin-bottom:var(--app-space-md);">
+      {% for message in messages %}
+        <div class="app-alert app-alert--danger">{{ message }}</div>
+      {% endfor %}
+    </div>
+  {% endif %}
+
   {% if debug %}
     <div style="max-width:1100px; margin-bottom:var(--app-space-sm); font-size:12px;">
       Card UID: <code class="app-debug-uid">{{ card.id }}</code>
@@ -159,6 +167,15 @@
           {% endif %}
         {% else %}
           <p class="app-muted">Contact が紐付いていません。</p>
+          {% url 'contacts:contact_create' as contact_create_url %}
+          {% with bc_id=card.id|stringformat:"s" %}
+            <div style="margin-top: var(--app-space-md);">
+              <a href="{% append_back_url contact_create_url|add:"?business_card="|add:bc_id back %}"
+                 class="app-btn app-btn--primary">
+                新規コンタクト作成
+              </a>
+            </div>
+          {% endwith %}
         {% endif %}
       </div>
     </div>
