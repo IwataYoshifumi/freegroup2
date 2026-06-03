@@ -258,9 +258,8 @@ JS フック予約：
 
   {% comment %}
     横断除外モーダル（§3.5 / §4.4.2）。既存 app-modal 機構（data-action="open-modal" /
-    "close-modal"）を流用。base.html には backdrop が無いため本画面に個別配置する。
+    "close-modal"）を流用。backdrop は mailings/app_base.html が共通供給する。
   {% endcomment %}
-  <div class="app-modal-backdrop" hidden></div>
   <div id="globalExcludeModal" class="app-modal" hidden role="dialog" aria-modal="true"
        aria-labelledby="globalExcludeModalTitle">
     <div class="app-modal__panel">

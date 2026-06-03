@@ -16,6 +16,9 @@
       {% block content %}{% endblock %}
     </main>
   </div>
+  {# 共通モーダル背景（app.js openModal が querySelector('.app-modal-backdrop') で参照）。
+     base.html には無いため mailings/tags 全画面分をここで1個供給する（個別配置の二重を排除）。 #}
+  <div class="app-modal-backdrop" hidden></div>
 {% endblock %}
 
 {% block drawer_content %}
