@@ -279,3 +279,101 @@ class TagListViewSortTests(TestCase):
         # ソート列ドロップダウンの5選択肢
         for label in ("カテゴリ", "タグ名", "付与Person数", "作成者", "更新日時"):
             self.assertIn(label, body)
+
+
+class Phase7TagCategoryViewAuthTests(TestCase):
+    """Phase 7 ⑤-B-2：TagCategory 系 View の粗い Permission（標準 CRUD、所有者判定なし）。
+
+    read=view_tagcategory / 作成=add / 編集・並び替え・非アーカイブ=change / 論理削除=delete。
+    viewer は閲覧のみ通過・変更/作成/削除は 403、未ログインはリダイレクト。
+    """
+
+    def setUp(self):
+        self.creator = User.objects.create_user(username="tc_creator", password="x")
+        self.category = TagCategory.objects.create(name="業種", sort_order=1)
+
+    def _grant(self, user, *codenames):
+        from django.contrib.auth.models import Permission
+
+        for cn in codenames:
+            user.user_permissions.add(Permission.objects.get(codename=cn))
+
+    def _client(self, user=None):
+        c = Client()
+        if user is not None:
+            c.force_login(User.objects.get(pk=user.pk))
+        return c
+
+    def _user(self, *codenames):
+        import uuid as _uuid
+
+        u = User.objects.create_user(
+            username=f"tc_{_uuid.uuid4().hex[:8]}", password="x"
+        )
+        if codenames:
+            self._grant(u, *codenames)
+        return u
+
+    # ---- read: view_tagcategory ----
+    def test_list_requires_view_tagcategory(self):
+        url = reverse("tags:tag_category_list")
+        self.assertEqual(self._client(self._user()).get(url).status_code, 403)
+        viewer = self._user("view_tagcategory")
+        self.assertEqual(self._client(viewer).get(url).status_code, 200)
+
+    def test_list_anonymous_redirect(self):
+        self.assertEqual(
+            self._client().get(reverse("tags:tag_category_list")).status_code, 302
+        )
+
+    def test_detail_requires_view_tagcategory(self):
+        url = reverse("tags:tag_category_detail", args=[self.category.pk])
+        self.assertEqual(self._client(self._user()).get(url).status_code, 403)
+        viewer = self._user("view_tagcategory")
+        self.assertEqual(self._client(viewer).get(url).status_code, 200)
+
+    # ---- 作成: add_tagcategory ----
+    def test_create_requires_add_tagcategory(self):
+        url = reverse("tags:tag_category_create")
+        viewer = self._user("view_tagcategory")
+        self.assertEqual(self._client(viewer).get(url).status_code, 403)
+        editor = self._user("add_tagcategory")
+        self.assertEqual(self._client(editor).get(url).status_code, 200)
+
+    # ---- 編集: change_tagcategory ----
+    def test_update_requires_change_tagcategory(self):
+        url = reverse("tags:tag_category_update", args=[self.category.pk])
+        viewer = self._user("view_tagcategory")
+        self.assertEqual(self._client(viewer).get(url).status_code, 403)
+        editor = self._user("change_tagcategory")
+        self.assertEqual(self._client(editor).get(url).status_code, 200)
+
+    def test_reorder_requires_change_tagcategory(self):
+        import json
+
+        url = reverse("tags:tag_category_reorder")
+        body = json.dumps({"order": [str(self.category.pk)]})
+        viewer = self._user("view_tagcategory")
+        self.assertEqual(
+            self._client(viewer).post(
+                url, data=body, content_type="application/json"
+            ).status_code,
+            403,
+        )
+        editor = self._user("change_tagcategory")
+        self.assertEqual(
+            self._client(editor).post(
+                url, data=body, content_type="application/json"
+            ).status_code,
+            200,
+        )
+
+    # ---- 論理削除: delete_tagcategory ----
+    def test_delete_requires_delete_tagcategory(self):
+        url = reverse("tags:tag_category_delete", args=[self.category.pk])
+        # viewer は削除不可（POST）
+        viewer = self._user("view_tagcategory")
+        self.assertEqual(self._client(viewer).post(url).status_code, 403)
+        # admin 相当（delete 保持）は通過（論理削除→リダイレクト 302）
+        admin = self._user("delete_tagcategory")
+        self.assertEqual(self._client(admin).post(url).status_code, 302)

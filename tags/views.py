@@ -140,7 +140,9 @@ def _tag_sort_context(params):
 # ======================================================================
 
 
-class TagCategoryListView(LoginRequiredMixin, ListView):
+class TagCategoryListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
+    # 認可（Phase 7 ⑤-B-2）：tags.view_tagcategory（全員）。所有者判定なし。
+    permission_required = "tags.view_tagcategory"
     model = TagCategory
     template_name = "tags/tag_category_list.html"
     context_object_name = "categories"
@@ -169,7 +171,9 @@ class TagCategoryListView(LoginRequiredMixin, ListView):
         return context
 
 
-class TagCategoryCreateView(LoginRequiredMixin, CreateView):
+class TagCategoryCreateView(LoginRequiredMixin, PermissionRequiredMixin, CreateView):
+    # 認可（Phase 7 ⑤-B-2）：tags.add_tagcategory。所有者判定なし。
+    permission_required = "tags.add_tagcategory"
     model = TagCategory
     form_class = TagCategoryForm
     template_name = "tags/tag_category_form.html"
@@ -188,7 +192,9 @@ class TagCategoryCreateView(LoginRequiredMixin, CreateView):
         return context
 
 
-class TagCategoryUpdateView(LoginRequiredMixin, UpdateView):
+class TagCategoryUpdateView(LoginRequiredMixin, PermissionRequiredMixin, UpdateView):
+    # 認可（Phase 7 ⑤-B-2）：tags.change_tagcategory。所有者判定なし。
+    permission_required = "tags.change_tagcategory"
     model = TagCategory
     form_class = TagCategoryForm
     template_name = "tags/tag_category_form.html"
@@ -220,7 +226,7 @@ class TagCategoryUpdateView(LoginRequiredMixin, UpdateView):
         return context
 
 
-class TagCategoryDetailView(LoginRequiredMixin, DetailView):
+class TagCategoryDetailView(LoginRequiredMixin, PermissionRequiredMixin, DetailView):
     """タグカテゴリ詳細（Phase 1b-ε.1 追加）。
 
     カテゴリ基本情報 + 配下タグ一覧（ページネーション 20 件/ページ）。
@@ -230,6 +236,8 @@ class TagCategoryDetailView(LoginRequiredMixin, DetailView):
     BackNavigator は contacts/cards 慣例どおり詳細画面では push_current を呼ばない。
     """
 
+    # 認可（Phase 7 ⑤-B-2）：tags.view_tagcategory（全員）。所有者判定なし。
+    permission_required = "tags.view_tagcategory"
     model = TagCategory
     template_name = "tags/tag_category_detail.html"
     context_object_name = "category"
@@ -271,12 +279,16 @@ class TagCategoryDetailView(LoginRequiredMixin, DetailView):
         return context
 
 
-class TagCategoryDeleteView(LoginRequiredMixin, View):
+class TagCategoryDeleteView(LoginRequiredMixin, PermissionRequiredMixin, View):
     """論理アーカイブ化（is_archived=True、§11.1.4）。物理削除はしない。
 
     Phase 1b-δ で UI ラベルは「削除」→「アーカイブ化」に統一したが、コード内表現
     （URL 名・View 名）は維持する方針（指示書準拠）。
+
+    認可（Phase 7 ⑤-B-2）：tags.delete_tagcategory。所有者判定なし。
     """
+
+    permission_required = "tags.delete_tagcategory"
 
     def post(self, request, pk):
         category = get_object_or_404(TagCategory, pk=pk)
@@ -286,12 +298,16 @@ class TagCategoryDeleteView(LoginRequiredMixin, View):
 
 
 @method_decorator(require_POST, name="dispatch")
-class TagCategoryReorderView(LoginRequiredMixin, View):
+class TagCategoryReorderView(LoginRequiredMixin, PermissionRequiredMixin, View):
     """並び替え AJAX：sort_order を一括更新する（§6.2.5）。
 
     POST: JSON body { "order": [pk1, pk2, ...] }
     レスポンス: {"ok": true}
+
+    認可（Phase 7 ⑤-B-2）：tags.change_tagcategory（並び替え＝編集）。所有者判定なし。
     """
+
+    permission_required = "tags.change_tagcategory"
 
     def post(self, request):
         try:
@@ -519,8 +535,13 @@ class TagUnarchiveView(LoginRequiredMixin, View):
         return redirect("tags:tag_detail", pk=tag.pk)
 
 
-class TagCategoryUnarchiveView(LoginRequiredMixin, View):
-    """タグカテゴリ非アーカイブ化（is_archived=False、Phase 1b-δ 追加）。POST 専用。"""
+class TagCategoryUnarchiveView(LoginRequiredMixin, PermissionRequiredMixin, View):
+    """タグカテゴリ非アーカイブ化（is_archived=False、Phase 1b-δ 追加）。POST 専用。
+
+    認可（Phase 7 ⑤-B-2）：tags.change_tagcategory（状態変更）。所有者判定なし。
+    """
+
+    permission_required = "tags.change_tagcategory"
 
     def post(self, request, pk):
         category = get_object_or_404(TagCategory, pk=pk)
