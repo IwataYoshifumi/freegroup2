@@ -7907,6 +7907,44 @@ class Phase7ViewAuthorizationTests(TestCase):
         self._grant(u, "delete_tag")
         self.assertEqual(self._client(u).post(url).status_code, 302)
 
+    # ---- TestSend No.51：owner でも send_campaign 無しは 403 ----
+    # （他人 403 ＝ test_test_send_other_403 の対、CSV の test_csv_requires_export_report_even_for_owner と対称）
+    def test_test_send_requires_send_campaign_even_for_owner(self):
+        u = User.objects.create_user(username="p7_nosend", password="x")
+        self._grant(u, "view_campaign")
+        c = Campaign.objects.create(
+            name="C_nosend",
+            template=EmailTemplate.objects.create(
+                name="T_nosend", subject="s", body="b", created_by=u
+            ),
+            mailing_list=self.mailing_list,
+            status=Campaign.Status.DRAFT,
+            created_by=u,
+        )
+        r = self._client(u).post(reverse("mailings:campaign_test_send", args=[c.pk]))
+        self.assertEqual(r.status_code, 403)
+
+    # ---- Preview No.82（view_campaign + owner）：他人は 403（test_detail_other_403 と対称）----
+    def test_preview_other_403(self):
+        from persons.models import Person
+
+        # 所有者判定は CampaignOwnerRequiredMixin.dispatch が person 解決前に弾くため、
+        # person は URL 引数を満たす最小レコードで足りる。
+        person = Person.objects.create(status="active")
+        r = self._client(self.other).get(
+            reverse("mailings:campaign_preview", args=[self.campaign.pk, person.pk])
+        )
+        self.assertEqual(r.status_code, 403)
+
+    # ---- Config No.60（change_mailingconfig、所有者なし）----
+    # （Suppressed の test_suppressed_list_requires_view_suppressedemail と対称：無→403／有→200）
+    def test_config_requires_change_mailingconfig(self):
+        u = User.objects.create_user(username="p7_config", password="x")
+        url = reverse("mailings:config_edit")
+        self.assertEqual(self._client(u).get(url).status_code, 403)
+        self._grant(u, "change_mailingconfig")
+        self.assertEqual(self._client(u).get(url).status_code, 200)
+
 
 class Phase7MailingListViewAuthTests(TestCase):
     """Phase 7 ⑤-B-1：MailingList 系 View の粗い Permission（所有者判定なし＝全社共有）。
