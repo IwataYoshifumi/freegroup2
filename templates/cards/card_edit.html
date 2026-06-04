@@ -1,0 +1,83 @@
+{% extends "cards/app_base.html" %}
+{% load back_tags %}
+
+{% block title %}名刺編集 — FreeGroup2{% endblock %}
+
+{% block content %}
+  <div class="app-page-header" style="max-width:760px;">
+    <div>
+      <div class="app-breadcrumb">名刺管理 / 名刺一覧 / 詳細 / 編集</div>
+      <h1>名刺編集</h1>
+      <p class="app-muted">向き・エラーメッセージの修正、または「名刺ではない」設定を行います。</p>
+    </div>
+    <div class="app-action-area">
+      {% if back.back_exist %}
+        <a href="{% back_url back %}" class="app-btn app-btn--secondary">戻る</a>
+      {% endif %}
+      {% if back.back_all_exist %}
+        <a href="{% back_all_url back %}" class="app-btn app-btn--secondary">最初に戻る</a>
+      {% endif %}
+    </div>
+  </div>
+
+  <section class="app-card" style="max-width:760px;">
+    {% if card.card_image %}
+      <div class="app-section__header"><h2>名刺画像</h2></div>
+      <img src="{{ card.card_image.url }}" alt="名刺画像"
+           style="max-width:300px; width:100%; border-radius:8px; margin-bottom:var(--app-space-md);">
+    {% else %}
+      <p class="app-muted">画像なし</p>
+    {% endif %}
+
+    {# 保存と「名刺でない」設定は同一フォーム。送信ボタンの name(mark_not_business_card)で View が分岐する #}
+    <form method="post" novalidate class="js-card-edit-form">
+      {% csrf_token %}
+      {% hidden_back_field back %}
+
+      {% if form.non_field_errors %}
+        <div class="app-alert app-alert--danger">{{ form.non_field_errors }}</div>
+      {% endif %}
+
+      <div class="app-form-grid">
+        <div class="app-form__group">
+          <label class="app-form__label" for="{{ form.orientation.id_for_label }}">{{ form.orientation.label }}</label>
+          {{ form.orientation }}
+          {{ form.orientation.errors }}
+        </div>
+        <div class="app-form__group app-form__group--full">
+          <label class="app-form__label" for="{{ form.error_message.id_for_label }}">{{ form.error_message.label }}</label>
+          {{ form.error_message }}
+          {{ form.error_message.errors }}
+        </div>
+      </div>
+
+      <div class="app-action-area" style="margin-top:24px;">
+        <button type="submit" class="app-btn app-btn--primary">保存</button>
+        {% if back.back_exist %}
+          <a href="{% back_url back %}" class="app-btn app-btn--secondary">戻る</a>
+        {% endif %}
+      </div>
+
+      <div style="margin-top:var(--app-space-md); border-top:1px solid var(--app-border); padding-top:var(--app-space-md);">
+        <p class="app-muted" style="font-size:13px; margin:0 0 8px;">
+          この名刺を「名刺ではない」に設定すると OCR 待ちから外れます（コンタクトは作成されません）。
+          上の入力内容も同時に反映されます。
+        </p>
+        <button type="submit" name="mark_not_business_card" value="1"
+                class="app-btn app-btn--danger js-mark-not-bc-btn">名刺ではない に設定</button>
+      </div>
+    </form>
+  </section>
+
+  <script>
+    (function () {
+      var btn = document.querySelector('.js-mark-not-bc-btn');
+      if (!btn) return;
+      btn.addEventListener('click', function (event) {
+        if (!window.confirm('この名刺を「名刺ではない」に設定します。よろしいですか？')) {
+          event.preventDefault();
+        }
+      });
+    })();
+  </script>
+{% endblock %}

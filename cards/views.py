@@ -9,9 +9,12 @@ import logging
 import statistics
 from collections import Counter
 
+from django.contrib import messages
 from django.contrib.auth import get_user_model
+from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import ValidationError
 from django.core.files.base import ContentFile
+from django.db import transaction
 from django.db.models import Count, Exists, OuterRef, Q
 from django.http import HttpResponse, HttpResponseRedirect
 from django.shortcuts import get_object_or_404, redirect, render
@@ -22,6 +25,7 @@ from django.views.generic import DetailView, ListView
 
 from back_navigator.back_navigator import BackNavigator
 
+from .forms import BusinessCardEditForm
 from .models import BusinessCard, DebugMask, OriginalImage
 from .services.image_processor import (
     convert_to_jpeg,
@@ -29,6 +33,7 @@ from .services.image_processor import (
     validate_image,
 )
 from .services.opencv_debug_cache import recalc_opencv_debug
+from .tasks.ocr_pipeline import _update_original_image_status
 from config.constants import DUPLICATE_CHECK_FIELDS
 from contacts.models import Contact, ContactFieldConfidence
 
@@ -811,3 +816,84 @@ class CardDetailView(DetailView):
         context["osd_rotate_zero"] = bool(osd) and osd.get("rotate") == 0
 
         return context
+
+
+class CardEditView(LoginRequiredMixin, View):
+    """名刺（BusinessCard）編集画面（v1.7、代替OCR運用の手動終端化）。
+
+    対象は **Contact 未生成の BC のみ**（Contact を持つ BC は編集不可。詳細は下記ガード）。
+    GET：orientation / error_message の編集フォームを表示。
+    POST：
+      - 通常保存：orientation / error_message を更新（ocr_status は変えない）。
+      - 「名刺でない」設定（POST に mark_not_business_card）：当該 BC を
+        ocr_result=not_business_card / ocr_status=done / claimed_at=None に終端化し
+        （error_message は入力値を反映）、既存の _update_original_image_status で元画像 status を
+        再集計する。手動 Contact 作成経路（_confirm_business_card_as_done）と同じ集計に合流し、
+        新しい集計ロジックは書かない。Contact は作らない（not_business_card は Contact を持たない）。
+        BC 更新と status 再集計は同一トランザクションで行う。
+
+    ガード（業務ルール）：Contact を既に持つ BC は編集不可。reverse OneToOne の
+    `getattr(bc, "contact", None)` で判定し、ある場合は messages.error + 名刺詳細へ redirect
+    （テンプレ側の「編集」ボタン非表示と二重構え）。所有者スコープ（original_image__user）も既存流儀に揃える。
+    """
+
+    template_name = "cards/card_edit.html"
+
+    def _get_editable_bc(self, request, pk):
+        """編集可能な BC を取得する。Contact 済みなら (None, redirect) を返す。"""
+        user = get_current_user(request)
+        bc = get_object_or_404(
+            BusinessCard.objects.select_related("original_image", "contact"),
+            pk=pk,
+            original_image__user=user,
+        )
+        if getattr(bc, "contact", None) is not None:
+            messages.error(
+                request, "この名刺は既にコンタクトが紐づいているため編集できません。"
+            )
+            return None, redirect("cards:card_detail", pk=bc.pk)
+        return bc, None
+
+    def get(self, request, pk):
+        bc, err = self._get_editable_bc(request, pk)
+        if err is not None:
+            return err
+        form = BusinessCardEditForm(instance=bc)
+        return render(request, self.template_name, self._context(request, bc, form))
+
+    def post(self, request, pk):
+        bc, err = self._get_editable_bc(request, pk)
+        if err is not None:
+            return err
+
+        form = BusinessCardEditForm(request.POST, instance=bc)
+        if not form.is_valid():
+            return render(
+                request, self.template_name, self._context(request, bc, form)
+            )
+
+        if "mark_not_business_card" in request.POST:
+            # 「名刺でない」終端化 + 既存集計に合流（BC 更新と status 再集計を同一トランザクション）。
+            with transaction.atomic():
+                card = form.save(commit=False)
+                card.ocr_result = BusinessCard.OcrResult.NOT_BUSINESS_CARD
+                card.ocr_status = BusinessCard.OcrStatus.DONE
+                card.claimed_at = None
+                card.save()
+                _update_original_image_status(card.original_image_id)
+        else:
+            # 通常保存：orientation / error_message のみ更新（ocr_status は変えない）。
+            form.save()
+
+        back = BackNavigator(request)
+        target_url = reverse("cards:card_detail", kwargs={"pk": bc.pk})
+        return HttpResponseRedirect(back.append_url(target_url))
+
+    def _context(self, request, bc, form):
+        return {
+            "card": bc,
+            "form": form,
+            "back": BackNavigator(request),
+            "active_app": "cards",
+            "active_menu": "cards:card_list",
+        }

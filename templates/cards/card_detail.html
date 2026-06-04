@@ -1,5 +1,6 @@
 {% extends "cards/app_base.html" %}
 {% load back_tags %}
+{% load ui_tags %}
 
 {% block title %}名刺詳細 — FreeGroup2{% endblock %}
 
@@ -13,6 +14,12 @@
            class="app-btn app-btn--secondary app-btn--sm">
           名刺画像アップロード
         </a>
+        {# Contact 未生成の BC のみ編集可（押せないボタンは出さない。サーバ側ガードと二重構え、v1.7） #}
+        {% if not contact %}
+          {% url 'cards:card_edit' pk=card.id as card_edit_url %}
+          <a href="{% append_back_url card_edit_url back %}"
+             class="app-btn app-btn--secondary app-btn--sm">名刺を編集</a>
+        {% endif %}
       </div>
     </div>
     <div class="app-action-area">
@@ -68,6 +75,23 @@
               {% endif %}
             </div>
           </div>
+
+          {# OCR処理結果。一覧と同じ ocr_result_badge を流用。空(business_card/done+null)時のみ get_ocr_result_display にフォールバック #}
+          <div class="app-detail-item" style="margin-top: var(--app-space-sm);">
+            <div class="app-detail-label">OCR処理結果</div>
+            <div class="app-detail-value">
+              {% ocr_result_badge card as ocr_badge_html %}
+              {% if ocr_badge_html %}{{ ocr_badge_html }}{% else %}{{ card.get_ocr_result_display|default:"—" }}{% endif %}
+            </div>
+          </div>
+
+          {# BusinessCard.error_message（人手入力 or OCR 集約のエラー文）。OSD エラー表示（開発用情報・osd 由来）とは別物。空なら枠ごと出さない #}
+          {% if card.error_message %}
+            <div class="app-detail-item" style="margin-top: var(--app-space-sm);">
+              <div class="app-detail-label">エラーメッセージ</div>
+              <div class="app-detail-value" style="white-space:pre-wrap;">{{ card.error_message }}</div>
+            </div>
+          {% endif %}
 
           {% if debug and card.contact %}
             {% url 'contacts:contact_detail' pk=card.contact.id as contact_detail_url %}

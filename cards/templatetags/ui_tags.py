@@ -237,16 +237,18 @@ def ocr_result_badge(card):
 
 
 @register.simple_tag
-def osd_debug_badge(card):
+def osd_debug_badge(card, show_reason=True):
     """OSD 向き判定（rotate / conf / 失敗）のデバッグ用バッジ HTML を返す（DEBUG 表示専用）。
 
     [性質] 純関数（DB操作なし・副作用なし）
     [入力] card: BusinessCard インスタンス
+           show_reason: True（既定）なら状態バッジ + 理由/conf の muted テキストを併記。
+             False ならバッジ本体のみ（一覧で TesseractError 長文を出さないため、§D）。
     [出力] SafeString
         - osd_json / osd ブロックが無い（OpenCV 未処理 / 記録なし）: 空文字
-        - osd.error あり: 「OSD失敗」バッジ + 理由文字列をそのまま表示
+        - osd.error あり: 「OSD失敗」バッジ（show_reason 時は + 理由文字列）
           （"Too few characters" 等の特定文字列で決め打ちせず、error が入っていれば失敗とする）
-        - それ以外: rotate（0/90/180/270）バッジ + orientation_conf の生値
+        - それ以外: rotate（0/90/180/270）バッジ（show_reason 時は + orientation_conf の生値）
 
     第2段OSD移植で OSD は OriginalImage.raw_json ではなく BusinessCard.osd_json に格納される
     （構造 {"schema_version", "osd": {...}, "tesseract_ocr": {...}}）。本タグは card.osd_json["osd"]
@@ -264,19 +266,21 @@ def osd_debug_badge(card):
 
     error = osd.get("error")
     if error:
-        return format_html(
-            '<span class="app-status-badge app-status-badge--error">OSD失敗</span> '
-            '<span class="app-muted">{}</span>',
-            error,
+        badge = mark_safe(
+            '<span class="app-status-badge app-status-badge--error">OSD失敗</span>'
         )
+        if not show_reason:
+            return badge
+        return format_html('{} <span class="app-muted">{}</span>', badge, error)
 
     rotate = osd.get("rotate")
-    conf = osd.get("orientation_conf")
     rotate_disp = "—" if rotate is None else "{}°".format(rotate)
-    conf_disp = "—" if conf is None else conf
-    return format_html(
-        '<span class="app-status-badge app-status-badge--info">OSD rot {}</span> '
-        '<span class="app-muted">conf {}</span>',
+    badge = format_html(
+        '<span class="app-status-badge app-status-badge--info">OSD rot {}</span>',
         rotate_disp,
-        conf_disp,
     )
+    if not show_reason:
+        return badge
+    conf = osd.get("orientation_conf")
+    conf_disp = "—" if conf is None else conf
+    return format_html('{} <span class="app-muted">conf {}</span>', badge, conf_disp)
