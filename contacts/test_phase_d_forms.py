@@ -40,6 +40,7 @@ class ContactFormNormalizationTests(TestCase):
         """ContactCreateForm 用 POST data（UPDATABLE_FIELDS 全埋め + salutation 必須）。"""
         data = {f: "" for f in Contact.UPDATABLE_FIELDS}
         data["salutation_name"] = "山田 様"  # §3.5 必須化を満たす
+        data["full_name"] = "山田太郎"  # v1.7 full_name 必須化を満たす（各テストで override 可）
         data["country"] = "JP"  # Phase D2：postal/rest は country 別正規化。JP として検証
         data.update(overrides)
         return data
@@ -78,13 +79,12 @@ class ContactFormNormalizationTests(TestCase):
         self.assertTrue(form.is_valid(), form.errors)
         self.assertEqual(form.cleaned_data["full_name"], "山田太郎")
 
-    def test_create_form_whitespace_only_full_name_becomes_empty(self):
-        # CharField の strip（U+3000 含む）で空になるため normalize 前に "" となり、
-        # full_name は空のまま valid（blank=True）。normalize_full_name の ValidationError
-        # 分岐は防御的で通常フローでは到達しないことを確認する。
+    def test_create_form_whitespace_only_full_name_rejected(self):
+        # v1.7：full_name 必須化により、空白のみ（CharField strip で空になる）は
+        # ContactCreateForm で弾く（旧挙動の「空のまま valid」は空保存バグだったため変更）。
         form = ContactCreateForm(data=self._create_data(full_name="　 "))
-        self.assertTrue(form.is_valid(), form.errors)
-        self.assertEqual(form.cleaned_data["full_name"], "")
+        self.assertFalse(form.is_valid())
+        self.assertIn("full_name", form.errors)
 
     def test_add_additional_role_form_normalizes(self):
         person = Person.objects.create(status=Person.Status.ACTIVE)
@@ -386,6 +386,7 @@ class AddedFiveFieldsFormTests(TestCase):
     def _create_data(self, **overrides):
         data = {f: "" for f in Contact.UPDATABLE_FIELDS}
         data["salutation_name"] = "宛名 様"
+        data["full_name"] = "氏名太郎"  # v1.7 full_name 必須化を満たす（各テストで override 可）
         data.update(overrides)
         return data
 

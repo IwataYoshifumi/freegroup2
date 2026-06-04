@@ -231,6 +231,21 @@ class ContactBaseForm(forms.ModelForm):
         if not value:
             self.add_error("salutation_name", "宛名は必須です。")
 
+    def _require_full_name(self, cleaned):
+        """full_name 必須化バリデーション（v1.7、手動作成経路の空保存防止）。
+
+        [性質] 副作用あり（検証失敗時 add_error）。DB 操作なし
+
+        手動コンタクト作成（ContactCreateForm）でのみ呼ぶ。full_name は JS 補助組み立てが
+        name_order 未選択等で発火しないと空のまま全層を通過するため、Form 層で空文字・空白のみ
+        入力を禁止する（_require_salutation_name と同じ流儀）。DB は blank=True のまま
+        （マイグレーション不要）。OCR 由来（Form を経ない）・fix 更新（Update/UpdateActive）・
+        別肩書追加（AddAdditionalRole）には適用しない（副作用を出さないため呼ばない）。
+        """
+        value = (cleaned.get("full_name") or "").strip()
+        if not value:
+            self.add_error("full_name", "氏名（フルネーム）を入力してください。")
+
 
 class ContactUpdateForm(ContactBaseForm):
     """primary Contact 修正用 Form（仕様書 §11.6.2 / §11.7.1）。
@@ -371,6 +386,8 @@ class ContactCreateForm(ContactBaseForm):
         cleaned = super().clean()
         # salutation_name 必須化（仕様書 §1.5.2 / Phase D §3.5）。
         self._require_salutation_name(cleaned)
+        # full_name 必須化（v1.7、手動作成経路の空保存防止。Create のみ。Update/AddRole/OCR は対象外）。
+        self._require_full_name(cleaned)
         return cleaned
 
 
