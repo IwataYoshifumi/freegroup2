@@ -15,7 +15,10 @@ from django.conf import settings
 from django.db import transaction
 
 from cards.models import BusinessCard, OriginalImage
-from cards.services.detectors.opencv_detector import detect_cards_with_debug
+from cards.services.detectors.opencv_detector import (
+    detect_cards_with_debug,
+    results_from_debug_result,
+)
 from cards.services.opencv_debug_cache import save_debug_data
 from cards.services.osd import (
     apply_upright,
@@ -80,9 +83,10 @@ class Run_Crop_Cards_From_OriginalImage:
 
         try:
             debug_result = detect_cards_with_debug(self.original_image.image_file.path)
-            attempts = debug_result.get("attempts") or []
-            last_attempt = attempts[-1] if attempts else {}
-            detections = last_attempt.get("results") or []
+            # rev2/rev3：最終検出結果は通常・反転を横断統合した integrated_results。
+            # 在り処を知る唯一の窓口 results_from_debug_result() を通す（attempts[-1].results を
+            # 直読みすると反転 attempt だけを拾い件数が落ちる移植漏れ。43739da 由来）。
+            detections = results_from_debug_result(debug_result)
             self.original_image.detected_count = len(detections)
 
             try:
