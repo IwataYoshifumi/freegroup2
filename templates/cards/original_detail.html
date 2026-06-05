@@ -382,13 +382,7 @@
       <h2>検出された名刺</h2>
     </div>
 
-    {% if original.status == "pending" %}
-      <p class="app-muted">処理待ちです。</p>
-    {% elif original.status == "garbage" %}
-      <p class="app-muted">名刺が検出されませんでした。</p>
-    {% elif original.status == "failed" %}
-      <p class="app-muted">処理に失敗しました。</p>
-    {% elif original.status == "extracted" %}
+    {% if business_cards %}
       <div class="app-table-wrapper">
         <table class="app-table app-table--nowrap">
           <thead>
@@ -430,6 +424,12 @@
           </tbody>
         </table>
       </div>
+    {% elif original.status == "pending" %}
+      <p class="app-muted">処理待ちです。</p>
+    {% elif original.status == "garbage" %}
+      <p class="app-muted">名刺が検出されませんでした。</p>
+    {% elif original.status == "failed" %}
+      <p class="app-muted">処理に失敗しました。</p>
     {% else %}
       <p class="app-muted">処理中です。</p>
     {% endif %}
