@@ -1,0 +1,93 @@
+{% comment %}
+汎用 列表示切替 partial（HIG v1.5 第6章）。mailings 配下の各一覧で共有 include。
+ドロップダウン＋チェックボックスで列を表示/非表示し、localStorage に永続化する（サーバーには送らない）。
+
+期待 context:
+  storage_key: str            ← localStorage キー（画面ごとに分離）
+  columns: [{"key","label","default"}]  ← 切替対象の列。default=False の列は初期 OFF。
+
+利用前提（呼び出し側のマークアップ）:
+  <th data-col-key="name">名称</th>
+  <td data-col-key="name">...</td>
+
+保存済みキーは保存値を優先、未保存キーは default（既定 ON、default=False なら初期 OFF）。
+tags/_column_toggle.html と同型だが列を context で差し替えられる汎用版。専用 class/guard で
+他画面の列切替と干渉しない。
+{% endcomment %}
+<div class="js-mcol-toggle" data-storage-key="{{ storage_key }}"
+     style="position:relative; display:inline-block;">
+  <button type="button" class="app-btn app-btn--outline-secondary app-btn--sm js-mcol-toggle__btn"
+          aria-haspopup="true" aria-expanded="false">
+    <i class="bi bi-layout-three-columns"></i> 表示列を選択
+  </button>
+  <div class="js-mcol-toggle__menu" hidden
+       style="position:absolute; top:100%; left:0; z-index:1000;
+              background:#fff; border:1px solid #cbd5e1; border-radius:6px;
+              box-shadow:0 4px 12px rgba(0,0,0,0.12); padding:8px;
+              min-width:200px; text-align:left;">
+    {% for col in columns %}
+      <label style="display:flex; align-items:center; gap:6px; padding:4px; cursor:pointer;">
+        <input type="checkbox" class="js-mcol-toggle__cb" data-col-key="{{ col.key }}"
+               {% if col.default is False %}data-default="0"{% endif %}> {{ col.label }}
+      </label>
+    {% endfor %}
+  </div>
+</div>
+<script>
+  (function () {
+    if (window.__mColToggleInit) return;
+    window.__mColToggleInit = true;
+    function init() {
+      document.querySelectorAll('.js-mcol-toggle').forEach(function (wrap) {
+        var storageKey = wrap.dataset.storageKey;
+        var btn = wrap.querySelector('.js-mcol-toggle__btn');
+        var menu = wrap.querySelector('.js-mcol-toggle__menu');
+        var cbs = wrap.querySelectorAll('.js-mcol-toggle__cb');
+
+        btn.addEventListener('click', function (e) {
+          e.stopPropagation();
+          var opening = menu.hidden;
+          menu.hidden = !opening;
+          btn.setAttribute('aria-expanded', opening ? 'true' : 'false');
+        });
+        document.addEventListener('click', function (e) {
+          if (menu.hidden) return;
+          if (!menu.contains(e.target) && e.target !== btn && !btn.contains(e.target)) {
+            menu.hidden = true;
+            btn.setAttribute('aria-expanded', 'false');
+          }
+        });
+
+        var saved = {};
+        try { saved = JSON.parse(localStorage.getItem(storageKey) || '{}'); } catch (e) { saved = {}; }
+        cbs.forEach(function (cb) {
+          var key = cb.dataset.colKey;
+          var def = cb.dataset.default !== '0';
+          cb.checked = saved.hasOwnProperty(key) ? !!saved[key] : def;
+          apply(cb);
+        });
+        cbs.forEach(function (cb) {
+          cb.addEventListener('change', function () { apply(cb); save(); });
+        });
+
+        function apply(cb) {
+          var key = cb.dataset.colKey;
+          var visible = cb.checked;
+          document.querySelectorAll('[data-col-key="' + key + '"]').forEach(function (el) {
+            el.style.display = visible ? '' : 'none';
+          });
+        }
+        function save() {
+          var state = {};
+          cbs.forEach(function (cb) { state[cb.dataset.colKey] = cb.checked; });
+          try { localStorage.setItem(storageKey, JSON.stringify(state)); } catch (e) { /* ignore quota */ }
+        }
+      });
+    }
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', init);
+    } else {
+      init();
+    }
+  })();
+</script>

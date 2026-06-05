@@ -1,87 +1,46 @@
 {% comment %}
 メール配信サイドバー部品（include 専用）。app_base.html から呼ばれる。
-全項目を 2 階層のアコーディオングループに統一：「キャンペーン」「タグ管理」「配信リスト管理」
-「配信設定」がグループ見出し（クリックでアコーディオン開閉）+ 配下サブアイテム。
-普段は折りたたみ、active_menu が含まれるグループのみ初期展開する。
-既存 toggleCollapsible 機構（app.js）の data-action="toggle-collapsible" を流用、
-表示切替は .app-collapsible-body の既存 CSS で動く。
+アコーディオン（2階層）を廃し、フラットな単層メニューに統一（v1.6 UI 整え）。
+項目順：キャンペーン一覧 / タグ一覧 / リスト一覧 / 配信停止リスト / 配信設定。
+各項目は遷移先 View の実 Permission で表示ガードする（権限の無い項目は出さない＝403 リンクを作らない）。
+「配信設定」は change_mailingconfig 保持者のみ表示（No.60）。
+active_menu（各 View が context で渡す）と一致する項目に is-active を付与する。
 {% endcomment %}
 <nav class="app-sidebar" aria-label="メール配信メニュー">
   <div class="app-sidebar__section-title">メール配信</div>
 
-  {# キャンペーン（active_menu が mailings:campaign_list / mailings:campaign_create のとき初期展開） #}
   {% if perms.mailings.view_campaign or perms.mailings.view_all_campaigns %}
-  <div class="app-collapsible{% if active_menu == 'mailings:campaign_list' or active_menu == 'mailings:campaign_create' %} is-open{% endif %}">
-    <button type="button" class="app-sidebar__section-title app-sidebar__group-toggle" data-action="toggle-collapsible" aria-expanded="{% if active_menu == 'mailings:campaign_list' or active_menu == 'mailings:campaign_create' %}true{% else %}false{% endif %}">
-      <span class="app-collapsible__icon app-collapsible__icon--inline">{% if active_menu == 'mailings:campaign_list' or active_menu == 'mailings:campaign_create' %}▾{% else %}▸{% endif %}</span>
-      キャンペーン
-    </button>
-    <div class="app-collapsible-body">
-      <a href="{% url 'mailings:campaign_create' %}"
-         class="app-sidebar__subitem{% if active_menu == 'mailings:campaign_create' %} is-active{% endif %}">
-        キャンペーン新規作成
-      </a>
-      <a href="{% url 'mailings:campaign_list' %}"
-         class="app-sidebar__subitem{% if active_menu == 'mailings:campaign_list' %} is-active{% endif %}">
-        キャンペーン一覧
-      </a>
-    </div>
-  </div>
+  <a href="{% url 'mailings:campaign_list' %}"
+     class="app-sidebar__subitem{% if active_menu == 'mailings:campaign_list' %} is-active{% endif %}">
+    キャンペーン一覧
+  </a>
   {% endif %}
 
-  {# タグ管理（active_menu が tags:* のとき初期展開） #}
-  <div class="app-collapsible{% if active_menu == 'tags:tag_list' or active_menu == 'tags:tag_category_list' or active_menu == 'tags:bulk_tagging' %} is-open{% endif %}">
-    <button type="button" class="app-sidebar__section-title app-sidebar__group-toggle" data-action="toggle-collapsible" aria-expanded="{% if active_menu == 'tags:tag_list' or active_menu == 'tags:tag_category_list' or active_menu == 'tags:bulk_tagging' %}true{% else %}false{% endif %}">
-      <span class="app-collapsible__icon app-collapsible__icon--inline">{% if active_menu == 'tags:tag_list' or active_menu == 'tags:tag_category_list' or active_menu == 'tags:bulk_tagging' %}▾{% else %}▸{% endif %}</span>
-      タグ管理
-    </button>
-    <div class="app-collapsible-body">
-      <a href="{% url 'tags:tag_list' %}"
-         class="app-sidebar__subitem{% if active_menu == 'tags:tag_list' %} is-active{% endif %}">
-        タグ一覧
-      </a>
-      <a href="{% url 'tags:tag_category_list' %}"
-         class="app-sidebar__subitem{% if active_menu == 'tags:tag_category_list' %} is-active{% endif %}">
-        タグカテゴリ一覧
-      </a>
-      <a href="{% url 'tags:bulk_tagging' %}"
-         class="app-sidebar__subitem{% if active_menu == 'tags:bulk_tagging' %} is-active{% endif %}">
-        検索＆一括タグ付け
-      </a>
-    </div>
-  </div>
+  {% if perms.tags.view_tag %}
+  <a href="{% url 'tags:tag_list' %}"
+     class="app-sidebar__subitem{% if active_menu == 'tags:tag_list' %} is-active{% endif %}">
+    タグ一覧
+  </a>
+  {% endif %}
 
-  {# 配信リスト管理（active_menu が該当 mailings:* のとき初期展開） #}
-  <div class="app-collapsible{% if active_menu == 'mailings:mailing_list_list' or active_menu == 'mailings:suppressed_list' %} is-open{% endif %}">
-    <button type="button" class="app-sidebar__section-title app-sidebar__group-toggle" data-action="toggle-collapsible" aria-expanded="{% if active_menu == 'mailings:mailing_list_list' or active_menu == 'mailings:suppressed_list' %}true{% else %}false{% endif %}">
-      <span class="app-collapsible__icon app-collapsible__icon--inline">{% if active_menu == 'mailings:mailing_list_list' or active_menu == 'mailings:suppressed_list' %}▾{% else %}▸{% endif %}</span>
-      配信リスト管理
-    </button>
-    <div class="app-collapsible-body">
-      <a href="{% url 'mailings:mailing_list_list' %}"
-         class="app-sidebar__subitem{% if active_menu == 'mailings:mailing_list_list' %} is-active{% endif %}">
-        配信リスト一覧
-      </a>
-      {% if perms.mailings.view_campaign %}
-      <a href="{% url 'mailings:suppressed_list' %}"
-         class="app-sidebar__subitem{% if active_menu == 'mailings:suppressed_list' %} is-active{% endif %}">
-        配信停止リスト
-      </a>
-      {% endif %}
-    </div>
-  </div>
+  {% if perms.mailings.view_mailinglist %}
+  <a href="{% url 'mailings:mailing_list_list' %}"
+     class="app-sidebar__subitem{% if active_menu == 'mailings:mailing_list_list' %} is-active{% endif %}">
+    リスト一覧
+  </a>
+  {% endif %}
 
-  {# 配信設定（active_menu が mailings:config_edit のとき初期展開） #}
-  <div class="app-collapsible{% if active_menu == 'mailings:config_edit' %} is-open{% endif %}">
-    <button type="button" class="app-sidebar__section-title app-sidebar__group-toggle" data-action="toggle-collapsible" aria-expanded="{% if active_menu == 'mailings:config_edit' %}true{% else %}false{% endif %}">
-      <span class="app-collapsible__icon app-collapsible__icon--inline">{% if active_menu == 'mailings:config_edit' %}▾{% else %}▸{% endif %}</span>
-      配信設定
-    </button>
-    <div class="app-collapsible-body">
-      <a href="{% url 'mailings:config_edit' %}"
-         class="app-sidebar__subitem{% if active_menu == 'mailings:config_edit' %} is-active{% endif %}">
-        配信設定
-      </a>
-    </div>
-  </div>
+  {% if perms.mailings.view_suppressedemail %}
+  <a href="{% url 'mailings:suppressed_list' %}"
+     class="app-sidebar__subitem{% if active_menu == 'mailings:suppressed_list' %} is-active{% endif %}">
+    配信停止リスト
+  </a>
+  {% endif %}
+
+  {% if perms.mailings.change_mailingconfig %}
+  <a href="{% url 'mailings:config_edit' %}"
+     class="app-sidebar__subitem{% if active_menu == 'mailings:config_edit' %} is-active{% endif %}">
+    配信設定
+  </a>
+  {% endif %}
 </nav>

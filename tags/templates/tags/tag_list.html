@@ -4,12 +4,15 @@
 {% block title %}タグ一覧 — FreeGroup2{% endblock %}
 
 {% block content %}
+  {# 遷移導線はタイトル直下・右側にまとめる（HIG 7.3）。新規作成＝青（原則3）、カテゴリ一覧＝遷移。 #}
   <div class="app-page-header">
     <div>
       <div class="app-breadcrumb">タグ一覧</div>
       <h1>タグ一覧</h1>
     </div>
-    <div class="app-action-area">
+    <div class="app-page-header__actions">
+      {% back_all_link back %}
+      {% back_link back %}
       {% if categories %}
         {% url 'tags:tag_create' as create_url %}
         <a href="{% append_back_url create_url back %}" class="app-btn app-btn--primary">＋ 新規タグ作成</a>

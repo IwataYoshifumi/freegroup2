@@ -32,6 +32,8 @@
           data-creator-email="{{ request.user.email|default:'' }}"
           data-creator-name="{{ request.user.get_full_name|default:'' }}">
       {% csrf_token %}
+      {# POST でも back スタックを引き継ぐ（作成後の詳細で「戻る」を出すため、HIG 3.2）。 #}
+      {% hidden_back_field back %}
 
       {% if form.non_field_errors %}
         <div class="app-message app-message--error">{{ form.non_field_errors }}</div>

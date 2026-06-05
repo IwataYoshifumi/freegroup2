@@ -58,6 +58,123 @@ def _archived_only(request):
     return request.GET.get("archived_only", "").lower() in ("1", "true", "on", "yes")
 
 
+# ----------------------------------------------------------------------
+# 一覧の多段サーバー側ソート（HIG v1.5 第6章。tags / persons 実装と同型の汎用版）。
+# クエリは単一パラメータ sort に優先順つきカンマ区切り、降順は先頭 "-"。
+#   例 ?sort=name,-created_at （第1=名称昇順 / 第2=作成日時降順）
+# 「画面でソートできる列＝許可リスト（field_map）にあるキー」を一致させ、それ以外は無視＝既定の並び。
+# ----------------------------------------------------------------------
+
+_MULTI_SORT_MAX_KEYS = 3
+
+
+def _parse_multi_sort(params, field_map):
+    """単一 sort パラメータを [(key, direction), ...] に解決する（純関数）。
+
+    [性質] 純関数（DB 操作なし・副作用なし）
+    [入力] params: QueryDict 様（request.GET）、field_map: {key: orm_field}
+    [出力] list[tuple[str, str]]（key は field_map 内、direction は "asc"/"desc"）
+        先頭 "-" は降順。許可リスト外・空・重複は無視。最大 _MULTI_SORT_MAX_KEYS 段。
+    """
+    raw = params.get("sort") or ""
+    tokens = []
+    seen = set()
+    for chunk in raw.split(","):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        if chunk.startswith("-"):
+            direction, key = "desc", chunk[1:]
+        else:
+            direction, key = "asc", chunk
+        if key not in field_map or key in seen:
+            continue
+        seen.add(key)
+        tokens.append((key, direction))
+        if len(tokens) >= _MULTI_SORT_MAX_KEYS:
+            break
+    return tokens
+
+
+def _apply_multi_sort(qs, params, field_map):
+    """QuerySet に多段ソート（?sort=key,-key,...）を適用する（純関数）。
+
+    [性質] 純関数（QuerySet 加工のみ・DB 操作なし）
+    有効トークンが無ければ qs をそのまま返す（呼び出し側の既定並びを温存）。
+    指定有りのときだけ許可リスト経由で order_by を多段で差し替える（末尾に pk で安定化）。
+    """
+    tokens = _parse_multi_sort(params, field_map)
+    if not tokens:
+        return qs
+    order = []
+    for key, direction in tokens:
+        prefix = "-" if direction == "desc" else ""
+        order.append(prefix + field_map[key])
+    order.append("pk")
+    return qs.order_by(*order)
+
+
+def _multi_sort_context(params, field_map, sort_columns):
+    """ソート UI（折りたたみ内コントロール）の描画用 context を作る（純関数）。
+
+    [性質] 純関数（DB 操作なし・副作用なし）
+    [入力] sort_columns: [{"key","label"}]（テンプレの列ドロップダウン用、画面の列と一致させる）
+    [出力] dict: sort_rows / sort_is_active / sort_value / sort_columns
+    """
+    tokens = _parse_multi_sort(params, field_map)
+    rows = [{"key": k, "dir": d} for (k, d) in tokens]
+    while len(rows) < _MULTI_SORT_MAX_KEYS:
+        rows.append({"key": "", "dir": "asc"})
+    return {
+        "sort_rows": rows,
+        "sort_is_active": bool(tokens),
+        "sort_value": ",".join(("-" + k if d == "desc" else k) for k, d in tokens),
+        "sort_columns": sort_columns,
+    }
+
+
+# 各一覧のソート許可リスト（key→ORM フィールド）と、ソートコントロールの列ドロップダウン定義。
+# 「選べる列＝画面に出ている列」に一致させる（HIG 6.2）。集計値（バウンス等の都度計算列）は対象外。
+CAMPAIGN_LIST_SORT_FIELD_MAP = {
+    "name": "name",
+    "status": "status",
+    "created_by": "created_by__username",
+    "created_at": "created_at",
+}
+CAMPAIGN_LIST_SORT_COLUMNS = [
+    {"key": "name", "label": "名称"},
+    {"key": "status", "label": "状態"},
+    {"key": "created_by", "label": "作成者"},
+    {"key": "created_at", "label": "作成日時"},
+]
+
+MAILING_LIST_SORT_FIELD_MAP = {
+    "name": "name",
+    "member_count": "member_count",
+    "created_by": "created_by__username",
+    "updated_at": "updated_at",
+}
+MAILING_LIST_SORT_COLUMNS = [
+    {"key": "name", "label": "リスト名"},
+    {"key": "member_count", "label": "メンバー数"},
+    {"key": "created_by", "label": "作成者"},
+    {"key": "updated_at", "label": "更新日時"},
+]
+
+SUPPRESSED_LIST_SORT_FIELD_MAP = {
+    "email": "email",
+    "source": "source",
+    "created_at": "created_at",
+    "status": "cancelled_at",
+}
+SUPPRESSED_LIST_SORT_COLUMNS = [
+    {"key": "email", "label": "メアド"},
+    {"key": "source", "label": "登録元"},
+    {"key": "created_at", "label": "登録日時"},
+    {"key": "status", "label": "状態"},
+]
+
+
 class CampaignOwnerRequiredMixin:
     """Campaign の所有者詳細判定を View に乗せる共通 Mixin（Phase 7 ⑤、rev20 §14.5）。
 
@@ -107,19 +224,42 @@ class MailingListListView(LoginRequiredMixin, PermissionRequiredMixin, ListView)
             qs = qs.filter(is_archived=True)
         else:
             qs = qs.filter(is_archived=False)
-        return qs.order_by("-created_at")
+        # 検索フォーム（HIG 第6章）：リスト名の部分一致。空欄は絞り込まない。
+        name = self.request.GET.get("name", "").strip()
+        if name:
+            qs = qs.filter(name__icontains=name)
+        qs = qs.order_by("-created_at")
+        # 既定並びを温存しつつ、?sort= があれば多段ソートで差し替える（HIG 6.2）。
+        return _apply_multi_sort(qs, self.request.GET, MAILING_LIST_SORT_FIELD_MAP)
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         back = BackNavigator(self.request)
-        back.push_current("", ["page", "archived_only"])
+        # 検索条件・ソート・ページも keys に含め「戻る」で一覧状態を復元する（HIG 6.1）。
+        back.push_current("", ["page", "archived_only", "name", "sort"])
         context.update(
             {
                 "back": back,
                 "active_app": "mailings",
                 "active_menu": "mailings:mailing_list_list",
                 "archived_only": _archived_only(self.request),
+                "search_name": self.request.GET.get("name", ""),
+                "column_storage_key": "mailing_list_list_visible_columns",
+                "column_defs": [
+                    {"key": "description", "label": "説明", "default": False},
+                    {"key": "member_count", "label": "メンバー数"},
+                    {"key": "status", "label": "状態"},
+                    {"key": "created_by", "label": "作成者"},
+                    {"key": "updated_at", "label": "更新日時"},
+                ],
             }
+        )
+        context.update(
+            _multi_sort_context(
+                self.request.GET,
+                MAILING_LIST_SORT_FIELD_MAP,
+                MAILING_LIST_SORT_COLUMNS,
+            )
         )
         return context
 
@@ -2806,14 +2946,43 @@ class SuppressedEmailListView(LoginRequiredMixin, PermissionRequiredMixin, ListV
         from .models import SuppressedEmail
 
         # active を先に、解除済みは後ろ。created_at 降順
-        return SuppressedEmail.objects.all().order_by(
-            "cancelled_at", "-created_at"
-        )
+        qs = SuppressedEmail.objects.all()
+        # 検索フォーム（HIG 第6章）：メアドの部分一致＋状態（有効/解除済み）の絞り込み。
+        email = self.request.GET.get("email", "").strip()
+        if email:
+            qs = qs.filter(email__icontains=email)
+        status = self.request.GET.get("status", "").strip()
+        if status == "active":
+            qs = qs.filter(cancelled_at__isnull=True)
+        elif status == "cancelled":
+            qs = qs.filter(cancelled_at__isnull=False)
+        qs = qs.order_by("cancelled_at", "-created_at")
+        # 既定並びを温存しつつ、?sort= があれば多段ソートで差し替える（HIG 6.2）。
+        return _apply_multi_sort(qs, self.request.GET, SUPPRESSED_LIST_SORT_FIELD_MAP)
 
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
-        ctx["back"] = BackNavigator(self.request)
+        back = BackNavigator(self.request)
+        # 検索条件・ソート・ページも keys に含め「戻る」で一覧状態を復元する（HIG 6.1）。
+        back.push_current("", ["page", "email", "status", "sort"])
+        ctx["back"] = back
         ctx["active_app"] = "mailings"
+        ctx["active_menu"] = "mailings:suppressed_list"
+        ctx["search_email"] = self.request.GET.get("email", "")
+        ctx["search_status"] = self.request.GET.get("status", "")
+        ctx["column_storage_key"] = "suppressed_list_visible_columns"
+        ctx["column_defs"] = [
+            {"key": "source", "label": "登録元"},
+            {"key": "created_at", "label": "登録日時"},
+            {"key": "status", "label": "状態"},
+        ]
+        ctx.update(
+            _multi_sort_context(
+                self.request.GET,
+                SUPPRESSED_LIST_SORT_FIELD_MAP,
+                SUPPRESSED_LIST_SORT_COLUMNS,
+            )
+        )
         return ctx
 
 
@@ -2958,12 +3127,42 @@ class CampaignListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
         from .models import Campaign
         from .services.permissions import visible_campaigns_for
 
-        qs = Campaign.objects.select_related("template", "mailing_list").order_by(
-            "-created_at"
-        )
-        return visible_campaigns_for(self.request.user, qs)
+        qs = Campaign.objects.select_related(
+            "template", "mailing_list", "created_by"
+        ).order_by("-created_at")
+        qs = visible_campaigns_for(self.request.user, qs)
+        # 検索フォーム（HIG 第6章）：名称・作成者の部分一致＋状態（複数選択トグル）の絞り込み。
+        name = self.request.GET.get("name", "").strip()
+        if name:
+            qs = qs.filter(name__icontains=name)
+        creator = self.request.GET.get("creator", "").strip()
+        if creator:
+            qs = qs.filter(created_by__username__icontains=creator)
+        selected = self._selected_statuses()
+        if selected:
+            qs = qs.filter(status__in=selected)
+        # 既定並び（-created_at）を温存しつつ、?sort= があれば多段ソートで差し替える（HIG 6.2）。
+        return _apply_multi_sort(qs, self.request.GET, CAMPAIGN_LIST_SORT_FIELD_MAP)
+
+    def _selected_statuses(self):
+        """状態トグルの選択値（複数）。初期表示は下書き・予約配信待機中・配信中（指示書 §2）。
+
+        [性質] 純関数寄り（request.GET を読むのみ）。`searched=1` が無い初回は既定3状態、
+        有るときは選択値（許可値のみ）。選択ゼロ（全解除）なら絞り込まない＝全件。
+        """
+        from .models import Campaign
+
+        valid = {c for c, _ in Campaign.Status.choices}
+        if self.request.GET.get("searched"):
+            return [s for s in self.request.GET.getlist("status") if s in valid]
+        return [
+            Campaign.Status.DRAFT,
+            Campaign.Status.SCHEDULED,
+            Campaign.Status.SENDING,
+        ]
 
     def get_context_data(self, **kwargs):
+        from .models import Campaign
         from mailings.services.report_aggregation import get_campaign_summary
 
         ctx = super().get_context_data(**kwargs)
@@ -2976,10 +3175,37 @@ class CampaignListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
         back = BackNavigator(self.request)
         # 一覧自身を戻り先候補としてスタックに積む（詳細→戻る で一覧に戻れるように）。
         # title は "" にして back_link / back_all_link がデフォルト「戻る」「最初に戻る」を表示する（HIG v1.2 §3.2）。
-        back.push_current("", ["page"])
+        # 検索条件・ソート・ページも keys に含め「戻る」で一覧状態を復元する（HIG 6.1）。
+        back.push_current(
+            "", ["page", "name", "creator", "status", "searched", "sort"]
+        )
         ctx["back"] = back
         ctx["active_app"] = "mailings"
         ctx["active_menu"] = "mailings:campaign_list"
+        # 検索フォームの現在値・選択肢（テンプレートで再表示）。
+        ctx["search_name"] = self.request.GET.get("name", "")
+        ctx["search_creator"] = self.request.GET.get("creator", "")
+        ctx["status_choices"] = Campaign.Status.choices
+        ctx["selected_statuses"] = self._selected_statuses()
+        # 列表示切替（localStorage キー＋切替対象列）とソートコントロール（折りたたみ内）。
+        ctx["column_storage_key"] = "campaign_list_visible_columns"
+        ctx["column_defs"] = [
+            {"key": "status", "label": "状態"},
+            {"key": "total", "label": "配信件数"},
+            {"key": "sent", "label": "送信成功"},
+            {"key": "bounced", "label": "バウンス"},
+            {"key": "clicks", "label": "有効クリック"},
+            {"key": "unsub", "label": "配信停止"},
+            {"key": "created_by", "label": "作成者"},
+            {"key": "created_at", "label": "作成日時"},
+        ]
+        ctx.update(
+            _multi_sort_context(
+                self.request.GET,
+                CAMPAIGN_LIST_SORT_FIELD_MAP,
+                CAMPAIGN_LIST_SORT_COLUMNS,
+            )
+        )
         return ctx
 
 
@@ -3356,7 +3582,11 @@ class CampaignCreateView(LoginRequiredMixin, PermissionRequiredMixin, CreateView
         except ValidationError as e:
             form.add_error(None, e)
             return self.form_invalid(form)
-        return redirect("mailings:campaign_detail", pk=campaign.pk)
+        # 作成後の詳細でも「戻る」が出るよう back スタックを引き継いでリダイレクトする
+        # （一覧→新規作成→作成→詳細 の一連で戻り導線を切らさない、HIG 3.2）。
+        back = BackNavigator(self.request)
+        detail_url = reverse("mailings:campaign_detail", kwargs={"pk": campaign.pk})
+        return redirect(back.append_url(detail_url))
 
     def get_context_data(self, **kwargs):
         # クエリパラメータを持たない画面なので push_current は呼ばない。
@@ -3409,8 +3639,11 @@ class CampaignDetailView(
             recipients = extract_recipients(campaign).select_related("primary_contact")
             recipient_count = recipients.count()
             sample_recipients = list(recipients[:10])
-        # 詳細画面はクエリパラメータを持たないので push_current は呼ばない。
-        # 一覧→詳細→編集 等の経路はテンプレ側 append_back_url で back スタックに積む。
+        # 詳細はキャンペーン作業の起点（ハブ）。HIG 3.2 に従い push_current し、編集・プレビュー・
+        # リスト選択などの子画面から「戻る」で詳細へ戻れるようにする（keys は pk が path 側に
+        # あるためクエリ無し＝["page"] のプレースホルダで path のみを積む）。
+        back = BackNavigator(self.request)
+        back.push_current("", ["page"])
         context.update(
             {
                 "template": campaign.template,
@@ -3418,7 +3651,7 @@ class CampaignDetailView(
                 "recipient_count": recipient_count,
                 "sample_recipients": sample_recipients,
                 "test_recipient_email": self.request.user.email,
-                "back": BackNavigator(self.request),
+                "back": back,
                 "active_app": "mailings",
                 "active_menu": "mailings:campaign_list",
             }

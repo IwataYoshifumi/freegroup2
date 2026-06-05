@@ -8046,3 +8046,187 @@ class Phase7MailingListViewAuthTests(TestCase):
         # editor は認可通過（person_ids 無しでも 403 ではない＝Mixin を抜ける）
         editor = self._user("change_mailinglist")
         self.assertNotEqual(self._client(editor).post(url).status_code, 403)
+
+
+class V16ListSearchAndSidebarSmokeTests(TestCase):
+    """v1.6 UI 整え：一覧の検索フォーム＋サイドバー（フラット化・配信設定の表示ガード）のスモーク。
+
+    挙動の最小確認：検索フォームの絞り込みが効くこと・主要要素が出ること・
+    サイドバーの「配信設定」が change_mailingconfig 保持者にのみ出ること（No.60）。
+    """
+
+    def setUp(self):
+        from mailings.models import SuppressedEmail
+
+        self.user = User.objects.create_user(
+            username="ui_smoke", password="x", email="ui@example.com"
+        )
+        for cn in (
+            "view_campaign",
+            "view_mailinglist",
+            "view_suppressedemail",
+            "view_tag",
+        ):
+            self.user.user_permissions.add(Permission.objects.get(codename=cn))
+        self.client.force_login(User.objects.get(pk=self.user.pk))
+
+        self.ml = MailingList.objects.create(name="営業リストA", created_by=self.user)
+        MailingList.objects.create(name="技術リストB", created_by=self.user)
+
+        tpl1 = EmailTemplate.objects.create(
+            name="T1", subject="s", body="b", created_by=self.user
+        )
+        self.camp_spring = Campaign.objects.create(
+            name="春キャンペーン", template=tpl1, mailing_list=self.ml,
+            status=Campaign.Status.DRAFT, created_by=self.user,
+        )
+        tpl2 = EmailTemplate.objects.create(
+            name="T2", subject="s", body="b", created_by=self.user
+        )
+        self.camp_summer = Campaign.objects.create(
+            name="夏キャンペーン", template=tpl2, mailing_list=self.ml,
+            status=Campaign.Status.SCHEDULED, created_by=self.user,
+        )
+
+        SuppressedEmail.objects.create(
+            email="alice@example.com", source=SuppressedEmail.Source.MANUAL
+        )
+        SuppressedEmail.objects.create(
+            email="bob@example.net", source=SuppressedEmail.Source.MANUAL
+        )
+
+    # ---- 検索フォームの存在（主要要素） ----
+    def test_campaign_list_renders_search_form(self):
+        r = self.client.get(reverse("mailings:campaign_list"))
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, 'name="name"')
+        self.assertContains(r, 'name="status"')
+
+    def test_mailing_list_renders_search_form(self):
+        r = self.client.get(reverse("mailings:mailing_list_list"))
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, 'name="name"')
+
+    def test_suppressed_list_renders_search_form(self):
+        r = self.client.get(reverse("mailings:suppressed_list"))
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, 'name="email"')
+        self.assertContains(r, 'name="status"')
+
+    # ---- 絞り込みが効く ----
+    def test_campaign_list_search_by_name(self):
+        r = self.client.get(reverse("mailings:campaign_list"), {"name": "春"})
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, "春キャンペーン")
+        self.assertNotContains(r, "夏キャンペーン")
+
+    def test_campaign_list_filter_by_status(self):
+        # 状態トグルは searched=1 とともに送られる（フォーム送信時）。予約配信待機中のみ選択。
+        r = self.client.get(
+            reverse("mailings:campaign_list"),
+            {"searched": "1", "status": Campaign.Status.SCHEDULED},
+        )
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, "夏キャンペーン")
+        self.assertNotContains(r, "春キャンペーン")
+
+    def test_campaign_list_default_status_filter_hides_done(self):
+        # 初期表示（searched 無し）は下書き・予約配信待機中・配信中のみ。配信完了は出ない。
+        tpl = EmailTemplate.objects.create(
+            name="Td", subject="s", body="b", created_by=self.user
+        )
+        Campaign.objects.create(
+            name="完了キャンペーン", template=tpl, mailing_list=self.ml,
+            status=Campaign.Status.DONE, created_by=self.user,
+        )
+        r = self.client.get(reverse("mailings:campaign_list"))
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, "春キャンペーン")          # draft（既定に含む）
+        self.assertNotContains(r, "完了キャンペーン")       # done（既定から除外）
+
+    def test_campaign_list_sort_by_name_applies(self):
+        # ?sort= が許可リスト経由で適用される（200 で返り、両件が出る）。
+        r = self.client.get(reverse("mailings:campaign_list"), {"sort": "name"})
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, "春キャンペーン")
+        self.assertContains(r, "夏キャンペーン")
+
+    def test_campaign_list_has_sort_and_column_controls(self):
+        r = self.client.get(reverse("mailings:campaign_list"))
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, "js-msort-control")      # 多段ソートコントロール
+        self.assertContains(r, "js-mcol-toggle")        # 列表示切替
+        self.assertContains(r, "js-mailings-page-sort") # 見出しクリックその場並べ替え
+
+    def test_campaign_list_report_button_gating(self):
+        # 下書き・予約配信待機中はレポート非表示、配信中以降は表示（指示書 §2）。
+        tpl = EmailTemplate.objects.create(
+            name="Ts", subject="s", body="b", created_by=self.user
+        )
+        sending = Campaign.objects.create(
+            name="配信中キャンペーン", template=tpl, mailing_list=self.ml,
+            status=Campaign.Status.SENDING, created_by=self.user,
+        )
+        r = self.client.get(reverse("mailings:campaign_list"), {"searched": "1",
+            "status": [Campaign.Status.DRAFT, Campaign.Status.SENDING]})
+        self.assertEqual(r.status_code, 200)
+        report_sending = reverse("mailings:campaign_report", args=[sending.pk])
+        report_draft = reverse("mailings:campaign_report", args=[self.camp_spring.pk])
+        self.assertContains(r, report_sending)      # 配信中＝レポート出る
+        self.assertNotContains(r, report_draft)     # 下書き＝レポート出ない
+
+    def test_campaign_create_to_detail_shows_back_link(self):
+        # 一覧→新規作成→作成→詳細 の一連で詳細に「戻る」が出る（HIG 3.2、BackNavigator）。
+        self.user.user_permissions.add(Permission.objects.get(codename="add_campaign"))
+        self.client.force_login(User.objects.get(pk=self.user.pk))
+        # 一覧（push_current）→ back スタックを取得するため一覧 GET（リンクの append_back_url 相当）。
+        list_resp = self.client.get(reverse("mailings:campaign_list"))
+        back_token = list_resp.context["back"]._encode_stack()
+        # 作成 POST（hidden_back_field 相当の back を載せる）→ 詳細へリダイレクト。
+        from back_navigator.back_navigator import BackNavigator
+
+        create_resp = self.client.post(
+            reverse("mailings:campaign_create"),
+            {"name": "戻り確認キャンペーン", BackNavigator.PARAM_NAME: back_token},
+        )
+        self.assertEqual(create_resp.status_code, 302)
+        # リダイレクト先（詳細）には back クエリが引き継がれている。
+        self.assertIn(BackNavigator.PARAM_NAME, create_resp.url)
+        detail_resp = self.client.get(create_resp.url)
+        self.assertEqual(detail_resp.status_code, 200)
+        # 詳細で「戻る」リンクが出る（back_exist True）。
+        self.assertTrue(detail_resp.context["back"].back_exist)
+
+    def test_mailing_list_search_by_name(self):
+        r = self.client.get(reverse("mailings:mailing_list_list"), {"name": "営業"})
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, "営業リストA")
+        self.assertNotContains(r, "技術リストB")
+
+    def test_suppressed_list_search_by_email(self):
+        r = self.client.get(reverse("mailings:suppressed_list"), {"email": "alice"})
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, "alice@example.com")
+        self.assertNotContains(r, "bob@example.net")
+
+    # ---- サイドバー：配信設定の表示ガード（No.60、change_mailingconfig） ----
+    def test_sidebar_hides_config_without_perm(self):
+        r = self.client.get(reverse("mailings:campaign_list"))
+        self.assertEqual(r.status_code, 200)
+        self.assertNotContains(r, reverse("mailings:config_edit"))
+
+    def test_sidebar_shows_config_with_perm(self):
+        self.user.user_permissions.add(
+            Permission.objects.get(codename="change_mailingconfig")
+        )
+        self.client.force_login(User.objects.get(pk=self.user.pk))
+        r = self.client.get(reverse("mailings:campaign_list"))
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, reverse("mailings:config_edit"))
+
+    def test_sidebar_is_flat_no_accordion_toggle(self):
+        # フラット化：サイドバーのアコーディオン開閉トグルが無い（キャンペーン一覧リンクは出る）。
+        r = self.client.get(reverse("mailings:campaign_list"))
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, "キャンペーン一覧")
+        self.assertNotContains(r, "app-sidebar__group-toggle")

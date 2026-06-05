@@ -17,8 +17,16 @@
   </div>
 
   <section class="app-card">
-    <form method="get" style="margin-bottom:8px;">
+    {# 検索フォーム（HIG 第6章・persons 参照実装に準拠）。リスト名の部分一致＋アーカイブ表示トグル。 #}
+    <form method="get" class="app-form-grid-edit" style="margin-bottom:8px;">
+      <div class="app-form-grid app-search-grid">
+        <div class="app-form__group">
+          <label class="app-form__label" for="id_name">リスト名</label>
+          <input type="text" id="id_name" name="name" value="{{ search_name }}" class="app-input">
+        </div>
+      </div>
       <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+        {# アーカイブ表示トグルは変更時に即送信（既存挙動を踏襲）。リスト名入力も一緒に送られる。 #}
         <label for="id_archived_only"
                class="app-btn {% if archived_only %}app-btn--primary{% else %}app-btn--secondary{% endif %}"
                style="cursor:pointer; margin-left:auto;">
@@ -29,20 +37,33 @@
                onchange="this.form.submit();"
                {% if archived_only %}checked{% endif %}>
       </div>
+
+      {# 多段ソート（折りたたみ、絞り込みと同一フォーム送信）。 #}
+      {% include "mailings/_sort_control.html" %}
+
+      <div class="app-action-area app-action-area--search">
+        <button type="submit" class="app-btn app-btn--primary">検索</button>
+        <a href="{% url 'mailings:mailing_list_list' %}" class="app-btn app-btn--secondary">リセット</a>
+      </div>
     </form>
 
     {% if mailing_lists %}
+      {# 表示列選択は表の左上に置く（HIG 6.2）。 #}
+      <div style="display:flex; justify-content:flex-start; margin-bottom:12px;">
+        {% include "mailings/_column_toggle_list.html" with columns=column_defs storage_key=column_storage_key %}
+      </div>
       <div class="app-table-wrapper">
-        <table class="app-table app-table--nowrap">
+        {# js-mailings-page-sort：列見出しクリックの現在ページ内DOMソート（補助系統、URL不変）。 #}
+        <table class="app-table app-table--nowrap js-mailings-page-sort">
           <thead>
             <tr>
               <th class="app-table__col--action">操作</th>
-              <th>リスト名</th>
-              <th>説明</th>
-              <th>メンバー数</th>
-              <th>状態</th>
-              <th>作成者</th>
-              <th class="app-table__col--date">更新日時</th>
+              <th data-sort-col>リスト名</th>
+              <th data-col-key="description" data-sort-col>説明</th>
+              <th data-col-key="member_count" data-sort-col>メンバー数</th>
+              <th data-col-key="status" data-sort-col>状態</th>
+              <th data-col-key="created_by" data-sort-col>作成者</th>
+              <th class="app-table__col--date" data-col-key="updated_at" data-sort-col>更新日時</th>
             </tr>
           </thead>
           <tbody>
@@ -72,21 +93,21 @@
                   {% endif %}
                   {{ ml.name }}
                 </td>
-                <td>
+                <td data-col-key="description">
                   {% if ml.description %}
                     <span class="app-ellipsis" data-tooltip="{{ ml.description }}" style="display:inline-block; max-width:280px; overflow:hidden; text-overflow:ellipsis; vertical-align:bottom;">{{ ml.description|truncatechars:40 }}</span>
                   {% else %}-{% endif %}
                 </td>
-                <td>{{ ml.member_count }}</td>
-                <td>
+                <td data-col-key="member_count">{{ ml.member_count }}</td>
+                <td data-col-key="status">
                   {% if ml.is_archived %}
                     <span class="app-status-badge app-status-badge--muted">アーカイブ済み</span>
                   {% else %}
                     <span class="app-status-badge app-status-badge--success">アクティブ</span>
                   {% endif %}
                 </td>
-                <td>{{ ml.created_by.username|default:"-" }}</td>
-                <td>{{ ml.updated_at|date:"Y/m/d H:i" }}</td>
+                <td data-col-key="created_by">{{ ml.created_by.username|default:"-" }}</td>
+                <td data-col-key="updated_at">{{ ml.updated_at|date:"Y/m/d H:i" }}</td>
               </tr>
             {% endfor %}
           </tbody>

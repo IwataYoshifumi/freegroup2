@@ -22,14 +22,76 @@
     {% endfor %}
   {% endif %}
 
+  {# 検索フォーム（HIG 第6章・persons 参照実装に準拠）。メアドの部分一致＋状態で絞り込み。 #}
   <section class="app-card">
-    <table class="app-table">
+    <form method="get" class="app-form-grid-edit">
+      <div class="app-form-grid app-search-grid">
+        <div class="app-form__group">
+          <label class="app-form__label" for="id_email">メアド</label>
+          <input type="text" id="id_email" name="email" value="{{ search_email }}" class="app-input">
+        </div>
+      </div>
+
+      {# 状態の絞り込み（トグル・単一選択、HIG 4.1）。常時露出させず折りたたみに収める。 #}
+      <div class="app-collapsible app-person-filter-collapsible">
+        <button type="button" class="app-collapsible__header" data-action="toggle-collapsible"
+                aria-expanded="false">
+          <span>状態で絞り込み</span>
+          <span class="app-collapsible__icon">▸</span>
+        </button>
+        <div class="app-collapsible-body">
+          <div class="app-person-filter-box">
+            <ul class="app-radio-toggle">
+              <li>
+                <label>
+                  <input type="radio" name="status" value=""
+                         {% if search_status != "active" and search_status != "cancelled" %}checked{% endif %}>
+                  すべて
+                </label>
+              </li>
+              <li>
+                <label>
+                  <input type="radio" name="status" value="active"
+                         {% if search_status == "active" %}checked{% endif %}>
+                  有効
+                </label>
+              </li>
+              <li>
+                <label>
+                  <input type="radio" name="status" value="cancelled"
+                         {% if search_status == "cancelled" %}checked{% endif %}>
+                  解除済み
+                </label>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      {# 多段ソート（折りたたみ、絞り込みと同一フォーム送信）。 #}
+      {% include "mailings/_sort_control.html" %}
+
+      <div class="app-action-area app-action-area--search">
+        <button type="submit" class="app-btn app-btn--primary">検索</button>
+        <a href="{% url 'mailings:suppressed_list' %}" class="app-btn app-btn--secondary">リセット</a>
+      </div>
+    </form>
+  </section>
+
+  <section class="app-card">
+    {# 表示列選択は表の左上に置く（HIG 6.2）。 #}
+    <div style="display:flex; justify-content:flex-start; margin-bottom:12px;">
+      {% include "mailings/_column_toggle_list.html" with columns=column_defs storage_key=column_storage_key %}
+    </div>
+    <div class="app-table-wrapper">
+    {# js-mailings-page-sort：列見出しクリックの現在ページ内DOMソート（補助系統、URL不変）。 #}
+    <table class="app-table js-mailings-page-sort">
       <thead>
         <tr>
-          <th>メアド</th>
-          <th>登録元</th>
-          <th>登録日時</th>
-          <th>状態</th>
+          <th data-sort-col>メアド</th>
+          <th data-col-key="source" data-sort-col>登録元</th>
+          <th data-col-key="created_at" data-sort-col>登録日時</th>
+          <th data-col-key="status" data-sort-col>状態</th>
           <th></th>
         </tr>
       </thead>
@@ -37,9 +99,9 @@
         {% for sup in suppressed_emails %}
           <tr>
             <td>{{ sup.email }}</td>
-            <td>{{ sup.get_source_display }}</td>
-            <td>{{ sup.created_at|date:"Y-m-d H:i" }}</td>
-            <td>
+            <td data-col-key="source">{{ sup.get_source_display }}</td>
+            <td data-col-key="created_at">{{ sup.created_at|date:"Y-m-d H:i" }}</td>
+            <td data-col-key="status">
               {% if sup.cancelled_at %}
                 解除済み（{{ sup.cancelled_at|date:"Y-m-d" }}）
               {% else %}
@@ -50,11 +112,21 @@
           </tr>
         {% empty %}
           <tr><td colspan="5">
-            配信拒否メアドはまだ登録されていません。バウンスや配信停止リンクから自動登録されます。
-            <a href="{% url 'mailings:suppressed_create' %}">手動登録 →</a>
+            {% if search_email or search_status %}
+              条件に一致する配信拒否メアドはありません。
+              <a href="{% url 'mailings:suppressed_list' %}">検索条件をリセット →</a>
+            {% else %}
+              配信拒否メアドはまだ登録されていません。バウンスや配信停止リンクから自動登録されます。
+              <a href="{% url 'mailings:suppressed_create' %}">手動登録 →</a>
+            {% endif %}
           </td></tr>
         {% endfor %}
       </tbody>
     </table>
+    </div>
+
+    {% if is_paginated %}
+      {% include "persons/_pagination.html" %}
+    {% endif %}
   </section>
 {% endblock %}
