@@ -6,28 +6,17 @@
 
 {% block content %}
   {% comment %}
-  基本情報はタイトル周辺に圧縮：ステータス・予約配信日時を h1 の右に並べ、
-  作成者・作成日時・送信元方式・配信停止フィルタは「ⓘ」アイコンの title 属性に
-  ツールチップとして格納（HTML5 標準のツールチップ表示）。
-  機能ボタン（基本情報を編集 / 新規リストを作成して紐づける / テスト送信 / 予約する / 削除）は
-  ステータス別にタイトル直下の 1 エリアにまとめ、宛先・メール内容セクションからは外す。
+  3段構成（§3）：①ヘッダ（h1＝画面名「配信キャンペーン詳細」のみ。戻る導線は右上）／
+  ②遷移ボタン群（タイトル直下・ステータス別。配信完了時はレポート遷移を表示）／
+  ③キャンペーン概要カード（ラベル:値を2列。状態はバッジで同行表示）。
+  キャンペーン名・状態・予約日時・送信元・作成者等は概要カードに集約し、
+  従来の h1 圧縮表示（ⓘツールチップ）は廃止。件名は概要に出さず「メール内容」に置く。
   {% endcomment %}
 
   <div class="app-page-header">
     <div>
       <div class="app-breadcrumb">メール配信 / キャンペーン / 詳細</div>
-      <h1 style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
-        <span>{{ campaign.name }}</span>
-        {% status_badge campaign %}
-        {% if campaign.scheduled_at %}
-          <span class="app-muted" style="font-size:14px; font-weight:normal;">予約：{{ campaign.scheduled_at|date:"Y-m-d H:i" }}</span>
-        {% endif %}
-        <span
-          class="app-muted"
-          style="font-size:14px; cursor:help;"
-          title="作成者：{{ campaign.created_by.get_full_name|default:campaign.created_by.username }}&#10;作成日時：{{ campaign.created_at|date:"Y-m-d H:i" }}&#10;送信元方式：{{ campaign.get_sender_mode_display }}{% if campaign.sender_mode == 'newsletter' %}（{{ campaign.sender_name }} <{{ campaign.sender_email }}>）{% endif %}&#10;配信停止フィルタ：{% if campaign.apply_unsubscribe_filter %}適用する（ON）{% else %}適用しない（OFF）{% endif %}"
-        >ⓘ</span>
-      </h1>
+      <h1>配信キャンペーン詳細</h1>
     </div>
     <div class="app-page-header__actions">
       {% back_all_link back %}
@@ -75,6 +64,44 @@
         <a class="app-btn app-btn--secondary" href="{% url 'mailings:campaign_report' pk=campaign.pk %}">配信レポートを見る</a>
       </div>
     {% endif %}
+  </section>
+
+  {# ====== キャンペーン概要（§3-3） ====== #}
+  {# ラベル:値を2列で表示（app-detail-grid は 900px 以下で1列に折り返す）。件名は載せない（メール内容にある）。 #}
+  <section class="app-card">
+    <h2>キャンペーン概要</h2>
+    <div class="app-detail-grid" style="margin-top:12px;">
+      <div class="app-detail-item">
+        <span class="app-detail-label">キャンペーン名</span>
+        <span class="app-detail-value" style="display:inline-flex; align-items:center; gap:8px; flex-wrap:wrap;">
+          {{ campaign.name }} {% status_badge campaign %}
+        </span>
+      </div>
+      <div class="app-detail-item">
+        <span class="app-detail-label">予約配信日時</span>
+        <span class="app-detail-value">{{ campaign.scheduled_at|date:"Y-m-d H:i"|default:"—" }}</span>
+      </div>
+      <div class="app-detail-item">
+        <span class="app-detail-label">宛先リスト</span>
+        <span class="app-detail-value">
+          {% if campaign.mailing_list %}
+            <a href="{% url 'mailings:mailing_list_detail' pk=campaign.mailing_list.pk %}">{{ campaign.mailing_list.name }}</a>
+          {% else %}—{% endif %}
+        </span>
+      </div>
+      <div class="app-detail-item">
+        <span class="app-detail-label">送信元</span>
+        <span class="app-detail-value">{{ campaign.get_sender_mode_display }}{% if campaign.sender_mode == 'newsletter' %}（{{ campaign.sender_name }} &lt;{{ campaign.sender_email }}&gt;）{% endif %}</span>
+      </div>
+      <div class="app-detail-item">
+        <span class="app-detail-label">配信件数</span>
+        <span class="app-detail-value">{{ recipient_count }} 件</span>
+      </div>
+      <div class="app-detail-item">
+        <span class="app-detail-label">作成者 / 作成日時</span>
+        <span class="app-detail-value">{{ campaign.created_by.get_full_name|default:campaign.created_by.username }} / {{ campaign.created_at|date:"Y-m-d H:i" }}</span>
+      </div>
+    </div>
   </section>
 
   {# ====== メール内容 ====== #}

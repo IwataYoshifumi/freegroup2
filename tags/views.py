@@ -338,13 +338,21 @@ class TagListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
         from django.db.models import Count, Q
 
         qs = Tag.objects.select_related("category", "created_by")
-        if _archived_only(self.request):
-            qs = qs.filter(is_archived=True)
-        else:
+        # 状態（アクティブ／アーカイブ済み）トグルで絞り込み（§3、HIG 4.1）。
+        selected_statuses = self._selected_statuses()
+        if "active" in selected_statuses and "archived" not in selected_statuses:
             qs = qs.filter(is_archived=False)
-        category_id = self.request.GET.get("category")
-        if category_id:
-            qs = qs.filter(category_id=category_id)
+        elif "archived" in selected_statuses and "active" not in selected_statuses:
+            qs = qs.filter(is_archived=True)
+        # 両方選択 or （searched で）全解除のときは is_archived で絞らない（全件）。
+        # タグ名の部分一致（§3）。
+        name = self.request.GET.get("name", "").strip()
+        if name:
+            qs = qs.filter(name__icontains=name)
+        # タグカテゴリの複数選択トグル（§3。旧 単一 category セレクトを置換）。
+        category_ids = [c for c in self.request.GET.getlist("category") if c]
+        if category_ids:
+            qs = qs.filter(category_id__in=category_ids)
         # 付与 Person 数（active のみ集計、§7.3 手順 3 / §11.7.1 と整合）。
         qs = qs.annotate(
             person_count=Count(
@@ -356,11 +364,24 @@ class TagListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
         qs = qs.order_by("category__sort_order", "name")
         return _apply_tag_list_sort(qs, self.request.GET)
 
+    def _selected_statuses(self):
+        """状態トグルの選択値（active / archived）。初期表示は active のみ（§3）。
+
+        [性質] 準関数寄り（request.GET を読むのみ）。`searched=1` が無い初回は ["active"]、
+        有るときは選択値（許可値のみ）。
+        """
+        valid = {"active", "archived"}
+        if self.request.GET.get("searched"):
+            return [s for s in self.request.GET.getlist("status") if s in valid]
+        return ["active"]
+
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         back = BackNavigator(self.request)
-        # HIG 6.1：並び替え・ページ状態を戻るで復元するため sort を追加（dir は廃止形式）。
-        back.push_current("", ["category", "page", "archived_only", "sort"])
+        # HIG 6.1：並び替え・ページ・絞り込み状態を戻るで復元するため keys に含める。
+        back.push_current(
+            "", ["category", "page", "name", "status", "searched", "sort"]
+        )
         context.update(
             {
                 "back": back,
@@ -369,8 +390,9 @@ class TagListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
                 "categories": TagCategory.objects.filter(is_archived=False).order_by(
                     "sort_order", "name"
                 ),
-                "selected_category": self.request.GET.get("category", ""),
-                "archived_only": _archived_only(self.request),
+                "selected_category_ids": self.request.GET.getlist("category"),
+                "search_name": self.request.GET.get("name", ""),
+                "selected_statuses": self._selected_statuses(),
             }
         )
         # 絞り込みフォーム内ソートコントロール用（sort_rows / sort_is_active / sort_value）。

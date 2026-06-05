@@ -8130,8 +8130,8 @@ class V16ListSearchAndSidebarSmokeTests(TestCase):
         self.assertContains(r, "夏キャンペーン")
         self.assertNotContains(r, "春キャンペーン")
 
-    def test_campaign_list_default_status_filter_hides_done(self):
-        # 初期表示（searched 無し）は下書き・予約配信待機中・配信中のみ。配信完了は出ない。
+    def test_campaign_list_default_shows_all_statuses(self):
+        # 第7弾：状態は「全部未選択＝全件」が既定。配信完了も初期表示で出る。
         tpl = EmailTemplate.objects.create(
             name="Td", subject="s", body="b", created_by=self.user
         )
@@ -8141,8 +8141,59 @@ class V16ListSearchAndSidebarSmokeTests(TestCase):
         )
         r = self.client.get(reverse("mailings:campaign_list"))
         self.assertEqual(r.status_code, 200)
-        self.assertContains(r, "春キャンペーン")          # draft（既定に含む）
-        self.assertNotContains(r, "完了キャンペーン")       # done（既定から除外）
+        self.assertContains(r, "春キャンペーン")          # draft
+        self.assertContains(r, "完了キャンペーン")          # done も既定で出る（全件）
+        # 状態トグルは初期で1つもチェックされない（事前選択しない）。
+        self.assertEqual(r.context["selected_statuses"], [])
+
+    def test_campaign_list_filter_by_delivery_date_range(self):
+        # 配信日（scheduled_at）の期間検索。両側・片側（開始のみ／終了のみ）が効く（§7）。
+        from datetime import timedelta as _td
+
+        now = timezone.now()
+        tpl = EmailTemplate.objects.create(
+            name="Tdate", subject="s", body="b", created_by=self.user
+        )
+        Campaign.objects.create(
+            name="配信日テストキャンペーン", template=tpl, mailing_list=self.ml,
+            status=Campaign.Status.SCHEDULED, scheduled_at=now, created_by=self.user,
+        )
+        today = now.date().isoformat()
+        tomorrow = (now + _td(days=1)).date().isoformat()
+        yesterday = (now - _td(days=1)).date().isoformat()
+        # 当日を含む範囲 → 出る。
+        r = self.client.get(
+            reverse("mailings:campaign_list"),
+            {"date_from": today, "date_to": today},
+        )
+        self.assertContains(r, "配信日テストキャンペーン")
+        # 開始日が翌日（未来）→ 出ない。
+        r = self.client.get(reverse("mailings:campaign_list"), {"date_from": tomorrow})
+        self.assertNotContains(r, "配信日テストキャンペーン")
+        # 終了日が前日（過去）→ 出ない。
+        r = self.client.get(reverse("mailings:campaign_list"), {"date_to": yesterday})
+        self.assertNotContains(r, "配信日テストキャンペーン")
+
+    def test_campaign_list_has_delivery_date_inputs(self):
+        r = self.client.get(reverse("mailings:campaign_list"))
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, 'name="date_from"')
+        self.assertContains(r, 'name="date_to"')
+
+    def test_no_template_comment_leak(self):
+        # 複数行 {# #} の画面漏れが塞がれている（app_base のモーダル背景コメント・
+        # 各一覧の検索フォーム説明コメント等）。漏れた本文そのものを検知する。
+        for url_name in (
+            "mailings:campaign_list",
+            "mailings:mailing_list_list",
+            "mailings:suppressed_list",
+        ):
+            r = self.client.get(reverse(url_name))
+            self.assertEqual(r.status_code, 200)
+            body = r.content.decode("utf-8")
+            self.assertNotIn("共通モーダル背景", body)   # モーダル背景コメント本文
+            self.assertNotIn("検索フォーム（HIG", body)  # 検索フォーム説明コメント本文（第8弾の漏れ）
+            self.assertNotIn("{% comment %}", body)      # comment タグ自体も描画されない
 
     def test_campaign_list_sort_by_name_applies(self):
         # ?sort= が許可リスト経由で適用される（200 で返り、両件が出る）。
@@ -8230,3 +8281,103 @@ class V16ListSearchAndSidebarSmokeTests(TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertContains(r, "キャンペーン一覧")
         self.assertNotContains(r, "app-sidebar__group-toggle")
+
+    # ---- 第3弾：用語統一・状態トグル ----
+    def test_suppressed_list_title_renamed(self):
+        # 用語統一：ページタイトル・サイドバーとも「配信拒否リスト」（§5、HIG 3.8）。
+        r = self.client.get(reverse("mailings:suppressed_list"))
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, "配信拒否リスト")          # ページ見出し
+        self.assertNotContains(r, "配信停止リスト")        # 旧称はサイドバー含め消える
+
+    def test_mailing_list_status_frozen_filter(self):
+        # 状態トグルに「凍結」を含む（§4）。凍結リストのみ抽出できる。
+        frozen = MailingList.objects.create(
+            name="凍結リストZ", created_by=self.user,
+            members_frozen_at=timezone.now(),
+        )
+        r = self.client.get(
+            reverse("mailings:mailing_list_list"),
+            {"searched": "1", "status": "frozen"},
+        )
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, "凍結リストZ")
+        self.assertNotContains(r, "営業リストA")   # active（非凍結）は出ない
+        self.assertNotContains(r, "技術リストB")
+        # フォームに凍結トグルが存在する。
+        self.assertContains(r, 'value="frozen"')
+
+    def test_mailing_list_filter_and_sort_side_by_side_markers(self):
+        r = self.client.get(reverse("mailings:mailing_list_list"))
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, "js-msort-control")   # ソート折りたたみ
+        # 第8弾：テキスト（リスト名）は折りたたみの外、状態トグルは「状態」折りたたみの中。
+        self.assertContains(r, "app-search-grid")    # テキスト欄は折りたたみの外
+        self.assertContains(r, 'value="frozen"')     # 状態トグル（凍結）
+
+    # ---- 第8弾：一覧3画面の構造そろえ（テキスト外・トグル内の状態折りたたみ・初期閉・横並び） ----
+    def _assert_list_structure_aligned(self, url_name):
+        r = self.client.get(reverse(url_name))
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode("utf-8")
+        # テキスト欄は折りたたみの外（app-search-grid 行）。
+        self.assertIn("app-search-grid", body)
+        # トグル絞り込みの折りたたみは初期閉（aria-expanded="false" / ▸）。
+        self.assertIn('aria-expanded="false"', body)
+        self.assertNotIn("app-person-filter-collapsible is-open", body)
+        # ソート折りたたみと横並び（同フォームにソートコントロールが出る）。
+        self.assertIn("js-msort-control", body)
+
+    def test_campaign_list_structure_aligned(self):
+        self._assert_list_structure_aligned("mailings:campaign_list")
+
+    def test_mailing_list_structure_aligned(self):
+        self._assert_list_structure_aligned("mailings:mailing_list_list")
+
+    def test_suppressed_list_structure_aligned(self):
+        self._assert_list_structure_aligned("mailings:suppressed_list")
+
+    # ---- 第8弾：キャンペーン詳細の刷新（h1＝画面名／概要カード／レポート出し分け） ----
+    def test_campaign_detail_header_is_screen_name(self):
+        r = self.client.get(
+            reverse("mailings:campaign_detail", args=[self.camp_spring.pk])
+        )
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, "<h1>配信キャンペーン詳細</h1>", html=False)
+
+    def test_campaign_detail_overview_card(self):
+        r = self.client.get(
+            reverse("mailings:campaign_detail", args=[self.camp_spring.pk])
+        )
+        self.assertEqual(r.status_code, 200)
+        for label in (
+            "キャンペーン概要",
+            "予約配信日時",
+            "宛先リスト",
+            "送信元",
+            "配信件数",
+            "作成者 / 作成日時",
+        ):
+            self.assertContains(r, label)
+        self.assertContains(r, "春キャンペーン")   # キャンペーン名が概要に出る
+
+    def test_campaign_detail_report_button_only_when_done(self):
+        # 下書きはレポート遷移を出さない。
+        r = self.client.get(
+            reverse("mailings:campaign_detail", args=[self.camp_spring.pk])
+        )
+        self.assertNotContains(
+            r, reverse("mailings:campaign_report", args=[self.camp_spring.pk])
+        )
+        # 配信完了（done）でレポート遷移が出る。
+        tpl = EmailTemplate.objects.create(
+            name="Tdone2", subject="s", body="b", created_by=self.user
+        )
+        done = Campaign.objects.create(
+            name="完了2", template=tpl, mailing_list=self.ml,
+            status=Campaign.Status.DONE, created_by=self.user,
+        )
+        r2 = self.client.get(reverse("mailings:campaign_detail", args=[done.pk]))
+        self.assertContains(
+            r2, reverse("mailings:campaign_report", args=[done.pk])
+        )

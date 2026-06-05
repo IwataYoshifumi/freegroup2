@@ -33,7 +33,7 @@ active_menu（各 View が context で渡す）と一致する項目に is-activ
   {% if perms.mailings.view_suppressedemail %}
   <a href="{% url 'mailings:suppressed_list' %}"
      class="app-sidebar__subitem{% if active_menu == 'mailings:suppressed_list' %} is-active{% endif %}">
-    配信停止リスト
+    配信拒否リスト
   </a>
   {% endif %}
 

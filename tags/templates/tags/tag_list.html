@@ -4,22 +4,26 @@
 {% block title %}タグ一覧 — FreeGroup2{% endblock %}
 
 {% block content %}
-  {# 遷移導線はタイトル直下・右側にまとめる（HIG 7.3）。新規作成＝青（原則3）、カテゴリ一覧＝遷移。 #}
   <div class="app-page-header">
     <div>
       <div class="app-breadcrumb">タグ一覧</div>
       <h1>タグ一覧</h1>
     </div>
+    {# 戻る導線は右上（HIG 3.2 / 付録）。 #}
     <div class="app-page-header__actions">
       {% back_all_link back %}
       {% back_link back %}
-      {% if categories %}
-        {% url 'tags:tag_create' as create_url %}
-        <a href="{% append_back_url create_url back %}" class="app-btn app-btn--primary">＋ 新規タグ作成</a>
-      {% endif %}
-      {% url 'tags:tag_category_list' as cat_url %}
-      <a href="{% append_back_url cat_url back %}" class="app-btn app-btn--secondary">タグカテゴリ一覧</a>
     </div>
+  </div>
+
+  {# 遷移導線（新規作成・カテゴリ一覧）はタイトル直下・左寄せに集約（HIG 3.1 / 7.3、「＋」除去）。 #}
+  <div class="app-action-area" style="justify-content:flex-start; margin-bottom:16px;">
+    {% if categories %}
+      {% url 'tags:tag_create' as create_url %}
+      <a href="{% append_back_url create_url back %}" class="app-btn app-btn--primary">新規タグ作成</a>
+    {% endif %}
+    {% url 'tags:tag_category_list' as cat_url %}
+    <a href="{% append_back_url cat_url back %}" class="app-btn app-btn--secondary">タグカテゴリ一覧</a>
   </div>
 
   {% if not categories %}
@@ -35,32 +39,79 @@
       </div>
     </section>
   {% else %}
-    <section class="app-card">
-      <form method="get">
-        <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
-          <label for="id_category" style="white-space:nowrap; font-weight:600;">カテゴリで絞り込み</label>
-          <select id="id_category" name="category" class="app-input"
-                  style="width:300px; max-width:100%;"
-                  onchange="this.form.requestSubmit();">
-            <option value="">全カテゴリ</option>
-            {% for cat in categories %}
-              <option value="{{ cat.id }}" {% if selected_category == cat.id|stringformat:"s" %}selected{% endif %}>{{ cat.name }}</option>
-            {% endfor %}
-          </select>
-          <label for="id_archived_only"
-                 class="app-btn {% if archived_only %}app-btn--primary{% else %}app-btn--secondary{% endif %}"
-                 style="cursor:pointer; margin-left:auto;">
-            {% if archived_only %}✓ {% endif %}アーカイブ済みのみを表示
-          </label>
-          <input type="checkbox" id="id_archived_only" name="archived_only" value="1"
-                 style="position:absolute; opacity:0; pointer-events:none;"
-                 onchange="this.form.requestSubmit();"
-                 {% if archived_only %}checked{% endif %}>
+    {% comment %}
+      検索フォーム（HIG 第6章・キャンペーン一覧と同構造／§2）：
+      テキスト（タグ名）は折りたたみの外＝常時表示。トグル絞り込み（タグカテゴリ＋状態）は
+      「絞り込み」折りたたみの中。絞り込みとソートの折りたたみは横並び・初期閉。
+    {% endcomment %}
+    <section class="app-card" style="margin-bottom:16px;">
+      <form method="get" class="app-form-grid-edit">
+        <input type="hidden" name="searched" value="1">
+        <div class="app-form-grid app-search-grid">
+          <div class="app-form__group">
+            <label class="app-form__label" for="id_name">タグ名</label>
+            <input type="text" id="id_name" name="name" value="{{ search_name }}" class="app-input">
+          </div>
         </div>
 
-        {# 多段ソート（絞り込みと同一フォームで送信。カテゴリ/アーカイブ変更時も一緒に送られる）。 #}
-        <div style="margin-top:12px; max-width:520px;">
-          {% include "tags/_sort_control.html" %}
+        <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:flex-start;">
+          {# 絞り込み（トグル群：タグカテゴリ＋状態）。初期閉・幅は中身に合わせる。 #}
+          <div class="app-collapsible app-person-filter-collapsible" style="flex:0 1 auto;">
+            <button type="button" class="app-collapsible__header" data-action="toggle-collapsible"
+                    aria-expanded="false">
+              <span>絞り込み</span>
+              <span class="app-collapsible__icon">▸</span>
+            </button>
+            <div class="app-collapsible-body">
+              <div class="app-person-filter-box" style="margin-top:var(--app-space-sm);">
+                {# ラベルは体言「タグカテゴリ」。トグルは2列折り返し＋枠を詰める。 #}
+                <div class="app-form__group">
+                  <span class="app-form__label">タグカテゴリ</span>
+                  <ul class="app-radio-toggle" style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                    {% for cat in categories %}
+                      <li>
+                        <label style="padding:5px 12px; min-height:32px;">
+                          <input type="checkbox" name="category" value="{{ cat.id }}"
+                                 {% if cat.id|stringformat:"s" in selected_category_ids %}checked{% endif %}>
+                          {{ cat.name }}
+                        </label>
+                      </li>
+                    {% endfor %}
+                  </ul>
+                </div>
+
+                <div class="app-form__group" style="margin-top:var(--app-space-sm);">
+                  <span class="app-form__label">状態</span>
+                  <ul class="app-radio-toggle" style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                    <li>
+                      <label style="padding:5px 12px; min-height:32px;">
+                        <input type="checkbox" name="status" value="active"
+                               {% if "active" in selected_statuses %}checked{% endif %}>
+                        アクティブ
+                      </label>
+                    </li>
+                    <li>
+                      <label style="padding:5px 12px; min-height:32px;">
+                        <input type="checkbox" name="status" value="archived"
+                               {% if "archived" in selected_statuses %}checked{% endif %}>
+                        アーカイブ済み
+                      </label>
+                    </li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {# ソート（折りたたみ・指定があれば開く）。 #}
+          <div style="flex:1 1 320px; min-width:280px;">
+            {% include "tags/_sort_control.html" %}
+          </div>
+        </div>
+
+        <div class="app-action-area app-action-area--search">
+          <button type="submit" class="app-btn app-btn--primary">検索</button>
+          <a href="{% url 'tags:tag_list' %}" class="app-btn app-btn--secondary">リセット</a>
         </div>
       </form>
     </section>
@@ -125,9 +176,7 @@
         {% endif %}
       {% else %}
         <p class="app-muted">
-          {% if archived_only %}アーカイブ済みのタグはありません。
-          {% else %}アクティブなタグがありません（「アーカイブ済みのみを表示」でアーカイブ済みを確認できます）。
-          {% endif %}
+          条件に一致するタグがありません（状態トグルや絞り込みを変更してください）。
         </p>
       {% endif %}
     </section>

@@ -215,15 +215,23 @@ class MailingListListView(LoginRequiredMixin, PermissionRequiredMixin, ListView)
     paginate_by = 50
 
     def get_queryset(self):
-        from django.db.models import Count
+        from django.db.models import Count, Q
 
         qs = MailingList.objects.select_related("created_by").annotate(
             member_count=Count("members")
         )
-        if _archived_only(self.request):
-            qs = qs.filter(is_archived=True)
-        else:
-            qs = qs.filter(is_archived=False)
+        # 状態トグル（アクティブ／アーカイブ済み／凍結）で絞り込み（§3、HIG 4.1）。
+        # active=is_archived False、archived=is_archived True、frozen=members_frozen_at 非NULL（編集不可）。
+        selected = self._selected_statuses()
+        status_q = Q()
+        if "active" in selected:
+            status_q |= Q(is_archived=False)
+        if "archived" in selected:
+            status_q |= Q(is_archived=True)
+        if "frozen" in selected:
+            status_q |= Q(members_frozen_at__isnull=False)
+        if selected:
+            qs = qs.filter(status_q)
         # 検索フォーム（HIG 第6章）：リスト名の部分一致。空欄は絞り込まない。
         name = self.request.GET.get("name", "").strip()
         if name:
@@ -232,17 +240,28 @@ class MailingListListView(LoginRequiredMixin, PermissionRequiredMixin, ListView)
         # 既定並びを温存しつつ、?sort= があれば多段ソートで差し替える（HIG 6.2）。
         return _apply_multi_sort(qs, self.request.GET, MAILING_LIST_SORT_FIELD_MAP)
 
+    def _selected_statuses(self):
+        """状態トグルの選択値（active / archived / frozen）。初期表示は active のみ（§3・§4）。
+
+        [性質] 準関数寄り（request.GET を読むのみ）。`searched=1` が無い初回は ["active"]、
+        有るときは選択値（許可値のみ）。
+        """
+        valid = {"active", "archived", "frozen"}
+        if self.request.GET.get("searched"):
+            return [s for s in self.request.GET.getlist("status") if s in valid]
+        return ["active"]
+
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         back = BackNavigator(self.request)
         # 検索条件・ソート・ページも keys に含め「戻る」で一覧状態を復元する（HIG 6.1）。
-        back.push_current("", ["page", "archived_only", "name", "sort"])
+        back.push_current("", ["page", "status", "searched", "name", "sort"])
         context.update(
             {
                 "back": back,
                 "active_app": "mailings",
                 "active_menu": "mailings:mailing_list_list",
-                "archived_only": _archived_only(self.request),
+                "selected_statuses": self._selected_statuses(),
                 "search_name": self.request.GET.get("name", ""),
                 "column_storage_key": "mailing_list_list_visible_columns",
                 "column_defs": [
@@ -3141,25 +3160,35 @@ class CampaignListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
         selected = self._selected_statuses()
         if selected:
             qs = qs.filter(status__in=selected)
+        # 配信日（scheduled_at＝配信日時）の期間検索（§7）。片側のみ指定も可。
+        # 不正な日付文字列は無視（filter に渡すと ValidationError になるため事前検証）。
+        from datetime import date as _date
+
+        def _parse_date(s):
+            try:
+                return _date.fromisoformat((s or "").strip())
+            except (ValueError, TypeError):
+                return None
+
+        date_from = _parse_date(self.request.GET.get("date_from"))
+        if date_from:
+            qs = qs.filter(scheduled_at__date__gte=date_from)
+        date_to = _parse_date(self.request.GET.get("date_to"))
+        if date_to:
+            qs = qs.filter(scheduled_at__date__lte=date_to)
         # 既定並び（-created_at）を温存しつつ、?sort= があれば多段ソートで差し替える（HIG 6.2）。
         return _apply_multi_sort(qs, self.request.GET, CAMPAIGN_LIST_SORT_FIELD_MAP)
 
     def _selected_statuses(self):
-        """状態トグルの選択値（複数）。初期表示は下書き・予約配信待機中・配信中（指示書 §2）。
+        """状態トグルの選択値（複数）。キャンペーン一覧は「全部未選択＝全件」を既定とする（§7）。
 
-        [性質] 純関数寄り（request.GET を読むのみ）。`searched=1` が無い初回は既定3状態、
-        有るときは選択値（許可値のみ）。選択ゼロ（全解除）なら絞り込まない＝全件。
+        [性質] 純関数寄り（request.GET を読むのみ）。既定の事前選択はしない。
+        選択された許可値のみ返す（空＝絞り込みなし＝全件）。
         """
         from .models import Campaign
 
         valid = {c for c, _ in Campaign.Status.choices}
-        if self.request.GET.get("searched"):
-            return [s for s in self.request.GET.getlist("status") if s in valid]
-        return [
-            Campaign.Status.DRAFT,
-            Campaign.Status.SCHEDULED,
-            Campaign.Status.SENDING,
-        ]
+        return [s for s in self.request.GET.getlist("status") if s in valid]
 
     def get_context_data(self, **kwargs):
         from .models import Campaign
@@ -3177,7 +3206,11 @@ class CampaignListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
         # title は "" にして back_link / back_all_link がデフォルト「戻る」「最初に戻る」を表示する（HIG v1.2 §3.2）。
         # 検索条件・ソート・ページも keys に含め「戻る」で一覧状態を復元する（HIG 6.1）。
         back.push_current(
-            "", ["page", "name", "creator", "status", "searched", "sort"]
+            "",
+            [
+                "page", "name", "creator", "status", "searched", "sort",
+                "date_from", "date_to",
+            ],
         )
         ctx["back"] = back
         ctx["active_app"] = "mailings"
@@ -3185,6 +3218,8 @@ class CampaignListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
         # 検索フォームの現在値・選択肢（テンプレートで再表示）。
         ctx["search_name"] = self.request.GET.get("name", "")
         ctx["search_creator"] = self.request.GET.get("creator", "")
+        ctx["search_date_from"] = self.request.GET.get("date_from", "")
+        ctx["search_date_to"] = self.request.GET.get("date_to", "")
         ctx["status_choices"] = Campaign.Status.choices
         ctx["selected_statuses"] = self._selected_statuses()
         # 列表示切替（localStorage キー＋切替対象列）とソートコントロール（折りたたみ内）。

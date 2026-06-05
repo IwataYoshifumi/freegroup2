@@ -377,3 +377,87 @@ class Phase7TagCategoryViewAuthTests(TestCase):
         # admin 相当（delete 保持）は通過（論理削除→リダイレクト 302）
         admin = self._user("delete_tagcategory")
         self.assertEqual(self._client(admin).post(url).status_code, 302)
+
+
+class TagListFilterTests(TestCase):
+    """v1.6 UI 第3弾：タグ一覧の絞り込み（タグ名・タグカテゴリ複数トグル・状態トグル）。"""
+
+    def setUp(self):
+        from django.contrib.auth.models import Permission
+
+        self.user = User.objects.create_user(username="tag_filter_user", password="x")
+        self.user.user_permissions.add(Permission.objects.get(codename="view_tag"))
+        self.client = Client()
+        self.client.force_login(self.user)
+        self.cat_a = TagCategory.objects.create(name="業種", sort_order=1)
+        self.cat_b = TagCategory.objects.create(name="地域", sort_order=2)
+        self.tag_mfg = Tag.objects.create(
+            name="製造業", category=self.cat_a, created_by=self.user
+        )
+        self.tag_it = Tag.objects.create(
+            name="IT", category=self.cat_a, created_by=self.user
+        )
+        self.tag_tokyo = Tag.objects.create(
+            name="東京", category=self.cat_b, created_by=self.user
+        )
+        self.tag_archived = Tag.objects.create(
+            name="廃止タグ", category=self.cat_a, created_by=self.user,
+            is_archived=True,
+        )
+        self.url = reverse("tags:tag_list")
+
+    def test_filter_by_tag_name(self):
+        resp = self.client.get(self.url, {"name": "製造"})
+        self.assertEqual(resp.status_code, 200)
+        names = [t.name for t in resp.context["tags"]]
+        self.assertIn("製造業", names)
+        self.assertNotIn("IT", names)
+
+    def test_category_toggle_multi_select(self):
+        # 複数カテゴリ選択（getlist）で OR 抽出。
+        resp = self.client.get(self.url, {"searched": "1", "category": [str(self.cat_b.id)]})
+        self.assertEqual(resp.status_code, 200)
+        names = [t.name for t in resp.context["tags"]]
+        self.assertIn("東京", names)
+        self.assertNotIn("製造業", names)
+
+    def test_status_toggle_archived(self):
+        # 既定はアクティブのみ＝アーカイブは出ない。
+        resp = self.client.get(self.url)
+        names = [t.name for t in resp.context["tags"]]
+        self.assertNotIn("廃止タグ", names)
+        self.assertIn("製造業", names)
+        # 状態トグルで archived を選ぶとアーカイブのみ。
+        resp = self.client.get(self.url, {"searched": "1", "status": "archived"})
+        names = [t.name for t in resp.context["tags"]]
+        self.assertIn("廃止タグ", names)
+        self.assertNotIn("製造業", names)
+
+    def test_filter_form_markers_rendered(self):
+        resp = self.client.get(self.url)
+        body = resp.content.decode("utf-8")
+        self.assertIn("タグカテゴリ", body)             # カテゴリ絞り込みラベル（体言、§6で「で絞り込み」除去）
+        self.assertIn('name="name"', body)             # タグ名絞り込み
+        self.assertIn('name="status"', body)           # 状態トグル
+
+    def test_no_template_comment_leak(self):
+        # 複数行 {# #} の画面漏れが塞がれている（第8弾の検索フォーム説明コメント等）。
+        resp = self.client.get(self.url)
+        self.assertEqual(resp.status_code, 200)
+        body = resp.content.decode("utf-8")
+        self.assertNotIn("検索フォーム（HIG", body)   # コメント本文が漏れていない
+        self.assertNotIn("{% comment %}", body)        # comment タグ自体も描画されない
+
+    def test_list_structure_aligned(self):
+        # 第8弾：キャンペーン一覧と同構造。テキスト（タグ名）は折りたたみの外、
+        # トグル絞り込みは折りたたみの中で初期閉、ソートと横並び。
+        resp = self.client.get(self.url)
+        self.assertEqual(resp.status_code, 200)
+        body = resp.content.decode("utf-8")
+        self.assertIn("app-search-grid", body)              # テキスト欄は折りたたみの外
+        self.assertIn('aria-expanded="false"', body)        # 絞り込み折りたたみは初期閉
+        self.assertNotIn("app-person-filter-collapsible is-open", body)
+        self.assertIn("js-tag-sort-control", body)          # ソート折りたたみと同フォーム
+        self.assertIn('name="category"', body)         # カテゴリトグル（checkbox）
+        self.assertNotIn("アーカイブ済みのみを表示", body)  # 旧ボタンは廃止
+        self.assertNotIn("＋ 新規タグ作成", body)          # ＋ 除去

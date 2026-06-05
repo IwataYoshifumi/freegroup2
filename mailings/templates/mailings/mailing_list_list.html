@@ -9,44 +9,89 @@
       <div class="app-breadcrumb">メール配信 / 配信リスト一覧</div>
       <h1>配信リスト一覧</h1>
     </div>
-    <div class="app-action-area">
-      {# 旧 mailing_list_create (単一画面 CreateView) は View/URL/テスト残置、リンクのみウィザード入口に張替（指示書作業4） #}
-      {% url 'mailings:new_list_meta' as create_url %}
-      <a href="{% append_back_url create_url back %}" class="app-btn app-btn--primary">＋ 新規リスト作成</a>
+    {# 戻る導線は右上（HIG 3.2 / 付録）。 #}
+    <div class="app-page-header__actions">
+      {% back_all_link back %}
+      {% back_link back %}
     </div>
   </div>
 
-  <section class="app-card">
-    {# 検索フォーム（HIG 第6章・persons 参照実装に準拠）。リスト名の部分一致＋アーカイブ表示トグル。 #}
-    <form method="get" class="app-form-grid-edit" style="margin-bottom:8px;">
+  {# 遷移導線（新規作成）はタイトル直下・左寄せに集約（HIG 3.1 / 7.3、「＋」除去）。 #}
+  <div class="app-action-area" style="justify-content:flex-start; margin-bottom:16px;">
+    {# 旧 mailing_list_create (単一画面 CreateView) は View/URL/テスト残置、リンクのみウィザード入口に張替 #}
+    {% url 'mailings:new_list_meta' as create_url %}
+    <a href="{% append_back_url create_url back %}" class="app-btn app-btn--primary">新規リスト作成</a>
+  </div>
+
+  {% comment %}
+    検索フォーム（HIG 第6章・キャンペーン一覧と同構造／§2）：
+    テキスト（リスト名）は折りたたみの外＝常時表示。状態トグルは「状態」折りたたみの中。
+    状態とソートの折りたたみは横並び・初期閉。
+  {% endcomment %}
+  <section class="app-card" style="margin-bottom:16px;">
+    <form method="get" class="app-form-grid-edit">
+      <input type="hidden" name="searched" value="1">
       <div class="app-form-grid app-search-grid">
         <div class="app-form__group">
           <label class="app-form__label" for="id_name">リスト名</label>
           <input type="text" id="id_name" name="name" value="{{ search_name }}" class="app-input">
         </div>
       </div>
-      <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
-        {# アーカイブ表示トグルは変更時に即送信（既存挙動を踏襲）。リスト名入力も一緒に送られる。 #}
-        <label for="id_archived_only"
-               class="app-btn {% if archived_only %}app-btn--primary{% else %}app-btn--secondary{% endif %}"
-               style="cursor:pointer; margin-left:auto;">
-          {% if archived_only %}✓ {% endif %}アーカイブ済みのみを表示
-        </label>
-        <input type="checkbox" id="id_archived_only" name="archived_only" value="1"
-               style="position:absolute; opacity:0; pointer-events:none;"
-               onchange="this.form.submit();"
-               {% if archived_only %}checked{% endif %}>
-      </div>
 
-      {# 多段ソート（折りたたみ、絞り込みと同一フォーム送信）。 #}
-      {% include "mailings/_sort_control.html" %}
+      <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:flex-start;">
+        {# 状態の絞り込み（トグル・複数選択）。初期閉・幅は中身に合わせる。 #}
+        <div class="app-collapsible app-person-filter-collapsible" style="flex:0 1 auto;">
+          <button type="button" class="app-collapsible__header" data-action="toggle-collapsible"
+                  aria-expanded="false">
+            <span>状態</span>
+            <span class="app-collapsible__icon">▸</span>
+          </button>
+          <div class="app-collapsible-body">
+            <div class="app-person-filter-box" style="margin-top:var(--app-space-sm);">
+              {# トグルは2列折り返し＋枠を詰める。 #}
+              <div class="app-form__group">
+                <ul class="app-radio-toggle" style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                  <li>
+                    <label style="padding:5px 12px; min-height:32px;">
+                      <input type="checkbox" name="status" value="active"
+                             {% if "active" in selected_statuses %}checked{% endif %}>
+                      アクティブ
+                    </label>
+                  </li>
+                  <li>
+                    <label style="padding:5px 12px; min-height:32px;">
+                      <input type="checkbox" name="status" value="archived"
+                             {% if "archived" in selected_statuses %}checked{% endif %}>
+                      アーカイブ済み
+                    </label>
+                  </li>
+                  <li>
+                    <label style="padding:5px 12px; min-height:32px;">
+                      <input type="checkbox" name="status" value="frozen"
+                             {% if "frozen" in selected_statuses %}checked{% endif %}>
+                      凍結（編集不可）
+                    </label>
+                  </li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {# ソート（折りたたみ・指定があれば開く）。 #}
+        <div style="flex:1 1 320px; min-width:280px;">
+          {% include "mailings/_sort_control.html" %}
+        </div>
+      </div>
 
       <div class="app-action-area app-action-area--search">
         <button type="submit" class="app-btn app-btn--primary">検索</button>
         <a href="{% url 'mailings:mailing_list_list' %}" class="app-btn app-btn--secondary">リセット</a>
       </div>
     </form>
+  </section>
 
+  <section class="app-card">
     {% if mailing_lists %}
       {# 表示列選択は表の左上に置く（HIG 6.2）。 #}
       <div style="display:flex; justify-content:flex-start; margin-bottom:12px;">
@@ -119,9 +164,7 @@
       {% endif %}
     {% else %}
       <p class="app-muted">
-        {% if archived_only %}アーカイブ済みの配信リストはありません。
-        {% else %}アクティブな配信リストがありません（「＋ 新規リスト作成」から作成、または「アーカイブ済みのみを表示」でアーカイブ済みを確認できます）。
-        {% endif %}
+        条件に一致する配信リストがありません（状態トグルや絞り込みを変更、または「新規リスト作成」から作成してください）。
       </p>
     {% endif %}
   </section>

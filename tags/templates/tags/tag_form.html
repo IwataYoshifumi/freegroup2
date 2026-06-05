@@ -31,8 +31,7 @@
         {% endfor %}
       </div>
 
-      {# 確定アクション：左から「最初に戻る」「戻る」「作成/保存」（HIG 8章）。
-         色は原則3＝新規作成は青(primary)、編集は緑(success)。離脱導線は BackNavigator に委ねる（3.2）。 #}
+      {# 確定アクション：左から「最初に戻る」「戻る」「作成/保存」（HIG 8章。新規=青/編集=緑）。 #}
       <div class="app-action-area">
         {% back_all_link back %}
         {% back_link back %}
