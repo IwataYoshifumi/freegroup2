@@ -273,9 +273,15 @@ class Contact(models.Model):
 
         姓系フィールドの現在値を保持する。__init__ 直後と save() 完了後に呼び、次回 save()
         での変更検知の基準とする。
+
+        値は self.__dict__ から直接読み、ロード済みフィールドのみを対象とする。
+        getattr を使うと deferred フィールドで DeferredAttribute.__get__ →
+        refresh_from_db が発火し、CASCADE 削除時の Collector による部分ロード生成で
+        __init__ → snapshot → refresh_from_db → __init__ … の無限再帰になるため
+        （deferred ロードを誘発しない取り方にする）。未ロードのフィールドは None 扱い。
         """
         self._salutation_source_snapshot = {
-            field: getattr(self, field, None)
+            field: self.__dict__.get(field)
             for field in self._SALUTATION_SOURCE_FIELDS
         }
 
@@ -296,9 +302,13 @@ class Contact(models.Model):
 
         住所構成要素の現在値を保持する。__init__ 直後と save() 完了後に呼び、次回 save()
         での変更検知の基準とする。欠損時のデフォルトは空文字。
+
+        salutation 側と同じ理由で self.__dict__ から直接読み、deferred フィールドの
+        ロード（refresh_from_db）を誘発しない。未ロードのフィールドは空文字扱い。
         """
         self._address_source_snapshot = {
-            field: getattr(self, field, "") for field in self._ADDRESS_SOURCE_FIELDS
+            field: self.__dict__.get(field, "")
+            for field in self._ADDRESS_SOURCE_FIELDS
         }
 
     def _address_source_changed(self):
