@@ -6,6 +6,7 @@ View 層の責務は HTTP リクエスト/レスポンス処理とテンプレ�
 
 import json
 import logging
+import math
 import statistics
 from collections import Counter
 
@@ -234,9 +235,10 @@ class OriginalDetailView(DetailView):
         debug_json = self.object.debug_json
         debug_masks = list(self.object.debug_masks.all())
         mask_white_ratios = _build_mask_white_ratios(debug_masks)
-        block1_mask_urls, block2_mask_urls = _build_mask_url_blocks(debug_masks)
 
-        last_attempt = _get_last_attempt(debug_json) or {}
+        # rev2/rev3：マスク別に「そのマスク自身の描画対象候補（passed/near、noise 除外）」を view 段で構築。
+        overlay_data = _build_mask_overlay_data(debug_json)
+        attempts = (debug_json or {}).get("attempts") or []
 
         context["debug_json"] = debug_json
         context["debug_summary"] = _build_debug_summary(
@@ -244,12 +246,16 @@ class OriginalDetailView(DetailView):
             business_cards=business_cards,
             bc_count=business_cards.count(),
         )
-        context["block1_mask_urls"] = block1_mask_urls
-        context["block2_mask_urls"] = block2_mask_urls
-        context["candidates_passed"] = _candidates_passed(debug_json)
-        context["candidates_all"] = _candidates_all(debug_json)
-        context["candidates_dedup"] = last_attempt.get("candidates_dedup") or []
-        context["warp_failures"] = last_attempt.get("warp_failures") or []
+        # マスク表示（attempt 別・実在マスクのみ・クローズ後に候補矩形を重畳）。
+        context["mask_attempt_blocks"] = _build_mask_attempt_blocks(debug_masks, overlay_data)
+        # 候補一覧テーブル（マスク別・マスク内 idx＝オーバーレイ番号と一致、描画対象＝passed/near のみ）。
+        context["candidates_table"] = _build_candidates_table(overlay_data)
+        context["candidates_dedup"] = [
+            d for a in attempts for d in (a.get("candidates_dedup") or [])
+        ]
+        context["warp_failures"] = [
+            w for a in attempts for w in (a.get("warp_failures") or [])
+        ]
         context["overlay_polygons"] = _build_overlay_polygons(debug_json)
         context["warning_stripe"] = _build_warning_stripe(debug_json, mask_white_ratios)
 
@@ -265,7 +271,22 @@ class OriginalDetailView(DetailView):
         return context
 
 
-_REJECT_REASONS_ORDER = ("area_too_small", "area_too_large", "zero_size", "aspect_invalid")
+# rev2/rev3 の reject_reason は aspect_invalid / too_small / zero_size。
+_REJECT_REASONS_ORDER = ("aspect_invalid", "too_small", "zero_size")
+
+# debug_json の attempt["masks"] のマスク名（順序固定）。マスク内 idx・表示順の基準。
+_MASK_NAMES = ("diff", "edge", "sat", "adaptive")
+
+# 各マスク名 → (生マスク種別, クローズ後マスク種別)。候補はクローズ後マスク上に重ねる。
+_MASK_NAME_TYPES = {
+    "diff": (DebugMask.MaskType.DIFF, DebugMask.MaskType.DIFF_CLOSED),
+    "edge": (DebugMask.MaskType.EDGE, DebugMask.MaskType.EDGE_CLOSED),
+    "sat": (DebugMask.MaskType.SAT, DebugMask.MaskType.SAT_CLOSED),
+    "adaptive": (DebugMask.MaskType.ADAPTIVE, DebugMask.MaskType.ADAPTIVE_CLOSED),
+}
+
+# 「惜しい棄却」を赤で描画する閾値。too_small はこの面積比以上のみ near 扱い（採用品と同等規模）。
+_OVERLAY_NEAR_AREA_RATIO = 0.03
 
 
 def _get_last_attempt(debug_json):
@@ -276,14 +297,190 @@ def _get_last_attempt(debug_json):
     return attempts[-1] if attempts else None
 
 
+def _final_results(debug_json):
+    """[性質] 純関数 / 最終検出結果（rev2/rev3 の integrated_results、無ければ attempts[-1].results）。"""
+    if not debug_json:
+        return []
+    if "integrated_results" in debug_json:
+        return debug_json.get("integrated_results") or []
+    attempts = debug_json.get("attempts") or []
+    return (attempts[-1].get("results") or []) if attempts else []
+
+
+def _all_candidates(debug_json):
+    """[性質] 純関数 / 全 attempt × 全 mask の candidates_filter を平坦化（統計用、描画対象に絞らない）。"""
+    out = []
+    for a in (debug_json or {}).get("attempts") or []:
+        masks = a.get("masks") or {}
+        if isinstance(masks, dict):
+            for name in _MASK_NAMES:
+                out.extend((masks.get(name) or {}).get("candidates_filter") or [])
+            for name, mdata in masks.items():
+                if name in _MASK_NAMES:
+                    continue
+                out.extend((mdata or {}).get("candidates_filter") or [])
+        out.extend(a.get("candidates_filter") or [])  # 旧構造フォールバック
+    return out
+
+
+def _is_drawable_candidate(c):
+    """[性質] 純関数 / overlay 描画対象か判定する（noise は view 段で除外＝CSS の display:none に頼らない）。
+
+    描画対象： passed=True（緑）／ reject_reason=aspect_invalid（赤）／
+              reject_reason=too_small かつ area_ratio>=0.03（赤）。それ以外（zero_size・極小 too_small）は False。
+    """
+    if c.get("passed"):
+        return True
+    reason = c.get("reject_reason") or ""
+    if reason == "aspect_invalid":
+        return True
+    if reason == "too_small" and (c.get("area_ratio") or 0) >= _OVERLAY_NEAR_AREA_RATIO:
+        return True
+    return False
+
+
+def _rotated_rect_points(c):
+    """[性質] 純関数 / rect_center/size/angle から回転矩形 4 隅の points 文字列と重心を返す。
+
+    座標は元画像ピクセル系（cv2 RotatedRect::points 相当）。SVG は viewBox=image_size +
+    preserveAspectRatio で closed_image の表示寸法へ自動フィットするため、ここでのスケール変換は不要
+    （元画像オーバーレイ _build_overlay_polygons と同じ手法）。
+    """
+    rc = c.get("rect_center") or [0, 0]
+    rs = c.get("rect_size") or [0, 0]
+    cx = rc[0] if len(rc) > 0 else 0
+    cy = rc[1] if len(rc) > 1 else 0
+    w = rs[0] if len(rs) > 0 else 0
+    h = rs[1] if len(rs) > 1 else 0
+    rad = math.radians(c.get("rect_angle") or 0)
+    bx = math.cos(rad) * 0.5
+    ax = math.sin(rad) * 0.5
+    p0 = (cx - ax * h - bx * w, cy + bx * h - ax * w)
+    p1 = (cx + ax * h - bx * w, cy - bx * h - ax * w)
+    p2 = (2 * cx - p0[0], 2 * cy - p0[1])
+    p3 = (2 * cx - p1[0], 2 * cy - p1[1])
+    points_str = " ".join(f"{x:.1f},{y:.1f}" for x, y in (p0, p1, p2, p3))
+    return points_str, cx, cy
+
+
+def _drawable_candidate_dict(c, idx, attempt_no, mask_name):
+    """[性質] 純関数 / 描画対象候補 1 件を overlay/テーブル兼用の表示 dict に整形する。
+
+    idx はマスク内（描画対象に絞った後の）連番。category は passed→緑 / それ以外→near(赤)。
+    """
+    points_str, cx, cy = _rotated_rect_points(c)
+    area = c.get("area") or 0
+    ratio = c.get("area_ratio") or 0
+    rs = c.get("rect_size") or [0, 0]
+    rw = rs[0] if len(rs) > 0 else 0
+    rh = rs[1] if len(rs) > 1 else 0
+    aspect = c.get("aspect_ratio")
+    return {
+        "idx": idx,
+        "attempt_no": attempt_no,
+        "mask_name": mask_name,
+        "points_str": points_str,
+        "cx": cx,
+        "cy": cy,
+        "category": "passed" if c.get("passed") else "near",
+        "passed": bool(c.get("passed")),
+        "reason": c.get("reject_reason") or "",
+        "area_str": f"{area:,.0f}",
+        "area_ratio_pct_str": f"{ratio * 100:.1f}",
+        "rect_w_str": f"{rw:.0f}",
+        "rect_h_str": f"{rh:.0f}",
+        "aspect_ratio_str": (f"{aspect:.2f}" if aspect is not None else "-"),
+    }
+
+
+def _build_mask_overlay_data(debug_json):
+    """[性質] 純関数 / {(attempt_no, mask_name): [描画対象候補]} を返す。
+
+    各マスクの candidates_filter から **そのマスク自身の** 描画対象（passed/near）だけを抽出し、
+    マスク内連番 idx を振る。noise はここで除外する（DOM に出さない）。マスクをまたいで混ぜない。
+    """
+    data = {}
+    for a in (debug_json or {}).get("attempts") or []:
+        attempt_no = a.get("attempt_no")
+        masks = a.get("masks")
+        if not isinstance(masks, dict):
+            continue
+        for name in _MASK_NAMES:
+            cf = (masks.get(name) or {}).get("candidates_filter") or []
+            drawn = []
+            idx = 0
+            for c in cf:
+                if not _is_drawable_candidate(c):
+                    continue
+                drawn.append(_drawable_candidate_dict(c, idx, attempt_no, name))
+                idx += 1
+            data[(attempt_no, name)] = drawn
+    return data
+
+
+def _build_mask_attempt_blocks(debug_masks, overlay_data):
+    """[性質] 準関数 / attempt 別のマスク表示ブロックを返す（実在マスクのみ・旧 OR/closed 固定枠は出さない）。
+
+    [出力] [{attempt_no, title, raw:[{label,url}], closed:[{label,url,mask_name,overlay}]}]
+      raw  : 生マスク（diff/edge/sat/adaptive のうち実在分）。overlay なし。
+      closed: クローズ後マスク（候補抽出元）。overlay に自分のマスクの描画対象候補を載せる。
+    """
+    verbose_of = dict(DebugMask.MaskType.choices)
+    by_key = {(m.mask_type, m.attempt_no): m for m in debug_masks}
+    attempt_nos = sorted({m.attempt_no for m in debug_masks})
+
+    def _url(mt, attempt_no):
+        rec = by_key.get((mt, attempt_no))
+        return rec.mask_image.url if (rec and rec.mask_image) else None
+
+    blocks = []
+    for an in attempt_nos:
+        raw, closed = [], []
+        for name in _MASK_NAMES:
+            raw_mt, closed_mt = _MASK_NAME_TYPES[name]
+            if (raw_mt, an) in by_key:
+                raw.append({"label": verbose_of.get(raw_mt, raw_mt), "url": _url(raw_mt, an)})
+            if (closed_mt, an) in by_key:
+                closed.append(
+                    {
+                        "label": verbose_of.get(closed_mt, closed_mt),
+                        "url": _url(closed_mt, an),
+                        "mask_name": name,
+                        "overlay": overlay_data.get((an, name), []),
+                    }
+                )
+        if raw or closed:
+            title = "1回目（通常処理）" if an == 1 else (
+                "2回目（反転リトライ）" if an == 2 else f"attempt {an}"
+            )
+            blocks.append({"attempt_no": an, "title": title, "raw": raw, "closed": closed})
+    return blocks
+
+
+def _build_candidates_table(overlay_data):
+    """[性質] 純関数 / 描画対象候補をマスク別（attempt → _MASK_NAMES 順 → idx）に並べたテーブル行。
+
+    各行の idx はマスク内連番で、同じ (attempt, mask) のオーバーレイ番号と一致する。
+    """
+    rows = []
+    for key in sorted(
+        overlay_data.keys(),
+        key=lambda k: (k[0], _MASK_NAMES.index(k[1]) if k[1] in _MASK_NAMES else 99),
+    ):
+        rows.extend(overlay_data[key])
+    return rows
+
+
 def _build_debug_summary(debug_json, business_cards=None, bc_count=0):
     if not debug_json:
         return None
     last = _get_last_attempt(debug_json) or {}
-    cf = last.get("candidates_filter") or []
-    cd = last.get("candidates_dedup") or []
-    results = last.get("results") or []
-    wf = last.get("warp_failures") or []
+    attempts = debug_json.get("attempts") or []
+    # rev2/rev3：候補は per-mask、最終検出は integrated_results。dedup/warp は attempt 横断で集計。
+    cf = _all_candidates(debug_json)
+    cd = [c for a in attempts for c in (a.get("candidates_dedup") or [])]
+    results = _final_results(debug_json)
+    wf = [w for a in attempts for w in (a.get("warp_failures") or [])]
 
     rejected = [x for x in cf if not x.get("passed")]
     reason_counter = Counter(x.get("reject_reason") or "" for x in rejected)
@@ -303,9 +500,17 @@ def _build_debug_summary(debug_json, business_cards=None, bc_count=0):
         f"（差分 {results_count - bc_count} 件）"
     )
 
+    # contours_count は per-mask（masks[name].contours_count）合算（全 attempt）。
+    contours_count = 0
+    for a in attempts:
+        masks = a.get("masks") or {}
+        if isinstance(masks, dict):
+            for mdata in masks.values():
+                contours_count += (mdata or {}).get("contours_count", 0) or 0
+
     return {
         "image_size": debug_json.get("image_size") or {},
-        "contours_count": last.get("contours_count", 0) or 0,
+        "contours_count": contours_count,
         "passed_count": sum(1 for x in cf if x.get("passed")),
         "candidates_total": len(cf),
         "kept_count": sum(1 for x in cd if x.get("kept")),
@@ -370,22 +575,29 @@ def _build_warning_stripe(debug_json, mask_white_ratios=None):
     last = _get_last_attempt(debug_json) or {}
     last_attempt_no = last.get("attempt_no")
 
-    # 条件1: 最終 attempt の closed マスク白画素率 ≥ 80%
-    mwr = mask_white_ratios or {}
-    closed_ratio = (mwr.get(last_attempt_no) or {}).get(DebugMask.MaskType.CLOSED)
-    if closed_ratio is not None and closed_ratio >= 0.80:
-        msgs.append(f"マスク白画素率が異常 ({closed_ratio * 100:.1f}%)")
+    # 条件1: 最終 attempt の closed マスク白画素率 ≥ 80%（rev2/rev3 では各 *_closed の最大値で判定）。
+    mwr = (mask_white_ratios or {}).get(last_attempt_no) or {}
+    closed_ratios = [
+        mwr.get(mt)
+        for _name, (_raw, mt) in _MASK_NAME_TYPES.items()
+        if mwr.get(mt) is not None
+    ]
+    if closed_ratios and max(closed_ratios) >= 0.80:
+        msgs.append(f"マスク白画素率が異常 ({max(closed_ratios) * 100:.1f}%)")
 
-    # 条件2: 最終 attempt の results が 0 件
-    results = last.get("results") or []
-    if len(results) == 0:
+    # 条件2: 最終検出（integrated_results）が 0 件
+    if len(_final_results(debug_json)) == 0:
         msgs.append("最終検出 0 件")
 
-    # 条件3: 最終 attempt の area_too_large ≥ 1
-    cf = last.get("candidates_filter") or []
-    too_large = sum(1 for x in cf if x.get("reject_reason") == "area_too_large")
-    if too_large >= 1:
-        msgs.append(f"巨大候補が {too_large} 件")
+    # 条件3: aspect_invalid のうち面積比の大きい候補（隣接結合/全面ブロブの目安）が一定数
+    big_aspect_invalid = sum(
+        1
+        for c in _all_candidates(debug_json)
+        if c.get("reject_reason") == "aspect_invalid"
+        and (c.get("area_ratio") or 0) >= 0.10
+    )
+    if big_aspect_invalid >= 1:
+        msgs.append(f"大面積の aspect_invalid 候補が {big_aspect_invalid} 件")
 
     # 条件4: 反転リトライが実施されたか
     or_inv = debug_json.get("or_inversion") or {}
@@ -396,53 +608,6 @@ def _build_warning_stripe(debug_json, mask_white_ratios=None):
         msgs.append(f"反転リトライ実行（{before} 件 → {after} 件{improved}）")
 
     return msgs
-
-
-_BLOCK1_MASK_TYPES = (
-    DebugMask.MaskType.DIFF,
-    DebugMask.MaskType.EDGE,
-    DebugMask.MaskType.SAT,
-    DebugMask.MaskType.OR,
-    DebugMask.MaskType.CLOSED,
-)
-_BLOCK2_MASK_TYPES = (
-    DebugMask.MaskType.OR,
-    DebugMask.MaskType.CLOSED,
-)
-
-
-def _build_mask_url_blocks(debug_masks):
-    """マスク画像 (label, url) のリストを attempt ごとの 2 ブロックで返す。
-
-    [性質] 準関数（DebugMask の mask_image.url 参照のみ・DB 書込なし）
-    [入力] debug_masks: DebugMask の iterable（同一 OriginalImage 配下）
-    [出力] (block1, block2)
-      block1: 1 回目（attempt_no=1）の (label, url|None) リスト。長さ常に 5。
-              順序は diff → edge → sat → or → closed。
-      block2: 2 回目（attempt_no=2）の (label, url|None) リスト。
-              attempt_no=2 のレコードが 1 件も無ければ [] を返す。
-              ある場合は or → closed の 2 件固定。
-    label の "mask_N" の番号は MaskType.choices の定義順（1〜5）に合わせる。
-    """
-    by_key = {(m.mask_type, m.attempt_no): m for m in debug_masks}
-    type_to_idx = {
-        mt: idx for idx, (mt, _) in enumerate(DebugMask.MaskType.choices, start=1)
-    }
-    verbose_of = dict(DebugMask.MaskType.choices)
-
-    def _entry(mask_type, attempt_no):
-        idx = type_to_idx[mask_type]
-        label = f"mask_{idx}: {verbose_of[mask_type]}"
-        rec = by_key.get((mask_type, attempt_no))
-        url = rec.mask_image.url if rec else None
-        return (label, url)
-
-    block1 = [_entry(mt, 1) for mt in _BLOCK1_MASK_TYPES]
-
-    has_attempt2 = any(m.attempt_no == 2 for m in debug_masks)
-    block2 = [_entry(mt, 2) for mt in _BLOCK2_MASK_TYPES] if has_attempt2 else []
-
-    return block1, block2
 
 
 def _build_mask_white_ratios(debug_masks):
@@ -461,76 +626,23 @@ def _build_mask_white_ratios(debug_masks):
     return ratios
 
 
-def _format_candidate(c):
-    """候補一覧テーブル表示用の整形済み文字列フィールドを付与した dict。"""
-    area = c.get("area") or 0
-    ratio = c.get("area_ratio") or 0
-    rect_size = c.get("rect_size") or [0, 0]
-    rect_center = c.get("rect_center") or [0, 0]
-    rw = rect_size[0] if len(rect_size) > 0 else 0
-    rh = rect_size[1] if len(rect_size) > 1 else 0
-    cx = rect_center[0] if len(rect_center) > 0 else 0
-    cy = rect_center[1] if len(rect_center) > 1 else 0
-    aspect = c.get("aspect_ratio")
-    return {
-        **c,
-        "area_str": f"{area:,.0f}",
-        "area_ratio_pct_str": f"{ratio * 100:.1f}",
-        "rect_w_str": f"{rw:.0f}",
-        "rect_h_str": f"{rh:.0f}",
-        "rect_cx_str": f"{cx:.0f}",
-        "rect_cy_str": f"{cy:.0f}",
-        "rect_angle_str": f"{(c.get('rect_angle') or 0):.1f}",
-        "aspect_ratio_str": (f"{aspect:.2f}" if aspect is not None else "-"),
-    }
-
-
-def _candidates_passed(debug_json):
-    last = _get_last_attempt(debug_json) or {}
-    cf = last.get("candidates_filter") or []
-    return [
-        _format_candidate(c)
-        for c in sorted(
-            (x for x in cf if x.get("passed")),
-            key=lambda x: -(x.get("area") or 0),
-        )
-    ]
-
-
-def _candidates_all(debug_json):
-    """passed 優先 → area 降順。"""
-    last = _get_last_attempt(debug_json) or {}
-    cf = last.get("candidates_filter") or []
-    return [
-        _format_candidate(c)
-        for c in sorted(
-            cf,
-            key=lambda x: (
-                0 if x.get("passed") else 1,
-                -(x.get("area") or 0),
-            ),
-        )
-    ]
-
-
 def _build_overlay_polygons(debug_json):
     """SVG polygon 用の points 文字列・重心・巨大候補フラグを事前計算したリスト。
 
     is_giant: results 内の area_ratio 中央値の 1.5 倍以上のものに True。
               ただし results が 1 件以下の場合は判定スキップ（全て False）。
 
-    対象は最終 attempt の results（反転リトライがあれば 2 回目、なければ 1 回目）。
+    対象は最終検出 integrated_results（通常・反転の統合。BC 化される集合と一致）。
     """
     if not debug_json:
         return []
-    last = _get_last_attempt(debug_json) or {}
     keys = ("top_left", "top_right", "bottom_right", "bottom_left")
     image_size = debug_json.get("image_size") or {}
     image_area = image_size.get("area") or 0
 
     # 各 polygon の座標と shoelace area を一旦計算
     raw = []
-    for r in last.get("results") or []:
+    for r in _final_results(debug_json):
         polygon = r.get("polygon") or {}
         coords = []
         for k in keys:

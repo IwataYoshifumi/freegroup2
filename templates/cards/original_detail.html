@@ -168,118 +168,125 @@
       <span class="app-collapsible__icon">▾</span>
     </button>
     <div class="app-collapsible-body">
-      <h3>1回目（通常処理）</h3>
-      <div class="app-mask-grid">
-        <div class="app-mask-grid__row">
-          {% for label, url in block1_mask_urls|slice:":3" %}
-            <div class="app-mask-grid__item">
-              <div class="app-mask-grid__label">{{ label }}</div>
-              {% if url %}
-                <a href="{{ url }}" target="_blank" rel="noopener">
-                  <img class="app-mask-grid__img" src="{{ url }}" alt="{{ label }}">
-                </a>
-              {% else %}
-                <p class="app-muted">マスク画像なし</p>
-              {% endif %}
-            </div>
-          {% endfor %}
-        </div>
-        <div class="app-mask-grid__row">
-          {% for label, url in block1_mask_urls|slice:"3:" %}
-            <div class="app-mask-grid__item">
-              <div class="app-mask-grid__label">{{ label }}</div>
-              {% if url %}
-                <a href="{{ url }}" target="_blank" rel="noopener">
-                  <img class="app-mask-grid__img" src="{{ url }}" alt="{{ label }}">
-                </a>
-              {% else %}
-                <p class="app-muted">マスク画像なし</p>
-              {% endif %}
-            </div>
-          {% endfor %}
-        </div>
-      </div>
+      <p class="app-muted" style="margin-top:0;">
+        クローズ後マスクに、そのマスク自身の候補を重畳：<span class="app-mask-legend app-mask-legend--passed">緑=採用</span>
+        / <span class="app-mask-legend app-mask-legend--near">赤=惜しい棄却</span>（aspect_invalid・面積比0.03以上のtoo_small／理由ラベル付き）。
+        ノイズ（zero_size・極小too_small）は描画しません。番号はセクション4テーブルの「#（マスク内）」と一致。
+      </p>
 
-      {% if block2_mask_urls %}
-        <h3>2回目（反転リトライ）</h3>
-        <div class="app-mask-grid">
-          <div class="app-mask-grid__row">
-            {% for label, url in block2_mask_urls %}
-              <div class="app-mask-grid__item">
-                <div class="app-mask-grid__label">{{ label }}</div>
-                {% if url %}
-                  <a href="{{ url }}" target="_blank" rel="noopener">
-                    <img class="app-mask-grid__img" src="{{ url }}" alt="{{ label }}">
-                  </a>
-                {% else %}
-                  <p class="app-muted">マスク画像なし</p>
-                {% endif %}
-              </div>
-            {% endfor %}
+      {% for blk in mask_attempt_blocks %}
+        <h3>{{ blk.title }}</h3>
+        {% if blk.raw %}
+          <div class="app-mask-grid">
+            <div class="app-mask-grid__row">
+              {% for m in blk.raw %}
+                <div class="app-mask-grid__item">
+                  <div class="app-mask-grid__label">{{ m.label }}</div>
+                  {% if m.url %}
+                    <a href="{{ m.url }}" target="_blank" rel="noopener">
+                      <img class="app-mask-grid__img" src="{{ m.url }}" alt="{{ m.label }}">
+                    </a>
+                  {% else %}
+                    <p class="app-muted">マスク画像なし</p>
+                  {% endif %}
+                </div>
+              {% endfor %}
+            </div>
           </div>
-        </div>
-      {% endif %}
+        {% endif %}
+        {% if blk.closed %}
+          <div class="app-mask-grid" style="margin-top:var(--app-space-md);">
+            <div class="app-mask-grid__row">
+              {% for m in blk.closed %}
+                <div class="app-mask-grid__item">
+                  <div class="app-mask-grid__label">{{ m.label }}（候補 {{ m.overlay|length }} 件）</div>
+                  {% if m.url %}
+                    {% if m.overlay and debug_json.image_size %}
+                      <div class="app-mask-overlay">
+                        <a href="{{ m.url }}" target="_blank" rel="noopener">
+                          <img class="app-mask-grid__img" src="{{ m.url }}" alt="{{ m.label }}">
+                        </a>
+                        <svg class="app-mask-overlay__svg"
+                             viewBox="0 0 {{ debug_json.image_size.width }} {{ debug_json.image_size.height }}"
+                             preserveAspectRatio="xMidYMid meet"
+                             xmlns="http://www.w3.org/2000/svg">
+                          {% for c in m.overlay %}
+                            <polygon class="app-debug-polygon app-debug-polygon--{{ c.category }}"
+                                     points="{{ c.points_str }}"></polygon>
+                            <text class="app-debug-polygon__label app-debug-polygon__label--mask"
+                                  x="{{ c.cx|floatformat:1 }}" y="{{ c.cy|floatformat:1 }}"
+                                  text-anchor="middle" dominant-baseline="central">{{ c.idx }}</text>
+                          {% endfor %}
+                        </svg>
+                      </div>
+                    {% else %}
+                      <a href="{{ m.url }}" target="_blank" rel="noopener">
+                        <img class="app-mask-grid__img" src="{{ m.url }}" alt="{{ m.label }}">
+                      </a>
+                    {% endif %}
+                  {% else %}
+                    <p class="app-muted">マスク画像なし</p>
+                  {% endif %}
+                </div>
+              {% endfor %}
+            </div>
+          </div>
+        {% endif %}
+      {% empty %}
+        <p class="app-muted">マスク画像がありません。</p>
+      {% endfor %}
     </div>
   </section>
 
-  {# ========== セクション 4: OpenCV 候補一覧テーブル ========== #}
+  {# ========== セクション 4: OpenCV 候補一覧テーブル（描画対象のみ・マスク別／マスク内 idx） ========== #}
   <section class="app-card app-collapsible is-open">
     <button type="button" class="app-collapsible__header" data-action="toggle-collapsible" aria-expanded="true">
-      <span>OpenCV 候補一覧テーブル</span>
+      <span>OpenCV 候補一覧テーブル（マスク上に描画した候補）</span>
       <span class="app-collapsible__icon">▾</span>
     </button>
     <div class="app-collapsible-body">
-      {% if candidates_all %}
-        <div class="app-candidates-toolbar">
-          <label class="app-candidates-toggle">
-            <input type="checkbox" class="js-show-rejected">
-            除外候補も表示する
-          </label>
-          <span class="app-candidates-counter">
-            表示中：<span class="js-candidates-visible">{{ candidates_passed|length }}</span> 件
-            / 全 <span class="js-candidates-total">{{ candidates_all|length }}</span> 件
-          </span>
-        </div>
+      {% if candidates_table %}
+        <p class="app-muted" style="margin-top:0;">
+          描画対象（採用＋惜しい棄却）のみ {{ candidates_table|length }} 件。# はマスク内連番でマスク画像の番号と一致。
+        </p>
         <div class="app-table-wrapper">
-          <table class="app-table app-candidates-table"
-                 data-passed-count="{{ candidates_passed|length }}"
-                 data-all-count="{{ candidates_all|length }}">
+          <table class="app-table">
             <thead>
               <tr>
-                <th>#</th>
-                <th>面積 (比率)</th>
-                <th>中心 (x, y)</th>
-                <th>サイズ (W × H)</th>
-                <th>角度</th>
+                <th>attempt</th>
+                <th>マスク</th>
+                <th># (マスク内)</th>
+                <th>採否</th>
+                <th>理由</th>
                 <th>縦横比</th>
-                <th>結果</th>
-                <th>除外理由</th>
+                <th>面積 (比率)</th>
+                <th>サイズ (W × H)</th>
               </tr>
             </thead>
             <tbody>
-              {% for c in candidates_all %}
+              {% for c in candidates_table %}
                 <tr class="{% if not c.passed %}is-rejected{% endif %}">
-                  <td>{{ c.index }}</td>
-                  <td>{{ c.area_str }} ({{ c.area_ratio_pct_str }}%)</td>
-                  <td>({{ c.rect_cx_str }}, {{ c.rect_cy_str }})</td>
-                  <td>{{ c.rect_w_str }} × {{ c.rect_h_str }}</td>
-                  <td>{{ c.rect_angle_str }}°</td>
-                  <td>{{ c.aspect_ratio_str }}</td>
+                  <td>{{ c.attempt_no }}</td>
+                  <td>{{ c.mask_name }}</td>
+                  <td>{{ c.idx }}</td>
                   <td>
                     {% if c.passed %}
-                      <span class="app-status-badge app-status-badge--success">✓ 通過</span>
+                      <span class="app-status-badge app-status-badge--success">✓ 採用</span>
                     {% else %}
-                      <span class="app-status-badge app-status-badge--error">✗ 除外</span>
+                      <span class="app-status-badge app-status-badge--error">✗ 惜しい棄却</span>
                     {% endif %}
                   </td>
-                  <td>{% if c.reject_reason %}{{ c.reject_reason }}{% else %}-{% endif %}</td>
+                  <td>{% if c.reason %}{{ c.reason }}{% else %}-{% endif %}</td>
+                  <td>{{ c.aspect_ratio_str }}</td>
+                  <td>{{ c.area_str }} ({{ c.area_ratio_pct_str }}%)</td>
+                  <td>{{ c.rect_w_str }} × {{ c.rect_h_str }}</td>
                 </tr>
               {% endfor %}
             </tbody>
           </table>
         </div>
       {% else %}
-        <p class="app-muted">候補がありません。</p>
+        <p class="app-muted">描画対象の候補がありません。</p>
       {% endif %}
     </div>
   </section>

@@ -1665,6 +1665,50 @@ form:has(.js-decision-additional_role:checked) .app-merge-survivor__label--prima
   stroke: rgba(120, 0, 30, 0.85);
 }
 
+/* セクション 3: クローズ後マスクへ候補矩形を重畳（マスク別・描画対象=採用/惜しい棄却のみ）。 */
+.app-mask-overlay {
+  position: relative;
+  display: inline-block;
+  max-width: 320px;
+  width: 100%;
+  line-height: 0;
+}
+
+.app-mask-overlay__svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+/* 採用=緑（基底 .app-debug-polygon を流用）／惜しい棄却=赤。基底の後に定義して上書きする。 */
+.app-debug-polygon--passed {
+  fill: rgba(34, 197, 94, 0.18);
+  stroke: rgb(34, 197, 94);
+}
+
+.app-debug-polygon--near {
+  fill: rgba(244, 63, 94, 0.16);
+  stroke: rgb(244, 63, 94);
+  stroke-width: 3;
+}
+
+/* マスクサムネ用ラベル（元画像用 120px は過大なため縮小）。 */
+.app-debug-polygon__label--mask {
+  font-size: 56px;
+  stroke-width: 1.5;
+}
+
+/* 凡例スウォッチ（緑=採用 / 赤=惜しい棄却）。 */
+.app-mask-legend {
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+.app-mask-legend--passed { color: #166534; background: rgba(34, 197, 94, 0.18); }
+.app-mask-legend--near { color: #991b1b; background: rgba(244, 63, 94, 0.16); }
+
 /* 検出失敗警告ストライプ（セクション 1 の上に表示） */
 .app-warning-stripe {
   background: #fee2e2;
