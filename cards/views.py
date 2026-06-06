@@ -982,6 +982,9 @@ class CardEditView(LoginRequiredMixin, View):
         再集計する。手動 Contact 作成経路（_confirm_business_card_as_done）と同じ集計に合流し、
         新しい集計ロジックは書かない。Contact は作らない（not_business_card は Contact を持たない）。
         BC 更新と status 再集計は同一トランザクションで行う。
+      - 「その他」設定（POST に mark_others）：既存4分類のどれにも当てはまらない BC を
+        ocr_result=others に設定する以外は「名刺でない」設定と同一経路（_finalize_bc）。
+        理由は error_message（メモ）欄に手入力する運用。Contact は作らない。
 
     ガード（業務ルール）：Contact を既に持つ BC は編集不可。reverse OneToOne の
     `getattr(bc, "contact", None)` で判定し、ある場合は messages.error + 名刺詳細へ redirect
@@ -1024,14 +1027,9 @@ class CardEditView(LoginRequiredMixin, View):
             )
 
         if "mark_not_business_card" in request.POST:
-            # 「名刺でない」終端化 + 既存集計に合流（BC 更新と status 再集計を同一トランザクション）。
-            with transaction.atomic():
-                card = form.save(commit=False)
-                card.ocr_result = BusinessCard.OcrResult.NOT_BUSINESS_CARD
-                card.ocr_status = BusinessCard.OcrStatus.DONE
-                card.claimed_at = None
-                card.save()
-                _update_original_image_status(card.original_image_id)
+            self._finalize_bc(form, BusinessCard.OcrResult.NOT_BUSINESS_CARD)
+        elif "mark_others" in request.POST:
+            self._finalize_bc(form, BusinessCard.OcrResult.OTHERS)
         else:
             # 通常保存：orientation / error_message のみ更新（ocr_status は変えない）。
             form.save()
@@ -1039,6 +1037,25 @@ class CardEditView(LoginRequiredMixin, View):
         back = BackNavigator(request)
         target_url = reverse("cards:card_detail", kwargs={"pk": bc.pk})
         return HttpResponseRedirect(back.append_url(target_url))
+
+    def _finalize_bc(self, form, ocr_result):
+        """[性質] 副作用あり（DB 書込）/ BC を ocr_result で終端化し元画像 status を再集計する。
+
+        「名刺でない」「その他」共通の終端化処理。ocr_status=done / claimed_at=None で OCR 待ち
+        行列（process_ocr が ocr_status=pending で選別）から確実に外し、orientation / error_message
+        などフォーム入力も同時保存する。BC 更新と status 再集計は同一トランザクション。
+        Contact は作らない（既存集計 _update_original_image_status に合流）。
+
+        [入力] form: BusinessCardEditForm（is_valid 済み）, ocr_result: BusinessCard.OcrResult
+        [出力] None
+        """
+        with transaction.atomic():
+            card = form.save(commit=False)
+            card.ocr_result = ocr_result
+            card.ocr_status = BusinessCard.OcrStatus.DONE
+            card.claimed_at = None
+            card.save()
+            _update_original_image_status(card.original_image_id)
 
     def _context(self, request, bc, form):
         return {

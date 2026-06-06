@@ -26,7 +26,7 @@
       <img src="{{ card.get_card_image_url_busted }}" alt="名刺画像"
            style="max-width:300px; width:100%; border-radius:8px; margin-bottom:var(--app-space-md);">
       {# 回転焼き直し：押すたびに card_image を実際に 90° 回して上書きする（編集フォームとは別フォーム）。 #}
-      <div class="app-action-area" style="margin-bottom:var(--app-space-md);">
+      <div class="app-action-area" style="margin-bottom:var(--app-space-md); justify-content:flex-start;">
         <form method="post" action="{% url 'cards:card_rotate' card.pk %}" style="display:inline;">
           {% csrf_token %}
           {% hidden_back_field back %}
@@ -66,13 +66,6 @@
         </div>
       </div>
 
-      <div class="app-action-area" style="margin-top:24px;">
-        <button type="submit" class="app-btn app-btn--primary">保存</button>
-        {% if back.back_exist %}
-          <a href="{% back_url back %}" class="app-btn app-btn--secondary">戻る</a>
-        {% endif %}
-      </div>
-
       <div style="margin-top:var(--app-space-md); border-top:1px solid var(--app-border); padding-top:var(--app-space-md);">
         <p class="app-muted" style="font-size:13px; margin:0 0 8px;">
           この名刺を「名刺ではない」に設定すると OCR 待ちから外れます（コンタクトは作成されません）。
@@ -80,6 +73,23 @@
         </p>
         <button type="submit" name="mark_not_business_card" value="1"
                 class="app-btn app-btn--danger js-mark-not-bc-btn">名刺ではない に設定</button>
+      </div>
+
+      <div style="margin-top:var(--app-space-md); border-top:1px solid var(--app-border); padding-top:var(--app-space-md);">
+        <p class="app-muted" style="font-size:13px; margin:0 0 8px;">
+          複数名刺の同居など既存4分類のどれにも当てはまらない場合に「その他」に設定すると
+          OCR 待ちから外れます（コンタクトは作成されません）。具体的な理由は上のエラーメッセージ（メモ）欄に
+          記入してください。上の入力内容も同時に反映されます。
+        </p>
+        <button type="submit" name="mark_others" value="1"
+                class="app-btn app-btn--danger js-mark-others-btn">その他 に設定</button>
+      </div>
+
+      <div class="app-action-area" style="margin-top:var(--app-space-md); border-top:1px solid var(--app-border); padding-top:var(--app-space-md);">
+        <button type="submit" class="app-btn app-btn--primary">保存</button>
+        {% if back.back_exist %}
+          <a href="{% back_url back %}" class="app-btn app-btn--secondary">戻る</a>
+        {% endif %}
       </div>
     </form>
   </section>
@@ -90,6 +100,15 @@
       if (!btn) return;
       btn.addEventListener('click', function (event) {
         if (!window.confirm('この名刺を「名刺ではない」に設定します。よろしいですか？')) {
+          event.preventDefault();
+        }
+      });
+    })();
+    (function () {
+      var btn = document.querySelector('.js-mark-others-btn');
+      if (!btn) return;
+      btn.addEventListener('click', function (event) {
+        if (!window.confirm('この名刺を「その他」に設定します。よろしいですか？')) {
           event.preventDefault();
         }
       });
