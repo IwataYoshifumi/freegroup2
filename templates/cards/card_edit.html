@@ -66,6 +66,8 @@
         </div>
       </div>
 
+      {# 終端化（名刺ではない / その他）は OCR待ち（can_finalize＝View で ocr_result is None を判定）の BC でのみ表示。詳細画面の can_create_contact と同条件・POST 側 _finalize_bc の行ロック再チェックと二重構え #}
+      {% if can_finalize %}
       <div style="margin-top:var(--app-space-md); border-top:1px solid var(--app-border); padding-top:var(--app-space-md);">
         <p class="app-muted" style="font-size:13px; margin:0 0 8px;">
           この名刺を「名刺ではない」に設定すると OCR 待ちから外れます（コンタクトは作成されません）。
@@ -84,6 +86,7 @@
         <button type="button" data-action="open-modal" data-target="confirmOthersModal"
                 class="app-btn app-btn--danger js-mark-others-btn">その他 に設定</button>
       </div>
+      {% endif %}
 
       <div class="app-action-area" style="margin-top:var(--app-space-md); border-top:1px solid var(--app-border); padding-top:var(--app-space-md);">
         <button type="submit" class="app-btn app-btn--primary">保存</button>
@@ -97,6 +100,7 @@
   {# 終端化確認モーダル（window.confirm 廃止・既存 app-modal 機構に準拠）。承認ボタンは form="cardEditForm" で上のフォームを submit し name/value・送信先・サーバ側処理は不変。キャンセルは閉じるだけ。backdrop は app.js が参照する共通要素。 #}
   <div class="app-modal-backdrop" hidden></div>
 
+  {% if can_finalize %}
   <div class="app-modal" id="confirmNotBcModal" hidden role="dialog" aria-modal="true">
     <div class="app-modal__panel">
       <div class="app-modal__header">
@@ -130,4 +134,5 @@
       </div>
     </div>
   </div>
+  {% endif %}
 {% endblock %}

@@ -99,6 +99,80 @@ class CardEditViewTests(TestCase):
         original.refresh_from_db()
         self.assertEqual(original.status, OriginalImage.STATUS_CARDS_EXTRACTED)
 
+    # --- P1: 再終端化ガード（ocr_result is None の BC だけ終端化可） ---
+    def test_finalize_blocked_when_already_terminalized(self):
+        """終端化済み（ocr_result 非 None）の BC は POST しても再終端化されない（後勝ち防止）。"""
+        for existing in (
+            BusinessCard.OcrResult.NOT_BUSINESS_CARD,
+            BusinessCard.OcrResult.OTHERS,
+            BusinessCard.OcrResult.BUSINESS_CARD,
+            BusinessCard.OcrResult.INSUFFICIENT_INFO,
+            BusinessCard.OcrResult.OCR_FAILED,
+        ):
+            for post_key in ("mark_not_business_card", "mark_others"):
+                bc = self._bc(
+                    self._original(),
+                    ocr_result=existing,
+                    ocr_status=BusinessCard.OcrStatus.DONE,
+                    error_message="既存メモ",
+                )
+                resp = self.client.post(
+                    self._edit_url(bc),
+                    {
+                        "orientation": BusinessCard.ORIENTATION_NORMAL,
+                        "error_message": "上書き試行",
+                        post_key: "1",
+                    },
+                )
+                # 弾かれて名刺詳細へ redirect
+                self.assertEqual(resp.status_code, 302)
+                self.assertEqual(
+                    resp.url, reverse("cards:card_detail", kwargs={"pk": bc.pk})
+                )
+                bc.refresh_from_db()
+                # 分類もメモも上書きされない
+                self.assertEqual(
+                    bc.ocr_result, existing, msg=f"{existing}/{post_key}"
+                )
+                self.assertEqual(bc.error_message, "既存メモ")
+
+    def test_finalize_allowed_when_ocr_result_null(self):
+        """ocr_result=None（OCR待ち）の BC は従来どおり終端化できる。"""
+        bc = self._bc(self._original())
+        self.assertIsNone(bc.ocr_result)
+        resp = self.client.post(
+            self._edit_url(bc),
+            {
+                "orientation": BusinessCard.ORIENTATION_NORMAL,
+                "error_message": "",
+                "mark_others": "1",
+            },
+        )
+        self.assertEqual(resp.status_code, 302)
+        bc.refresh_from_db()
+        self.assertEqual(bc.ocr_result, BusinessCard.OcrResult.OTHERS)
+
+    def test_edit_get_hides_finalize_buttons_when_terminalized(self):
+        bc = self._bc(
+            self._original(),
+            ocr_result=BusinessCard.OcrResult.OTHERS,
+            ocr_status=BusinessCard.OcrStatus.DONE,
+        )
+        resp = self.client.get(self._edit_url(bc))
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, "名刺ではない に設定")
+        self.assertNotContains(resp, "その他 に設定")
+        # 通常保存フォーム（向き/メモ）は従来どおり表示
+        self.assertContains(resp, 'name="orientation"')
+        self.assertContains(resp, 'name="error_message"')
+
+    def test_edit_get_shows_finalize_buttons_when_pending(self):
+        bc = self._bc(self._original())  # ocr_result=None
+        resp = self.client.get(self._edit_url(bc))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "名刺ではない に設定")
+        self.assertContains(resp, "その他 に設定")
+
     # --- 「その他」設定 → ocr_result=others で終端化 + 行列から除外 ---
     def test_mark_others_finalizes_and_excluded_from_ocr_queue(self):
         original = self._original()
@@ -216,3 +290,68 @@ class CardEditViewTests(TestCase):
         resp = self.client.get(reverse("cards:card_detail", kwargs={"pk": bc.pk}))
         self.assertEqual(resp.status_code, 200)
         self.assertNotContains(resp, "名刺を編集")
+
+    # --- v1.7: 新規コンタクト作成ボタンの表示制御（ocr_result is null のときだけ） ---
+    def test_detail_shows_create_contact_button_when_ocr_result_null(self):
+        # _bc は ocr_result=None（モデル default）で作られる＝OCR待ち
+        bc = self._bc(self._original())
+        self.assertIsNone(bc.ocr_result)
+        resp = self.client.get(reverse("cards:card_detail", kwargs={"pk": bc.pk}))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "新規コンタクト作成")
+
+    def test_detail_hides_create_contact_button_when_ocr_result_set(self):
+        # ocr_result に値が入っていれば（5値いずれでも）ボタンは出さない
+        for result in (
+            BusinessCard.OcrResult.BUSINESS_CARD,
+            BusinessCard.OcrResult.NOT_BUSINESS_CARD,
+            BusinessCard.OcrResult.INSUFFICIENT_INFO,
+            BusinessCard.OcrResult.OCR_FAILED,
+            BusinessCard.OcrResult.OTHERS,
+        ):
+            bc = self._bc(
+                self._original(),
+                ocr_result=result,
+                ocr_status=BusinessCard.OcrStatus.DONE,
+            )
+            resp = self.client.get(
+                reverse("cards:card_detail", kwargs={"pk": bc.pk})
+            )
+            self.assertEqual(resp.status_code, 200)
+            self.assertNotContains(
+                resp, "新規コンタクト作成", msg_prefix=f"ocr_result={result}"
+            )
+
+    def test_detail_hides_create_contact_button_when_contact_linked(self):
+        original = self._original()
+        bc = self._bc(original)
+        person = Person.objects.create(status=Person.Status.ACTIVE)
+        Contact.objects.create(
+            person=person,
+            status=Contact.Status.PRIMARY,
+            business_card=bc,
+            full_name="既存三郎",
+        )
+        resp = self.client.get(reverse("cards:card_detail", kwargs={"pk": bc.pk}))
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, "新規コンタクト作成")
+
+    # --- v1.7: ocr_status バッジ（別表 C.13 ラベル）併記 ---
+    def test_detail_shows_ocr_status_badge_label(self):
+        bc_pending = self._bc(self._original())  # ocr_status=pending
+        resp = self.client.get(
+            reverse("cards:card_detail", kwargs={"pk": bc_pending.pk})
+        )
+        self.assertContains(resp, "OCR待ち")
+
+        bc_done = self._bc(
+            self._original(),
+            ocr_status=BusinessCard.OcrStatus.DONE,
+            ocr_result=BusinessCard.OcrResult.NOT_BUSINESS_CARD,
+        )
+        resp_done = self.client.get(
+            reverse("cards:card_detail", kwargs={"pk": bc_done.pk})
+        )
+        # ocr_status=done のバッジラベル「完了」が併記される（ocr_result バッジ「名刺ではない」も残る）
+        self.assertContains(resp_done, "完了")
+        self.assertContains(resp_done, "名刺ではない")

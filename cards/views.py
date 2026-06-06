@@ -929,6 +929,11 @@ class CardDetailView(DetailView):
         contact = getattr(self.object, "contact", None)
         context["contact"] = contact
 
+        # v1.7: 「新規コンタクト作成」ボタンは OCR 判定がまだ下りていない（ocr_result is None＝OCR待ち）
+        # BC でのみ表示する。判定はサーバ側で行い、None と空文字を厳密に区別する（モデル default=None 基準）。
+        # Contact 紐付け済みのガードはテンプレ側 {% if contact %} 分岐が従来どおり担う。
+        context["can_create_contact"] = self.object.ocr_result is None
+
         # Contact 編集 UI 用 context（ContactDetailView と同等、_contact_field.html 再利用）。
         # contact が None なら編集セクションを丸ごと出さないため、空辞書 + False で安全に。
         if contact is not None:
@@ -1027,12 +1032,19 @@ class CardEditView(LoginRequiredMixin, View):
             )
 
         if "mark_not_business_card" in request.POST:
-            self._finalize_bc(form, BusinessCard.OcrResult.NOT_BUSINESS_CARD)
+            finalized = self._finalize_bc(form, BusinessCard.OcrResult.NOT_BUSINESS_CARD)
         elif "mark_others" in request.POST:
-            self._finalize_bc(form, BusinessCard.OcrResult.OTHERS)
+            finalized = self._finalize_bc(form, BusinessCard.OcrResult.OTHERS)
         else:
             # 通常保存：orientation / error_message のみ更新（ocr_status は変えない）。
             form.save()
+            finalized = None
+
+        # 再終端化ガード（P1）：既に終端化済み（ocr_result 非 None）の BC を別ワーカーが
+        # 同時終端化した場合、_finalize_bc が False を返す。後勝ち上書きを起こさず弾く。
+        if finalized is False:
+            messages.error(request, "この名刺は既に処理済みのため、再設定できません。")
+            return redirect("cards:card_detail", pk=bc.pk)
 
         back = BackNavigator(request)
         target_url = reverse("cards:card_detail", kwargs={"pk": bc.pk})
@@ -1046,16 +1058,26 @@ class CardEditView(LoginRequiredMixin, View):
         などフォーム入力も同時保存する。BC 更新と status 再集計は同一トランザクション。
         Contact は作らない（既存集計 _update_original_image_status に合流）。
 
+        再終端化ガード（P1・並列運用対策）：対象 BC を select_for_update で行ロックし、ocr_result が
+        まだ None（OCR待ち）であることを最新の committed 状態で再確認してからのみ更新する。既に
+        終端化済み（ocr_result が非 None）なら更新せず False を返し、後勝ちの分類/メモ上書きを防ぐ。
+        None 判定はモデル default=None 基準で厳密に行う（空文字とは区別）。
+
         [入力] form: BusinessCardEditForm（is_valid 済み）, ocr_result: BusinessCard.OcrResult
-        [出力] None
+        [出力] bool（True=終端化を実行 / False=既に終端化済みのため弾いた）
         """
         with transaction.atomic():
             card = form.save(commit=False)
+            # 行ロック後に最新状態で再チェック（チェック〜更新の割り込みを防ぐ）。
+            locked = BusinessCard.objects.select_for_update().get(pk=card.pk)
+            if locked.ocr_result is not None:
+                return False
             card.ocr_result = ocr_result
             card.ocr_status = BusinessCard.OcrStatus.DONE
             card.claimed_at = None
             card.save()
             _update_original_image_status(card.original_image_id)
+        return True
 
     def _context(self, request, bc, form):
         return {
@@ -1064,6 +1086,9 @@ class CardEditView(LoginRequiredMixin, View):
             "back": BackNavigator(request),
             "active_app": "cards",
             "active_menu": "cards:card_list",
+            # 終端化（名刺ではない / その他）ボタンは OCR待ち（ocr_result is None）の BC でのみ表示。
+            # 詳細画面の can_create_contact と同条件。POST 側 _finalize_bc の行ロック再チェックと二重構え。
+            "can_finalize": bc.ocr_result is None,
         }
 
 

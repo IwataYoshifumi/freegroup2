@@ -77,11 +77,16 @@
           </div>
 
           {# OCR処理結果。一覧と同じ ocr_result_badge を流用。空(business_card/done+null)時のみ get_ocr_result_display にフォールバック #}
+          {# v1.7: 既存 ocr_result バッジの隣に ocr_status バッジ（別表 C.13 ラベル）を併記する（置換ではない・表示のみ） #}
           <div class="app-detail-item" style="margin-top: var(--app-space-sm);">
             <div class="app-detail-label">OCR処理結果</div>
-            <div class="app-detail-value">
+            <div class="app-detail-value" style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
               {% ocr_result_badge card as ocr_badge_html %}
               {% if ocr_badge_html %}{{ ocr_badge_html }}{% else %}{{ card.get_ocr_result_display|default:"—" }}{% endif %}
+              {% if card.ocr_status == "pending" %}<span class="app-status-badge app-status-badge--muted">OCR待ち</span>
+              {% elif card.ocr_status == "processing" %}<span class="app-status-badge app-status-badge--info">OCR中</span>
+              {% elif card.ocr_status == "done" %}<span class="app-status-badge app-status-badge--success">完了</span>
+              {% elif card.ocr_status == "failed" %}<span class="app-status-badge app-status-badge--error">失敗</span>{% endif %}
             </div>
           </div>
 
@@ -191,15 +196,18 @@
           {% endif %}
         {% else %}
           <p class="app-muted">Contact が紐付いていません。</p>
-          {% url 'contacts:contact_create' as contact_create_url %}
-          {% with bc_id=card.id|stringformat:"s" %}
-            <div style="margin-top: var(--app-space-md);">
-              <a href="{% append_back_url contact_create_url|add:"?business_card="|add:bc_id back %}"
-                 class="app-btn app-btn--primary">
-                新規コンタクト作成
-              </a>
-            </div>
-          {% endwith %}
+          {# v1.7: 新規コンタクト作成は OCR 判定未確定（can_create_contact＝View 側で ocr_result is None を厳密判定）の BC でのみ表示 #}
+          {% if can_create_contact %}
+            {% url 'contacts:contact_create' as contact_create_url %}
+            {% with bc_id=card.id|stringformat:"s" %}
+              <div style="margin-top: var(--app-space-md);">
+                <a href="{% append_back_url contact_create_url|add:"?business_card="|add:bc_id back %}"
+                   class="app-btn app-btn--primary">
+                  新規コンタクト作成
+                </a>
+              </div>
+            {% endwith %}
+          {% endif %}
         {% endif %}
       </div>
     </div>
