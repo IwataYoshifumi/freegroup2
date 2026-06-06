@@ -42,6 +42,12 @@ _ADAPTIVE_C = 10
 _ASPECT_MIN = 1.52
 _ASPECT_MAX = 1.8
 
+# 面積比の固定下限（候補面積 ÷ 画像全体面積）。これ未満は小片ゴミ（文字ブロック・ロゴ・
+# 帯状の小片）として棄却する。絶対px下限 _DEFAULT_MIN_CARD_AREA_PX とは別軸の、画像解像度に
+# 依存しない相対下限（高解像度画像では絶対8000px²が実質無効になるのを補う）。img7(56aa7858)の
+# 177×102＝面積比0.6%の小片を落とす目的で 1.0% に設定。分母はベースライン測定と同じ画像全体面積。
+_AREA_RATIO_MIN = 0.01
+
 # ── 未確定パラメータ（settings から読む・仮値・評価基準で詰める） ──
 # rev2 §1.2.4（絶対下限）／§1.4・§4.2（統合の IoU・中心距離）参照。ハードコードせず
 # settings 値を優先し、settings 未設定時のみ下記フォールバック（= settings の仮値と同値）。
@@ -450,6 +456,9 @@ def _extract_candidates_from_mask(mask_closed: np.ndarray, image_area: int) -> t
         hull = cv2.convexHull(cnt)
         rect = cv2.minAreaRect(hull)
         (cx, cy), (rw, rh), angle = rect
+        # 候補面積比は minAreaRect の矩形面積 ÷ 画像全体面積（＝ベースライン測定の面積%と同基準）。
+        # contourArea(area) はエッジ輪郭だと矩形より大幅に小さく出るため、面積比下限には使わない。
+        rect_area_ratio = ((rw * rh) / image_area) if image_area > 0 else 0.0
 
         passed_flag = False
         reject_reason = ""
@@ -460,6 +469,9 @@ def _extract_candidates_from_mask(mask_closed: np.ndarray, image_area: int) -> t
         elif area < min_area:
             # OCR 不能な極小候補を落とす緩い絶対下限のみ（採否の主基準ではない・rev2 §1.2.4）
             reject_reason = "too_small"
+        elif rect_area_ratio < _AREA_RATIO_MIN:
+            # 画像全体に対し小さすぎる小片（文字ブロック・ロゴ等）を落とす固定下限（論点1）
+            reject_reason = "area_ratio_too_small"
         else:
             aspect_ratio = max(rw, rh) / min(rw, rh)
             if not (_ASPECT_MIN <= aspect_ratio <= _ASPECT_MAX):
