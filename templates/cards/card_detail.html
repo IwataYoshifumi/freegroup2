@@ -52,7 +52,7 @@
         <div class="app-section__header"><h2>名刺画像</h2></div>
 
         {% if card.card_image %}
-          <img src="{{ card.card_image.url }}"
+          <img src="{{ card.get_card_image_url_busted }}"
                alt="名刺画像"
                style="max-width:300px; width:100%; cursor:pointer; border-radius:8px;"
                data-action="open-modal"
@@ -287,7 +287,7 @@
               <a href="{% append_back_url sibling_url back %}" class="app-list-card" style="display:flex; align-items:center; gap:var(--app-space-sm); text-decoration:none; color:inherit;">
                 <div style="flex:0 0 auto;">
                   {% if sibling.card_image %}
-                    <img src="{{ sibling.card_image.url }}" alt="名刺サムネイル" style="max-height:56px; max-width:120px; border-radius:4px;">
+                    <img src="{{ sibling.get_card_image_url_busted }}" alt="名刺サムネイル" style="max-height:56px; max-width:120px; border-radius:4px;">
                   {% else %}
                     <span class="app-muted" style="display:inline-block; min-width:96px; text-align:center;">画像なし</span>
                   {% endif %}
@@ -372,7 +372,7 @@
           <button class="app-btn app-btn--sm" data-action="close-modal">閉じる</button>
         </div>
         <div class="app-modal__body" style="text-align:center;">
-          <img src="{{ card.card_image.url }}" alt="名刺画像" style="max-width:100%;">
+          <img src="{{ card.get_card_image_url_busted }}" alt="名刺画像" style="max-width:100%;">
         </div>
       </div>
     </div>

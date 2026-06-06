@@ -406,7 +406,7 @@
                 </td>
                 <td>
                   {% if card.card_image %}
-                    <img src="{{ card.card_image.url }}" alt="名刺サムネイル" style="max-height:96px;max-width:200px;border-radius:4px;display:block;">
+                    <img src="{{ card.get_card_image_url_busted }}" alt="名刺サムネイル" style="max-height:96px;max-width:200px;border-radius:4px;display:block;">
                   {% else %}
                     <span class="app-muted">画像なし</span>
                   {% endif %}

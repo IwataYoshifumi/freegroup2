@@ -23,6 +23,7 @@ from django.urls import reverse
 from django.utils.dateparse import parse_date
 from django.views import View
 from django.views.generic import DetailView, ListView
+from PIL import Image
 
 from back_navigator.back_navigator import BackNavigator
 
@@ -56,6 +57,44 @@ def get_current_user(request):
 
 def placeholder_view(request):
     return HttpResponse("準備中", content_type="text/plain; charset=utf-8")
+
+
+def _overwrite_image_file(img, path, image_format):
+    """[性質] 副作用あり（ファイル上書き）。img を path へ image_format 形式で上書き保存する。
+
+    回転焼き直し（_rotate_and_overwrite_card_image）のファイル書き込み部分を分離した
+    ヘルパー。失敗時に呼び出し側のトランザクションをロールバックさせるため例外はそのまま伝播する。
+    """
+    img.save(path, format=image_format)
+
+
+def _rotate_and_overwrite_card_image(card, direction):
+    """[性質] 副作用あり（DB 書込 + 画像ファイル上書き）。card_image を実際に 90° 回す。
+
+    [入力] card: BusinessCard（card_image を持つこと）, direction: str（"cw"=時計回り90° /
+            "ccw"=反時計回り90°）
+    [出力] None
+
+    OSD 正立化後の card_image を Pillow で direction 方向に 90° 回し、同一ファイルパスへ上書き
+    保存する。あわせて orientation を normal にリセットする（実画像と orientation バッジの食い違いを
+    消すため）。DB 更新（orientation / updated_at）とファイル上書きは同一トランザクションで行い、
+    ファイル保存に失敗した場合は DB 変更もロールバックする（中途半端な状態を残さない）。
+    元の切り抜き前画像（OriginalImage 側）には一切触れない。
+    """
+    path = card.card_image.path
+    with Image.open(path) as opened:
+        opened.load()
+        # PIL の ROTATE_* は反時計回り基準：ROTATE_270 = 時計回り90°、ROTATE_90 = 反時計回り90°。
+        if direction == "cw":
+            rotated = opened.transpose(Image.Transpose.ROTATE_270)
+        else:
+            rotated = opened.transpose(Image.Transpose.ROTATE_90)
+        image_format = opened.format or "JPEG"
+
+    with transaction.atomic():
+        card.orientation = BusinessCard.ORIENTATION_NORMAL
+        card.save(update_fields=["orientation", "updated_at"])
+        _overwrite_image_file(rotated, path, image_format)
 
 
 class UploadView(View):
@@ -1009,3 +1048,50 @@ class CardEditView(LoginRequiredMixin, View):
             "active_app": "cards",
             "active_menu": "cards:card_list",
         }
+
+
+class CardRotateView(LoginRequiredMixin, View):
+    """名刺画像の 90° 回転焼き直し（v1.7）。
+
+    対象は **Contact 未生成の BC のみ**（CardEditView と同じ業務ガード）。POST 専用で、
+    direction（"cw"=時計回り90° / "ccw"=反時計回り90°）に従い card_image を実際に回して
+    同一パスへ上書きし、orientation を normal にリセットする（_rotate_and_overwrite_card_image）。
+    処理後は名刺編集画面へ redirect（back チェーンを保持）。表示側のキャッシュバスティングは
+    BusinessCard.get_card_image_url_busted（updated_at ベース）で担保する。
+
+    ガード：Contact 済み BC はサーバ側で弾く（テンプレ側の回転ボタン非表示と二重構え）。
+    所有者スコープ（original_image__user）も既存流儀に揃える。
+    """
+
+    def post(self, request, pk):
+        user = get_current_user(request)
+        bc = get_object_or_404(
+            BusinessCard.objects.select_related("original_image", "contact"),
+            pk=pk,
+            original_image__user=user,
+        )
+        if getattr(bc, "contact", None) is not None:
+            messages.error(
+                request, "この名刺は既にコンタクトが紐づいているため回転できません。"
+            )
+            return redirect("cards:card_detail", pk=bc.pk)
+        if not bc.card_image:
+            messages.error(request, "画像がないため回転できません。")
+            return redirect("cards:card_edit", pk=bc.pk)
+
+        direction = request.POST.get("direction")
+        if direction not in ("cw", "ccw"):
+            messages.error(request, "回転方向が不正です。")
+            return redirect("cards:card_edit", pk=bc.pk)
+
+        try:
+            _rotate_and_overwrite_card_image(bc, direction)
+        except Exception:
+            logger.exception("card_image rotate failed: pk=%s direction=%s", pk, direction)
+            messages.error(request, "画像の回転に失敗しました。")
+            return redirect("cards:card_edit", pk=bc.pk)
+
+        messages.success(request, "名刺画像を回転しました。")
+        back = BackNavigator(request)
+        target_url = reverse("cards:card_edit", kwargs={"pk": bc.pk})
+        return HttpResponseRedirect(back.append_url(target_url))
