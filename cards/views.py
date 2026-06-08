@@ -10,6 +10,7 @@ import math
 import statistics
 from collections import Counter
 
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import get_user_model
 from django.contrib.auth.mixins import LoginRequiredMixin
@@ -17,7 +18,7 @@ from django.core.exceptions import ValidationError
 from django.core.files.base import ContentFile
 from django.db import transaction
 from django.db.models import Count, Exists, OuterRef, Q
-from django.http import HttpResponse, HttpResponseRedirect
+from django.http import Http404, HttpResponse, HttpResponseRedirect
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils.dateparse import parse_date
@@ -266,6 +267,9 @@ class OriginalDetailView(DetailView):
         context = super().get_context_data(**kwargs)
         context["active_app"] = "cards"
         context["active_menu"] = "originals:original_list"
+        # 再検出ボタンの表示可否。本番では非表示（実行ガードは RecalcDebugView 側が本体）。
+        # Django 標準の {% if debug %} は INTERNAL_IPS 依存で罠があるため View から明示的に渡す。
+        context["recalc_debug_enabled"] = settings.DEBUG
         business_cards = self.object.businesscard_set.all().order_by("created_at")
         context["business_cards"] = business_cards
         context["back"] = BackNavigator(self.request)
@@ -733,9 +737,15 @@ class RecalcDebugView(View):
     recalc_opencv_debug() で 3 ステップ（clear → detect → save）を実行する。
     OriginalImage.status / BusinessCard / raw_json は触らない。
     GET / その他メソッドは Django 標準の 405 応答（method_not_allowed）が返る。
+
+    再検出は debug_json を丸ごと再生成・上書きするため、本番（settings.DEBUG=False）では
+    塞ぐ。非 DEBUG では画面ボタンを隠すだけでなく URL 直叩き POST も 404 で弾く
+    （表示制御は補助、本体はこの View 側の実行ガード）。
     """
 
     def post(self, request, pk):
+        if not settings.DEBUG:
+            raise Http404("recalc_debug is available only when DEBUG is enabled")
         user = get_current_user(request)
         original = get_object_or_404(OriginalImage, pk=pk, user=user)
         recalc_opencv_debug(original)

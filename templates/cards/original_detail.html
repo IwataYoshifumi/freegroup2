@@ -61,6 +61,7 @@
   <section class="app-card">
     <div class="app-section__header">
       <h2>ステータス・処理情報・検出統計</h2>
+      {% if recalc_debug_enabled %}
       <form method="post" action="{% url 'originals:recalc_debug' pk=original.id %}"
             class="js-recalc-debug-form" style="margin: 0;">
         {% csrf_token %}
@@ -68,6 +69,7 @@
           OpenCV 検出を再計算
         </button>
       </form>
+      {% endif %}
     </div>
 
     <div class="app-detail-grid">
