@@ -10,6 +10,7 @@ import math
 import statistics
 from collections import Counter
 
+import numpy as np
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import get_user_model
@@ -17,8 +18,8 @@ from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import ValidationError
 from django.core.files.base import ContentFile
 from django.db import transaction
-from django.db.models import Count, Exists, OuterRef, Q
-from django.http import Http404, HttpResponse, HttpResponseRedirect
+from django.db.models import Count, Exists, Max, OuterRef, Q
+from django.http import Http404, HttpResponse, HttpResponseRedirect, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils.dateparse import parse_date
@@ -35,7 +36,10 @@ from .services.image_processor import (
     extract_exif_to_json,
     validate_image,
 )
+from .services.detectors.opencv_detector import warp_card_from_points
 from .services.opencv_debug_cache import recalc_opencv_debug
+from .services.osd import apply_upright
+from .tasks.crop_cards import _unlink_card_image, save_and_create_business_card
 from .tasks.ocr_pipeline import _update_original_image_status
 from config.constants import DUPLICATE_CHECK_FIELDS
 from contacts.models import Contact, ContactFieldConfidence
@@ -750,6 +754,191 @@ class RecalcDebugView(View):
         original = get_object_or_404(OriginalImage, pk=pk, user=user)
         recalc_opencv_debug(original)
         return redirect("originals:original_detail", pk=original.id)
+
+
+# 手動切り出しで受け付ける回転角（時計回り度数）。
+_MANUAL_CROP_ROTATIONS = (0, 90, 180, 270)
+
+
+def _validate_manual_points(points):
+    """[性質] 純関数 / 手動4点入力を検証し (ok, parsed, message) を返す。
+
+    [入力] points: リクエスト由来の4点（[[x, y], ...] または [{"x":, "y":}, ...]）
+    [出力] (ok: bool, parsed: list[tuple[float, float]] | None, message: str)
+           ok=True のとき parsed は (x, y) 4 組。ok=False のとき message にエラー理由。
+    """
+    if not isinstance(points, (list, tuple)) or len(points) != 4:
+        return False, None, "4点の座標が必要です。"
+    parsed = []
+    for p in points:
+        if isinstance(p, (list, tuple)) and len(p) == 2:
+            x, y = p[0], p[1]
+        elif isinstance(p, dict) and "x" in p and "y" in p:
+            x, y = p["x"], p["y"]
+        else:
+            return False, None, "各点は [x, y] または {x, y} 形式で指定してください。"
+        # bool は int のサブクラスなので明示的に弾く。
+        if isinstance(x, bool) or isinstance(y, bool) or not isinstance(x, (int, float)) \
+                or not isinstance(y, (int, float)):
+            return False, None, "座標は数値で指定してください。"
+        parsed.append((float(x), float(y)))
+    return True, parsed, ""
+
+
+class ManualCropView(View):
+    """元画像上で手動指定された4点から名刺を切り出し BusinessCard を作る（POST 専用・JSON）。
+
+    自動検出（OpenCV）が取りこぼした名刺を、ユーザーが元画像上で4隅を指定して切り出す経路。
+    入力（JSON body）:
+        {"points": [[x, y], [x, y], [x, y], [x, y]], "rotation": 0|90|180|270}
+        points  : 元画像ピクセル座標の4点（任意順）。[x, y] / {"x":, "y":} の両形式可。
+        rotation: 切り出し後に適用する時計回り角度（apply_upright に渡す）。
+    所有者スコープは既存 View 群を踏襲（get_current_user + user 付き get_object_or_404）。
+    成功時 201 で BusinessCard の id / card_index / 詳細 URL を JSON で返す。
+    入力不正・小さすぎ等は 400、作成失敗は 500（いずれも JSON エラー応答・例外を外に漏らさない）。
+    GET / その他メソッドは Django 標準の 405 応答。
+    """
+
+    def post(self, request, pk):
+        user = get_current_user(request)
+        original = get_object_or_404(OriginalImage, pk=pk, user=user)
+
+        # ── 入力パース＋バリデーション（400・500 で落とさない） ──
+        try:
+            payload = json.loads(request.body or b"{}")
+        except (ValueError, TypeError):
+            return JsonResponse({"error": "JSON ボディが不正です。"}, status=400)
+        if not isinstance(payload, dict):
+            return JsonResponse({"error": "JSON ボディが不正です。"}, status=400)
+
+        ok, parsed_points, msg = _validate_manual_points(payload.get("points"))
+        if not ok:
+            return JsonResponse({"error": msg}, status=400)
+
+        rotation = payload.get("rotation", 0)
+        if rotation not in _MANUAL_CROP_ROTATIONS:
+            return JsonResponse(
+                {"error": "回転角は 0 / 90 / 180 / 270 のいずれかにしてください。"}, status=400
+            )
+
+        # 座標の範囲チェック（image_size があれば上限も照合、無ければ 0 以上のみ）。
+        image_size = (original.debug_json or {}).get("image_size") or {}
+        max_w = image_size.get("width")
+        max_h = image_size.get("height")
+        for x, y in parsed_points:
+            if x < 0 or y < 0:
+                return JsonResponse({"error": "座標が負の値です。"}, status=400)
+            if max_w is not None and x > max_w:
+                return JsonResponse({"error": "座標が画像の幅を超えています。"}, status=400)
+            if max_h is not None and y > max_h:
+                return JsonResponse({"error": "座標が画像の高さを超えています。"}, status=400)
+
+        # ── a. 元画像の生ピクセル取得 ──
+        try:
+            with Image.open(original.image_file.path) as opened:
+                np_rgb = np.array(opened.convert("RGB"))
+        except Exception as e:
+            logger.warning(
+                "manual_crop: 元画像の読み込みに失敗 OriginalImage %s: %s", original.id, e
+            )
+            return JsonResponse({"error": "元画像を読み込めませんでした。"}, status=400)
+
+        # ── b. warp（公開ラッパー経由・None は小さすぎ等） ──
+        warp_result = warp_card_from_points(np_rgb, parsed_points)
+        if warp_result is None:
+            return JsonResponse(
+                {"error": "指定範囲が小さすぎます（名刺として切り出せません）。"}, status=400
+            )
+        warped_image, polygon = warp_result
+
+        # ── c. ユーザー選択角で回転（段1 関数は回転しないのでここで適用） ──
+        final_image = apply_upright(warped_image, rotation)
+
+        # ── d.〜g. 採番 → atomic でBC生成＋debug_json 追記（競合時1回リトライ） ──
+        business_card = self._create_manual_card(original, final_image, polygon)
+        if business_card is None:
+            return JsonResponse({"error": "名刺の作成に失敗しました。"}, status=500)
+
+        return JsonResponse(
+            {
+                "business_card_id": str(business_card.id),
+                "card_index": business_card.card_index,
+                "card_detail_url": reverse(
+                    "cards:card_detail", kwargs={"pk": business_card.id}
+                ),
+            },
+            status=201,
+        )
+
+    def _next_card_index(self, original):
+        """[性質] 準関数（DB 読み取り）/ 既存 BC の最大 card_index + 1（無ければ 0）。"""
+        current_max = original.businesscard_set.aggregate(m=Max("card_index"))["m"]
+        return 0 if current_max is None else current_max + 1
+
+    def _create_manual_card(self, original, final_image, polygon):
+        """[性質] 副作用あり（DB 書込・ファイル書込）/ 採番→BC生成→debug_json追記を atomic で行う。
+
+        ① save_and_create_business_card で保存＋BC作成、② debug_json.manual_results 追記を
+        同一 transaction.atomic 内で行う（②失敗時は BC をロールバックし、書き込み済み画像も
+        _unlink_card_image で明示削除する）。card_index の UniqueConstraint 競合（段1 が
+        IntegrityError を握って business_card=None を返す）時は採番し直して1回だけリトライする
+        （select_for_update は使わない）。
+        [出力] BusinessCard（成功）/ None（リトライ後も失敗・作成失敗）
+        """
+        for attempt in range(2):
+            card_index = self._next_card_index(original)
+            cleanup_rel = None
+            collision = False
+            try:
+                with transaction.atomic():
+                    result = save_and_create_business_card(
+                        final_image, original, card_index, osd_json=None,
+                    )
+                    if result.business_card is None:
+                        # 段1 が card_index 競合（IntegrityError）を握って None 返し
+                        # （書き込み済み画像も段1側で削除済み）。初回のみ採番し直してリトライ。
+                        if result.db_error and "IntegrityError" in result.db_error \
+                                and attempt == 0:
+                            collision = True
+                        else:
+                            logger.warning(
+                                "manual_crop: BC作成に失敗 OriginalImage %s: crop_error=%s db_error=%s",
+                                original.id, result.crop_error, result.db_error,
+                            )
+                            return None
+                    else:
+                        cleanup_rel = str(result.business_card.card_image) or None
+                        self._append_manual_result(
+                            original, result.business_card.id, polygon
+                        )
+            except Exception as e:
+                # ② debug_json 追記等で失敗：atomic で BC はロールバック済み。
+                # 画像ファイルは非トランザクションなので明示削除（迷子ファイルを残さない）。
+                logger.warning(
+                    "manual_crop: BC生成/debug_json追記で例外 OriginalImage %s: %s",
+                    original.id, e,
+                )
+                if cleanup_rel:
+                    _unlink_card_image(cleanup_rel)
+                return None
+
+            if collision:
+                continue
+            return result.business_card
+        return None
+
+    def _append_manual_result(self, original, business_card_id, polygon):
+        """[性質] 副作用あり（DB 書込）/ debug_json トップレベル manual_results に1件追記する。
+
+        既存キー（attempts / integrated_results 等）は触らず manual_results のみ部分更新する。
+        debug_json が None でも manual_results だけ持つ dict を作る。
+        """
+        dj = dict(original.debug_json or {})
+        manual = list(dj.get("manual_results") or [])
+        manual.append({"business_card_id": str(business_card_id), "polygon": polygon})
+        dj["manual_results"] = manual
+        original.debug_json = dj
+        original.save(update_fields=["debug_json", "updated_at"])
 
 
 class CardDeleteView(View):

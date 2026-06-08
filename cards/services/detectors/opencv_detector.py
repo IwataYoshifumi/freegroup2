@@ -714,6 +714,29 @@ def _warp_card(np_rgb: np.ndarray, src_pts: np.ndarray) -> tuple[np.ndarray | No
     return warped, w, h
 
 
+def warp_card_from_points(np_rgb: np.ndarray, points) -> tuple[Image.Image, dict] | None:
+    """[性質] 純関数 / 任意順の4点と元画像 np_rgb から正対化済み画像と整列 polygon を返す。
+
+    手動切り出し経路の唯一の warp 入口。private な _sort_corners / _warp_card を内部で
+    呼び、View から直接叩かせない（4点の整列規約・最小サイズ判定をこの関数に閉じ込める）。
+
+    [入力] np_rgb: 元画像全体の np.ndarray（RGB, shape (H, W, 3)）
+           points: 4 点の座標（任意順・元画像ピクセル座標）。[[x, y], ...] 相当の
+                   shape (4, 2) に変換可能な list / tuple / np.ndarray。
+    [出力] (warped_image, polygon) のタプル、または None。
+             warped_image: 透視変換済み PIL.Image（向き補正なし）
+             polygon:      _sort_corners 整列後（TL/TR/BR/BL 順）の polygon dict（{x, y}）。
+                           自動枠（_pts_to_polygon）と同一形式。
+           サイズ基準未満（_MIN_WARP_WIDTH / _MIN_WARP_HEIGHT）で切り出せないときは None。
+    """
+    src_pts = np.array(points, dtype=np.float32)
+    sorted_pts = _sort_corners(src_pts)
+    warped_rgb, _w, _h = _warp_card(np_rgb, sorted_pts)
+    if warped_rgb is None:
+        return None
+    return Image.fromarray(warped_rgb), _pts_to_polygon(sorted_pts)
+
+
 def _expand_polygon(
     pts: np.ndarray, ratio: float, min_px: int, max_w: int, max_h: int
 ) -> np.ndarray:
