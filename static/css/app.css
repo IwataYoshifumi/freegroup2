@@ -1677,6 +1677,45 @@ form:has(.js-decision-additional_role:checked) .app-merge-survivor__label--prima
   stroke: rgba(12, 36, 97, 0.85);
 }
 
+/* 手動切り出しクリック面（段2-c2）。既存枠SVGの上に重ねる別レイヤ。
+   OFF時は pointer-events:none で通常操作を邪魔しない。ON時のみクリックを受ける。 */
+.app-manual-crop-layer {
+  pointer-events: none;
+}
+.app-manual-crop-layer.is-active {
+  pointer-events: auto;
+  cursor: crosshair;
+}
+
+/* クリックした四隅マーカー（橙＝自動の緑/手動枠の青と区別）。 */
+.app-manual-crop__marker {
+  fill: rgba(234, 88, 12, 0.9);
+  stroke: #ffffff;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+/* クリック順に結ぶ確定ポリゴン（橙・破線で「作業中」を示す）。 */
+.app-manual-crop__polygon {
+  fill: rgba(234, 88, 12, 0.12);
+  stroke: rgb(234, 88, 12);
+  stroke-width: 3;
+  stroke-dasharray: 10 6;
+  vector-effect: non-scaling-stroke;
+}
+
+/* 元画像セクションヘッダの手動切り出し操作群。 */
+.app-manual-crop-controls {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.app-manual-crop-hint {
+  font-size: 13px;
+  color: #475569;
+}
+
 /* セクション 3: クローズ後マスクへ候補矩形を重畳（マスク別・描画対象=採用/惜しい棄却のみ）。 */
 .app-mask-overlay {
   position: relative;

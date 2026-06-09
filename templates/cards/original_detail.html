@@ -31,6 +31,20 @@
   <section class="app-card">
     <div class="app-section__header">
       <h2>元画像</h2>
+      {% if original.image_file %}
+      <div class="app-manual-crop-controls">
+        <button type="button" class="app-btn app-btn--secondary app-btn--sm js-manual-crop-start">
+          手動名刺切り出し
+        </button>
+        <span class="js-manual-crop-active" hidden>
+          <span class="app-manual-crop-hint">
+            名刺の四隅を4点クリック（<span class="js-manual-crop-count">0</span>/4）
+          </span>
+          <button type="button" class="app-btn app-btn--secondary app-btn--sm js-manual-crop-reset">やり直し</button>
+          <button type="button" class="app-btn app-btn--secondary app-btn--sm js-manual-crop-cancel">キャンセル</button>
+        </span>
+      </div>
+      {% endif %}
     </div>
     {% if original.image_file %}
       <div class="app-original-overlay">
@@ -51,6 +65,11 @@
             {% endfor %}
           </svg>
         {% endif %}
+        {# 手動切り出しクリック面（最前面・既存枠SVGの後＝DOM上で上に重なる）。
+           viewBox は画像の自然寸法基準で JS が設定。OFF時は pointer-events:none で操作を邪魔しない。 #}
+        <svg class="app-original-overlay__svg app-manual-crop-layer js-manual-crop-layer"
+             preserveAspectRatio="xMidYMid meet"
+             xmlns="http://www.w3.org/2000/svg"></svg>
       </div>
     {% else %}
       <p class="app-muted">画像がありません。</p>
@@ -528,6 +547,126 @@
         // フォールバック（非対応環境）
         document.addEventListener('DOMContentLoaded', loadAllViewers);
       }
+    })();
+
+    // ===== 段2-c2-①：手動名刺切り出し（4点クリック取得・表示・やり直し） =====
+    // プレビュー/回転/保存は段2-c2-②送り。ここは座標取得と表示のみ。
+    (function () {
+      const overlay = document.querySelector('.app-original-overlay');
+      if (!overlay) return;
+      const img = overlay.querySelector('.app-original-overlay__img');
+      const layer = overlay.querySelector('.js-manual-crop-layer');
+      const startBtn = document.querySelector('.js-manual-crop-start');
+      const activeBox = document.querySelector('.js-manual-crop-active');
+      const resetBtn = document.querySelector('.js-manual-crop-reset');
+      const cancelBtn = document.querySelector('.js-manual-crop-cancel');
+      const countEl = document.querySelector('.js-manual-crop-count');
+      if (!img || !layer || !startBtn) return;
+
+      const SVGNS = 'http://www.w3.org/2000/svg';
+      let active = false;
+      let points = [];          // [{x, y}] 元画像ピクセル座標（②でプレビュー/保存に使う）
+      let natW = 0;
+      let natH = 0;
+
+      // <img> の自然寸法を取得（未ロードだと naturalWidth=0 のため complete を確認）。
+      function ensureNatural() {
+        if (img.complete && img.naturalWidth) {
+          natW = img.naturalWidth;
+          natH = img.naturalHeight;
+          layer.setAttribute('viewBox', '0 0 ' + natW + ' ' + natH);
+          return true;
+        }
+        return false;
+      }
+
+      function clearMarks() {
+        while (layer.firstChild) layer.removeChild(layer.firstChild);
+      }
+
+      function redraw() {
+        clearMarks();
+        if (points.length >= 2) {
+          const poly = document.createElementNS(SVGNS, 'polygon');
+          poly.setAttribute('class', 'app-manual-crop__polygon');
+          poly.setAttribute(
+            'points',
+            points.map(function (p) { return p.x.toFixed(1) + ',' + p.y.toFixed(1); }).join(' ')
+          );
+          layer.appendChild(poly);
+        }
+        const r = Math.max(natW, natH) / 120 || 6;   // 表示でほどよく見える半径
+        points.forEach(function (p) {
+          const c = document.createElementNS(SVGNS, 'circle');
+          c.setAttribute('class', 'app-manual-crop__marker');
+          c.setAttribute('cx', p.x);
+          c.setAttribute('cy', p.y);
+          c.setAttribute('r', r);
+          layer.appendChild(c);
+        });
+        if (countEl) countEl.textContent = String(points.length);
+      }
+
+      // クリック点（画面px）→ 元画像px（viewBox=自然寸法）に変換。
+      function toImagePoint(evt) {
+        if (!layer.createSVGPoint) return null;
+        const pt = layer.createSVGPoint();
+        pt.x = evt.clientX;
+        pt.y = evt.clientY;
+        const ctm = layer.getScreenCTM();
+        if (!ctm) return null;
+        const p = pt.matrixTransform(ctm.inverse());
+        return { x: p.x, y: p.y };
+      }
+
+      function enterMode() {
+        if (!ensureNatural()) {
+          img.addEventListener('load', enterMode, { once: true });
+          return;
+        }
+        active = true;
+        points = [];
+        redraw();
+        layer.classList.add('is-active');
+        startBtn.hidden = true;
+        if (activeBox) activeBox.hidden = false;
+      }
+
+      function exitMode() {
+        active = false;
+        points = [];
+        clearMarks();
+        layer.classList.remove('is-active');
+        startBtn.hidden = false;
+        if (activeBox) activeBox.hidden = true;
+        if (countEl) countEl.textContent = '0';
+      }
+
+      startBtn.addEventListener('click', enterMode);
+      if (cancelBtn) cancelBtn.addEventListener('click', exitMode);
+      if (resetBtn) {
+        resetBtn.addEventListener('click', function () {
+          points = [];
+          redraw();
+        });
+      }
+
+      layer.addEventListener('click', function (evt) {
+        if (!active || points.length >= 4) return;   // 5点目以降は無視
+        const p = toImagePoint(evt);
+        if (!p) return;
+        // 端クリックの軽微なはみ出しを自然寸法内にクランプ。
+        p.x = Math.min(Math.max(p.x, 0), natW);
+        p.y = Math.min(Math.max(p.y, 0), natH);
+        points.push(p);
+        redraw();
+      });
+
+      // 段2-c2-② が取得済み4点を読めるよう最小の読み取り口を公開（保持はクロージャ）。
+      window.manualCrop = {
+        getPoints: function () { return points.slice(); },
+        isActive: function () { return active; }
+      };
     })();
   </script>
 {% endblock %}
