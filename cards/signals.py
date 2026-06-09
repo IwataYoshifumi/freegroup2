@@ -73,6 +73,42 @@ def _delete_card_image_file(sender, instance, **kwargs):
         logger.warning("BusinessCard post_delete handler failed: %s", exc)
 
 
+@receiver(post_delete, sender=BusinessCard)
+def _sync_manual_results_on_card_delete(sender, instance, **kwargs):
+    """BusinessCard 削除時に親 debug_json.manual_results の該当エントリを同期削除。
+
+    手動切り出し（ManualCropView）で追記された manual_results エントリ
+    （{"business_card_id": str(UUID), "polygon": {...}}）は、当該 BC が消えると孤児に
+    なるため、削除と同時に取り除く。CardDeleteView / admin / QuerySet 一括 / CASCADE の
+    全削除経路を1箇所でカバーするため post_delete に乗せる。
+
+    [方針]
+      - 親 OriginalImage が既に存在しない（親ごと CASCADE 削除された）場合は no-op で return
+        （debug_json も親ごと消えるので同期不要）。
+      - manual_results から business_card_id == str(instance.id) を除去。該当が無ければ
+        保存もしない（no-op）。除去があったときのみ save。
+      - 既存キー（attempts / integrated_results 等）は触らない（_append_manual_result と同パターン）。
+      - 例外は握りつぶす（FS 系レシーバと同様、削除自体は完了させる）。
+    """
+    try:
+        original = OriginalImage.objects.filter(id=instance.original_image_id).first()
+        if original is None:
+            return  # 親ごと削除（CASCADE）→ 同期不要
+        dj = dict(original.debug_json or {})
+        manual = dj.get("manual_results")
+        if not manual:
+            return  # 手動枠なし → no-op
+        target = str(instance.id)
+        kept = [m for m in manual if m.get("business_card_id") != target]
+        if len(kept) == len(manual):
+            return  # 該当エントリなし → 保存しない
+        dj["manual_results"] = kept
+        original.debug_json = dj
+        original.save(update_fields=["debug_json", "updated_at"])
+    except Exception as exc:
+        logger.warning("BusinessCard manual_results sync on delete failed: %s", exc)
+
+
 @receiver(post_delete, sender=OriginalImage)
 def _delete_original_image_files(sender, instance, **kwargs):
     """OriginalImage 削除時の FS 実体クリーンアップ。
