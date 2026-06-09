@@ -678,8 +678,11 @@ def _build_overlay_polygons(debug_json):
 
     is_giant: results 内の area_ratio 中央値の 1.5 倍以上のものに True。
               ただし results が 1 件以下の場合は判定スキップ（全て False）。
+    is_manual: 自動枠（integrated_results 由来）は False、手動枠（manual_results 由来）は True。
 
-    対象は最終検出 integrated_results（通常・反転の統合。BC 化される集合と一致）。
+    自動枠の対象は最終検出 integrated_results（通常・反転の統合。BC 化される集合と一致）。
+    手動枠（debug_json.manual_results）は giant 判定の母集団に混ぜず is_giant=False 固定で
+    末尾に「足すだけ」（自動枠の points_str/centroid/is_giant/area_ratio は一切変えない）。
     """
     if not debug_json:
         return []
@@ -731,6 +734,28 @@ def _build_overlay_polygons(debug_json):
             "centroid_y": cy,
             "is_giant": is_giant,
             "area_ratio": r["area_ratio"],
+            "is_manual": False,
+        })
+
+    # 手動枠（debug_json.manual_results）を合流。giant 判定の母集団には入れず、
+    # is_giant=False 固定・is_manual=True で末尾に足すだけ（自動枠の値・赤判定に非干渉）。
+    for m in debug_json.get("manual_results") or []:
+        polygon = m.get("polygon") or {}
+        coords = [
+            ((polygon.get(k) or {}).get("x", 0), (polygon.get(k) or {}).get("y", 0))
+            for k in keys
+        ]
+        points_str = " ".join(f"{x:.1f},{y:.1f}" for x, y in coords)
+        cx = sum(c[0] for c in coords) / 4.0
+        cy = sum(c[1] for c in coords) / 4.0
+        items.append({
+            "card_index": None,
+            "points_str": points_str,
+            "centroid_x": cx,
+            "centroid_y": cy,
+            "is_giant": False,
+            "area_ratio": 0.0,
+            "is_manual": True,
         })
     return items
 

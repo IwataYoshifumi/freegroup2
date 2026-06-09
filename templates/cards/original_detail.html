@@ -41,13 +41,13 @@
                preserveAspectRatio="xMidYMid meet"
                xmlns="http://www.w3.org/2000/svg">
             {% for p in overlay_polygons %}
-              <polygon class="app-debug-polygon{% if p.is_giant %} app-debug-polygon--giant{% endif %}"
+              <polygon class="app-debug-polygon{% if p.is_giant %} app-debug-polygon--giant{% endif %}{% if p.is_manual %} app-debug-polygon--manual{% endif %}"
                        points="{{ p.points_str }}"></polygon>
-              <text class="app-debug-polygon__label{% if p.is_giant %} app-debug-polygon__label--giant{% endif %}"
+              <text class="app-debug-polygon__label{% if p.is_giant %} app-debug-polygon__label--giant{% endif %}{% if p.is_manual %} app-debug-polygon__label--manual{% endif %}"
                     x="{{ p.centroid_x|floatformat:1 }}"
                     y="{{ p.centroid_y|floatformat:1 }}"
                     text-anchor="middle"
-                    dominant-baseline="central">{{ p.card_index }}</text>
+                    dominant-baseline="central">{% if p.is_manual %}手{% else %}{{ p.card_index }}{% endif %}</text>
             {% endfor %}
           </svg>
         {% endif %}

@@ -1665,6 +1665,18 @@ form:has(.js-decision-additional_role:checked) .app-merge-survivor__label--prima
   stroke: rgba(120, 0, 30, 0.85);
 }
 
+/* 手動切り出し枠（debug_json.manual_results 由来）= 青。自動枠（緑）/giant（赤）と区別する。 */
+.app-debug-polygon--manual {
+  fill: rgba(37, 99, 235, 0.18);
+  stroke: rgb(37, 99, 235);
+  stroke-width: 4;
+}
+
+.app-debug-polygon__label--manual {
+  fill: #dbeafe;
+  stroke: rgba(12, 36, 97, 0.85);
+}
+
 /* セクション 3: クローズ後マスクへ候補矩形を重畳（マスク別・描画対象=採用/惜しい棄却のみ）。 */
 .app-mask-overlay {
   position: relative;
