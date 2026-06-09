@@ -32,7 +32,9 @@
     <div class="app-section__header">
       <h2>元画像</h2>
       {% if original.image_file %}
-      <div class="app-manual-crop-controls">
+      <div class="app-manual-crop-controls"
+           data-preview-url="{% url 'originals:manual_crop_preview' pk=original.id %}"
+           data-submit-url="{% url 'originals:manual_crop' pk=original.id %}">
         <button type="button" class="app-btn app-btn--secondary app-btn--sm js-manual-crop-start">
           手動名刺切り出し
         </button>
@@ -43,6 +45,9 @@
           <button type="button" class="app-btn app-btn--secondary app-btn--sm js-manual-crop-reset">やり直し</button>
           <button type="button" class="app-btn app-btn--secondary app-btn--sm js-manual-crop-cancel">キャンセル</button>
         </span>
+        {# JS から .click() して app.js の openModal を通すための隠しトリガ。 #}
+        <button type="button" class="js-manual-crop-open" data-action="open-modal"
+                data-target="manualCropModal" hidden></button>
       </div>
       {% endif %}
     </div>
@@ -498,6 +503,31 @@
     </div>
   </section>
 
+  {# ========== 手動切り出し：プレビュー・向き調整モーダル（段2-c2-②） ========== #}
+  {% if original.image_file %}
+    <div class="app-modal-backdrop" hidden></div>
+    <div class="app-modal" id="manualCropModal" hidden>
+      <div class="app-modal__panel" style="width:min(720px,95vw);">
+        <div class="app-modal__header">
+          <h2>切り出しプレビュー・向き調整</h2>
+          <button type="button" class="app-btn app-btn--sm" data-action="close-modal">閉じる</button>
+        </div>
+        <div class="app-modal__body" style="text-align:center;">
+          <div class="app-manual-crop-preview-wrap">
+            <img class="js-manual-crop-preview app-manual-crop-preview" alt="切り出しプレビュー">
+          </div>
+          <div class="app-manual-crop-modal-actions">
+            <button type="button" class="app-btn app-btn--secondary app-btn--sm js-manual-crop-rotate-left">⟲ 左回転</button>
+            <button type="button" class="app-btn app-btn--secondary app-btn--sm js-manual-crop-rotate-right">右回転 ⟳</button>
+            <button type="button" class="app-btn app-btn--primary app-btn--sm js-manual-crop-confirm">確定</button>
+            <button type="button" class="app-btn app-btn--secondary app-btn--sm js-manual-crop-modal-cancel"
+                    data-action="close-modal">キャンセル</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  {% endif %}
+
   {# ===== このブランチ専用スクリプト（A 側マージ時に共通化判断） ===== #}
   <script src="https://cdn.jsdelivr.net/npm/@andypf/json-viewer@2.4.0/dist/iife/index.js"></script>
   <script>
@@ -660,9 +690,87 @@
         p.y = Math.min(Math.max(p.y, 0), natH);
         points.push(p);
         redraw();
+        if (points.length === 4) requestPreview();   // 4点目で素warpプレビューへ
       });
 
-      // 段2-c2-② が取得済み4点を読めるよう最小の読み取り口を公開（保持はクロージャ）。
+      // ===== 段2-c2-②：プレビュー→回転モーダル→確定→名刺詳細遷移 =====
+      // ①と同じクロージャ（points/exitMode 等）を共有する。
+      const controls = document.querySelector('.app-manual-crop-controls');
+      const previewUrl = controls ? controls.dataset.previewUrl : '';
+      const submitUrl = controls ? controls.dataset.submitUrl : '';
+      const opener = document.querySelector('.js-manual-crop-open');
+      const previewImg = document.querySelector('.js-manual-crop-preview');
+      const rotLeftBtn = document.querySelector('.js-manual-crop-rotate-left');
+      const rotRightBtn = document.querySelector('.js-manual-crop-rotate-right');
+      const confirmBtn = document.querySelector('.js-manual-crop-confirm');
+      const modalCancelBtn = document.querySelector('.js-manual-crop-modal-cancel');
+      let rotation = 0;   // {0,90,180,270} 時計回り
+
+      function pointsPayload() {
+        return points.map(function (p) { return [p.x, p.y]; });
+      }
+
+      function applyRotationStyle() {
+        if (previewImg) previewImg.style.transform = 'rotate(' + rotation + 'deg)';
+      }
+
+      // 4点そろったらサーバで素warpしてプレビュー画像を取得→モーダルを開く。
+      function requestPreview() {
+        if (!window.appAjax || !previewUrl || points.length !== 4) return;
+        window.appAjax.postJson(previewUrl, { points: pointsPayload() }).then(function (result) {
+          if (result.ok && result.data && result.data.image) {
+            rotation = 0;
+            if (previewImg) previewImg.src = result.data.image;
+            applyRotationStyle();
+            if (opener) opener.click();   // app.js openModal 経由（activeModal を正しく設定）
+          } else if (result.data && result.data.error) {
+            window.appAjax.showToastMessage(result.data.error);
+          }
+        });
+      }
+
+      if (rotLeftBtn) {
+        rotLeftBtn.addEventListener('click', function () {
+          rotation = (rotation + 270) % 360;   // 左90°
+          applyRotationStyle();
+        });
+      }
+      if (rotRightBtn) {
+        rotRightBtn.addEventListener('click', function () {
+          rotation = (rotation + 90) % 360;    // 右90°
+          applyRotationStyle();
+        });
+      }
+
+      if (confirmBtn) {
+        confirmBtn.addEventListener('click', function () {
+          if (!window.appAjax || !submitUrl) return;
+          confirmBtn.disabled = true;   // 二重投稿防止
+          window.appAjax
+            .postJson(submitUrl, { points: pointsPayload(), rotation: rotation })
+            .then(function (result) {
+              if (result.ok && result.data && result.data.card_detail_url) {
+                window.location = result.data.card_detail_url;   // 名刺詳細へ遷移
+              } else {
+                if (result.data && result.data.error) {
+                  window.appAjax.showToastMessage(result.data.error);
+                }
+                confirmBtn.disabled = false;   // 失敗時のみ再操作可
+              }
+            });
+        });
+      }
+
+      // モーダルのキャンセル：data-action="close-modal" で app.js がモーダルを閉じ、
+      // ここで①の点をクリアしてモードを抜ける。
+      if (modalCancelBtn) {
+        modalCancelBtn.addEventListener('click', function () {
+          rotation = 0;
+          exitMode();
+        });
+      }
+
+      // 段2-c2-① が取得済み4点を読めるよう最小の読み取り口を公開（保持はクロージャ）。
       window.manualCrop = {
         getPoints: function () { return points.slice(); },
         isActive: function () { return active; }

@@ -4,11 +4,13 @@ View 層の責務は HTTP リクエスト/レスポンス処理とテンプレ�
 ビジネスロジックは services 層・tasks 層に委譲する。
 """
 
+import base64
 import json
 import logging
 import math
 import statistics
 from collections import Counter
+from io import BytesIO
 
 import numpy as np
 from django.conf import settings
@@ -810,6 +812,52 @@ def _validate_manual_points(points):
     return True, parsed, ""
 
 
+def _prepare_manual_warp(original, points_payload):
+    """[性質] 準関数（画像ファイル読み取りのみ・DB 書込なし）/ 手動4点を検証し warp 結果を返す。
+
+    点検証 → 範囲チェック → 元画像読込 → warp_card_from_points までを共有する
+    （保存・回転・BC 生成は行わない）。ManualCropView（確定保存）と ManualPreviewView
+    （素 warp プレビュー）で同一の検証・warp を使うためのヘルパー。
+    [入力] original: OriginalImage、points_payload: リクエスト由来の4点
+    [出力] (warp_result, error_response)
+      成功: ((warped_image: PIL.Image, polygon: dict), None)
+      失敗: (None, JsonResponse(status=400))
+    """
+    ok, parsed_points, msg = _validate_manual_points(points_payload)
+    if not ok:
+        return None, JsonResponse({"error": msg}, status=400)
+
+    # 座標の範囲チェック（image_size があれば上限も照合、無ければ 0 以上のみ）。
+    image_size = (original.debug_json or {}).get("image_size") or {}
+    max_w = image_size.get("width")
+    max_h = image_size.get("height")
+    for x, y in parsed_points:
+        if x < 0 or y < 0:
+            return None, JsonResponse({"error": "座標が負の値です。"}, status=400)
+        if max_w is not None and x > max_w:
+            return None, JsonResponse({"error": "座標が画像の幅を超えています。"}, status=400)
+        if max_h is not None and y > max_h:
+            return None, JsonResponse({"error": "座標が画像の高さを超えています。"}, status=400)
+
+    # 元画像の生ピクセル取得。
+    try:
+        with Image.open(original.image_file.path) as opened:
+            np_rgb = np.array(opened.convert("RGB"))
+    except Exception as e:
+        logger.warning(
+            "manual_crop: 元画像の読み込みに失敗 OriginalImage %s: %s", original.id, e
+        )
+        return None, JsonResponse({"error": "元画像を読み込めませんでした。"}, status=400)
+
+    # warp（公開ラッパー経由・None は小さすぎ等）。
+    warp_result = warp_card_from_points(np_rgb, parsed_points)
+    if warp_result is None:
+        return None, JsonResponse(
+            {"error": "指定範囲が小さすぎます（名刺として切り出せません）。"}, status=400
+        )
+    return warp_result, None
+
+
 class ManualCropView(View):
     """元画像上で手動指定された4点から名刺を切り出し BusinessCard を作る（POST 専用・JSON）。
 
@@ -836,47 +884,19 @@ class ManualCropView(View):
         if not isinstance(payload, dict):
             return JsonResponse({"error": "JSON ボディが不正です。"}, status=400)
 
-        ok, parsed_points, msg = _validate_manual_points(payload.get("points"))
-        if not ok:
-            return JsonResponse({"error": msg}, status=400)
-
         rotation = payload.get("rotation", 0)
         if rotation not in _MANUAL_CROP_ROTATIONS:
             return JsonResponse(
                 {"error": "回転角は 0 / 90 / 180 / 270 のいずれかにしてください。"}, status=400
             )
 
-        # 座標の範囲チェック（image_size があれば上限も照合、無ければ 0 以上のみ）。
-        image_size = (original.debug_json or {}).get("image_size") or {}
-        max_w = image_size.get("width")
-        max_h = image_size.get("height")
-        for x, y in parsed_points:
-            if x < 0 or y < 0:
-                return JsonResponse({"error": "座標が負の値です。"}, status=400)
-            if max_w is not None and x > max_w:
-                return JsonResponse({"error": "座標が画像の幅を超えています。"}, status=400)
-            if max_h is not None and y > max_h:
-                return JsonResponse({"error": "座標が画像の高さを超えています。"}, status=400)
-
-        # ── a. 元画像の生ピクセル取得 ──
-        try:
-            with Image.open(original.image_file.path) as opened:
-                np_rgb = np.array(opened.convert("RGB"))
-        except Exception as e:
-            logger.warning(
-                "manual_crop: 元画像の読み込みに失敗 OriginalImage %s: %s", original.id, e
-            )
-            return JsonResponse({"error": "元画像を読み込めませんでした。"}, status=400)
-
-        # ── b. warp（公開ラッパー経由・None は小さすぎ等） ──
-        warp_result = warp_card_from_points(np_rgb, parsed_points)
-        if warp_result is None:
-            return JsonResponse(
-                {"error": "指定範囲が小さすぎます（名刺として切り出せません）。"}, status=400
-            )
+        # ── 点検証→範囲チェック→画像読込→warp（プレビューEPと共有）──
+        warp_result, error = _prepare_manual_warp(original, payload.get("points"))
+        if error is not None:
+            return error
         warped_image, polygon = warp_result
 
-        # ── c. ユーザー選択角で回転（段1 関数は回転しないのでここで適用） ──
+        # ── ユーザー選択角で回転（段1 関数は回転しないのでここで適用）──
         final_image = apply_upright(warped_image, rotation)
 
         # ── d.〜g. 採番 → atomic でBC生成＋debug_json 追記（競合時1回リトライ） ──
@@ -886,6 +906,7 @@ class ManualCropView(View):
 
         return JsonResponse(
             {
+                "success": True,
                 "business_card_id": str(business_card.id),
                 "card_index": business_card.card_index,
                 "card_detail_url": reverse(
@@ -964,6 +985,50 @@ class ManualCropView(View):
         dj["manual_results"] = manual
         original.debug_json = dj
         original.save(update_fields=["debug_json", "updated_at"])
+
+
+class ManualPreviewView(View):
+    """手動指定された4点を素 warp して切り出し画像（base64 PNG）を返す（POST 専用・JSON）。
+
+    段2-c2-② の回転モーダル用プレビュー。保存・BC 生成・debug_json 追記・回転は一切行わず、
+    rotation=0 の素 warp 画像のみ返す（回転はブラウザ側で見せ、確定時に ManualCropView が
+    apply_upright で適用する＝プレビューと保存結果の向きが一致する）。
+    入力（JSON body）: {"points": [[x, y]×4]}（[x,y] / {"x":,"y":} 両形式可）。
+    成功: 200 + {"success": true, "image": "data:image/png;base64,<...>"}。
+    点不足・範囲外・小さすぎ warp は ManualCropView と同じ作法で 400（500 で落とさない）。
+    所有者スコープは既存 View 群を踏襲。GET / その他メソッドは Django 標準の 405。
+    """
+
+    def post(self, request, pk):
+        user = get_current_user(request)
+        original = get_object_or_404(OriginalImage, pk=pk, user=user)
+
+        try:
+            payload = json.loads(request.body or b"{}")
+        except (ValueError, TypeError):
+            return JsonResponse({"error": "JSON ボディが不正です。"}, status=400)
+        if not isinstance(payload, dict):
+            return JsonResponse({"error": "JSON ボディが不正です。"}, status=400)
+
+        # 点検証→範囲チェック→画像読込→warp（ManualCropView と共有・回転や保存はしない）。
+        warp_result, error = _prepare_manual_warp(original, payload.get("points"))
+        if error is not None:
+            return error
+        warped_image, _polygon = warp_result
+
+        # 素 warp 画像（rotation=0）を PNG→base64 data URL にして返す。
+        try:
+            buf = BytesIO()
+            rgb = warped_image if warped_image.mode == "RGB" else warped_image.convert("RGB")
+            rgb.save(buf, format="PNG")
+            data_url = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+        except Exception as e:
+            logger.warning(
+                "manual_crop preview: 画像エンコードに失敗 OriginalImage %s: %s", original.id, e
+            )
+            return JsonResponse({"error": "プレビュー画像の生成に失敗しました。"}, status=400)
+
+        return JsonResponse({"success": True, "image": data_url}, status=200)
 
 
 class CardDeleteView(View):
