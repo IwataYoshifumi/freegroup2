@@ -1704,12 +1704,13 @@ form:has(.js-decision-additional_role:checked) .app-merge-survivor__label--prima
   vector-effect: non-scaling-stroke;
 }
 
-/* 元画像セクションヘッダの手動切り出し操作群。 */
+/* 手動切り出し操作群（元画像カードの外・直前に左寄せ配置）。 */
 .app-manual-crop-controls {
   display: inline-flex;
   gap: 8px;
   align-items: center;
   flex-wrap: wrap;
+  margin-bottom: var(--app-space-md);
 }
 .app-manual-crop-hint {
   font-size: 13px;
