@@ -128,7 +128,7 @@ def _person_sort_context(params):
     }
 
 
-class PersonListView(ListView):
+class PersonListView(LoginRequiredMixin, ListView):
     """人物一覧画面（仕様書 §11.4 7 番）。
 
     GET 専用。デフォルトは status='active' のみ表示。検索フォームに 7 フィールド
@@ -191,7 +191,7 @@ class PersonListView(ListView):
         return context
 
 
-class PersonDetailView(DetailView):
+class PersonDetailView(LoginRequiredMixin, DetailView):
     """人物詳細画面（仕様書 §11.5 8 番）。
 
     Person.status で 4 分岐：

@@ -942,14 +942,12 @@ class ContactDetailViewTests(TestCase):
         resp = self.client.get(url)
         self.assertEqual(resp.status_code, 404)
 
-    def test_e2_unauthenticated_returns_200(self):
-        """E2: 未ログイン → 200（仮認証スタイル、論点 1）。"""
+    def test_e2_unauthenticated_redirects_to_login(self):
+        """E2: 未ログイン → 302（LoginRequiredMixin でログインへリダイレクト、Phase 7 段1）。"""
         c = Client()  # 未ログイン
-        # スーパーユーザーが存在しないと get_current_user が None を返すが
-        # このテストは仮認証「スタイル」（LoginRequiredMixin 未使用）の確認
-        User.objects.create_superuser(username="su", password="dummy")
         resp = c.get(self._url())
-        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.status_code, 302)
+        self.assertTrue(resp.url.startswith(reverse("accounts:login")))
 
     # ---- レスポンス検証 ----
 
@@ -1538,12 +1536,12 @@ class ContactListViewTests(TestCase):
         resp2 = self.client.get(self.url, {"page": "2"})
         self.assertEqual(len(list(resp2.context["contacts"])), 1)
 
-    def test_unauthenticated_returns_200(self):
-        """未ログイン → 200（仮認証スタイル、ContactDetailView と同じ）。"""
-        # スーパーユーザーがいなくても ContactListView は user フィルタしないので 200
+    def test_unauthenticated_redirects_to_login(self):
+        """未ログイン → 302（LoginRequiredMixin でログインへリダイレクト、ContactDetailView と同じ）。"""
         c = Client()
         resp = c.get(self.url)
-        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.status_code, 302)
+        self.assertTrue(resp.url.startswith(reverse("accounts:login")))
 
     # ---- HIG v1.5 §6.2：多段サーバー側ソート（単一 sort パラメータ、例 ?sort=company,-title,name）----
 

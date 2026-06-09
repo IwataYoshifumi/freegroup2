@@ -19,7 +19,6 @@ D-3c で追加した AJAX 2 エンドポイント、および D-3b で追加し�
 
 import json
 
-from django.contrib.auth import get_user_model
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -45,9 +44,6 @@ from .forms import (
     build_contact_sns_formset,
 )
 from .models import Contact, ContactFieldConfidence, ContactSns
-
-
-User = get_user_model()
 
 
 # ----------------------------------------------------------------------
@@ -142,18 +138,7 @@ def _contact_sort_context(params):
     }
 
 
-def get_current_user(request):
-    """認証未実装のための仮処理（既存 cards/views.py と同じ実装）。
-
-    request.user が認証済みならそれを返し、未認証なら最初のスーパーユーザーを返す。
-    v1.4.2 は認証仮実装期（仕様書 §18.1）、本格的な認証は v1.5.0 以降で実装。
-    """
-    if request.user.is_authenticated:
-        return request.user
-    return User.objects.filter(is_superuser=True).first()
-
-
-class ContactListView(ListView):
+class ContactListView(LoginRequiredMixin, ListView):
     """Contact 一覧画面（v1.4.2 仕様変更で追加、仕様書改訂は別途）。
 
     GET 専用。デフォルトは active Person 配下の primary / active のみ表示。
@@ -257,7 +242,7 @@ class ContactListView(ListView):
         return context
 
 
-class ContactDetailView(DetailView):
+class ContactDetailView(LoginRequiredMixin, DetailView):
     """Contact 詳細画面（仕様書 §11.3 11 番、D-3b）。
 
     GET 専用、業務メイン画面（active な Person を見る画面）。Contact.status と
