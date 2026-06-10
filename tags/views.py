@@ -540,12 +540,17 @@ class TagDeleteView(LoginRequiredMixin, View):
         return redirect("tags:tag_list")
 
 
-class TagUnarchiveView(LoginRequiredMixin, View):
+class TagUnarchiveView(LoginRequiredMixin, PermissionRequiredMixin, View):
     """非アーカイブ化（is_archived=False、Phase 1b-δ 追加）。POST 専用。
 
     archived タグを元に戻す。リダイレクト先は呼び出し元（back スタックがあればそこへ、
     無ければタグ一覧）。
+
+    認可（Phase 7 段2-C）：tags.change_tag（状態変更）。所有者判定なし。
+    対になる TagCategoryUnarchiveView（change_tagcategory）と同方式。
     """
+
+    permission_required = "tags.change_tag"
 
     def post(self, request, pk):
         tag = get_object_or_404(Tag, pk=pk)

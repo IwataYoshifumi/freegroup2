@@ -379,6 +379,56 @@ class Phase7TagCategoryViewAuthTests(TestCase):
         self.assertEqual(self._client(admin).post(url).status_code, 302)
 
 
+class Phase7TagUnarchiveAuthTests(TestCase):
+    """Phase 7 段2-C：TagUnarchiveView の粗い Permission（tags.change_tag、所有者判定なし）。
+
+    対になる TagCategoryUnarchiveView（change_tagcategory）と同方式。change_tag 無しは
+    403、有りは非アーカイブ化して 302。
+    """
+
+    def setUp(self):
+        self.creator = User.objects.create_user(username="tu_creator", password="x")
+        self.category = TagCategory.objects.create(name="業種", sort_order=1)
+        self.tag = Tag.objects.create(
+            name="廃止タグ",
+            category=self.category,
+            created_by=self.creator,
+            is_archived=True,
+        )
+
+    def _user(self, *codenames):
+        from django.contrib.auth.models import Permission
+
+        u = User.objects.create_user(
+            username=f"tu_{uuid.uuid4().hex[:8]}", password="x"
+        )
+        for cn in codenames:
+            u.user_permissions.add(Permission.objects.get(codename=cn))
+        return u
+
+    def _client(self, user=None):
+        c = Client()
+        if user is not None:
+            c.force_login(User.objects.get(pk=user.pk))
+        return c
+
+    def test_unarchive_requires_change_tag(self):
+        url = reverse("tags:tag_unarchive", args=[self.tag.pk])
+        # change_tag を持たないユーザー → 403、タグはアーカイブ済みのまま
+        viewer = self._user("view_tag")
+        self.assertEqual(self._client(viewer).post(url).status_code, 403)
+        self.tag.refresh_from_db()
+        self.assertTrue(self.tag.is_archived)
+
+    def test_unarchive_with_change_tag_ok(self):
+        url = reverse("tags:tag_unarchive", args=[self.tag.pk])
+        # change_tag を持つユーザー → 非アーカイブ化されて 302
+        editor = self._user("change_tag")
+        self.assertEqual(self._client(editor).post(url).status_code, 302)
+        self.tag.refresh_from_db()
+        self.assertFalse(self.tag.is_archived)
+
+
 class TagListFilterTests(TestCase):
     """v1.6 UI 第3弾：タグ一覧の絞り込み（タグ名・タグカテゴリ複数トグル・状態トグル）。"""
 
