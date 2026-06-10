@@ -36,6 +36,19 @@ class _DuplicatesTestBase(TestCase):
         self.other_user = User.objects.create_user(
             username="dup_other_user", password="dummy"
         )
+        # Phase 7 段2-A：マージ系 View は persons.merge_person / undo_merge を要求する
+        # （URL一覧表 rev20 No.15-17 / No.21 ★1）。既存テストの正常系は「認可済みの
+        # マージ担当者」が操作する前提なので、共通ユーザーに両権限を付与する。
+        from django.contrib.auth.models import Permission
+
+        self.user.user_permissions.add(
+            Permission.objects.get(
+                codename="merge_person", content_type__app_label="persons"
+            ),
+            Permission.objects.get(
+                codename="undo_merge", content_type__app_label="persons"
+            ),
+        )
 
         self.client = Client()
         self.client.force_login(self.user)
@@ -2273,3 +2286,89 @@ class PersonMergeLogDetailUndoLinkTests(_PersonMergeLogViewTestBase):
         # append_back_url で ?back=... が付くため、URL の先頭部分のみで照合
         self.assertContains(resp, confirm_undo_url)
         self.assertContains(resp, "このマージを復元する")
+
+
+class Phase7DuplicatesViewAuthTests(_PersonMergeLogViewTestBase):
+    """Phase 7 段2-A：マージ系 View の Permission ガード（URL一覧表 rev20 ★1）。
+
+    No.15-17（一覧/詳細/レビュー）= persons.merge_person、No.21（復元）= persons.undo_merge。
+    所有者判定なし（duplicates は owner が一意に定まらないため権限ベースで割り切り）。
+    破壊的 2 View（レビュー POST=マージ実行 / 復元 POST）は 403 時に DB が不変であることまで検証。
+    """
+
+    def setUp(self):
+        super().setUp()
+        # 権限なしユーザー（merge_person も undo_merge も持たない）
+        self.noperm = User.objects.create_user(
+            username="dup_noperm", password="dummy"
+        )
+        self.noperm_client = Client()
+        self.noperm_client.force_login(self.noperm)
+        # 一覧/詳細/レビュー用の pending 候補（group_id 付き、未マージの新規 Person 2 体で作る。
+        # base の surviving/merged は merge_log 用に Contact を付け替え済みなので流用しない）。
+        self.group_id = uuid.uuid4()
+        self.pa, _ = self._make_person_with_primary("候補甲", created_by=self.user)
+        self.pb, _ = self._make_person_with_primary("候補乙", created_by=self.user)
+        self.candidate = self._make_candidate(
+            self.pa, self.pb, group_id=self.group_id
+        )
+
+    # ---- No.15 一覧: persons.merge_person ----
+    def test_list_requires_merge_person(self):
+        url = reverse("duplicates:duplicate_group_list")
+        self.assertEqual(self.noperm_client.get(url).status_code, 403)
+        self.assertEqual(self.client.get(url).status_code, 200)
+
+    # ---- No.16 詳細: persons.merge_person ----
+    def test_detail_requires_merge_person(self):
+        url = reverse(
+            "duplicates:duplicate_group_detail", kwargs={"group_id": self.group_id}
+        )
+        self.assertEqual(self.noperm_client.get(url).status_code, 403)
+        self.assertEqual(self.client.get(url).status_code, 200)
+
+    # ---- No.17 レビュー GET: persons.merge_person ----
+    def test_review_get_requires_merge_person(self):
+        url = reverse(
+            "duplicates:duplicate_group_review", kwargs={"group_id": self.group_id}
+        )
+        self.assertEqual(self.noperm_client.get(url).status_code, 403)
+        self.assertEqual(self.client.get(url).status_code, 200)
+
+    # ---- No.17 レビュー POST（破壊的＝マージ実行）: 403 時にマージ未実行 ----
+    def test_review_post_forbidden_does_not_merge(self):
+        url = reverse(
+            "duplicates:duplicate_group_review", kwargs={"group_id": self.group_id}
+        )
+        resp = self.noperm_client.post(url, data={})
+        self.assertEqual(resp.status_code, 403)
+        # 候補は PENDING のまま・マージは実行されていない（DB 状態不変）
+        self.candidate.refresh_from_db()
+        self.assertEqual(
+            self.candidate.review_status, DuplicateCandidate.ReviewStatus.PENDING
+        )
+        self.pa.refresh_from_db()
+        self.pb.refresh_from_db()
+        self.assertEqual(self.pa.status, Person.Status.ACTIVE)
+        self.assertEqual(self.pb.status, Person.Status.ACTIVE)
+
+    # ---- No.21 復元 GET: persons.undo_merge ----
+    def test_confirm_undo_get_requires_undo_merge(self):
+        log = self._make_log(status=PersonMergeLog.Status.UNDOABLE)
+        url = reverse(
+            "duplicates:merge_log_confirm_undo", kwargs={"pk": log.pk}
+        )
+        self.assertEqual(self.noperm_client.get(url).status_code, 403)
+        self.assertEqual(self.client.get(url).status_code, 200)
+
+    # ---- No.21 復元 POST（破壊的＝復元実行）: 403 時に復元未実行 ----
+    def test_confirm_undo_post_forbidden_does_not_undo(self):
+        log = self._make_log(status=PersonMergeLog.Status.UNDOABLE)
+        url = reverse(
+            "duplicates:merge_log_confirm_undo", kwargs={"pk": log.pk}
+        )
+        resp = self.noperm_client.post(url, data={})
+        self.assertEqual(resp.status_code, 403)
+        # ログは UNDOABLE のまま・復元は実行されていない（DB 状態不変）
+        log.refresh_from_db()
+        self.assertEqual(log.status, PersonMergeLog.Status.UNDOABLE)
