@@ -181,6 +181,9 @@ class Contact(models.Model):
                 name="unique_primary_contact_per_person",
             ),
         ]
+        permissions = [
+            ("edit_all_contacts", "他人の Contact を編集できる（横断権限、Phase 7 段2-B）"),
+        ]
 
     # Contact のユーザー入力対象フィールドのマスター定義（仕様書 §11.6.2）。
     # ContactBaseForm.Meta.fields はこの集合を参照する。Contact 側がマスター、

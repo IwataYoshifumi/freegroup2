@@ -44,6 +44,7 @@ from .forms import (
     build_contact_sns_formset,
 )
 from .models import Contact, ContactFieldConfidence, ContactSns
+from .services.permissions import can_edit_contact
 
 
 # ----------------------------------------------------------------------
@@ -369,7 +370,7 @@ class _ContactAjaxBase(View):
             return _error("Authentication required", 403)
         return super().dispatch(request, *args, **kwargs)
 
-    def _get_contact_or_error(self, pk):
+    def _get_contact_or_error(self, pk, user):
         """Contact を取得し、ガード違反なら (None, error_response) を返す。
 
         戻り値：(contact, None) または (None, JsonResponse)
@@ -378,6 +379,11 @@ class _ContactAjaxBase(View):
             contact = Contact.objects.select_related("person").get(pk=pk)
         except Contact.DoesNotExist:
             return None, _error("Contact not found", 404)
+
+        # 所有者ガード（Phase 7 段2-B、正本は services.permissions.can_edit_contact）。
+        # created_by / managed_by 本人または横断権限保持者のみ編集可、それ以外は 403。
+        if not can_edit_contact(user, contact):
+            return None, _error("You do not have permission to edit this contact", 403)
 
         # Contact.status ガード（'inactive' を弾く）
         if contact.status not in (Contact.Status.PRIMARY, Contact.Status.ACTIVE):
@@ -412,7 +418,7 @@ class ContactAjaxUpdateFieldView(_ContactAjaxBase):
     """
 
     def post(self, request, pk):
-        contact, err = self._get_contact_or_error(pk)
+        contact, err = self._get_contact_or_error(pk, request.user)
         if err is not None:
             return err
 
@@ -467,7 +473,7 @@ class ContactAjaxConfirmFieldsView(_ContactAjaxBase):
     """
 
     def post(self, request, pk):
-        contact, err = self._get_contact_or_error(pk)
+        contact, err = self._get_contact_or_error(pk, request.user)
         if err is not None:
             return err
 

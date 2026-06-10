@@ -337,6 +337,8 @@ class _ContactAjaxTestBase(TestCase):
             # （補完されると salutation_name の CFC が増えてカウントがずれるため）。
             salutation_name="テスト 様",
             salutation_name_is_manual=True,
+            # Phase 7 段2-B：所有者ガード導入後、正常系はログインユーザーが所有者である前提。
+            created_by=self.user,
         )
         self.person_a.primary_contact = self.contact_a
         self.person_a.save(update_fields=["primary_contact", "updated_at"])
@@ -748,6 +750,129 @@ class ContactAjaxConfirmFieldsViewTests(_ContactAjaxTestBase):
             self._url(), {"field_names": ["organization"]}
         )
         self.assertEqual(resp.json()["unconfirmed_count"], 2)
+
+
+class CanEditContactTests(TestCase):
+    """can_edit_contact の単体テスト（Phase 7 段2-B、所有者ガードの正本）。
+
+    判定 4 ケース：created_by 本人 / managed_by 本人 / 横断権限保持者 / 他人。
+    """
+
+    def setUp(self):
+        from django.contrib.auth.models import Permission
+
+        self.owner = User.objects.create_user(username="ce_owner", password="x")
+        self.manager = User.objects.create_user(username="ce_manager", password="x")
+        self.privileged = User.objects.create_user(username="ce_priv", password="x")
+        self.stranger = User.objects.create_user(username="ce_stranger", password="x")
+
+        # privileged に横断権限 contacts.edit_all_contacts を付与
+        perm = Permission.objects.get(
+            codename="edit_all_contacts", content_type__app_label="contacts"
+        )
+        self.privileged.user_permissions.add(perm)
+        # has_perm のキャッシュを避けるため取り直す
+        self.privileged = User.objects.get(pk=self.privileged.pk)
+
+        self.person = Person.objects.create()
+        self.contact = Contact.objects.create(
+            person=self.person,
+            status=Contact.Status.PRIMARY,
+            full_name="Owner-name",
+            created_by=self.owner,
+            managed_by=self.manager,
+        )
+
+    def test_created_by_owner_can_edit(self):
+        """created_by 本人は編集可。"""
+        from contacts.services.permissions import can_edit_contact
+
+        self.assertTrue(can_edit_contact(self.owner, self.contact))
+
+    def test_managed_by_user_can_edit(self):
+        """managed_by 本人は編集可。"""
+        from contacts.services.permissions import can_edit_contact
+
+        self.assertTrue(can_edit_contact(self.manager, self.contact))
+
+    def test_cross_cutting_permission_can_edit(self):
+        """横断権限 contacts.edit_all_contacts 保持者は編集可。"""
+        from contacts.services.permissions import can_edit_contact
+
+        self.assertTrue(can_edit_contact(self.privileged, self.contact))
+
+    def test_stranger_cannot_edit(self):
+        """所有者でも管理者でも横断権限保持者でもない他人は編集不可。"""
+        from contacts.services.permissions import can_edit_contact
+
+        self.assertFalse(can_edit_contact(self.stranger, self.contact))
+
+
+class ContactAjaxOwnerGuardTests(_ContactAjaxTestBase):
+    """AJAX 2 View の所有者ガード結合テスト（Phase 7 段2-B）。
+
+    _ContactAjaxTestBase の contact_a は created_by=self.user。別ユーザーで
+    ログインした場合に編集・確認が 403 で弾かれること、本人なら通ることを実証する。
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.stranger = User.objects.create_user(
+            username="d3c_stranger", password="dummy"
+        )
+        self.stranger_client = Client()
+        self.stranger_client.force_login(self.stranger)
+
+    def _update_url(self):
+        return reverse(
+            "contacts:ajax_update_field", kwargs={"pk": self.contact_a.pk}
+        )
+
+    def _confirm_url(self):
+        return reverse(
+            "contacts:ajax_confirm_fields", kwargs={"pk": self.contact_a.pk}
+        )
+
+    def test_update_field_by_stranger_forbidden(self):
+        """他人による update_field → 403、値は変わらない。"""
+        before = self.contact_a.organization
+        resp = self._post_json(
+            self._update_url(),
+            {"field_name": "organization", "new_value": "HACKED"},
+            client=self.stranger_client,
+        )
+        self.assertEqual(resp.status_code, 403)
+        self.assertFalse(resp.json()["success"])
+        self.contact_a.refresh_from_db()
+        self.assertEqual(self.contact_a.organization, before)
+
+    def test_update_field_by_owner_ok(self):
+        """本人（created_by）による update_field → 200。"""
+        resp = self._post_json(
+            self._update_url(),
+            {"field_name": "organization", "new_value": "owner-edit"},
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.contact_a.refresh_from_db()
+        self.assertEqual(self.contact_a.organization, "owner-edit")
+
+    def test_confirm_fields_by_stranger_forbidden(self):
+        """他人による confirm_fields → 403。"""
+        resp = self._post_json(
+            self._confirm_url(),
+            {"field_names": ["organization"]},
+            client=self.stranger_client,
+        )
+        self.assertEqual(resp.status_code, 403)
+        self.assertFalse(resp.json()["success"])
+
+    def test_confirm_fields_by_owner_ok(self):
+        """本人（created_by）による confirm_fields → 200。"""
+        resp = self._post_json(
+            self._confirm_url(),
+            {"field_names": ["organization"]},
+        )
+        self.assertEqual(resp.status_code, 200)
 
 
 class ContactDetailViewTests(TestCase):
