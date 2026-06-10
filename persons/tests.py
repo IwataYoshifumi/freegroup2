@@ -15,6 +15,31 @@ from persons.models import Person
 User = get_user_model()
 
 
+def _grant_view_person(user):
+    """Phase 7 段3-1：PersonListView / PersonDetailView は persons.view_person を要求する
+    （URL一覧表 rev20 No.7 / No.8 ★1）。これらの View を叩く既存テストの正常系を保つため、
+    テストユーザーに閲覧権限を付与する補正ヘルパー。"""
+    from django.contrib.auth.models import Permission
+
+    user.user_permissions.add(
+        Permission.objects.get(
+            codename="view_person", content_type__app_label="persons"
+        )
+    )
+
+
+def _grant_add_contact(user):
+    """Phase 7 段3-2：PersonAddAdditionalRoleView は新規 Contact 作成のため
+    contacts.add_contact を要求する（rev20 No.9 ★2）。add-role 系テストの正常系を保つ補正。"""
+    from django.contrib.auth.models import Permission
+
+    user.user_permissions.add(
+        Permission.objects.get(
+            codename="add_contact", content_type__app_label="contacts"
+        )
+    )
+
+
 def _empty_sns_management_form(prefix="sns"):
     """ContactSns InlineFormSet の空 management_form（POST テスト用、Phase F1 §11.6.7）。"""
     return {
@@ -47,6 +72,7 @@ class PersonListViewTests(TestCase):
         self.user = User.objects.create_user(
             username="person_list_test_user", password="dummy"
         )
+        _grant_view_person(self.user)
         self.person_a = Person.objects.create()
         self.contact_a = Contact.objects.create(
             person=self.person_a,
@@ -160,6 +186,180 @@ class PersonListViewTests(TestCase):
         self.assertIn(p_both.id, ids)
         self.assertEqual(len(ids), 2)
 
+    # ---- HIG 第6章：多段ソート（単一 sort パラメータ、例 ?sort=company,-title,name）----
+
+    def test_single_key_sort_asc_and_desc(self):
+        """?sort=company（昇順）/ ?sort=-company（降順）で会社順に並ぶ。"""
+        p_c, _ = self._make_active_with_primary(full_name="C", organization="Cccorp")
+        p_a, _ = self._make_active_with_primary(full_name="A", organization="Aaacorp")
+        p_b, _ = self._make_active_with_primary(full_name="B", organization="Bbbcorp")
+
+        resp = self.client.get(self.url, {"sort": "company"})
+        ids = [p.id for p in resp.context["persons"]]
+        # Aaacorp < Acme Corp(person_a) < Bbbcorp < Cccorp
+        self.assertLess(ids.index(p_a.id), ids.index(p_b.id))
+        self.assertLess(ids.index(p_b.id), ids.index(p_c.id))
+        self.assertTrue(resp.context["sort_is_active"])
+        self.assertEqual(resp.context["sort_rows"][0], {"key": "company", "dir": "asc"})
+
+        resp = self.client.get(self.url, {"sort": "-company"})
+        ids = [p.id for p in resp.context["persons"]]
+        self.assertLess(ids.index(p_c.id), ids.index(p_b.id))
+        self.assertLess(ids.index(p_b.id), ids.index(p_a.id))
+        self.assertEqual(resp.context["sort_rows"][0], {"key": "company", "dir": "desc"})
+
+    def test_multi_key_sort_priority(self):
+        """?sort=company,-name で 会社昇順 → 同社内は氏名降順（多段・全件）。"""
+        # 同じ会社 "Same" を持つ 2 人を氏名違いで作る。
+        # 氏名ソートは phonetic_name（読み）順なので、-name 降順で Zoe→Amy になるよう読みを付ける。
+        p_same_z, _ = self._make_active_with_primary(
+            full_name="Zoe", organization="Same", phonetic_name="ゾエ"
+        )
+        p_same_a, _ = self._make_active_with_primary(
+            full_name="Amy", organization="Same", phonetic_name="エイミー"
+        )
+        # 別会社（後ろに来る）
+        p_other, _ = self._make_active_with_primary(
+            full_name="Mike", organization="Zzcorp"
+        )
+        resp = self.client.get(self.url, {"sort": "company,-name"})
+        ids = [p.id for p in resp.context["persons"]]
+        # 会社 "Same" グループが "Zzcorp" より前、グループ内は氏名降順 Zoe→Amy
+        self.assertLess(ids.index(p_same_z.id), ids.index(p_same_a.id))
+        self.assertLess(ids.index(p_same_a.id), ids.index(p_other.id))
+        # sort_rows が 2 段ぶん復元される
+        self.assertEqual(resp.context["sort_rows"][0], {"key": "company", "dir": "asc"})
+        self.assertEqual(resp.context["sort_rows"][1], {"key": "name", "dir": "desc"})
+
+    def test_name_sort_uses_phonetic_name(self):
+        """氏名ソート（?sort=name）は漢字コード順でなく phonetic_name（カタカナ読み）の五十音順。"""
+        # 漢字コード順と読み順が一致しない 3 人を用意（読み: サトウ < スズキ < タナカ）。
+        # 漢字順なら 佐(U+4F50) < 田(U+7530) < 鈴(U+9234) で sato→tanaka→suzuki になり、
+        # 読み順（sato→suzuki→tanaka）と食い違うため、読みで並んでいることを区別できる。
+        p_tanaka, _ = self._make_active_with_primary(
+            full_name="田中", phonetic_name="タナカ"
+        )
+        p_suzuki, _ = self._make_active_with_primary(
+            full_name="鈴木", phonetic_name="スズキ"
+        )
+        p_sato, _ = self._make_active_with_primary(
+            full_name="佐藤", phonetic_name="サトウ"
+        )
+
+        resp = self.client.get(self.url, {"sort": "name"})
+        ids = [p.id for p in resp.context["persons"]]
+        # 読み昇順：サトウ → スズキ → タナカ
+        self.assertLess(ids.index(p_sato.id), ids.index(p_suzuki.id))
+        self.assertLess(ids.index(p_suzuki.id), ids.index(p_tanaka.id))
+
+        resp = self.client.get(self.url, {"sort": "-name"})
+        ids = [p.id for p in resp.context["persons"]]
+        # 読み降順：タナカ → スズキ → サトウ
+        self.assertLess(ids.index(p_tanaka.id), ids.index(p_suzuki.id))
+        self.assertLess(ids.index(p_suzuki.id), ids.index(p_sato.id))
+
+    def test_invalid_keys_ignored_in_multi(self):
+        """許可リスト外キー（department/address）は無視され、有効キーだけ適用される。"""
+        p_z, _ = self._make_active_with_primary(full_name="Z", organization="Zzcorp")
+        p_a, _ = self._make_active_with_primary(full_name="A", organization="Aaacorp")
+        resp = self.client.get(self.url, {"sort": "department,company,address"})
+        ids = [p.id for p in resp.context["persons"]]
+        # company 昇順だけが効く
+        self.assertLess(ids.index(p_a.id), ids.index(p_z.id))
+        self.assertTrue(resp.context["sort_is_active"])
+        self.assertEqual(resp.context["sort_rows"][0], {"key": "company", "dir": "asc"})
+
+    def test_all_invalid_or_empty_sort_keeps_default(self):
+        """全キーが不正（or 空）なら sort 無効＝既定の並びを維持し、折りたたみは閉じ判定。"""
+        resp = self.client.get(self.url, {"sort": "department,address"})
+        self.assertFalse(resp.context["sort_is_active"])
+        self.assertEqual(resp.context["sort_value"], "")
+        # 全行が「指定なし」
+        self.assertTrue(all(r["key"] == "" for r in resp.context["sort_rows"]))
+
+        resp_empty = self.client.get(self.url, {"sort": ""})
+        self.assertFalse(resp_empty.context["sort_is_active"])
+
+    def test_no_sort_param_keeps_default_order(self):
+        """sort 未指定なら search_persons の既定並びを維持し、折りたたみは閉じ判定。"""
+        resp = self.client.get(self.url)
+        self.assertFalse(resp.context["sort_is_active"])
+        self.assertEqual(resp.context["sort_value"], "")
+
+    def test_duplicate_key_first_wins(self):
+        """同一キーの二重指定は先勝ち（?sort=-company,company → company 降順のみ）。"""
+        resp = self.client.get(self.url, {"sort": "-company,company"})
+        rows = resp.context["sort_rows"]
+        self.assertEqual(rows[0], {"key": "company", "dir": "desc"})
+        # 2 行目以降は未指定（重複が落ちている）
+        self.assertEqual(rows[1]["key"], "")
+
+    def test_collapse_open_state_reflects_sort(self):
+        """ソート指定があれば折りたたみは開く（is-open）、無ければ閉じる。"""
+        resp_sorted = self.client.get(self.url, {"sort": "company"})
+        self.assertContains(resp_sorted, "js-person-sort-control is-open")
+        resp_plain = self.client.get(self.url)
+        self.assertNotContains(resp_plain, "js-person-sort-control is-open")
+
+    def test_thead_uses_japanese_status_heading(self):
+        """<thead> 見出しが「状態」になり、英字見出し status を出さない（HIG 原則4）。"""
+        resp = self.client.get(self.url)
+        self.assertContains(resp, "状態")
+        self.assertNotContains(resp, ">status<")
+
+    def test_header_sort_removed_and_sort_control_rendered(self):
+        """列見出しクリックのソート（data-sort-key/方向アイコン script）は廃止され、
+        検索フォーム内のソートコントロール＋列切替が描画される。"""
+        resp = self.client.get(self.url)
+        body = resp.content.decode("utf-8")
+        # 旧・列見出しクリックの URL 書き換え式ソート（__personSortHeaderInit）は消えている。
+        # ※ data-sort-key は現在ページ内 DOM ソートの氏名 phonetic 比較用に正当に使うため、
+        #    「存在しないこと」のチェック対象からは外す（旧式の判定指標は __personSortHeaderInit）。
+        self.assertNotIn("__personSortHeaderInit", body)
+        # フォーム内ソートコントロール（折りたたみ＋4列ドロップダウン＋方向トグル）
+        self.assertIn("js-person-sort-control", body)
+        self.assertIn('name="sort"', body)
+        self.assertIn("app-radio-toggle", body)
+        for label in ("指定なし", "氏名", "会社", "役職", "連絡先"):
+            self.assertIn(label, body)
+        # 列切替（data-col-key と persons 専用キー）は維持
+        self.assertIn("data-col-key", body)
+        self.assertIn("person_list_visible_columns", body)
+
+    def test_column_toggle_init_is_deferred_until_dom_ready(self):
+        """列切替の初期化が DOM 構築後に走る（再読込時もテーブルに表示状態が適用される）。
+
+        partial はテーブルより上のツールバーに置かれるため、即時実行だと初期 apply の
+        時点で [data-col-key] が未生成になり localStorage 復元状態が反映されない。
+        DOMContentLoaded 遅延が入っていることを描画 HTML で回帰確認する（JS 層のため）。
+        """
+        resp = self.client.get(self.url)
+        body = resp.content.decode("utf-8")
+        self.assertIn("DOMContentLoaded", body)
+        self.assertIn("readyState", body)
+        self.assertIn("person_list_visible_columns", body)
+
+    def test_pagination_preserves_sort_query(self):
+        """ソート状態でページ送りしても sort が失われない（_pagination.html）。"""
+        for i in range(25):
+            self._make_active_with_primary(
+                full_name=f"pp-{i:02d}", organization=f"org{i:02d}"
+            )
+        resp = self.client.get(self.url, {"sort": "-company"})
+        self.assertTrue(resp.context["is_paginated"])
+        body = resp.content.decode("utf-8")
+        # urlencode で - は %2D にエンコードされるため両表記を許容して確認
+        self.assertTrue("sort=-company" in body or "sort=%2Dcompany" in body)
+
+    def test_push_current_captures_sort_not_dir(self):
+        """戻る復元用に push_current が sort を取り込み、廃止した dir は keys に無い（HIG 6.1）。"""
+        resp = self.client.get(self.url, {"sort": "company,-title"})
+        back = resp.context["back"]
+        urls = " ".join(entry.get("url", "") for entry in back.back_stack)
+        self.assertIn("sort=", urls)
+        self.assertIn("company", urls)
+        self.assertNotIn("dir=", urls)
+
     def test_pagination_21_records(self):
         """21 件以上で 2 ページに分かれる（paginate_by=20）。"""
         for i in range(20):
@@ -179,7 +379,90 @@ class PersonListViewTests(TestCase):
         ids = [p.id for p in resp.context["persons"]]
         self.assertIn(orphan.id, ids)
         body = resp.content.decode()
-        self.assertIn("(primary_contact 未設定)", body)
+        # 氏名欄は内部語を出さず (氏名なし) に畳む（HIG 原則4）
+        self.assertIn("(氏名なし)", body)
+        self.assertNotIn("(primary_contact 未設定)", body)
+
+    # ---- v1.6 残UI改修：連絡先4列分割・住所列・ステータス業務語/トグル/折りたたみ・列見出しJSソート ----
+
+    def test_contact_columns_split_into_four_and_address(self):
+        """連絡先1列が メール/携帯電話/個人電話・FAX/会社電話・FAX の4列に分割され、住所列が増える。
+
+        電話・FAX セルは両値あれば「TEL ◯◯／FAX ◯◯」併記、片方だけならそれだけ出す（item 8）。
+        """
+        self._make_active_with_primary(
+            full_name="Carol Contact",
+            email="carol@ex.example",
+            mobile_phone="090-5555-6666",
+            org_phone="0561-00-0000",
+            org_fax="0561-11-1111",
+            personal_phone="052-2222-3333",
+            address="Aichi Toyota",
+        )
+        resp = self.client.get(self.url)
+        body = resp.content.decode("utf-8")
+        # 見出し（業務語・分割後）
+        for head in ("メール", "携帯電話", "個人電話・FAX", "会社電話・FAX", "住所"):
+            self.assertIn(head, body)
+        # 値（携帯・住所・会社電話/FAX 併記）
+        self.assertIn("090-5555-6666", body)
+        self.assertIn("Aichi Toyota", body)
+        self.assertIn("TEL 0561-00-0000／FAX 0561-11-1111", body)
+        # 個人は phone のみ → TEL のみ（FAX 併記なし）
+        self.assertIn("TEL 052-2222-3333", body)
+
+    def test_status_filter_japanese_business_words_and_toggle(self):
+        """ステータスフィルタが業務語（有効/マージ済み/アーカイブ）＋複数選択トグルで描画される。
+
+        表示は業務語、送信値（internal）は active/merged/archived のまま（item 2/3）。
+        """
+        resp = self.client.get(self.url)
+        body = resp.content.decode("utf-8")
+        for label in ("有効", "マージ済み", "アーカイブ"):
+            self.assertIn(label, body)
+        # 送信値は internal を維持
+        for value in ('value="active"', 'value="merged"', 'value="archived"'):
+            self.assertIn(value, body)
+        # 複数選択トグル（checkbox を app-radio-toggle でトグル化、name は維持）
+        self.assertIn("app-radio-toggle", body)
+        self.assertIn('name="status"', body)
+
+    def test_status_filter_collapsed_by_default(self):
+        """ステータスフィルタは折りたたみ（app-collapsible）に入り、初期は閉（item 4）。"""
+        resp = self.client.get(self.url)
+        body = resp.content.decode("utf-8")
+        self.assertIn("app-person-filter-collapsible", body)
+        # ステータス見出しの折りたたみは初期 aria-expanded=false（自動展開しない）
+        self.assertIn("<span>ステータス</span>", body)
+        self.assertIn('aria-expanded="false"', body)
+
+    def test_search_card_width_scoped_to_persons(self):
+        """検索カードに persons 専用の横幅スコープ class が付く（item 1・共有partを汚さない）。"""
+        resp = self.client.get(self.url)
+        self.assertContains(resp, "app-person-search")
+
+    def test_column_toggle_lists_new_columns_with_off_defaults(self):
+        """列切替メニューに新列が並び、増えた3列は data-default="0"（初期OFF）になる（item 9）。"""
+        resp = self.client.get(self.url)
+        body = resp.content.decode("utf-8")
+        for key in ("status", "email", "mobile_phone",
+                    "personal_contact", "org_contact", "address"):
+            self.assertIn('data-col-key="%s"' % key, body)
+        # 増設3列は初期OFF
+        for key in ("personal_contact", "org_contact", "address"):
+            self.assertIn('data-col-key="%s" data-default="0"' % key, body)
+
+    def test_page_sort_markers_present_and_not_url_rewrite(self):
+        """列見出しの現在ページ内JSソート用マーカーが出る一方、旧URL書き換え方式の痕跡は無い（item 11）。"""
+        resp = self.client.get(self.url)
+        body = resp.content.decode("utf-8")
+        # クライアント側DOMソートの目印
+        self.assertIn("js-person-page-sort", body)
+        self.assertIn("data-sort-col", body)
+        # 旧 URL クエリ書き換え方式（サーバー側ソートへの入力）と取り違えていないこと。
+        # ※ data-sort-key は現在ページ内 DOM ソートの氏名 phonetic 比較用に正当に使うため、
+        #    取り違え検出の指標は __personSortHeaderInit（旧式 JS の初期化マーカー）の不在で判定する。
+        self.assertNotIn("__personSortHeaderInit", body)
 
 
 class PersonDetailViewTests(TestCase):
@@ -189,6 +472,7 @@ class PersonDetailViewTests(TestCase):
         self.user = User.objects.create_user(
             username="person_detail_test_user", password="dummy"
         )
+        _grant_view_person(self.user)
         self.client = Client()
         self.client.force_login(self.user)
 
@@ -244,7 +528,9 @@ class PersonDetailViewTests(TestCase):
         resp = self.client.get(self._url(archived))
         self.assertEqual(resp.status_code, 200)
         self.assertTemplateUsed(resp, "persons/person_detail_archived.html")
-        self.assertIn("archived", resp.content.decode())
+        # status バッジは status_badge タグで日本語ラベル表示（HIG 原則4・英字値は出さない）
+        self.assertIn("アーカイブ", resp.content.decode())
+        self.assertNotIn(">archived<", resp.content.decode())
 
     def test_merged_person_shows_merge_logs(self):
         """merged Person はマージ履歴セクションを表示。"""
@@ -293,6 +579,7 @@ class PersonAddAdditionalRoleViewTests(TestCase):
         self.user = User.objects.create_user(
             username="add_role_test_user", password="dummy"
         )
+        _grant_add_contact(self.user)
         self.person = Person.objects.create()
         self.primary = Contact.objects.create(
             person=self.person,
@@ -524,6 +811,7 @@ class PersonDetailDebugUidTests(TestCase):
 
     def setUp(self):
         self.user = User.objects.create_user(username="person_dbg", password="dummy")
+        _grant_view_person(self.user)
         self.client = Client()
         self.client.force_login(self.user)
 
@@ -561,6 +849,7 @@ class PersonDetailDebugUidOffTests(TestCase):
 
     def setUp(self):
         self.user = User.objects.create_user(username="person_dbg_off", password="dummy")
+        _grant_view_person(self.user)
         self.client = Client()
         self.client.force_login(self.user)
 
@@ -584,6 +873,7 @@ class PersonAddAdditionalRoleSnsTests(TestCase):
 
     def setUp(self):
         self.user = User.objects.create_user(username="add_sns_user", password="x")
+        _grant_add_contact(self.user)
         self.person = Person.objects.create()
         self.primary = Contact.objects.create(
             person=self.person,
@@ -638,6 +928,7 @@ class PersonAddAdditionalRoleRenderTests(TestCase):
 
     def setUp(self):
         self.user = User.objects.create_user(username="add_render_user", password="x")
+        _grant_add_contact(self.user)
         self.person = Person.objects.create()
         self.primary = Contact.objects.create(
             person=self.person, status=Contact.Status.PRIMARY, full_name="P"
@@ -668,3 +959,48 @@ class PersonAddAdditionalRoleRenderTests(TestCase):
         resp = self.client.get(self._url())
         self.assertContains(resp, "app-form__label")
         self.assertContains(resp, "js-sns-formset-container")
+
+
+class Phase7PersonViewAuthTests(TestCase):
+    """Phase 7 段3-1：PersonListView / PersonDetailView の persons.view_person ガード
+    （URL一覧表 rev20 No.7 / No.8 ★1）。owner 判定は持たない（v1.7+ 先送り）。"""
+
+    def setUp(self):
+        self.viewer = User.objects.create_user(username="pv_viewer", password="x")
+        _grant_view_person(self.viewer)
+        self.noperm = User.objects.create_user(username="pv_noperm", password="x")
+        # 詳細が 200 を返す orphan Person（active + primary_contact NULL）
+        self.person = Person.objects.create()
+
+    def _client(self, user):
+        c = Client()
+        c.force_login(user)
+        return c
+
+    def test_list_requires_view_person(self):
+        url = reverse("persons:person_list")
+        self.assertEqual(self._client(self.noperm).get(url).status_code, 403)
+        self.assertEqual(self._client(self.viewer).get(url).status_code, 200)
+
+    def test_detail_requires_view_person(self):
+        url = reverse("persons:person_detail", kwargs={"pk": self.person.pk})
+        self.assertEqual(self._client(self.noperm).get(url).status_code, 403)
+        # orphan Person 詳細は 200（active + primary_contact あり なら ContactDetail へ 302）
+        self.assertEqual(self._client(self.viewer).get(url).status_code, 200)
+
+    def test_list_anonymous_redirects(self):
+        """未ログインは LoginRequiredMixin で 302（段1 の回帰確認）。"""
+        self.assertEqual(Client().get(reverse("persons:person_list")).status_code, 302)
+
+    def test_add_additional_role_requires_add_contact(self):
+        """Phase 7 段3-2 No.9：別肩書追加は contacts.add_contact を要求する
+        （実体は active Person 配下への Contact 作成）。"""
+        url = reverse(
+            "persons:person_add_additional_role", kwargs={"pk": self.person.pk}
+        )
+        # contacts.add_contact なし → 403
+        self.assertEqual(self._client(self.noperm).get(url).status_code, 403)
+        # contacts.add_contact あり → 200（active Person 配下のフォーム表示）
+        adder = User.objects.create_user(username="pv_adder", password="x")
+        _grant_add_contact(adder)
+        self.assertEqual(self._client(adder).get(url).status_code, 200)

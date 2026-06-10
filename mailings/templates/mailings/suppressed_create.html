@@ -1,0 +1,39 @@
+{% extends "mailings/app_base.html" %}
+{% load back_tags %}
+
+{% block title %}配信拒否メアド 手動登録 — FreeGroup2{% endblock %}
+
+{% block content %}
+  <div class="app-page-header">
+    <div>
+      <div class="app-breadcrumb">メール配信 / 配信拒否メアド / 手動登録</div>
+      <h1>配信拒否メアド 手動登録</h1>
+    </div>
+  </div>
+
+  {% if messages %}
+    {% for message in messages %}
+      <section class="app-card">
+        <div class="app-message">{{ message }}</div>
+      </section>
+    {% endfor %}
+  {% endif %}
+
+  <section class="app-card" style="max-width: 720px; margin: 0 auto;">
+    <form method="post" action="{% url 'mailings:suppressed_create' %}" class="app-form-grid">
+      {% csrf_token %}
+      <div class="app-form__group">
+        <label for="email">メアド</label>
+        <input type="email" id="email" name="email" class="app-input" required>
+      </div>
+      <div class="app-form__group">
+        <label for="note">備考</label>
+        <textarea id="note" name="note" class="app-input" rows="3"></textarea>
+      </div>
+      <div>
+        <button type="submit" class="app-btn app-btn--primary">登録</button>
+        <a class="app-btn app-btn--secondary" href="{% url 'mailings:suppressed_list' %}">戻る</a>
+      </div>
+    </form>
+  </section>
+{% endblock %}

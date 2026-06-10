@@ -11,12 +11,8 @@
       <h1>重複候補レビュー</h1>
     </div>
     <div class="app-action-area">
-      {% if back.back_exist %}
-        <a href="{% back_url back %}" class="app-btn app-btn--secondary">戻る</a>
-      {% endif %}
-      {% if back.back_all_exist %}
-        <a href="{% back_all_url back %}" class="app-btn app-btn--secondary">最初に戻る</a>
-      {% endif %}
+      {% back_all_link back %}
+      {% back_link back %}
     </div>
   </div>
 
@@ -44,7 +40,7 @@
     <div class="app-section__header"><h2>名刺画像比較</h2></div>
     <div class="app-form-grid">
       <div class="app-form__group">
-        <h3>左側（Person A）</h3>
+        <h3>人物（左）</h3>
         {% if surviving_card_image_url %}
           <div class="app-review-thumb">
             <button type="button" data-action="open-modal" data-target="review-img-modal-surviving" aria-label="名刺画像を拡大表示">
@@ -56,7 +52,7 @@
         {% endif %}
       </div>
       <div class="app-form__group">
-        <h3>右側（Person B）</h3>
+        <h3>人物（右）</h3>
         {% if merged_card_image_url %}
           <div class="app-review-thumb">
             <button type="button" data-action="open-modal" data-target="review-img-modal-merged" aria-label="名刺画像を拡大表示">
@@ -84,7 +80,7 @@
     </div>
     <div class="app-form-grid">
       <div class="app-form__group">
-        <h3>左側（Person A）</h3>
+        <h3>人物（左）</h3>
         {% for group in surviving_field_groups %}
           <div class="app-review-field-group__title">{{ group.group_name }}</div>
           <dl class="app-detail-list">
@@ -99,12 +95,12 @@
         <label class="app-merge-survivor__btn">
           <input type="radio" name="surviving_person_choice" value="person_a"
                  {% if form.surviving_person_choice.value == "person_a" %}checked{% endif %}>
-          <span class="app-merge-survivor__label--survivor">これをサバイブにする</span>
+          <span class="app-merge-survivor__label--survivor">これをサバイブ側にする</span>
           <span class="app-merge-survivor__label--primary-role">これを主コンタクトにする</span>
         </label>
       </div>
       <div class="app-form__group">
-        <h3>右側（Person B）</h3>
+        <h3>人物（右）</h3>
         {% for group in merged_field_groups %}
           <div class="app-review-field-group__title">{{ group.group_name }}</div>
           <dl class="app-detail-list">
@@ -119,7 +115,7 @@
         <label class="app-merge-survivor__btn">
           <input type="radio" name="surviving_person_choice" value="person_b"
                  {% if form.surviving_person_choice.value == "person_b" %}checked{% endif %}>
-          <span class="app-merge-survivor__label--survivor">これをサバイブにする</span>
+          <span class="app-merge-survivor__label--survivor">これをサバイブ側にする</span>
           <span class="app-merge-survivor__label--primary-role">これを主コンタクトにする</span>
         </label>
       </div>
@@ -129,7 +125,7 @@
     <div class="app-section__header" style="margin-top:var(--app-space-md);"><h2>SNS 比較</h2></div>
     <div class="app-form-grid">
       <div class="app-form__group">
-        <h3>左側（Person A）</h3>
+        <h3>人物（左）</h3>
         {% for group in surviving_sns_groups %}
           <div class="app-review-field-group__title">{{ group.sns_type_label }}</div>
           <ul class="app-sns-compare__list">
@@ -144,7 +140,7 @@
         {% endfor %}
       </div>
       <div class="app-form__group">
-        <h3>右側（Person B）</h3>
+        <h3>人物（右）</h3>
         {% for group in merged_sns_groups %}
           <div class="app-review-field-group__title">{{ group.sns_type_label }}</div>
           <ul class="app-sns-compare__list">
@@ -201,16 +197,15 @@
     {% if form.has_confirm_checkboxes %}
       <div class="app-section--executes-merge">
         <div class="app-section__header" style="margin-top:var(--app-space-md);"><h2>確認チェック</h2></div>
-        <div class="app-form__group">
-          {% for field in form %}
-            {% if field.name|slice:":10" == "confirmed_" %}
-              <div class="app-form__group">
-                <label>{{ field }} {{ field.label }}</label>
-                {{ field.errors }}
-              </div>
-            {% endif %}
-          {% endfor %}
-        </div>
+        {% for field in form %}
+          {% if field.name|slice:":10" == "confirmed_" %}
+            <div class="app-form__group">
+              <div class="app-form__label">{{ field.label }}</div>
+              {{ field }}
+              {{ field.errors }}
+            </div>
+          {% endif %}
+        {% endfor %}
       </div>
     {% endif %}
 
@@ -223,13 +218,9 @@
     </div>
 
     <div class="app-action-area" style="margin-top:24px;">
+      {% back_all_link back %}
+      {% back_link back %}
       <button type="submit" class="app-btn app-btn--primary">決定</button>
-      {% if back.back_exist %}
-        <a href="{% back_url back %}" class="app-btn app-btn--secondary">戻る</a>
-      {% endif %}
-      {% if back.back_all_exist %}
-        <a href="{% back_all_url back %}" class="app-btn app-btn--secondary">最初に戻る</a>
-      {% endif %}
     </div>
   </form>
 

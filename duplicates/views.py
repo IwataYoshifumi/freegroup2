@@ -16,7 +16,7 @@ PersonMergeLogConfirmUndoView：マージ復元確認 + 実行（URL 21 番、D-
 """
 
 from django.contrib import messages
-from django.contrib.auth.mixins import LoginRequiredMixin
+from django.contrib.auth.mixins import LoginRequiredMixin, PermissionRequiredMixin
 from django.core.exceptions import ValidationError
 from django.db.models import (
     Case,
@@ -150,7 +150,9 @@ FIELD_GROUPS = (
 )
 
 
-class DuplicateCandidateGroupListView(LoginRequiredMixin, ListView):
+class DuplicateCandidateGroupListView(
+    LoginRequiredMixin, PermissionRequiredMixin, ListView
+):
     """重複候補グループ一覧画面（15 番、仕様書 §11.3 / §11.5）。
 
     DuplicateCandidate を group_id 単位で集約表示。各 group の rank（全件同一の前提）、
@@ -168,6 +170,9 @@ class DuplicateCandidateGroupListView(LoginRequiredMixin, ListView):
     group_id IS NULL のレコードは集約対象外（指示書 §1 確認事項、null は単発候補で
     本画面の対象外）。
     """
+
+    # 認可（Phase 7 段2-A、URL一覧表 rev20 No.15 ★1）：マージ候補閲覧も merge_person。
+    permission_required = "persons.merge_person"
 
     template_name = "duplicates/duplicate_group_list.html"
     context_object_name = "groups"
@@ -290,7 +295,7 @@ class DuplicateCandidateGroupListView(LoginRequiredMixin, ListView):
 
         back = BackNavigator(self.request)
         back.push_current(
-            "重複候補グループ一覧",
+            "",
             ["rank", "progress", "user", "searched", "page"],
         )
         context["back"] = back
@@ -306,7 +311,9 @@ class DuplicateCandidateGroupListView(LoginRequiredMixin, ListView):
         return context
 
 
-class DuplicateCandidateGroupDetailView(LoginRequiredMixin, View):
+class DuplicateCandidateGroupDetailView(
+    LoginRequiredMixin, PermissionRequiredMixin, View
+):
     """重複候補グループ詳細画面（16 番、仕様書 §11.3 / §11.5.1）。
 
     URL kwarg `group_id`（UUID）で受け取り、当該 group の候補を集計表示。
@@ -318,6 +325,9 @@ class DuplicateCandidateGroupDetailView(LoginRequiredMixin, View):
     BackNavigator は push_current を呼ばず、テンプレート側で {% back_url back %} を使う
     （contact_detail / card_detail と同パターン、A-2-追加 で確立）。
     """
+
+    # 認可（Phase 7 段2-A、URL一覧表 rev20 No.16 ★1）：persons.merge_person。
+    permission_required = "persons.merge_person"
 
     template_name = "duplicates/duplicate_group_detail.html"
 
@@ -359,7 +369,9 @@ class DuplicateCandidateGroupDetailView(LoginRequiredMixin, View):
         return render(request, self.template_name, context)
 
 
-class DuplicateCandidateGroupUpdateView(LoginRequiredMixin, View):
+class DuplicateCandidateGroupUpdateView(
+    LoginRequiredMixin, PermissionRequiredMixin, View
+):
     """重複候補レビュー画面（17 番、仕様書 §11.3 / §11.5.2 / §11.5.3 / §11.5.5）。
 
     GET（D-4b）：仕様書 §11.5.2 の 5 ステップで次のペアを表示する。
@@ -386,6 +398,9 @@ class DuplicateCandidateGroupUpdateView(LoginRequiredMixin, View):
     duplicate_checked_at=NULL になり DC 全 invalidated 化で再マージ不可となる問題のため）。
     フィールド修正は Contact 詳細画面 AJAX に分離（§10.6.4 ケース 4）。
     """
+
+    # 認可（Phase 7 段2-A、URL一覧表 rev20 No.17 ★1）：マージ実行系は persons.merge_person。
+    permission_required = "persons.merge_person"
 
     template_name = "duplicates/duplicate_group_review.html"
     _SESSION_KEY_PREFIX = "reviewed_pair_ids:"
@@ -708,7 +723,7 @@ class DuplicateCandidateGroupUpdateView(LoginRequiredMixin, View):
         )
 
 
-class PersonMergeLogListView(LoginRequiredMixin, ListView):
+class PersonMergeLogListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
     """マージログ一覧画面（19 番、仕様書 §11.3 / D-4f-1）。
 
     PersonMergeLog を全件対象に -executed_at 降順で表示。絞り込み GET パラメータ：
@@ -721,6 +736,10 @@ class PersonMergeLogListView(LoginRequiredMixin, ListView):
     N+1 対策：surviving / merged の primary_contact、executed_by / undone_by を
     select_related。
     """
+
+    # 認可（Phase 7 段3-2、rev20 No.19 ★2）：マージ実行者が履歴を閲覧する対応として
+    # persons.merge_person を付与（No.15-17 マージ系と同一権限、段2-A と整合）。
+    permission_required = "persons.merge_person"
 
     template_name = "duplicates/merge_log_list.html"
     context_object_name = "merge_logs"
@@ -773,7 +792,7 @@ class PersonMergeLogListView(LoginRequiredMixin, ListView):
         context = super().get_context_data(**kwargs)
         back = BackNavigator(self.request)
         back.push_current(
-            "マージログ一覧",
+            "",
             ["status", "user", "searched", "page"],
         )
         context["back"] = back
@@ -786,7 +805,7 @@ class PersonMergeLogListView(LoginRequiredMixin, ListView):
         return context
 
 
-class PersonMergeLogDetailView(LoginRequiredMixin, View):
+class PersonMergeLogDetailView(LoginRequiredMixin, PermissionRequiredMixin, View):
     """マージログ詳細画面（20 番、仕様書 §11.3 / D-4f-1）。
 
     URL kwarg `pk`（UUID）で受け取り、PersonMergeLog を 1 件取得。存在しない pk は
@@ -797,7 +816,11 @@ class PersonMergeLogDetailView(LoginRequiredMixin, View):
 
     復元ボタン：is_undoable=True のときテンプレ側で「準備中」グレーアウト表示
     （21 番 PersonMergeLogConfirmUndoView は D-4f-2 で別途実装）。
+
+    認可（Phase 7 段3-2、rev20 No.20 ★2）：persons.merge_person（No.19 一覧と同一）。
     """
+
+    permission_required = "persons.merge_person"
 
     template_name = "duplicates/merge_log_detail.html"
 
@@ -830,7 +853,7 @@ class PersonMergeLogDetailView(LoginRequiredMixin, View):
         return render(request, self.template_name, context)
 
 
-class PersonMergeLogConfirmUndoView(LoginRequiredMixin, View):
+class PersonMergeLogConfirmUndoView(LoginRequiredMixin, PermissionRequiredMixin, View):
     """マージ復元の確認 + 実行画面（21 番、仕様書 §11.3 / D-4f-2）。
 
     GET：merge_log を取得 → is_undoable() False なら messages.error + 20 番リダイレクト
@@ -844,6 +867,9 @@ class PersonMergeLogConfirmUndoView(LoginRequiredMixin, View):
     BackNavigator：push_current は呼ばない。20 番からの遷移時に append_back_url で
     back スタックが引き継がれる（merge_log_detail.html 側で対応）。
     """
+
+    # 認可（Phase 7 段2-A、URL一覧表 rev20 No.21 ★1）：マージ復元は admin のみ undo_merge。
+    permission_required = "persons.undo_merge"
 
     template_name = "duplicates/merge_log_confirm_undo.html"
 

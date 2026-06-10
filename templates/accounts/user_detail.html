@@ -15,7 +15,7 @@
     <section class="app-card">
       <div class="app-section__header">
         <h1>ユーザ詳細</h1>
-        <a href="{% url 'accounts:user_list' %}" class="app-btn app-btn--secondary app-btn--sm">一覧に戻る</a>
+        <a href="{% url 'accounts:user_list' %}" class="app-btn app-btn--secondary app-btn--sm">戻る</a>
       </div>
 
       <div class="app-detail-item">
@@ -60,7 +60,7 @@
 
     {% if object.is_active %}
       <div class="app-action-area" style="margin-top: var(--app-space-md);">
-        <a href="{% url 'accounts:retire_user' user_id=object.id %}" class="app-btn app-btn--danger">退職処理</a>
+        <a href="{% url 'accounts:retire_user' user_id=object.id %}" class="app-btn app-btn--warning">退職処理</a>
       </div>
     {% else %}
       <div class="app-action-area" style="margin-top: var(--app-space-md);">

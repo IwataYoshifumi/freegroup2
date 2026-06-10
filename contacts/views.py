@@ -19,8 +19,7 @@ D-3c で追加した AJAX 2 エンドポイント、および D-3b で追加し�
 
 import json
 
-from django.contrib.auth import get_user_model
-from django.contrib.auth.mixins import LoginRequiredMixin
+from django.contrib.auth.mixins import LoginRequiredMixin, PermissionRequiredMixin
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Q
@@ -45,23 +44,102 @@ from .forms import (
     build_contact_sns_formset,
 )
 from .models import Contact, ContactFieldConfidence, ContactSns
+from .services.permissions import can_edit_contact
 
 
-User = get_user_model()
+# ----------------------------------------------------------------------
+# Contact 一覧の多段サーバー側ソート（HIG v1.5 §6.2、persons 実装に倣う）。
+#
+# 「画面でソートできる列＝許可リストにあるキー」を一致させ、それ以外は無視＝既定の並びに戻す。
+# クエリは単一パラメータ sort に優先順つきカンマ区切り、降順は先頭 "-"。
+#   例 ?sort=organization,-title,name （第1=会社昇順 / 第2=役職降順 / 第3=氏名昇順）
+# 氏名は読み（phonetic_name）の五十音順。Contact 自身のフィールドなので直参照（join 不要）。
+# ----------------------------------------------------------------------
+
+CONTACT_LIST_SORT_FIELD_MAP = {
+    "name": "phonetic_name",      # 氏名は読み（カタカナ）の五十音順
+    "company": "organization",
+    "title": "title",
+    "email": "email",             # 連絡先列のソートキー
+}
+# 多段ソートの最大段数（ソートコントロールの行数と一致）。
+CONTACT_LIST_SORT_MAX_KEYS = 3
 
 
-def get_current_user(request):
-    """認証未実装のための仮処理（既存 cards/views.py と同じ実装）。
+def _parse_contact_sort(params):
+    """単一 sort パラメータ（例 "company,-title,name"）を [(key, direction), ...] に解決する。
 
-    request.user が認証済みならそれを返し、未認証なら最初のスーパーユーザーを返す。
-    v1.4.2 は認証仮実装期（仕様書 §18.1）、本格的な認証は v1.5.0 以降で実装。
+    [性質] 純関数（DB 操作なし・副作用なし）
+    [入力] params: QueryDict 様（request.GET）
+    [出力] list[tuple[str, str]]（key は許可リスト内、direction は "asc" / "desc"）
+        - 先頭 "-" は降順、無印は昇順。
+        - 許可リスト外キー・空トークンは無視（不正値は黙って捨てる＝既定の並びに戻す）。
+        - 同一キーの二重指定は先勝ちで除外。最大 CONTACT_LIST_SORT_MAX_KEYS 段まで。
     """
-    if request.user.is_authenticated:
-        return request.user
-    return User.objects.filter(is_superuser=True).first()
+    raw = params.get("sort") or ""
+    tokens = []
+    seen = set()
+    for chunk in raw.split(","):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        if chunk.startswith("-"):
+            direction = "desc"
+            key = chunk[1:]
+        else:
+            direction = "asc"
+            key = chunk
+        if key not in CONTACT_LIST_SORT_FIELD_MAP or key in seen:
+            continue
+        seen.add(key)
+        tokens.append((key, direction))
+        if len(tokens) >= CONTACT_LIST_SORT_MAX_KEYS:
+            break
+    return tokens
 
 
-class ContactListView(ListView):
+def _apply_contact_list_sort(qs, params):
+    """Contact QuerySet に多段ソート（?sort=key,-key,...）を適用する（純関数）。
+
+    [性質] 純関数（QuerySet を加工して返すのみ・DB 操作なし）
+    有効トークンが無ければ qs をそのまま返す（呼び出し側の既定並びを温存）。
+    指定有りのときだけ許可リスト経由で order_by を多段で差し替える（末尾に pk で安定化）。
+    """
+    tokens = _parse_contact_sort(params)
+    if not tokens:
+        return qs
+    order = []
+    for key, direction in tokens:
+        prefix = "-" if direction == "desc" else ""
+        order.append(prefix + CONTACT_LIST_SORT_FIELD_MAP[key])
+    order.append("pk")
+    return qs.order_by(*order)
+
+
+def _contact_sort_context(params):
+    """ソート UI（検索フォーム内の折りたたみ）の描画用 context を作る（純関数）。
+
+    [性質] 純関数（DB 操作なし・副作用なし）
+    [出力] dict:
+        sort_rows: CONTACT_LIST_SORT_MAX_KEYS 行分の [{"key", "dir"}]
+                   （未指定行は key="" / dir="asc"）。各行が列ドロップダウン＋方向トグルに対応。
+        sort_is_active: bool（有効トークンが 1 つでもあるか＝折りたたみの開閉初期状態の判定）。
+        sort_value: 正規化済み sort 文字列（hidden の初期値・no-JS 再送信用）。
+    """
+    tokens = _parse_contact_sort(params)
+    rows = [{"key": k, "dir": d} for (k, d) in tokens]
+    while len(rows) < CONTACT_LIST_SORT_MAX_KEYS:
+        rows.append({"key": "", "dir": "asc"})
+    return {
+        "sort_rows": rows,
+        "sort_is_active": bool(tokens),
+        "sort_value": ",".join(
+            ("-" + k if d == "desc" else k) for k, d in tokens
+        ),
+    }
+
+
+class ContactListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
     """Contact 一覧画面（v1.4.2 仕様変更で追加、仕様書改訂は別途）。
 
     GET 専用。デフォルトは active Person 配下の primary / active のみ表示。
@@ -70,6 +148,8 @@ class ContactListView(ListView):
     同形（7 フィールド AND、tel は personal_phone / mobile_phone / personal_fax の OR）。
     """
 
+    # 認可（Phase 7 段3-2、rev20 No.23 ★2）：Contact 閲覧 → view_contact。
+    permission_required = "contacts.view_contact"
     model = Contact
     template_name = "contacts/contact_list.html"
     context_object_name = "contacts"
@@ -127,14 +207,16 @@ class ContactListView(ListView):
         if p.get("address", "").strip():
             qs = qs.filter(address__icontains=p["address"].strip())
 
-        return qs.order_by("-updated_at", "-created_at")
+        # 既定の並びは更新日時降順。?sort= があれば許可リスト経由で多段ソートに差し替える。
+        qs = qs.order_by("-updated_at", "-created_at")
+        return _apply_contact_list_sort(qs, self.request.GET)
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
 
         back = BackNavigator(self.request)
         back.push_current(
-            "コンタクト一覧",
+            "",
             [
                 "name",
                 "organization",
@@ -145,6 +227,8 @@ class ContactListView(ListView):
                 "address",
                 "status",
                 "searched",
+                # HIG §6.1：並び替え・ページ状態を戻るで復元するため sort を追加（単一パラメータ）。
+                "sort",
                 "page",
             ],
         )
@@ -156,10 +240,12 @@ class ContactListView(ListView):
             context[key] = self.request.GET.get(key, "")
         context["selected_statuses"] = self._get_selected_statuses()
         context["searched"] = self.request.GET.get("searched") == "1"
+        # 検索フォーム内ソートコントロール用（sort_rows / sort_is_active / sort_value）。
+        context.update(_contact_sort_context(self.request.GET))
         return context
 
 
-class ContactDetailView(DetailView):
+class ContactDetailView(LoginRequiredMixin, PermissionRequiredMixin, DetailView):
     """Contact 詳細画面（仕様書 §11.3 11 番、D-3b）。
 
     GET 専用、業務メイン画面（active な Person を見る画面）。Contact.status と
@@ -177,6 +263,8 @@ class ContactDetailView(DetailView):
     （D-3b 論点 3）。
     """
 
+    # 認可（Phase 7 段3-2、rev20 No.11 ★2）：Contact 閲覧 → view_contact。
+    permission_required = "contacts.view_contact"
     model = Contact
     template_name = "contacts/contact_detail.html"
     context_object_name = "contact"
@@ -286,7 +374,7 @@ class _ContactAjaxBase(View):
             return _error("Authentication required", 403)
         return super().dispatch(request, *args, **kwargs)
 
-    def _get_contact_or_error(self, pk):
+    def _get_contact_or_error(self, pk, user):
         """Contact を取得し、ガード違反なら (None, error_response) を返す。
 
         戻り値：(contact, None) または (None, JsonResponse)
@@ -295,6 +383,11 @@ class _ContactAjaxBase(View):
             contact = Contact.objects.select_related("person").get(pk=pk)
         except Contact.DoesNotExist:
             return None, _error("Contact not found", 404)
+
+        # 所有者ガード（Phase 7 段2-B、正本は services.permissions.can_edit_contact）。
+        # created_by / managed_by 本人または横断権限保持者のみ編集可、それ以外は 403。
+        if not can_edit_contact(user, contact):
+            return None, _error("You do not have permission to edit this contact", 403)
 
         # Contact.status ガード（'inactive' を弾く）
         if contact.status not in (Contact.Status.PRIMARY, Contact.Status.ACTIVE):
@@ -329,7 +422,7 @@ class ContactAjaxUpdateFieldView(_ContactAjaxBase):
     """
 
     def post(self, request, pk):
-        contact, err = self._get_contact_or_error(pk)
+        contact, err = self._get_contact_or_error(pk, request.user)
         if err is not None:
             return err
 
@@ -384,7 +477,7 @@ class ContactAjaxConfirmFieldsView(_ContactAjaxBase):
     """
 
     def post(self, request, pk):
-        contact, err = self._get_contact_or_error(pk)
+        contact, err = self._get_contact_or_error(pk, request.user)
         if err is not None:
             return err
 
@@ -415,7 +508,7 @@ class ContactAjaxConfirmFieldsView(_ContactAjaxBase):
         )
 
 
-class UpdatePrimaryContactView(LoginRequiredMixin, UpdateView):
+class UpdatePrimaryContactView(LoginRequiredMixin, PermissionRequiredMixin, UpdateView):
     """primary Contact 修正画面（12 番、仕様書 §11.3 / §11.4.1 / §11.4.2）。
 
     GET：フォーム表示。POST：change_reason の値で処理を分岐：
@@ -433,6 +526,8 @@ class UpdatePrimaryContactView(LoginRequiredMixin, UpdateView):
     スタックを引き継ぐ（A-2-追加 で確立、b9f8776）。
     """
 
+    # 認可（Phase 7 段3-2、rev20 No.12 ★2）：Contact 変更 → change_contact。
+    permission_required = "contacts.change_contact"
     model = Contact
     form_class = ContactUpdateForm
     template_name = "contacts/contact_update_primary.html"
@@ -508,7 +603,7 @@ class UpdatePrimaryContactView(LoginRequiredMixin, UpdateView):
         )
 
 
-class UpdateActiveContactView(LoginRequiredMixin, UpdateView):
+class UpdateActiveContactView(LoginRequiredMixin, PermissionRequiredMixin, UpdateView):
     """active Contact 修正画面（13 番、仕様書 §11.6 / §11.7）。
 
     GET：フォーム表示。POST：フォーム値で Contact.fix() を呼び、Contact 詳細画面へ
@@ -524,6 +619,8 @@ class UpdateActiveContactView(LoginRequiredMixin, UpdateView):
     {% back_url back %} を使ってキャンセル時の戻り先（呼び出し元）を解決する。
     """
 
+    # 認可（Phase 7 段3-2、rev20 No.13 ★2）：Contact 変更 → change_contact。
+    permission_required = "contacts.change_contact"
     model = Contact
     form_class = ContactUpdateActiveForm
     template_name = "contacts/contact_update_active.html"
@@ -723,7 +820,7 @@ def _promote_new_contact_as_primary(form, target_contact, user):
     return new_contact
 
 
-class ContactCreateView(LoginRequiredMixin, View):
+class ContactCreateView(LoginRequiredMixin, PermissionRequiredMixin, View):
     """手動 Contact 新規作成画面（10 番、仕様書 §11.4.4 / §11.6.5）。
 
     GET：空フォームを表示。
@@ -740,6 +837,8 @@ class ContactCreateView(LoginRequiredMixin, View):
     （仕様書 §10.6.4、PersonAddAdditionalRoleView と同じ流儀）。
     """
 
+    # 認可（Phase 7 段3-2、rev20 No.10 ★2）：Contact 作成 → add_contact。
+    permission_required = "contacts.add_contact"
     template_name = "contacts/contact_create.html"
     duplicates_template_name = "contacts/contact_create_duplicates.html"
 
@@ -823,7 +922,7 @@ class ContactCreateView(LoginRequiredMixin, View):
         }
 
 
-class PreviewContactView(LoginRequiredMixin, View):
+class PreviewContactView(LoginRequiredMixin, PermissionRequiredMixin, View):
     """Contact プレビュー（14 番、仕様書 §11.3 / §11.4.4 AJAX 連携）。
 
     GET のみ。HTML フラグメント（_preview_modal_body.html）を返す。
@@ -835,6 +934,8 @@ class PreviewContactView(LoginRequiredMixin, View):
       - 将来的に Contact 一覧画面のモーダルプレビューでも使用（§11.3 14 番）
     """
 
+    # 認可（Phase 7 段3-2、rev20 No.14 ★2）：Contact 閲覧 → view_contact。
+    permission_required = "contacts.view_contact"
     template_name = "contacts/_preview_modal_body.html"
 
     def get(self, request, pk):

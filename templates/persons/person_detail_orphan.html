@@ -13,12 +13,8 @@
       </div>
     </div>
     <div class="app-action-area">
-      {% if back.back_exist %}
-        <a href="{% back_url back %}" class="app-btn app-btn--secondary">戻る</a>
-      {% endif %}
-      {% if back.back_all_exist %}
-        <a href="{% back_all_url back %}" class="app-btn app-btn--secondary">最初に戻る</a>
-      {% endif %}
+      {% back_all_link back %}
+      {% back_link back %}
     </div>
   </div>
 
@@ -88,6 +84,9 @@
     </section>
   {% endif %}
 
+  {# ---- タグ付与・解除 UI（v1.6 Phase 1b-β、§5.2.3）---- #}
+  {% include "persons/_tag_assignment_ui.html" %}
+
   {# ---- User-Person 紐付け UI ---- #}
   {% with linked=person.linked_user %}
     {% if not linked or linked == user or perms.accounts.link_user_to_person %}
@@ -103,7 +102,7 @@
           <p class="app-muted">あなた（{{ user.username }}）と紐付け済みです。</p>
           <div class="app-action-area">
             {% url 'accounts:link_user_person_confirm' person_id=person.id as confirm_url %}
-            <a href="{% append_back_url confirm_url back %}" class="app-btn app-btn--danger">紐付けを解除</a>
+            <a href="{% append_back_url confirm_url back %}" class="app-btn app-btn--warning">紐付けを解除</a>
           </div>
         {% else %}
           <p class="app-muted">ユーザー「{{ linked.username }}」と紐付け済みです。</p>
@@ -113,11 +112,7 @@
   {% endwith %}
 
   <div class="app-action-area" style="margin-top:24px; max-width:1100px;">
-    {% if back.back_exist %}
-      <a href="{% back_url back %}" class="app-btn app-btn--secondary">戻る</a>
-    {% endif %}
-    {% if back.back_all_exist %}
-      <a href="{% back_all_url back %}" class="app-btn app-btn--secondary">最初に戻る</a>
-    {% endif %}
+    {% back_all_link back %}
+    {% back_link back %}
   </div>
 {% endblock %}

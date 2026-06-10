@@ -10,12 +10,8 @@
       <h1>マージログ詳細</h1>
     </div>
     <div class="app-action-area">
-      {% if back.back_exist %}
-        <a href="{% back_url back %}" class="app-btn app-btn--secondary">戻る</a>
-      {% endif %}
-      {% if back.back_all_exist %}
-        <a href="{% back_all_url back %}" class="app-btn app-btn--secondary">最初に戻る</a>
-      {% endif %}
+      {% back_all_link back %}
+      {% back_link back %}
     </div>
   </div>
 
@@ -38,7 +34,7 @@
         </dd>
       </div>
       <div class="app-detail-item">
-        <dt class="app-detail-label">統合元</dt>
+        <dt class="app-detail-label">マージド側</dt>
         <dd class="app-detail-value">
           {% url 'persons:person_detail' pk=merged_person.pk as merged_url %}
           <a href="{% append_back_url merged_url back %}">{{ merged_person.primary_contact.full_name|default:"(氏名なし)" }}</a>
@@ -91,11 +87,11 @@
 
   <section class="app-card" style="max-width:1100px;">
     <div class="app-section__header"><h2>復元プレビュー</h2></div>
-    <p class="app-muted">復元実行時にどの Contact がどう動くかの予測。実際の復元は実行ボタンから（D-4f-2 で実装予定）。</p>
+    <p class="app-muted">復元実行時にどの連絡先がどう動くかの予測。実際の復元は実行ボタンから（D-4f-2 で実装予定）。</p>
 
     <div class="app-form-grid">
       <div class="app-form__group">
-        <h3>統合元（{{ merged_person.primary_contact.full_name|default:"-" }}）に戻る Contact</h3>
+        <h3>マージド側（{{ merged_person.primary_contact.full_name|default:"-" }}）に戻る連絡先</h3>
         {% if undo_preview.contacts_to_restore %}
           <dl class="app-detail-list">
             {% for c in undo_preview.contacts_to_restore %}
@@ -115,7 +111,7 @@
         {% endif %}
       </div>
       <div class="app-form__group">
-        <h3>サバイブ側に残る Contact</h3>
+        <h3>サバイブ側に残る連絡先</h3>
         {% if undo_preview.contacts_remaining_in_surviving %}
           <dl class="app-detail-list">
             {% for c in undo_preview.contacts_remaining_in_surviving %}
@@ -142,8 +138,8 @@
       <div class="app-action-area" style="margin-top:0;">
         {% url 'duplicates:merge_log_confirm_undo' pk=merge_log.pk as confirm_undo_url %}
         <a href="{% append_back_url confirm_undo_url back %}"
-           class="app-btn app-btn--danger">このマージを復元する</a>
-        <span class="app-muted">復元すると merged_person が active 状態に戻ります。</span>
+           class="app-btn app-btn--warning">このマージを復元する</a>
+        <span class="app-muted">復元するとマージド側が有効状態に戻ります。</span>
       </div>
     </section>
   {% endif %}

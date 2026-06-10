@@ -1,0 +1,162 @@
+{% extends "mailings/app_base.html" %}
+{% load back_tags %}
+
+{% block title %}配信キャンペーン一覧 — FreeGroup2{% endblock %}
+
+{% block content %}
+  <div class="app-page-header">
+    <div>
+      <div class="app-breadcrumb">メール配信 / キャンペーン</div>
+      <h1>配信キャンペーン一覧</h1>
+    </div>
+    {# 戻る導線は右上（HIG 3.2 / 付録）。 #}
+    <div class="app-page-header__actions">
+      {% back_all_link back %}
+      {% back_link back %}
+    </div>
+  </div>
+
+  {# 遷移導線（新規作成）はタイトル直下・左寄せに置く（HIG 3.1 / 7.3）。先頭の「＋」は付けない。 #}
+  <div class="app-action-area" style="justify-content:flex-start; margin-bottom:16px;">
+    {% url 'mailings:campaign_create' as create_url %}
+    <a class="app-btn app-btn--primary" href="{% append_back_url create_url back %}">新規キャンペーン作成</a>
+  </div>
+
+  {% if messages %}
+    {% for message in messages %}
+      <section class="app-card">
+        <div class="app-message">{{ message }}</div>
+      </section>
+    {% endfor %}
+  {% endif %}
+
+  {# 検索フォーム（HIG 第6章）：名称・作成者の部分一致（常時露出）＋ 状態トグル・多段ソート（折りたたみ）。 #}
+  <section class="app-card">
+    <form method="get" class="app-form-grid-edit">
+      <input type="hidden" name="searched" value="1">
+      <div class="app-form-grid app-search-grid">
+        <div class="app-form__group">
+          <label class="app-form__label" for="id_name">キャンペーン名</label>
+          <input type="text" id="id_name" name="name" value="{{ search_name }}" class="app-input">
+        </div>
+        <div class="app-form__group">
+          <label class="app-form__label" for="id_creator">作成者</label>
+          <input type="text" id="id_creator" name="creator" value="{{ search_creator }}" class="app-input">
+        </div>
+        {# 配信日（scheduled_at）の期間検索。片側のみ指定も可（§7）。折りたたみの外＝常時表示。 #}
+        <div class="app-form__group">
+          <label class="app-form__label" for="id_date_from">配信日（開始）</label>
+          <input type="date" id="id_date_from" name="date_from" value="{{ search_date_from }}" class="app-input">
+        </div>
+        <div class="app-form__group">
+          <label class="app-form__label" for="id_date_to">配信日（終了）</label>
+          <input type="date" id="id_date_to" name="date_to" value="{{ search_date_to }}" class="app-input">
+        </div>
+      </div>
+
+      {# 「状態で絞り込み」と「ソート」の折りたたみを横並びに（HIG 第6章・縦積みで横長にしない）。 #}
+      <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:flex-start;">
+        {# 状態の絞り込み（トグル・複数選択、HIG 4.1）。ラベルは体言「状態」。幅は中身に合わせる（§7）。 #}
+        <div class="app-collapsible app-person-filter-collapsible" style="flex:0 1 auto;">
+          <button type="button" class="app-collapsible__header" data-action="toggle-collapsible"
+                  aria-expanded="false">
+            <span>状態</span>
+            <span class="app-collapsible__icon">▸</span>
+          </button>
+          <div class="app-collapsible-body">
+            {# ヘッダと中身の間に余白。トグルは2列折り返し＋枠を詰める（§1）。 #}
+            <div class="app-person-filter-box" style="margin-top:var(--app-space-sm);">
+              <ul class="app-radio-toggle" style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                {% for value, label in status_choices %}
+                  <li>
+                    <label style="padding:5px 12px; min-height:32px;">
+                      <input type="checkbox" name="status" value="{{ value }}"
+                             {% if value in selected_statuses %}checked{% endif %}>
+                      {{ label }}
+                    </label>
+                  </li>
+                {% endfor %}
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        {# 多段ソート（折りたたみ、絞り込みと同一フォーム送信）。 #}
+        <div style="flex:1 1 320px; min-width:280px;">
+          {% include "mailings/_sort_control.html" %}
+        </div>
+      </div>
+
+      <div class="app-action-area app-action-area--search">
+        <button type="submit" class="app-btn app-btn--primary">検索</button>
+        <a href="{% url 'mailings:campaign_list' %}" class="app-btn app-btn--secondary">リセット</a>
+      </div>
+    </form>
+  </section>
+
+  <section class="app-card">
+    {# 表示列選択は表の左上に置く（HIG 6.2）。 #}
+    <div style="display:flex; justify-content:flex-start; margin-bottom:12px;">
+      {% include "mailings/_column_toggle_list.html" with columns=column_defs storage_key=column_storage_key %}
+    </div>
+
+    <div class="app-table-wrapper">
+      {# js-mailings-page-sort：列見出しクリックの現在ページ内DOMソート（app.js・補助系統、URL不変）。 #}
+      <table class="app-table js-mailings-page-sort">
+        <thead>
+          <tr>
+            <th class="app-table__col--action"></th>
+            <th data-col-key="name" data-sort-col>名称</th>
+            <th data-col-key="status" data-sort-col>状態</th>
+            <th data-col-key="total" data-sort-col>配信件数</th>
+            <th data-col-key="sent" data-sort-col>送信成功</th>
+            <th data-col-key="bounced" data-sort-col>バウンス</th>
+            <th data-col-key="clicks" data-sort-col>有効クリック<br>(総アクセス)</th>
+            <th data-col-key="unsub" data-sort-col>配信停止</th>
+            <th data-col-key="created_by" data-sort-col>作成者</th>
+            <th data-col-key="created_at" data-sort-col>作成日時</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in campaigns_with_summary %}
+            <tr>
+              {% url 'mailings:campaign_detail' pk=item.campaign.pk as detail_url %}
+              {% url 'mailings:campaign_report' pk=item.campaign.pk as report_url %}
+              <td class="app-table__col--action">
+                <a class="app-btn app-btn--sm" href="{% append_back_url detail_url back %}">詳細</a>
+                {# レポートは配信完了以降のみ（下書き・予約配信待機中では出さない、指示書 §2）。 #}
+                {% if item.campaign.status != 'draft' and item.campaign.status != 'scheduled' %}
+                  <a class="app-btn app-btn--sm" href="{% append_back_url report_url back %}">レポート</a>
+                {% endif %}
+              </td>
+              <td data-col-key="name"><a href="{% append_back_url detail_url back %}">{{ item.campaign.name }}</a></td>
+              <td data-col-key="status">{{ item.campaign.get_status_display }}</td>
+              <td data-col-key="total">{{ item.summary.total }}</td>
+              <td data-col-key="sent">{{ item.summary.sent }}</td>
+              <td data-col-key="bounced">{{ item.summary.bounced }}</td>
+              <td data-col-key="clicks">{{ item.summary.valid_clicks }} ({{ item.summary.total_access }})</td>
+              <td data-col-key="unsub">{{ item.summary.unsubscribed }}</td>
+              <td data-col-key="created_by">{{ item.campaign.created_by.username|default:"-" }}</td>
+              <td data-col-key="created_at">{{ item.campaign.created_at|date:"Y-m-d H:i" }}</td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="10">
+              {% if search_name or search_creator %}
+                条件に一致するキャンペーンはありません。
+                <a href="{% url 'mailings:campaign_list' %}">検索条件をリセット →</a>
+              {% else %}
+                まだキャンペーンがありません。
+                <a href="{% append_back_url create_url back %}">新規キャンペーン作成 →</a>
+              {% endif %}
+            </td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    {# 検索条件（name/creator/status/sort）を保持したまま遷移する共通ページャ（request.GET.urlencode）。 #}
+    {% if is_paginated %}
+      {% include "persons/_pagination.html" %}
+    {% endif %}
+  </section>
+{% endblock %}

@@ -1,0 +1,107 @@
+{% comment %}
+人物検索フォーム partial（v1.6 Phase 1b 論点 B-1、仕様書 §11.4 / §11.4.2.1）。
+
+person_list.html・bulk_tagging.html 等で {% include %} で再利用する。
+v1.4.2 既存 7 項目（name/organization/department/title/email/tel/address）+ status 3。
+
+期待 context（include 側で渡す）:
+  name / organization / department / title / email / tel / address: str
+  selected_statuses: list[str]
+  reset_url: str（リセットボタンの遷移先。include 側で {% url %} 等で渡す）
+  submit_label: str（任意。既定 "検索"）
+  show_sort_control: bool（任意。True のとき人物一覧の多段ソートコントロールを出す。
+                          person_list.html からのみ True で渡す。他画面では出さない）
+{% endcomment %}
+<form method="get" class="app-form-grid-edit">
+  <input type="hidden" name="searched" value="1">
+  <div class="app-form-grid app-search-grid">
+    <div class="app-form__group">
+      <label class="app-form__label" for="id_name">氏名</label>
+      <input type="text" id="id_name" name="name" value="{{ name }}" class="app-input">
+    </div>
+    <div class="app-form__group">
+      <label class="app-form__label" for="id_organization">会社名</label>
+      <input type="text" id="id_organization" name="organization" value="{{ organization }}" class="app-input">
+    </div>
+    <div class="app-form__group">
+      <label class="app-form__label" for="id_department">部署名</label>
+      <input type="text" id="id_department" name="department" value="{{ department }}" class="app-input">
+    </div>
+    <div class="app-form__group">
+      <label class="app-form__label" for="id_title">役職</label>
+      <input type="text" id="id_title" name="title" value="{{ title }}" class="app-input">
+    </div>
+
+    <div class="app-form__group">
+      <label class="app-form__label" for="id_email">メール</label>
+      <input type="text" id="id_email" name="email" value="{{ email }}" class="app-input">
+    </div>
+    <div class="app-form__group">
+      <label class="app-form__label" for="id_tel">電話</label>
+      <input type="text" id="id_tel" name="tel" value="{{ tel }}" class="app-input">
+    </div>
+    <div class="app-form__group" style="grid-column: span 2;">
+      <label class="app-form__label" for="id_address">住所</label>
+      <input type="text" id="id_address" name="address" value="{{ address }}" class="app-input">
+    </div>
+
+    {% if show_status_filter == False %}
+      {% comment %}
+        bulk_tagging から show_status_filter=False で呼ばれた場合：ステータス UI を出さず、
+        hidden で status=active を強制送信。仕様書 §7.3 手順 3 / §11.7.1（マージ後は active のみ）。
+      {% endcomment %}
+      <input type="hidden" name="status" value="active">
+    {% else %}
+      {% comment %}
+        persons 一覧のステータスフィルタ（HIG 原則4・4.1）。
+        - 表示文言は業務語（有効／マージ済み／アーカイブ）。送信値（internal）は active/merged/archived のまま。
+        - 複数選択トグル（app-radio-toggle + checkbox）。複数 ON を維持できる。
+        - 折りたたみ（app-collapsible）に格納し初期は閉。既定は「有効のみ」。
+        この枝は show_status_filter 未指定（=persons 一覧のみ）で描画される。
+      {% endcomment %}
+      <div class="app-collapsible app-person-filter-collapsible">
+        <button type="button" class="app-collapsible__header" data-action="toggle-collapsible"
+                aria-expanded="false">
+          <span>ステータス</span>
+          <span class="app-collapsible__icon">▸</span>
+        </button>
+        <div class="app-collapsible-body">
+          <div class="app-person-filter-box">
+            <ul class="app-radio-toggle">
+              <li>
+                <label>
+                  <input type="checkbox" name="status" value="active"
+                         {% if "active" in selected_statuses %}checked{% endif %}>
+                  有効
+                </label>
+              </li>
+              <li>
+                <label>
+                  <input type="checkbox" name="status" value="merged"
+                         {% if "merged" in selected_statuses %}checked{% endif %}>
+                  マージ済み
+                </label>
+              </li>
+              <li>
+                <label>
+                  <input type="checkbox" name="status" value="archived"
+                         {% if "archived" in selected_statuses %}checked{% endif %}>
+                  アーカイブ
+                </label>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    {% endif %}
+
+    {% if show_sort_control %}
+      {% include "persons/_sort_control.html" %}
+    {% endif %}
+  </div>
+
+  <div class="app-action-area app-action-area--search">
+    <button type="submit" class="app-btn app-btn--primary">{{ submit_label|default:"検索" }}</button>
+    <a href="{{ reset_url }}" class="app-btn app-btn--secondary">リセット</a>
+  </div>
+</form>

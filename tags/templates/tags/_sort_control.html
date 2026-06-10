@@ -1,0 +1,110 @@
+{% comment %}
+タグ一覧の多段ソートコントロール（HIG v1.5 第6章 / 4.1）。絞り込みフォーム内に置く折りたたみブロック。
+persons/_sort_control.html を複製・tags 用に改名（persons 版は列がハードコードのため共有 include 不可）。
+
+期待 context（TagListView._tag_sort_context 由来）:
+  sort_rows: [{"key","dir"}] を 3 行（未指定行は key="" / dir="asc"）
+  sort_is_active: bool（折りたたみの開閉初期状態。ソート指定があれば開く）
+  sort_value: 正規化済み sort 文字列（hidden の初期値・JS 無効時の再送信用）
+
+クエリは単一 sort（例 ?sort=category,-name,updated_at）。送信時に下の inline JS が 3 行を読んで
+hidden(name="sort") へ「優先順つきカンマ区切り・降順は先頭 -」で組み立てる。列ドロップダウンは
+name を持たせず、方向ラジオは送信直前に disabled にして、URL を sort 単一パラメータに保つ。
+
+送信契機：tag_list の絞り込みフォームはカテゴリ select / アーカイブトグルの onchange 自動送信のみで
+ソート変更の送信契機が無いため、本ブロック内（ソート行の直下）に「並び替えを適用」submit を置く。
+新規 CSS/JS ファイルは作らず、既存 app-collapsible / app-radio-toggle と inline script で完結。
+{% endcomment %}
+<div class="app-collapsible app-person-filter-collapsible js-tag-sort-control{% if sort_is_active %} is-open{% endif %}">
+  <button type="button" class="app-collapsible__header" data-action="toggle-collapsible"
+          aria-expanded="{% if sort_is_active %}true{% else %}false{% endif %}">
+    <span>ソート</span>
+    <span class="app-collapsible__icon">{% if sort_is_active %}▾{% else %}▸{% endif %}</span>
+  </button>
+  <div class="app-collapsible-body">
+   <div class="app-person-filter-box">
+    {# JS が送信直前に value を組み立てる。未ソート時は disabled で sort= を URL に出さない。 #}
+    <input type="hidden" name="sort" class="js-tag-sort-value"
+           value="{{ sort_value }}"{% if not sort_is_active %} disabled{% endif %}>
+
+    {% for row in sort_rows %}
+      <div class="js-tag-sort-row"
+           style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom: var(--app-space-sm);">
+        <span class="app-form__label" style="min-width:5em; margin:0;">第{{ forloop.counter }}キー</span>
+        <select class="app-input js-tag-sort-key" style="max-width:180px;">
+          <option value="">指定なし</option>
+          <option value="category"{% if row.key == "category" %} selected{% endif %}>カテゴリ</option>
+          <option value="name"{% if row.key == "name" %} selected{% endif %}>タグ名</option>
+          <option value="person_count"{% if row.key == "person_count" %} selected{% endif %}>付与Person数</option>
+          <option value="created_by"{% if row.key == "created_by" %} selected{% endif %}>作成者</option>
+          <option value="updated_at"{% if row.key == "updated_at" %} selected{% endif %}>更新日時</option>
+        </select>
+        <ul class="app-radio-toggle">
+          <li>
+            <label>
+              <input type="radio" name="_tsortdir{{ forloop.counter }}"
+                     class="js-tag-sort-dir" value="asc"
+                     {% if row.dir != "desc" %}checked{% endif %}>
+              昇順
+            </label>
+          </li>
+          <li>
+            <label>
+              <input type="radio" name="_tsortdir{{ forloop.counter }}"
+                     class="js-tag-sort-dir" value="desc"
+                     {% if row.dir == "desc" %}checked{% endif %}>
+              降順
+            </label>
+          </li>
+        </ul>
+      </div>
+    {% endfor %}
+
+    <p class="app-muted" style="margin:0 0 var(--app-space-sm); font-size:0.85em;">
+      上の行ほど優先（第1キー→第2キー→第3キー）。「指定なし」の行は無視されます。
+    </p>
+    {# 送信契機：このボタンでソート指定を適用（フォーム submit → 下の JS が sort を組み立てる）。 #}
+    <button type="submit" class="app-btn app-btn--primary">並び替えを適用</button>
+   </div>
+  </div>
+</div>
+<script>
+  (function () {
+    if (window.__tagSortControlInit) return;
+    window.__tagSortControlInit = true;
+    function init() {
+      var ctrl = document.querySelector('.js-tag-sort-control');
+      if (!ctrl) return;
+      var form = ctrl.closest('form');
+      if (!form) return;
+      var hidden = ctrl.querySelector('.js-tag-sort-value');
+      form.addEventListener('submit', function () {
+        var parts = [];
+        var seen = {};
+        ctrl.querySelectorAll('.js-tag-sort-row').forEach(function (row) {
+          var sel = row.querySelector('.js-tag-sort-key');
+          var key = sel ? sel.value : '';
+          if (!key || seen[key]) return;     // 未指定・同一列の二重指定は無視
+          seen[key] = true;
+          var dirEl = row.querySelector('.js-tag-sort-dir:checked');
+          var dir = dirEl ? dirEl.value : 'asc';
+          parts.push((dir === 'desc' ? '-' : '') + key);
+        });
+        if (parts.length) {
+          hidden.value = parts.join(',');
+          hidden.disabled = false;
+        } else {
+          hidden.value = '';
+          hidden.disabled = true;            // 空なら sort= を URL に出さない
+        }
+        // 方向ラジオは name を持つので、送信から外して URL を sort 単一に保つ。
+        ctrl.querySelectorAll('.js-tag-sort-dir').forEach(function (r) { r.disabled = true; });
+      });
+    }
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', init);
+    } else {
+      init();
+    }
+  })();
+</script>

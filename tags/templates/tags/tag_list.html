@@ -1,0 +1,184 @@
+{% extends "mailings/app_base.html" %}
+{% load back_tags %}
+
+{% block title %}タグ一覧 — FreeGroup2{% endblock %}
+
+{% block content %}
+  <div class="app-page-header">
+    <div>
+      <div class="app-breadcrumb">タグ一覧</div>
+      <h1>タグ一覧</h1>
+    </div>
+    {# 戻る導線は右上（HIG 3.2 / 付録）。 #}
+    <div class="app-page-header__actions">
+      {% back_all_link back %}
+      {% back_link back %}
+    </div>
+  </div>
+
+  {# 遷移導線（新規作成・カテゴリ一覧）はタイトル直下・左寄せに集約（HIG 3.1 / 7.3、「＋」除去）。 #}
+  <div class="app-action-area" style="justify-content:flex-start; margin-bottom:16px;">
+    {% if categories %}
+      {% url 'tags:tag_create' as create_url %}
+      <a href="{% append_back_url create_url back %}" class="app-btn app-btn--primary">新規タグ作成</a>
+    {% endif %}
+    {% url 'tags:tag_category_list' as cat_url %}
+    <a href="{% append_back_url cat_url back %}" class="app-btn app-btn--secondary">タグカテゴリ一覧</a>
+  </div>
+
+  {% if not categories %}
+    <section class="app-card">
+      <div style="padding:24px; text-align:center;">
+        <h2 style="margin-bottom:12px;">先にカテゴリを作成してください</h2>
+        <p class="app-muted" style="margin-bottom:16px;">
+          タグはカテゴリに必ず属する設計です（仕様書 §4.9A）。<br>
+          まずカテゴリ一覧画面で最初のカテゴリを作成してください。
+        </p>
+        {% url 'tags:tag_category_list' as cat_url %}
+        <a href="{% append_back_url cat_url back %}" class="app-btn app-btn--primary">タグカテゴリ一覧画面へ</a>
+      </div>
+    </section>
+  {% else %}
+    {% comment %}
+      検索フォーム（HIG 第6章・キャンペーン一覧と同構造／§2）：
+      テキスト（タグ名）は折りたたみの外＝常時表示。トグル絞り込み（タグカテゴリ＋状態）は
+      「絞り込み」折りたたみの中。絞り込みとソートの折りたたみは横並び・初期閉。
+    {% endcomment %}
+    <section class="app-card" style="margin-bottom:16px;">
+      <form method="get" class="app-form-grid-edit">
+        <input type="hidden" name="searched" value="1">
+        <div class="app-form-grid app-search-grid">
+          <div class="app-form__group">
+            <label class="app-form__label" for="id_name">タグ名</label>
+            <input type="text" id="id_name" name="name" value="{{ search_name }}" class="app-input">
+          </div>
+        </div>
+
+        <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:flex-start;">
+          {# 絞り込み（トグル群：タグカテゴリ＋状態）。初期閉・幅は中身に合わせる。 #}
+          <div class="app-collapsible app-person-filter-collapsible" style="flex:0 1 auto;">
+            <button type="button" class="app-collapsible__header" data-action="toggle-collapsible"
+                    aria-expanded="false">
+              <span>絞り込み</span>
+              <span class="app-collapsible__icon">▸</span>
+            </button>
+            <div class="app-collapsible-body">
+              <div class="app-person-filter-box" style="margin-top:var(--app-space-sm);">
+                {# ラベルは体言「タグカテゴリ」。トグルは2列折り返し＋枠を詰める。 #}
+                <div class="app-form__group">
+                  <span class="app-form__label">タグカテゴリ</span>
+                  <ul class="app-radio-toggle" style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                    {% for cat in categories %}
+                      <li>
+                        <label style="padding:5px 12px; min-height:32px;">
+                          <input type="checkbox" name="category" value="{{ cat.id }}"
+                                 {% if cat.id|stringformat:"s" in selected_category_ids %}checked{% endif %}>
+                          {{ cat.name }}
+                        </label>
+                      </li>
+                    {% endfor %}
+                  </ul>
+                </div>
+
+                <div class="app-form__group" style="margin-top:var(--app-space-sm);">
+                  <span class="app-form__label">状態</span>
+                  <ul class="app-radio-toggle" style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                    <li>
+                      <label style="padding:5px 12px; min-height:32px;">
+                        <input type="checkbox" name="status" value="active"
+                               {% if "active" in selected_statuses %}checked{% endif %}>
+                        アクティブ
+                      </label>
+                    </li>
+                    <li>
+                      <label style="padding:5px 12px; min-height:32px;">
+                        <input type="checkbox" name="status" value="archived"
+                               {% if "archived" in selected_statuses %}checked{% endif %}>
+                        アーカイブ済み
+                      </label>
+                    </li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {# ソート（折りたたみ・指定があれば開く）。 #}
+          <div style="flex:1 1 320px; min-width:280px;">
+            {% include "tags/_sort_control.html" %}
+          </div>
+        </div>
+
+        <div class="app-action-area app-action-area--search">
+          <button type="submit" class="app-btn app-btn--primary">検索</button>
+          <a href="{% url 'tags:tag_list' %}" class="app-btn app-btn--secondary">リセット</a>
+        </div>
+      </form>
+    </section>
+
+    <section class="app-card">
+      {% if tags %}
+        {# HIG §6：表示列選択は表の左上に置く。 #}
+        <div style="display:flex; justify-content:flex-start; margin-bottom:12px;">
+          {% include "tags/_column_toggle.html" %}
+        </div>
+        <div class="app-table-wrapper">
+          {% comment %}
+            js-tag-page-sort：列見出しクリックの「現在ページ内DOMソート」対象（app.js）。
+            サーバー側多段フォームソート（?sort=）とは別系統で、URLは書き換えない。
+            カテゴリ・付与Person数は data-sort-key に数値を持たせ、サーバー側（sort_order/数値）と並びを揃える。
+          {% endcomment %}
+          <table class="app-table app-table--nowrap js-tag-page-sort">
+            <thead>
+              <tr>
+                <th class="app-table__col--action">操作</th>
+                <th data-col-key="category" data-sort-col>カテゴリ</th>
+                <th data-col-key="name" data-sort-col>タグ名</th>
+                <th data-col-key="person_count" data-sort-col>付与 Person 数</th>
+                <th data-col-key="description">説明</th>
+                <th data-col-key="status">状態</th>
+                <th data-col-key="created_by" data-sort-col>作成者</th>
+                <th class="app-table__col--date" data-col-key="updated_at" data-sort-col>更新日時</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for tag in tags %}
+                {% url 'tags:tag_detail' pk=tag.id as detail_url %}
+                {% url 'tags:tag_update' pk=tag.id as update_url %}
+                <tr>
+                  <td class="app-table__col--action">
+                    <a href="{% append_back_url detail_url back %}" class="app-btn app-btn--outline-secondary app-btn--sm">詳細</a>
+                    {% if not tag.is_archived %}
+                      <a href="{% append_back_url update_url back %}" class="app-btn app-btn--success app-btn--sm">編集</a>
+                    {% endif %}
+                  </td>
+                  <td data-col-key="category" data-sort-key="{{ tag.category.sort_order }}">{{ tag.category.name }}</td>
+                  <td data-col-key="name">{{ tag.name }}</td>
+                  <td data-col-key="person_count" data-sort-key="{{ tag.person_count }}">{{ tag.person_count }}</td>
+                  <td data-col-key="description">{{ tag.description|default:"-"|truncatechars:60 }}</td>
+                  <td data-col-key="status">
+                    {% if tag.is_archived %}
+                      <span class="app-status-badge app-status-badge--muted">アーカイブ済み</span>
+                    {% else %}
+                      <span class="app-status-badge app-status-badge--success">アクティブ</span>
+                    {% endif %}
+                  </td>
+                  <td data-col-key="created_by">{{ tag.created_by.username|default:"-" }}</td>
+                  <td data-col-key="updated_at">{{ tag.updated_at|date:"Y/m/d H:i" }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+
+        {% if is_paginated %}
+          {% include "persons/_pagination.html" %}
+        {% endif %}
+      {% else %}
+        <p class="app-muted">
+          条件に一致するタグがありません（状態トグルや絞り込みを変更してください）。
+        </p>
+      {% endif %}
+    </section>
+  {% endif %}
+{% endblock %}

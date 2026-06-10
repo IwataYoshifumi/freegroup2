@@ -1,5 +1,6 @@
 {% extends "cards/app_base.html" %}
 {% load back_tags %}
+{% load badge_tags %}
 {% load ui_tags %}
 
 {% block title %}コンタクト詳細 — FreeGroup2{% endblock %}
@@ -11,12 +12,8 @@
       <h1>{{ contact|default:"コンタクト詳細" }}</h1>
     </div>
     <div class="app-action-area">
-      {% if back.back_exist %}
-        <a href="{% back_url back %}" class="app-btn app-btn--secondary">戻る</a>
-      {% endif %}
-      {% if back.back_all_exist %}
-        <a href="{% back_all_url back %}" class="app-btn app-btn--secondary">最初に戻る</a>
-      {% endif %}
+      {% back_all_link back %}
+      {% back_link back %}
     </div>
   </div>
 
@@ -44,11 +41,11 @@
         {% if is_primary %}
           {% url 'contacts:contact_update_primary' contact.id as update_primary_url %}
           <a href="{% append_back_url update_primary_url back %}"
-             class="app-btn app-btn--primary">プライマリーコンタクト修正</a>
+             class="app-btn app-btn--success">プライマリーコンタクト修正</a>
         {% elif is_active %}
           {% url 'contacts:contact_update_active' contact.id as update_active_url %}
           <a href="{% append_back_url update_active_url back %}"
-             class="app-btn app-btn--primary">アクティブ修正</a>
+             class="app-btn app-btn--success">アクティブ修正</a>
         {% endif %}
 
         {# 別肩書追加ボタン（9 番、primary のみ表示） #}
@@ -95,19 +92,11 @@
       <h2 style="margin:0;">{{ contact.full_name|default:"(氏名なし)" }}</h2>
 
       {# status バッジ #}
-      {% if is_primary %}
-        <span class="app-status-badge app-status-badge--success">primary</span>
-      {% elif is_active %}
-        <span class="app-status-badge app-status-badge--warning">active</span>
-      {% elif is_inactive %}
-        <span class="app-status-badge app-status-badge--muted">inactive</span>
-      {% endif %}
+      {% status_badge contact %}
 
-      {# Person.status バッジ #}
+      {# Person.status バッジ（通常以外のときだけ出す） #}
       {% if contact.person.status != "active" %}
-        <span class="app-status-badge app-status-badge--muted">
-          Person.{{ contact.person.status }}
-        </span>
+        {% status_badge contact.person %}
       {% endif %}
 
       {# マージ候補バッジ #}
@@ -262,11 +251,7 @@
              style="display:flex; align-items:center; gap:var(--app-space-sm); text-decoration:none; color:inherit;">
             <div class="app-list-card__main" style="margin:0; flex:1 1 auto;">
               <strong>{{ other.full_name|default:"(氏名なし)" }}</strong>
-              {% if other.status == "primary" %}
-                <span class="app-status-badge app-status-badge--success">primary</span>
-              {% elif other.status == "active" %}
-                <span class="app-status-badge app-status-badge--warning">active</span>
-              {% endif %}
+              {% status_badge other %}
               {% if other.organization %}<div class="app-muted">{{ other.organization }}</div>{% endif %}
             </div>
           </a>
@@ -337,12 +322,8 @@
 
   {# 下部戻るボタン #}
   <div class="app-action-area" style="margin-top:24px; max-width:1100px;">
-    {% if back.back_exist %}
-      <a href="{% back_url back %}" class="app-btn app-btn--secondary">戻る</a>
-    {% endif %}
-    {% if back.back_all_exist %}
-      <a href="{% back_all_url back %}" class="app-btn app-btn--secondary">最初に戻る</a>
-    {% endif %}
+    {% back_all_link back %}
+    {% back_link back %}
   </div>
 
   {# 名刺画像モーダル #}

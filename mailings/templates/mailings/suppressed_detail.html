@@ -1,0 +1,49 @@
+{% extends "mailings/app_base.html" %}
+{% load back_tags %}
+
+{% block title %}配信拒否メアド詳細 — FreeGroup2{% endblock %}
+
+{% block content %}
+  <div class="app-page-header">
+    <div>
+      <div class="app-breadcrumb">メール配信 / 配信拒否メアド / 詳細</div>
+      <h1>{{ suppressed.email }}</h1>
+    </div>
+  </div>
+
+  {% if messages %}
+    {% for message in messages %}
+      <section class="app-card">
+        <div class="app-message">{{ message }}</div>
+      </section>
+    {% endfor %}
+  {% endif %}
+
+  <section class="app-card">
+    <dl class="app-dl">
+      <dt>メアド</dt><dd>{{ suppressed.email }}</dd>
+      <dt>登録元</dt><dd>{{ suppressed.get_source_display }}</dd>
+      <dt>登録日時</dt><dd>{{ suppressed.created_at|date:"Y-m-d H:i" }}</dd>
+      <dt>バウンス理由</dt><dd>{{ suppressed.bounce_reason|default:"—" }}</dd>
+      <dt>備考</dt><dd>{{ suppressed.note|default:"—" }}</dd>
+      <dt>状態</dt>
+      <dd>
+        {% if suppressed.cancelled_at %}
+          解除済み（{{ suppressed.cancelled_at|date:"Y-m-d H:i" }}、解除者：{{ suppressed.cancelled_by }}）
+        {% else %}
+          <strong>有効（配信ブロック中）</strong>
+        {% endif %}
+      </dd>
+    </dl>
+  </section>
+
+  {% if not suppressed.cancelled_at %}
+    <section class="app-card">
+      <form method="post" action="{% url 'mailings:suppressed_detail' pk=suppressed.pk %}">
+        {% csrf_token %}
+        <p>この配信拒否を解除すると、当該メアドへの配信が再開されます。</p>
+        <button type="submit" class="app-btn app-btn--warning">解除する</button>
+      </form>
+    </section>
+  {% endif %}
+{% endblock %}

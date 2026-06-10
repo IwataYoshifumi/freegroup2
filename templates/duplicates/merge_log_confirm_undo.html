@@ -10,19 +10,15 @@
       <h1>マージ復元の確認</h1>
     </div>
     <div class="app-action-area">
-      {% if back.back_exist %}
-        <a href="{% back_url back %}" class="app-btn app-btn--secondary">戻る</a>
-      {% endif %}
-      {% if back.back_all_exist %}
-        <a href="{% back_all_url back %}" class="app-btn app-btn--secondary">最初に戻る</a>
-      {% endif %}
+      {% back_all_link back %}
+      {% back_link back %}
     </div>
   </div>
 
   <div class="app-alert app-alert--danger" style="max-width:1100px;">
     <strong>この操作は取り消せません。</strong>
-    {{ merged_person.primary_contact.full_name|default:"(氏名なし)" }} を active 状態に戻し、
-    {{ undo_preview.contacts_to_restore|length }} 件の Contact が
+    {{ merged_person.primary_contact.full_name|default:"(氏名なし)" }} を有効状態に戻し、
+    {{ undo_preview.contacts_to_restore|length }} 件の連絡先が
     {{ merged_person.primary_contact.full_name|default:"(氏名なし)" }} 配下に戻されます。
   </div>
 
@@ -42,7 +38,7 @@
         <dd class="app-detail-value">{{ surviving_person.primary_contact.full_name|default:"(氏名なし)" }}</dd>
       </div>
       <div class="app-detail-item">
-        <dt class="app-detail-label">統合元</dt>
+        <dt class="app-detail-label">マージド側</dt>
         <dd class="app-detail-value">{{ merged_person.primary_contact.full_name|default:"(氏名なし)" }}</dd>
       </div>
     </dl>
@@ -52,7 +48,7 @@
     <div class="app-section__header"><h2>復元プレビュー</h2></div>
     <div class="app-form-grid">
       <div class="app-form__group">
-        <h3>統合元（{{ merged_person.primary_contact.full_name|default:"-" }}）に戻る Contact</h3>
+        <h3>マージド側（{{ merged_person.primary_contact.full_name|default:"-" }}）に戻る連絡先</h3>
         {% if undo_preview.contacts_to_restore %}
           <dl class="app-detail-list">
             {% for c in undo_preview.contacts_to_restore %}
@@ -67,7 +63,7 @@
         {% endif %}
       </div>
       <div class="app-form__group">
-        <h3>サバイブ側に残る Contact</h3>
+        <h3>サバイブ側に残る連絡先</h3>
         {% if undo_preview.contacts_remaining_in_surviving %}
           <dl class="app-detail-list">
             {% for c in undo_preview.contacts_remaining_in_surviving %}
@@ -113,16 +109,15 @@
 
     <div class="app-section__header" style="margin-top:var(--app-space-md);"><h2>確認</h2></div>
     <div class="app-form__group">
-      <label>
-        {{ form.confirmed }} {{ form.confirmed.label }}
-      </label>
+      <div class="app-form__label">{{ form.confirmed.label }}</div>
+      {{ form.confirmed }}
       {{ form.confirmed.errors }}
     </div>
 
     <div class="app-action-area" style="margin-top:24px;">
-      <button type="submit" class="app-btn app-btn--danger">復元する</button>
       {% url 'duplicates:merge_log_detail' pk=merge_log.pk as detail_url %}
-      <a href="{% append_back_url detail_url back %}" class="app-btn app-btn--secondary">キャンセル</a>
+      <a href="{% append_back_url detail_url back %}" class="app-btn app-btn--secondary">戻る</a>
+      <button type="submit" class="app-btn app-btn--warning">復元する</button>
     </div>
   </form>
 {% endblock %}

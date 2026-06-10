@@ -188,6 +188,46 @@ a { color: inherit; text-decoration: none; }
   margin-bottom: 2px;
 }
 
+/* サイドバーのサブメニュー項目（グループ配下、インデント表現のみ） */
+.app-sidebar a.app-sidebar__subitem {
+  padding-left: 24px;
+}
+
+/* サイドバーのアコーディオン見出し（button 化、リンクと同じ見た目に揃える） */
+.app-sidebar__group-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  color: var(--app-muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-align: left;
+  border-radius: 8px;
+  margin: 8px 0;
+}
+.app-sidebar__group-toggle:hover {
+  background: rgba(15, 23, 42, 0.04);
+}
+
+/* インライン用アイコン（▾/▸ をテキストとして並べる、円背景は付けない） */
+.app-collapsible__icon--inline {
+  display: inline;
+  min-width: 0;
+  min-height: 0;
+  background: transparent;
+  color: inherit;
+  border-radius: 0;
+  width: auto;
+  height: auto;
+  padding: 0;
+}
+
 .app-sidebar a:hover,
 .app-sidebar a.is-active,
 .app-drawer a:hover,
@@ -393,6 +433,9 @@ a { color: inherit; text-decoration: none; }
   font-size: 12px;
   font-weight: 700;
 }
+
+/* 明示 display を持つ要素では HTML5 hidden 属性が効かないため、ここで上書きする。 */
+.app-status-badge[hidden] { display: none; }
 
 .app-status-badge--success { background: #dcfce7; color: #166534; }
 .app-status-badge--warning { background: #fef3c7; color: #92400e; }
@@ -612,6 +655,26 @@ a { color: inherit; text-decoration: none; }
   color: #92400e;
 }
 
+/* β-2b で導入：Django messages framework と JS のエラー / 成功 / 情報通知表示。
+   warning と同じパターン（border + background + color の 3 値）。 */
+.app-message--error {
+  border-color: #fca5a5;
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+.app-message--success {
+  border-color: #86efac;
+  background: #f0fdf4;
+  color: #166534;
+}
+
+.app-message--info {
+  border-color: #93c5fd;
+  background: #eff6ff;
+  color: #1e40af;
+}
+
 .app-status-badge--muted { background: #f1f5f9; color: #475569; }
 .app-status-badge--info { background: #dbeafe; color: #1d4ed8; }
 
@@ -804,14 +867,79 @@ a { color: inherit; text-decoration: none; }
 .app-icon--search::before { content: "⌕"; font-size: 17px; }
 .app-icon--back::before { content: "‹"; font-size: 22px; font-weight: 800; }
 
-.app-table__col--action { width: 78px; text-align: center; }
+.app-table__col--action { width: 200px; text-align: center; white-space: nowrap; }
 .app-table__col--name { width: 120px; }
 .app-table__col--organization { width: 220px; }
 .app-table__col--dept { width: 190px; }
 .app-table__col--personal_phone { width: 130px; }
 .app-table__col--email { width: 230px; }
 .app-table__col--status { width: 62px; text-align: center; }
-.app-table__col--date { width: 106px; }
+.app-table__col--date { width: 128px; }
+
+/* ========== 人物一覧：検索フォーム横長是正・フィルタ折りたたみ・列見出しソート ==========
+   いずれも persons 一覧スコープ（.app-person-search / .app-person-filter-* / .js-person-page-sort）。
+   他画面が共有する _search_form.html / app-collapsible 既定には影響しない。 */
+
+/* item1：検索カードを全幅に伸ばさず左寄せ（左端＝サイドバー右に寄せる）。入力欄は中身に合わせた幅へ（HIG 2.1/2.2）。 */
+.app-person-search { max-width: 960px; margin-inline: 0; }
+.app-person-search input[name="name"],
+.app-person-search input[name="title"],
+.app-person-search input[name="tel"] { max-width: 200px; }
+.app-person-search input[name="organization"],
+.app-person-search input[name="department"],
+.app-person-search input[name="email"] { max-width: 340px; }
+.app-person-search input[name="address"] { max-width: 100%; }
+
+/* item4/5：ステータス・ソートの折りたたみ。操作部を枠で囲い、バー（ヘッダ）と展開部（枠）の
+   左右端を一致させる。グリッド配置（横並び/縦積み）もここで制御する（旧インライン grid-column を CSS へ移管）。
+   デスクトップ（≥769px）は max-width 固定を外し、grid-column: span 2 のセル幅（上段4列グリッドの2列分）
+   いっぱいに広げる。これでステータス＝左2列分・ソート＝右2列分となり、上段入力欄と左右端が揃う。
+   バー幅＝枠幅は「2列分の幅」で一致（ヘッダ width:100% と枠 block 幅がともにセル2列分を満たす）。
+   ※スマホ幅の 320px 揃えは下の @media 側に移設（縦積み時のみ 320px）。 */
+.app-person-search .app-person-filter-collapsible {
+  grid-column: span 2;   /* デスクトップ（≥769px）：4カラム中2カラム＝ステータス左・ソート右の横並び（幅も2列分） */
+}
+.app-person-filter-collapsible .app-collapsible__header {
+  margin-bottom: var(--app-space-sm);
+}
+.app-person-filter-box {
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius);
+  padding: var(--app-space-md);
+}
+
+/* 検索フォーム上段グリッド。元は _search_form.html のインライン grid-template-columns:repeat(4,1fr)。
+   この partial は persons一覧／bulk_tagging／mailings で共有されるため、4カラム定義は
+   partial 自身に付くクラス（.app-search-grid）へ移管し、全 consumer の従来の見え方（デスクトップ4列）を保つ。
+   .app-form-grid 既定（3列）や @media(max-width:900px) の1列化より後方なので、同特殊度でも本ルールが勝つ。 */
+.app-search-grid { grid-template-columns: repeat(4, 1fr); }
+
+/* スマホ幅（≤768px）：persons一覧のステータス/ソートを縦1列に積み（grid-column 1/-1）、
+   あわせて検索フォーム上段（.app-search-grid）を4列→2列に折り返す。同一 @media にまとめる。
+   ・縦積み時は従来どおり max-width:320px で揃える（バー幅＝枠幅の揃いは 320px のまま不変）。
+     ※デスクトップの「2列分幅」はこの @media には及ばないので、狭幅は従来挙動を維持する。
+   ・上段2列で各欄は概ね200px弱を確保。ブレークポイントは今回 768px を直書き。 */
+@media (max-width: 768px) {
+  .app-person-search .app-person-filter-collapsible {
+    grid-column: 1 / -1;
+    max-width: 320px;
+  }
+  .app-search-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* item11：列見出しクリックの現在ページ内DOMソート。クリック可カーソル＋方向インジケータ。
+   persons一覧（.js-person-page-sort）・contacts一覧（.js-contact-page-sort）・tags一覧（.js-tag-page-sort）で共通。 */
+.js-person-page-sort th[data-sort-col],
+.js-contact-page-sort th[data-sort-col],
+.js-tag-page-sort th[data-sort-col] { cursor: pointer; user-select: none; }
+.js-person-page-sort th[data-sort-dir="asc"]::after,
+.js-contact-page-sort th[data-sort-dir="asc"]::after,
+.js-tag-page-sort th[data-sort-dir="asc"]::after { content: " ▲"; font-size: 0.8em; color: var(--app-color-primary); }
+.js-person-page-sort th[data-sort-dir="desc"]::after,
+.js-contact-page-sort th[data-sort-dir="desc"]::after,
+.js-tag-page-sort th[data-sort-dir="desc"]::after { content: " ▼"; font-size: 0.8em; color: var(--app-color-primary); }
 
 /* JSでbody直下に出すため、テーブルのoverflowに邪魔されない */
 .app-floating-tooltip {
@@ -995,6 +1123,40 @@ a { color: inherit; text-decoration: none; }
 .app-btn--danger:hover {
   background: #b91c1c;
   border-color: #b91c1c;
+}
+
+/* Phase 1b-ε.2 追加：tags / mailings の色割当統一用 */
+.app-btn--success {
+  background: var(--app-color-success);
+  color: #fff;
+  border-color: var(--app-color-success);
+}
+
+.app-btn--success:hover {
+  background: #15803d;
+  border-color: #15803d;
+}
+
+.app-btn--warning {
+  background: var(--app-color-warning);
+  color: #fff;
+  border-color: var(--app-color-warning);
+}
+
+.app-btn--warning:hover {
+  background: #b45309;
+  border-color: #b45309;
+}
+
+.app-btn--outline-secondary {
+  background: #fff;
+  color: #475569;
+  border-color: #cbd5e1;
+}
+
+.app-btn--outline-secondary:hover {
+  background: #f8fafc;
+  border-color: #94a3b8;
 }
 
 .app-btn-group {
@@ -1774,3 +1936,140 @@ form:has(.js-decision-additional_role:checked) .app-merge-survivor__label--prima
   overflow: auto;
   margin-top: var(--app-space-sm);
 }
+
+/* (c) EmailTemplate プレビュー：差し込み未展開 {{...}} の警告色（仕様書 §7.7.1.3）。
+   prepare 出力には触らず、View 層で <span class="app-preview__missing">…</span> wrap。 */
+.app-preview__missing {
+  background-color: #fff3cd;
+  color: #c00;
+  padding: 0 0.2em;
+  border-radius: 0.2em;
+  font-weight: 600;
+}
+.app-preview__body {
+  white-space: normal;
+  line-height: 1.5;
+}
+
+/* 縦並びのラジオ／チェックリスト（Campaign 送信元方式など） */
+.app-radio-list {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 4px 12px 4px 0;
+  width: auto;
+}
+/* RadioSelect が <ul> で出力されるケースのリセット */
+ul.app-radio-list,
+ul.app-radio-list li {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+ul.app-radio-list li {
+  margin: 4px 0;
+}
+ul.app-radio-list li label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: normal;
+}
+
+/* ===== 削除ボタン（控えめ・黒系） =====
+   赤い塗りボタンと違って画面上の威圧感を抑える。削除フローの確認モーダルは別途出る前提。 */
+.app-btn-trash {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  min-height: 32px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: #4b5563;
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+}
+.app-btn-trash:hover {
+  background: #f3f4f6;
+  color: #111827;
+  border-color: var(--app-border);
+}
+
+/* ===== 送信元方式トグル / 配信停止フィルタトグル 等（HIG v1.3 §4.1） =====
+   Bootstrap .btn-check 相当：独立した outline/solid 切替ボタンの横並び。
+   非選択は outline-primary、選択中は primary solid。標準 radio は視覚上隠し、
+   label 自体をボタンとして見せる（<label><input>テキスト</label> 構造に対し
+   :has() セレクタで判定）。
+   構造非依存：Django 5+ の RadioSelect は <div class="app-radio-toggle"><div><label>
+   構造で出る（旧来の <ul><li> ではない）。.app-radio-toggle の直下が ul/div どちらでも
+   動くよう、構造に依らない子孫セレクタで書く。 */
+.app-radio-toggle {
+  display: inline-flex;
+  flex-wrap: wrap;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  gap: 8px;
+}
+.app-radio-toggle > * { margin: 0; list-style: none; }
+.app-radio-toggle input[type="radio"],
+.app-radio-toggle input[type="checkbox"] {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+  width: 0;
+  height: 0;
+}
+.app-radio-toggle label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 18px;
+  min-height: 38px;
+  cursor: pointer;
+  font-weight: 600;
+  background: transparent;
+  color: var(--app-color-primary);
+  border: 1px solid var(--app-color-primary);
+  border-radius: 8px;
+  user-select: none;
+  transition: background-color .12s ease, color .12s ease;
+}
+.app-radio-toggle label:hover {
+  background: rgba(37, 99, 235, 0.08);
+}
+.app-radio-toggle label:has(input[type="radio"]:checked),
+.app-radio-toggle label:has(input[type="checkbox"]:checked) {
+  background: var(--app-color-primary);
+  color: #fff;
+  border-color: var(--app-color-primary);
+}
+.app-radio-toggle label:has(input[type="radio"]:focus-visible),
+.app-radio-toggle label:has(input[type="checkbox"]:focus-visible) {
+  outline: 2px solid #1d4ed8;
+  outline-offset: 2px;
+}
+
+/* ===== ヘルプアイコン（フォーム欄ラベル横の ? ツールチップ） =====
+   既存の [data-tooltip] JS（app.js floating-tooltip）に乗る。常時表示の help_text を畳んで、
+   情報密度を下げる。 */
+.app-help-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: #e5e7eb;
+  color: #374151;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: help;
+  user-select: none;
+}
+.app-help-icon:hover { background: #d1d5db; }

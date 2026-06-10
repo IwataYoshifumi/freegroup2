@@ -23,6 +23,24 @@ from persons.models import Person
 User = get_user_model()
 
 
+def _grant_contact_perms(user):
+    """Phase 7 段3-2：Contact 系 View に標準 CRUD 権限ガードが入ったため、View を叩く
+    既存テストの正常系を保つよう view/add/change/delete_contact を一括付与する補正。"""
+    from django.contrib.auth.models import Permission
+
+    user.user_permissions.add(
+        *Permission.objects.filter(
+            content_type__app_label="contacts",
+            codename__in=[
+                "view_contact",
+                "add_contact",
+                "change_contact",
+                "delete_contact",
+            ],
+        )
+    )
+
+
 def _empty_sns_management_form(prefix="sns"):
     """ContactSns InlineFormSet の空 management_form（View POST テスト用、Phase F1 §11.6.7）。"""
     return {
@@ -175,6 +193,7 @@ class SalutationIsManualViewTests(TestCase):
         self.user = User.objects.create_user(
             username="is_manual_user", password="dummy"
         )
+        _grant_contact_perms(self.user)
         self.client = Client()
         self.client.force_login(self.user)
 
@@ -247,6 +266,7 @@ class ContactCreateTemplateRenderTests(TestCase):
         self.user = User.objects.create_user(
             username="tmpl_render_user", password="dummy"
         )
+        _grant_contact_perms(self.user)
         self.client = Client()
         self.client.force_login(self.user)
 
@@ -314,6 +334,7 @@ class UpdatePreservesRenderedFieldsTests(TestCase):
         self.user = User.objects.create_user(
             username="preserve_user", password="dummy"
         )
+        _grant_contact_perms(self.user)
         self.client = Client()
         self.client.force_login(self.user)
         self.person = Person.objects.create(status=Person.Status.ACTIVE)
@@ -428,6 +449,7 @@ class PostalDisplayContactDetailTests(TestCase):
         self.user = User.objects.create_user(
             username="postal_disp_user", password="dummy"
         )
+        _grant_contact_perms(self.user)
         self.client = Client()
         self.client.force_login(self.user)
 

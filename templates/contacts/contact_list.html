@@ -1,5 +1,6 @@
 {% extends "cards/app_base.html" %}
 {% load back_tags %}
+{% load badge_tags %}
 
 {% block title %}コンタクト一覧 — FreeGroup2{% endblock %}
 
@@ -15,81 +16,30 @@
     </div>
   </div>
 
-  <section class="app-card">
-    <form method="get" class="app-form-grid-edit">
-      <input type="hidden" name="searched" value="1">
-      <div class="app-form-grid" style="grid-template-columns: repeat(4, 1fr);">
-        <div class="app-form__group">
-          <label class="app-form__label" for="id_name">氏名</label>
-          <input type="text" id="id_name" name="name" value="{{ name }}" class="app-input">
-        </div>
-        <div class="app-form__group">
-          <label class="app-form__label" for="id_organization">会社名</label>
-          <input type="text" id="id_organization" name="organization" value="{{ organization }}" class="app-input">
-        </div>
-        <div class="app-form__group">
-          <label class="app-form__label" for="id_department">部署名</label>
-          <input type="text" id="id_department" name="department" value="{{ department }}" class="app-input">
-        </div>
-        <div class="app-form__group">
-          <label class="app-form__label" for="id_title">役職</label>
-          <input type="text" id="id_title" name="title" value="{{ title }}" class="app-input">
-        </div>
-
-        <div class="app-form__group">
-          <label class="app-form__label" for="id_email">メール</label>
-          <input type="text" id="id_email" name="email" value="{{ email }}" class="app-input">
-        </div>
-        <div class="app-form__group">
-          <label class="app-form__label" for="id_tel">電話</label>
-          <input type="text" id="id_tel" name="tel" value="{{ tel }}" class="app-input">
-        </div>
-        <div class="app-form__group" style="grid-column: span 2;">
-          <label class="app-form__label" for="id_address">住所</label>
-          <input type="text" id="id_address" name="address" value="{{ address }}" class="app-input">
-        </div>
-
-        <div class="app-form__group" style="grid-column: span 4;">
-          <label class="app-form__label">ステータス</label>
-          <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:center;">
-            <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
-              <input type="checkbox" name="status" value="primary"
-                     {% if "primary" in selected_statuses %}checked{% endif %}>
-              primary
-            </label>
-            <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
-              <input type="checkbox" name="status" value="active"
-                     {% if "active" in selected_statuses %}checked{% endif %}>
-              active
-            </label>
-            <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
-              <input type="checkbox" name="status" value="inactive"
-                     {% if "inactive" in selected_statuses %}checked{% endif %}>
-              inactive
-            </label>
-          </div>
-        </div>
-      </div>
-
-      <div class="app-action-area app-action-area--search">
-        <button type="submit" class="app-btn app-btn--primary">検索</button>
-        <a href="{% url 'contacts:contact_list' %}" class="app-btn app-btn--secondary">リセット</a>
-      </div>
-    </form>
+  <section class="app-card app-person-search">
+    {% include "contacts/_search_form.html" %}
   </section>
 
   <section class="app-card">
+    {# HIG §6：表示列選択は表の左上に置く。 #}
+    <div style="display:flex; justify-content:flex-start; margin-bottom:12px;">
+      {% include "contacts/_column_toggle.html" %}
+    </div>
     <div class="app-table-wrapper">
-      <table class="app-table app-table--nowrap">
+      {% comment %}
+        js-contact-page-sort：列見出しクリックの「現在ページ内DOMソート」対象（app.js）。
+        サーバー側多段フォームソート（?sort=）とは別系統で、URLは書き換えない。
+      {% endcomment %}
+      <table class="app-table app-table--nowrap js-contact-page-sort">
         <thead>
           <tr>
             <th class="app-table__col--action">操作</th>
-            <th class="app-table__col--name">氏名</th>
-            <th class="app-table__col--status">status</th>
-            <th class="app-table__col--organization">会社</th>
-            <th class="app-table__col--dept">役職</th>
-            <th class="app-table__col--email">連絡先</th>
-            <th class="app-table__col--date">更新日時</th>
+            <th class="app-table__col--name" data-col-key="name" data-sort-col>氏名</th>
+            <th class="app-table__col--status" data-col-key="status">状態</th>
+            <th class="app-table__col--organization" data-col-key="company" data-sort-col>会社</th>
+            <th class="app-table__col--dept" data-col-key="title" data-sort-col>役職</th>
+            <th class="app-table__col--email" data-col-key="email" data-sort-col>連絡先</th>
+            <th class="app-table__col--date" data-col-key="updated_at">更新日時</th>
           </tr>
         </thead>
         <tbody>
@@ -99,34 +49,30 @@
               <td class="app-table__col--action">
                 <a href="{% append_back_url detail_url back %}" class="app-btn app-btn--secondary app-btn--sm">詳細</a>
               </td>
-              <td>{{ contact.full_name|default:"-" }}</td>
-              <td>
-                {% if contact.status == "primary" %}
-                  <span class="app-status-badge app-status-badge--success">primary</span>
-                {% elif contact.status == "active" %}
-                  <span class="app-status-badge app-status-badge--warning">active</span>
-                {% elif contact.status == "inactive" %}
-                  <span class="app-status-badge app-status-badge--muted">inactive</span>
-                {% endif %}
+              <td data-col-key="name" data-sort-key="{{ contact.phonetic_name }}">{{ contact.full_name|default:"-" }}</td>
+              <td data-col-key="status">
+                {% status_badge contact %}
               </td>
-              <td>
+              <td data-col-key="company">
                 {% if contact.organization %}
                   <span class="app-ellipsis" data-tooltip="{{ contact.organization }}">{{ contact.organization|truncatechars:30 }}</span>
                 {% else %}-{% endif %}
               </td>
-              <td>{{ contact.title|default:"-" }}</td>
-              <td>
+              <td data-col-key="title">{{ contact.title|default:"-" }}</td>
+              <td data-col-key="email">
                 {% if contact.email %}<div>{{ contact.email }}</div>{% endif %}
                 {% if contact.mobile_phone %}<div>{{ contact.mobile_phone }}</div>{% endif %}
                 {% if contact.personal_phone %}<div>{{ contact.personal_phone }}</div>{% endif %}
                 {% if contact.personal_fax %}<div>FAX: {{ contact.personal_fax }}</div>{% endif %}
                 {% if not contact.email and not contact.mobile_phone and not contact.personal_phone and not contact.personal_fax %}-{% endif %}
               </td>
-              <td>{{ contact.updated_at|date:"Y/m/d H:i" }}</td>
+              <td data-col-key="updated_at">{{ contact.updated_at|date:"Y/m/d H:i" }}</td>
             </tr>
           {% empty %}
             <tr><td colspan="7" class="app-muted">
-              該当するコンタクトがありません。
+              該当するコンタクトがありません。新しい名刺を取り込むか、コンタクトを新規作成しましょう。
+              <a href="{% url 'cards:card_upload' %}">名刺を取り込む →</a>
+              <a href="{% append_back_url create_url back %}" style="margin-left:12px;">コンタクト新規作成 →</a>
             </td></tr>
           {% endfor %}
         </tbody>
@@ -139,13 +85,7 @@
         <a href="{% append_back_url detail_url back %}" class="app-list-card" style="display:block; text-decoration:none; color:inherit;">
           <div class="app-list-card__main">
             <strong>{{ contact.full_name|default:"(氏名なし)" }}</strong>
-            {% if contact.status == "primary" %}
-              <span class="app-status-badge app-status-badge--success">primary</span>
-            {% elif contact.status == "active" %}
-              <span class="app-status-badge app-status-badge--warning">active</span>
-            {% elif contact.status == "inactive" %}
-              <span class="app-status-badge app-status-badge--muted">inactive</span>
-            {% endif %}
+            {% status_badge contact %}
             {% if contact.organization %}<div>{{ contact.organization }}</div>{% endif %}
             {% if contact.title %}<div class="app-muted">{{ contact.title }}</div>{% endif %}
           </div>
@@ -160,32 +100,16 @@
           </div>
         </a>
       {% empty %}
-        <p class="app-muted">該当するコンタクトがありません。</p>
+        <p class="app-muted">
+          該当するコンタクトがありません。新しい名刺を取り込むか、コンタクトを新規作成しましょう。
+          <a href="{% url 'cards:card_upload' %}">名刺を取り込む →</a>
+          <a href="{% append_back_url create_url back %}" style="margin-left:12px;">コンタクト新規作成 →</a>
+        </p>
       {% endfor %}
     </div>
 
     {% if is_paginated %}
-      <nav class="app-pagination" aria-label="ページネーション">
-        {% if page_obj.has_previous %}
-          <a href="?name={{ name }}&organization={{ organization }}&department={{ department }}&title={{ title }}&email={{ email }}&tel={{ tel }}&address={{ address }}{% for s in selected_statuses %}&status={{ s }}{% endfor %}&searched=1&page={{ page_obj.previous_page_number }}" class="app-pagination__button">‹</a>
-        {% else %}
-          <button type="button" class="app-pagination__button" disabled>‹</button>
-        {% endif %}
-
-        {% for num in paginator.page_range %}
-          {% if num == page_obj.number %}
-            <button type="button" class="app-pagination__button is-active">{{ num }}</button>
-          {% else %}
-            <a href="?name={{ name }}&organization={{ organization }}&department={{ department }}&title={{ title }}&email={{ email }}&tel={{ tel }}&address={{ address }}{% for s in selected_statuses %}&status={{ s }}{% endfor %}&searched=1&page={{ num }}" class="app-pagination__button">{{ num }}</a>
-          {% endif %}
-        {% endfor %}
-
-        {% if page_obj.has_next %}
-          <a href="?name={{ name }}&organization={{ organization }}&department={{ department }}&title={{ title }}&email={{ email }}&tel={{ tel }}&address={{ address }}{% for s in selected_statuses %}&status={{ s }}{% endfor %}&searched=1&page={{ page_obj.next_page_number }}" class="app-pagination__button">›</a>
-        {% else %}
-          <button type="button" class="app-pagination__button" disabled>›</button>
-        {% endif %}
-      </nav>
+      {% include "persons/_pagination.html" %}
     {% endif %}
   </section>
 {% endblock %}

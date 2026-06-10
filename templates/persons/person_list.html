@@ -1,5 +1,6 @@
 {% extends "cards/app_base.html" %}
 {% load back_tags %}
+{% load badge_tags %}
 
 {% block title %}人物一覧 — FreeGroup2{% endblock %}
 
@@ -11,82 +12,37 @@
     </div>
   </div>
 
-  <section class="app-card">
-    <form method="get" class="app-form-grid-edit">
-      <input type="hidden" name="searched" value="1">
-      <div class="app-form-grid" style="grid-template-columns: repeat(4, 1fr);">
-        <div class="app-form__group">
-          <label class="app-form__label" for="id_name">氏名</label>
-          <input type="text" id="id_name" name="name" value="{{ name }}" class="app-input">
-        </div>
-        <div class="app-form__group">
-          <label class="app-form__label" for="id_organization">会社名</label>
-          <input type="text" id="id_organization" name="organization" value="{{ organization }}" class="app-input">
-        </div>
-        <div class="app-form__group">
-          <label class="app-form__label" for="id_department">部署名</label>
-          <input type="text" id="id_department" name="department" value="{{ department }}" class="app-input">
-        </div>
-        <div class="app-form__group">
-          <label class="app-form__label" for="id_title">役職</label>
-          <input type="text" id="id_title" name="title" value="{{ title }}" class="app-input">
-        </div>
-
-        <div class="app-form__group">
-          <label class="app-form__label" for="id_email">メール</label>
-          <input type="text" id="id_email" name="email" value="{{ email }}" class="app-input">
-        </div>
-        <div class="app-form__group">
-          <label class="app-form__label" for="id_tel">電話</label>
-          <input type="text" id="id_tel" name="tel" value="{{ tel }}" class="app-input">
-        </div>
-        <div class="app-form__group" style="grid-column: span 2;">
-          <label class="app-form__label" for="id_address">住所</label>
-          <input type="text" id="id_address" name="address" value="{{ address }}" class="app-input">
-        </div>
-
-        <div class="app-form__group" style="grid-column: span 4;">
-          <label class="app-form__label">ステータス</label>
-          <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:center;">
-            <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
-              <input type="checkbox" name="status" value="active"
-                     {% if "active" in selected_statuses %}checked{% endif %}>
-              active
-            </label>
-            <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
-              <input type="checkbox" name="status" value="merged"
-                     {% if "merged" in selected_statuses %}checked{% endif %}>
-              merged
-            </label>
-            <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
-              <input type="checkbox" name="status" value="archived"
-                     {% if "archived" in selected_statuses %}checked{% endif %}>
-              archived
-            </label>
-          </div>
-        </div>
-      </div>
-
-      <div class="app-action-area app-action-area--search">
-        <button type="submit" class="app-btn app-btn--primary">検索</button>
-        <a href="{% url 'persons:person_list' %}" class="app-btn app-btn--secondary">リセット</a>
-      </div>
-    </form>
+  <section class="app-card app-person-search">
+    {% url 'persons:person_list' as reset_url %}
+    {% include "persons/_search_form.html" with show_sort_control=True %}
   </section>
 
   <section class="app-card">
+    {# HIG 3.1・原則7：表示列選択は表の左上に置く。 #}
+    <div style="display:flex; justify-content:flex-start; margin-bottom:12px;">
+      {% include "persons/_column_toggle.html" %}
+    </div>
     <div class="app-table-wrapper">
-      <table class="app-table app-table--nowrap">
+      {% comment %}
+        js-person-page-sort：列見出しクリックの「現在ページ内DOMソート」対象（app.js）。
+        サーバー側多段フォームソート（?sort=）とは別系統で、URLは書き換えない。
+        ※複数行のメモは comment タグで囲む（波カッコ＃…＃の形は単一行専用で、複数行だと画面に漏れる）。
+      {% endcomment %}
+      <table class="app-table app-table--nowrap js-person-page-sort">
         <thead>
           <tr>
             <th class="app-table__col--action">操作</th>
-            <th class="app-table__col--name">氏名</th>
-            <th class="app-table__col--status">status</th>
-            <th class="app-table__col--organization">会社</th>
-            <th class="app-table__col--dept">役職</th>
-            <th class="app-table__col--email">連絡先</th>
-            <th>アクティブ数</th>
-            <th class="app-table__col--date">更新日時</th>
+            <th class="app-table__col--name" data-col-key="name" data-sort-col>氏名</th>
+            <th class="app-table__col--status" data-col-key="status" data-sort-col>状態</th>
+            <th class="app-table__col--organization" data-col-key="company" data-sort-col>会社</th>
+            <th class="app-table__col--dept" data-col-key="title" data-sort-col>役職</th>
+            <th class="app-table__col--email" data-col-key="email" data-sort-col>メール</th>
+            <th data-col-key="mobile_phone" data-sort-col>携帯電話</th>
+            <th data-col-key="personal_contact" data-sort-col>個人電話・FAX</th>
+            <th data-col-key="org_contact" data-sort-col>会社電話・FAX</th>
+            <th data-col-key="address" data-sort-col>住所</th>
+            <th data-col-key="active_count" data-sort-col>アクティブ数</th>
+            <th class="app-table__col--date" data-col-key="updated_at" data-sort-col>更新日時</th>
           </tr>
         </thead>
         <tbody>
@@ -96,41 +52,58 @@
               <td class="app-table__col--action">
                 <a href="{% append_back_url detail_url back %}" class="app-btn app-btn--secondary app-btn--sm">詳細</a>
               </td>
-              <td>
-                {% if person.primary_contact %}
-                  {{ person.primary_contact.full_name|default:"(氏名なし)" }}
-                {% else %}
-                  <span class="app-muted">(primary_contact 未設定)</span>
-                {% endif %}
+              <td data-col-key="name" data-sort-key="{{ person.primary_contact.phonetic_name }}">
+                {{ person.primary_contact.full_name|default:"(氏名なし)" }}
               </td>
-              <td>
-                {% if person.status == "active" %}
-                  <span class="app-status-badge app-status-badge--success">active</span>
-                {% elif person.status == "merged" %}
-                  <span class="app-status-badge app-status-badge--info">merged</span>
-                {% elif person.status == "archived" %}
-                  <span class="app-status-badge app-status-badge--muted">archived</span>
-                {% endif %}
+              <td data-col-key="status">
+                {% if person.status != "active" %}{% status_badge person %}{% endif %}
               </td>
-              <td>
+              <td data-col-key="company">
                 {% if person.primary_contact.organization %}
                   <span class="app-ellipsis" data-tooltip="{{ person.primary_contact.organization }}">{{ person.primary_contact.organization|truncatechars:30 }}</span>
                 {% else %}-{% endif %}
               </td>
-              <td>{{ person.primary_contact.title|default:"-" }}</td>
-              <td>
-                {% if person.primary_contact.email %}<div>{{ person.primary_contact.email }}</div>{% endif %}
-                {% if person.primary_contact.mobile_phone %}<div>{{ person.primary_contact.mobile_phone }}</div>{% endif %}
-                {% if person.primary_contact.personal_phone %}<div>{{ person.primary_contact.personal_phone }}</div>{% endif %}
-                {% if person.primary_contact.personal_fax %}<div>FAX: {{ person.primary_contact.personal_fax }}</div>{% endif %}
-                {% if not person.primary_contact.email and not person.primary_contact.mobile_phone and not person.primary_contact.personal_phone and not person.primary_contact.personal_fax %}-{% endif %}
+              <td data-col-key="title">
+                {% if person.primary_contact.title %}
+                  <span class="app-ellipsis" data-tooltip="{{ person.primary_contact.title }}">{{ person.primary_contact.title|truncatechars:24 }}</span>
+                {% else %}-{% endif %}
               </td>
-              <td>{{ person.active_count }}</td>
-              <td>{{ person.updated_at|date:"Y/m/d H:i" }}</td>
+              <td data-col-key="email">
+                {% if person.primary_contact.email %}
+                  <span class="app-ellipsis" data-tooltip="{{ person.primary_contact.email }}">{{ person.primary_contact.email|truncatechars:32 }}</span>
+                {% else %}-{% endif %}
+              </td>
+              <td data-col-key="mobile_phone">{{ person.primary_contact.mobile_phone|default:"-" }}</td>
+              <td data-col-key="personal_contact">
+                {% if person.primary_contact.personal_phone and person.primary_contact.personal_fax %}
+                  TEL {{ person.primary_contact.personal_phone }}／FAX {{ person.primary_contact.personal_fax }}
+                {% elif person.primary_contact.personal_phone %}
+                  TEL {{ person.primary_contact.personal_phone }}
+                {% elif person.primary_contact.personal_fax %}
+                  FAX {{ person.primary_contact.personal_fax }}
+                {% else %}-{% endif %}
+              </td>
+              <td data-col-key="org_contact">
+                {% if person.primary_contact.org_phone and person.primary_contact.org_fax %}
+                  TEL {{ person.primary_contact.org_phone }}／FAX {{ person.primary_contact.org_fax }}
+                {% elif person.primary_contact.org_phone %}
+                  TEL {{ person.primary_contact.org_phone }}
+                {% elif person.primary_contact.org_fax %}
+                  FAX {{ person.primary_contact.org_fax }}
+                {% else %}-{% endif %}
+              </td>
+              <td data-col-key="address">
+                {% if person.primary_contact.address %}
+                  <span class="app-ellipsis" data-tooltip="{{ person.primary_contact.address }}">{{ person.primary_contact.address|truncatechars:30 }}</span>
+                {% else %}-{% endif %}
+              </td>
+              <td data-col-key="active_count">{{ person.active_count }}</td>
+              <td data-col-key="updated_at">{{ person.updated_at|date:"Y/m/d H:i" }}</td>
             </tr>
           {% empty %}
-            <tr><td colspan="8" class="app-muted">
-              該当する人物がいません。
+            <tr><td colspan="12" class="app-muted">
+              該当する人物がいません。新しい名刺を取り込めば人物が自動で作られます。
+              <a href="{% url 'cards:card_upload' %}">名刺を取り込む →</a>
             </td></tr>
           {% endfor %}
         </tbody>
@@ -143,19 +116,9 @@
         <a href="{% append_back_url detail_url back %}" class="app-list-card" style="display:block; text-decoration:none; color:inherit;">
           <div class="app-list-card__main">
             <strong>
-              {% if person.primary_contact %}
-                {{ person.primary_contact.full_name|default:"(氏名なし)" }}
-              {% else %}
-                (primary_contact 未設定)
-              {% endif %}
+              {{ person.primary_contact.full_name|default:"(氏名なし)" }}
             </strong>
-            {% if person.status == "active" %}
-              <span class="app-status-badge app-status-badge--success">active</span>
-            {% elif person.status == "merged" %}
-              <span class="app-status-badge app-status-badge--info">merged</span>
-            {% elif person.status == "archived" %}
-              <span class="app-status-badge app-status-badge--muted">archived</span>
-            {% endif %}
+            {% if person.status != "active" %}{% status_badge person %}{% endif %}
             {% if person.primary_contact.organization %}<div>{{ person.primary_contact.organization }}</div>{% endif %}
             {% if person.primary_contact.title %}<div class="app-muted">{{ person.primary_contact.title }}</div>{% endif %}
           </div>
@@ -165,32 +128,15 @@
           </div>
         </a>
       {% empty %}
-        <p class="app-muted">該当する人物がいません。</p>
+        <p class="app-muted">
+          該当する人物がいません。新しい名刺を取り込めば人物が自動で作られます。
+          <a href="{% url 'cards:card_upload' %}">名刺を取り込む →</a>
+        </p>
       {% endfor %}
     </div>
 
     {% if is_paginated %}
-      <nav class="app-pagination" aria-label="ページネーション">
-        {% if page_obj.has_previous %}
-          <a href="?name={{ name }}&organization={{ organization }}&department={{ department }}&title={{ title }}&email={{ email }}&tel={{ tel }}&address={{ address }}{% for s in selected_statuses %}&status={{ s }}{% endfor %}&searched=1&page={{ page_obj.previous_page_number }}" class="app-pagination__button">‹</a>
-        {% else %}
-          <button type="button" class="app-pagination__button" disabled>‹</button>
-        {% endif %}
-
-        {% for num in paginator.page_range %}
-          {% if num == page_obj.number %}
-            <button type="button" class="app-pagination__button is-active">{{ num }}</button>
-          {% else %}
-            <a href="?name={{ name }}&organization={{ organization }}&department={{ department }}&title={{ title }}&email={{ email }}&tel={{ tel }}&address={{ address }}{% for s in selected_statuses %}&status={{ s }}{% endfor %}&searched=1&page={{ num }}" class="app-pagination__button">{{ num }}</a>
-          {% endif %}
-        {% endfor %}
-
-        {% if page_obj.has_next %}
-          <a href="?name={{ name }}&organization={{ organization }}&department={{ department }}&title={{ title }}&email={{ email }}&tel={{ tel }}&address={{ address }}{% for s in selected_statuses %}&status={{ s }}{% endfor %}&searched=1&page={{ page_obj.next_page_number }}" class="app-pagination__button">›</a>
-        {% else %}
-          <button type="button" class="app-pagination__button" disabled>›</button>
-        {% endif %}
-      </nav>
+      {% include "persons/_pagination.html" %}
     {% endif %}
   </section>
 {% endblock %}

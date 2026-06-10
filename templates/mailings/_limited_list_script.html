@@ -1,0 +1,50 @@
+{% comment %}
+表示件数統一 UI スクリプト partial（Phase 1c-α #12、仕様書 §3 / §10）。
+
+ページ内に複数置かれる .js-limited-list 要素について、先頭 50 件のみ表示し、
+残りを「他 X 件を表示」ボタンで展開できるようにする共通スクリプト。
+
+利用側のマークアップ規約：
+  <div class="js-limited-list" data-limit="50">
+    <table>...
+      <tbody>
+        <tr>...</tr>  ← この tr 単位で 50 件カウント
+        ...
+      </tbody>
+    </table>
+    <div class="js-limited-list__footer" style="display:none; margin-top:8px;">
+      <button type="button" class="app-btn app-btn--secondary app-btn--sm js-limited-list__expand">
+        他 <span class="js-limited-list__hidden-count">0</span> 件を表示
+      </button>
+    </div>
+  </div>
+
+「全 X 件」バッジは利用側がセクションヘッダに直書きする（partial の責務外）。
+1 ページに何度 include されてもイベント登録は 1 回（data 属性で多重実行を防ぐ）。
+{% endcomment %}
+<script>
+  (function () {
+    if (window.__limitedListInit) return;
+    window.__limitedListInit = true;
+    document.querySelectorAll('.js-limited-list').forEach(function (wrap) {
+      var limit = parseInt(wrap.dataset.limit || '50', 10);
+      var rows = wrap.querySelectorAll('tbody > tr');
+      if (rows.length <= limit) return;
+      var hidden = 0;
+      rows.forEach(function (r, i) {
+        if (i >= limit) { r.style.display = 'none'; hidden++; }
+      });
+      var footer = wrap.querySelector('.js-limited-list__footer');
+      var btn = wrap.querySelector('.js-limited-list__expand');
+      var countEl = wrap.querySelector('.js-limited-list__hidden-count');
+      if (footer && btn) {
+        if (countEl) countEl.textContent = hidden;
+        footer.style.display = '';
+        btn.addEventListener('click', function () {
+          rows.forEach(function (r) { r.style.display = ''; });
+          footer.parentNode.removeChild(footer);
+        });
+      }
+    });
+  })();
+</script>

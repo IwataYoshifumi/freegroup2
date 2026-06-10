@@ -1,0 +1,19 @@
+{% comment %}
+ソート可能 <th> partial（Phase 1c-α UI 改善 要望1）。
+
+期待 context:
+  key: str           ← sort URL クエリで使うキー（name / company / department / title / address / email）
+  label: str         ← ヘッダ表示文字列
+  current_sort: str  ← 現在の sort（view 側で _resolve_sort 後の値）
+  current_dir: str   ← 現在の dir（asc / desc）
+  extra_style: str   ← 任意の追加 inline style（例：min-width:240px）
+
+要望2 の列切替で data-col-key を使うため、ここでも自動で付ける（key と同値）。
+{% endcomment %}
+<th data-sort-key="{{ key }}" data-col-key="{{ key }}"{% if extra_style %} style="{{ extra_style }}"{% endif %}>
+  {{ label }}
+  {% if current_sort == key %}
+    <i class="bi bi-arrow-{% if current_dir == 'asc' %}up{% else %}down{% endif %}"
+       style="color:#3b82f6; margin-left:4px;" aria-label="{{ current_dir }}"></i>
+  {% endif %}
+</th>

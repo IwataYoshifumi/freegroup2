@@ -1,0 +1,42 @@
+{% extends "mailings/app_base.html" %}
+{% load back_tags %}
+
+{% block title %}{% if is_create %}タグ作成{% else %}タグ編集{% endif %} — FreeGroup2{% endblock %}
+
+{% block content %}
+  <div class="app-page-header">
+    <div>
+      <div class="app-breadcrumb">タグ一覧 / {% if is_create %}新規作成{% else %}編集{% endif %}</div>
+      <h1>{% if is_create %}タグ作成{% else %}タグ編集：{{ object.name }}{% endif %}</h1>
+    </div>
+    <div class="app-action-area">
+      {% back_all_link back %}
+      {% back_link back %}
+    </div>
+  </div>
+
+  <section class="app-card" style="max-width: 720px; margin: 0 auto;">
+    <form method="post" class="app-form-grid-edit">
+      {% csrf_token %}
+
+      <div class="app-form-grid" style="grid-template-columns: 1fr;">
+        {% for field in form %}
+          <div class="app-form__group">
+            <label class="app-form__label" for="{{ field.id_for_label }}">
+              {{ field.label }}{% if field.help_text %}<span class="app-help-icon" data-tooltip="{{ field.help_text }}" tabindex="0">?</span>{% endif %}
+            </label>
+            {{ field }}
+            {% if field.errors %}{{ field.errors }}{% endif %}
+          </div>
+        {% endfor %}
+      </div>
+
+      {# 確定アクション：左から「最初に戻る」「戻る」「作成/保存」（HIG 8章。新規=青/編集=緑）。 #}
+      <div class="app-action-area">
+        {% back_all_link back %}
+        {% back_link back %}
+        <button type="submit" class="app-btn {% if is_create %}app-btn--primary{% else %}app-btn--success{% endif %}">{% if is_create %}作成{% else %}保存{% endif %}</button>
+      </div>
+    </form>
+  </section>
+{% endblock %}

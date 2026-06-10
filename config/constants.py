@@ -4,6 +4,8 @@
 モデル固有の選択肢は各モデルの内部クラスとして定義する（仕様書 §14.4）。
 """
 
+import os
+
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 
@@ -111,3 +113,72 @@ DUPLICATE_LOCATION_FIELDS = [
     "branch",
     "address",
 ]
+
+# 検索結果一括タグ付け（仕様書 v1.6 §6.2.6）の Person 件数上限。
+# 1 回の操作で全 Person × 全タグを誤選択する事故防止と、
+# bulk_create の SQL バッファ・サーバ応答時間の現実的な上限。
+BULK_TAGGING_MAX_PERSONS = 500
+
+# ======================================================================
+# v1.6 メルマガ配信系（Phase 3）
+# ======================================================================
+
+# cron 1 起動あたりの未送信受信者処理上限 N（仕様書 v1.6 §7.2.1）。
+# send_scheduled_campaigns 管理コマンドが 1 起動でこの件数まで処理し、
+# 残りは次回 cron 起動が続きを拾う（自然再処理方式、§7.2.4 弱点許容）。
+CAMPAIGN_SEND_BATCH_LIMIT = 100
+
+# 受信者単位の送信失敗上限 M（仕様書 v1.6 §7.2.2）。
+# DeliveryHistory.failed_count がこの値に達したら「最終 failed」確定、
+# Campaign.status=done 判定の対象になる。
+# 重複チェック系（失敗回数を数えない）からの意図的逸脱の理由は §7.2.2 重要警告を参照：
+# 配信は永久失敗メアド（無効アドレス等）が混在するため回数を数えないと永久に done にならない。
+CAMPAIGN_RECIPIENT_MAX_FAILURES = 3
+
+# ソフトバウンス連続回数の SuppressedEmail 昇格閾値（仕様書 v1.6 §4.8A / §10.3.2）。
+# SoftBounceCounter.count がこの値に達したら SuppressedEmail に
+# source='bounce_soft_promoted' で登録、SoftBounceCounter は物理削除。
+# Phase 5 で使うが、Phase 3 時点で定数を予約定義する（§19.1 論点 4）。
+SOFT_BOUNCE_PROMOTION_THRESHOLD = 5
+
+# ClickLog.ip_masked の保持日数（仕様書 v1.6 §4.6 / §8.3.2）。
+# 期限経過後に管理コマンドが NULL 上書きする（個人情報保護観点）。
+# Phase 4 で使うが、Phase 3 時点で定数を予約定義する。
+CLICK_LOG_IP_RETENTION_DAYS = 90
+
+# 配信メール内のリンクのベース URL（仕様書 v1.6 §7.4.6.4 / §8.1）。
+# TrackingLink: {MAILING_SITE_URL}/t/<token>/、UnsubscribeLink: {MAILING_SITE_URL}/u/<token>/
+# .env の MAILING_SITE_URL から取得する（settings.py の load_dotenv が先行読込済みのため
+# constants 読込時には os.environ に反映されている）。環境別管理を前倒しで導入。
+# 末尾スラッシュは email_context のヘルパーが "/t/<token>/" の形で先頭に付けるため、
+# 二重スラッシュ防止に rstrip("/") で正規化する（.env 側に付けても安全）。
+# 未設定時は runserver 既定の http://localhost:8000 にフォールバック（example.com には戻さない）。
+MAILING_SITE_URL = os.getenv("MAILING_SITE_URL", "http://localhost:8000").rstrip("/")
+
+# ======================================================================
+# v1.6 クリックトラッキング系（Phase 4、仕様書 §8.2.1）
+# ======================================================================
+
+# クリック中継ビュー（TrackingRedirectView）の User-Agent ボット判定パターン（§8.2 順2）。
+# 部分一致・大文字小文字区別なしで判定する（detect_bot_status 純関数側で小文字化）。
+# v1.7+ で拡充予定（仕様書 §8.2.1）。クラウド IP レンジ判定は v1.6 ではスコープ外。
+KNOWN_BOT_USER_AGENT_PATTERNS = [
+    "bot",
+    "crawl",
+    "spider",
+    "fetch",
+    "preview",
+    "scan",
+    "monitor",
+    "headless",
+    "slurp",
+    "curl",
+    "wget",
+    "python-requests",
+]
+
+# プリフェッチ判定の閾値秒数（§8.2 順3、§8.2.1）。
+# TrackingLink.created_at から本秒数以内のクリックはメーラープリフェッチ扱い（too_fast）。
+# TrackingLink.created_at は PRODUCTION mode 配信の (III) atomic 内で確定するため、
+# 実質「メール送信時刻」と近似される（仕様書 §7.4.3.3 / §8.4）。
+CLICK_PREFETCH_THRESHOLD_SECONDS = 3

@@ -1,0 +1,20 @@
+{# 配信停止確認画面（受信者向け、§6.2.7）#}
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>メール配信停止 — FreeGroup2</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+  <main class="app-card" style="max-width: 480px; margin: 4em auto; padding: 2em;">
+    <h1>FreeGroup2 メール配信停止</h1>
+    <p>以下のメアド宛のメール配信を停止します。よろしいですか？</p>
+    <p><strong>{{ masked_email }}</strong></p>
+    <form method="post" action="{% url 'mailings:unsubscribe_confirm' token=token %}">
+      <button type="submit" class="app-btn app-btn--danger">配信停止する</button>
+    </form>
+  </main>
+</body>
+</html>

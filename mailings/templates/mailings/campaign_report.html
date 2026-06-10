@@ -1,0 +1,83 @@
+{% extends "mailings/app_base.html" %}
+{% load back_tags %}
+
+{% block title %}配信レポート — {{ campaign.name }}{% endblock %}
+
+{% block content %}
+  <div class="app-page-header">
+    <div>
+      <div class="app-breadcrumb">メール配信 / キャンペーン / レポート</div>
+      <h1>{{ campaign.name }}</h1>
+    </div>
+    <div class="app-page-header__actions">
+      <a class="app-btn app-btn--secondary" href="{% url 'mailings:campaign_list' %}">一覧へ戻る</a>
+    </div>
+  </div>
+
+  {# 1. 基本情報 #}
+  <section class="app-card">
+    <h2>基本情報</h2>
+    <dl class="app-dl">
+      <dt>状態</dt><dd>{{ campaign.get_status_display }}</dd>
+      <dt>配信予定</dt><dd>{{ campaign.scheduled_at|date:"Y-m-d H:i"|default:"—" }}</dd>
+      <dt>配信開始</dt><dd>{{ campaign.started_at|date:"Y-m-d H:i"|default:"—" }}</dd>
+      <dt>配信完了</dt><dd>{{ campaign.completed_at|date:"Y-m-d H:i"|default:"—" }}</dd>
+      <dt>作成者</dt><dd>{{ campaign.created_by }}</dd>
+    </dl>
+  </section>
+
+  {# 2. 集計値カード（§6.2.2 / §13.1）#}
+  <section class="app-card">
+    <h2>集計値</h2>
+    <table class="app-table">
+      <tr><th>配信件数</th><td>{{ summary.total }}</td></tr>
+      <tr><th>送信成功</th><td>{{ summary.sent }}</td></tr>
+      <tr><th>バウンス数</th><td>{{ summary.bounced }}</td></tr>
+      <tr><th>有効クリック数</th><td>{{ summary.valid_clicks }}（総アクセス数 {{ summary.total_access }}）</td></tr>
+      <tr><th>配信停止数</th><td>{{ summary.unsubscribed }}</td></tr>
+    </table>
+  </section>
+
+  {# 3. リンク別クリック数表（§6.2.2 項目3）#}
+  <section class="app-card">
+    <h2>リンク別クリック数</h2>
+    <table class="app-table">
+      <thead>
+        <tr>
+          <th>URL</th>
+          <th>有効クリック</th>
+          <th>総アクセス</th>
+          <th>ユニーククリックユーザー</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for link in link_aggregates %}
+          <tr>
+            <td>{{ link.original_url }}</td>
+            <td>{{ link.valid_clicks }}</td>
+            <td>{{ link.total_access }}</td>
+            <td>{{ link.unique_users }}</td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="4">トラッキングリンクはありません。</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  {# 4. 絞り込み一覧リンク（§6.2.2 項目4）#}
+  <section class="app-card">
+    <h2>受信者一覧</h2>
+    <p>
+      <a class="app-btn app-btn--secondary" href="{% url 'mailings:campaign_report_clicked' pk=campaign.pk %}">クリックした人を見る</a>
+      <a class="app-btn app-btn--secondary" href="{% url 'mailings:campaign_report_bounced' pk=campaign.pk %}">バウンスした人を見る</a>
+      <a class="app-btn app-btn--secondary" href="{% url 'mailings:campaign_report_unsubscribed' pk=campaign.pk %}">配信停止した人を見る</a>
+    </p>
+  </section>
+
+  {# 5. CSV ダウンロード（§6.2.2 項目5 / §13.2）#}
+  <section class="app-card">
+    <h2>CSV ダウンロード</h2>
+    <p><a class="app-btn app-btn--primary" href="{% url 'mailings:campaign_report_csv' pk=campaign.pk %}">CSV 項目選択へ</a></p>
+  </section>
+{% endblock %}

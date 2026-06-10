@@ -1,7 +1,8 @@
 {% extends "cards/app_base.html" %}
 {% load back_tags %}
+{% load badge_tags %}
 
-{% block title %}人物詳細（統合済み） — FreeGroup2{% endblock %}
+{% block title %}人物詳細（マージ済み） — FreeGroup2{% endblock %}
 
 {% block content %}
   <div class="app-page-header" style="max-width:1100px;">
@@ -9,16 +10,12 @@
       <div class="app-breadcrumb">人物管理 / 人物一覧 / 詳細</div>
       <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
         <h1>人物詳細</h1>
-        <span class="app-status-badge app-status-badge--info">merged</span>
+        {% status_badge person %}
       </div>
     </div>
     <div class="app-action-area">
-      {% if back.back_exist %}
-        <a href="{% back_url back %}" class="app-btn app-btn--secondary">戻る</a>
-      {% endif %}
-      {% if back.back_all_exist %}
-        <a href="{% back_all_url back %}" class="app-btn app-btn--secondary">最初に戻る</a>
-      {% endif %}
+      {% back_all_link back %}
+      {% back_link back %}
     </div>
   </div>
 
@@ -103,12 +100,11 @@
     {% include "contacts/_inactive_contacts.html" %}
   </section>
 
+  {# ---- タグ付与・解除 UI（v1.6 Phase 1b-β、§5.2.3）---- #}
+  {% include "persons/_tag_assignment_ui.html" %}
+
   <div class="app-action-area" style="margin-top:24px; max-width:1100px;">
-    {% if back.back_exist %}
-      <a href="{% back_url back %}" class="app-btn app-btn--secondary">戻る</a>
-    {% endif %}
-    {% if back.back_all_exist %}
-      <a href="{% back_all_url back %}" class="app-btn app-btn--secondary">最初に戻る</a>
-    {% endif %}
+    {% back_all_link back %}
+    {% back_link back %}
   </div>
 {% endblock %}

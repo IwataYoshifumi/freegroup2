@@ -58,7 +58,7 @@
         <h2>紐付け情報</h2>
         <p class="app-muted">あなたは Person「{{ user.person }}」に紐付けられています。</p>
         <div class="app-action-area" style="margin-top: var(--app-space-md);">
-          <a href="{% url 'accounts:link_user_person_confirm' person_id=user.person.id %}" class="app-btn app-btn--danger">紐付けを解除する</a>
+          <a href="{% url 'accounts:link_user_person_confirm' person_id=user.person.id %}" class="app-btn app-btn--warning">紐付けを解除する</a>
         </div>
       </section>
     {% else %}

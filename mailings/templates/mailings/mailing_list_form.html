@@ -1,0 +1,497 @@
+{% extends "mailings/app_base.html" %}
+{% load back_tags %}
+
+{% block title %}{% if is_create %}リスト作成{% else %}リスト編集：{{ object.name }}{% endif %} — FreeGroup2{% endblock %}
+
+{% block content %}
+  <div class="app-page-header">
+    <div>
+      <div class="app-breadcrumb">メール配信 / 配信リスト一覧 / {% if is_create %}新規作成{% else %}編集{% endif %}</div>
+      <h1 style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+        {% if not is_create and is_frozen %}
+          <i class="bi bi-lock-fill" style="color:#64748b;"
+             title="凍結: {{ mailing_list.members_frozen_at|date:'Y/m/d H:i' }}"></i>
+        {% endif %}
+        <span>{% if is_create %}リスト作成{% else %}リスト編集：{{ object.name }}{% endif %}</span>
+      </h1>
+    </div>
+    <div class="app-action-area">
+      {% back_all_link back %}
+      {% back_link back %}
+    </div>
+  </div>
+
+  {% comment %}
+    Step 1: リスト本体（name / description）の編集
+      - is_create=True：通常 form 送信（作成して次へ）
+      - is_create=False：AJAX 自動保存（focusout、凍結時も動作可、rev14.1 §11.3.6）
+  {% endcomment %}
+  <section class="app-card">
+    <h2 style="margin-bottom:12px;">Step 1：リスト本体</h2>
+    {% if is_create %}
+      <form method="post" class="app-form-grid-edit">
+        {% csrf_token %}
+        <div class="app-form-grid" style="grid-template-columns: 1fr;">
+          {% for field in form %}
+            <div class="app-form__group">
+              <label class="app-form__label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+              {{ field }}
+              {% if field.errors %}{{ field.errors }}{% endif %}
+            </div>
+          {% endfor %}
+        </div>
+        <div class="app-action-area">
+          <button type="submit" class="app-btn app-btn--primary">作成して次へ（メンバー組成）</button>
+        </div>
+      </form>
+    {% else %}
+      <form id="js-meta-form" class="app-form-grid-edit"
+            data-mailing-list-id="{{ object.id }}"
+            onsubmit="return false;">
+        {% csrf_token %}
+        <div class="app-form-grid" style="grid-template-columns: 1fr;">
+          {% for field in form %}
+            <div class="app-form__group">
+              <label class="app-form__label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+              {{ field }}
+              <div class="js-meta-error" data-field="{{ field.name }}"
+                   style="display:none; color:#dc2626; font-size:0.9em; margin-top:4px;"></div>
+            </div>
+          {% endfor %}
+        </div>
+        <div id="js-meta-status" aria-live="polite"
+             style="min-height:1.5em; color:#16a34a; font-size:0.95em; margin-top:8px;"></div>
+      </form>
+
+      <script>
+        (function () {
+          var form = document.getElementById('js-meta-form');
+          if (!form) return;
+          var listId = form.dataset.mailingListId;
+          var statusEl = document.getElementById('js-meta-status');
+          var csrf = form.querySelector('[name=csrfmiddlewaretoken]').value;
+          var statusTimer = null;
+          var initial = {};
+          var targets = form.querySelectorAll('input[name=name], textarea[name=description], input[name=description]');
+
+          targets.forEach(function (el) {
+            initial[el.name] = el.value;
+            el.addEventListener('blur', function () {
+              if (el.value === initial[el.name]) return;
+              save();
+            });
+          });
+
+          function clearErrors() {
+            form.querySelectorAll('.js-meta-error').forEach(function (e) {
+              e.style.display = 'none';
+              e.textContent = '';
+            });
+          }
+          function showErrors(errors) {
+            Object.keys(errors).forEach(function (field) {
+              var el = form.querySelector('.js-meta-error[data-field="' + field + '"]');
+              if (el) {
+                el.textContent = (errors[field] || []).join(' / ');
+                el.style.display = 'block';
+              }
+            });
+          }
+          function flash(msg, ok) {
+            statusEl.textContent = msg;
+            statusEl.style.color = ok ? '#16a34a' : '#dc2626';
+            if (statusTimer) clearTimeout(statusTimer);
+            if (ok) {
+              statusTimer = setTimeout(function () { statusEl.textContent = ''; }, 2000);
+            }
+          }
+          function save() {
+            clearErrors();
+            var payload = {};
+            targets.forEach(function (el) { payload[el.name] = el.value; });
+            fetch("/mailings/lists/" + listId + "/update-meta/", {
+              method: 'POST',
+              credentials: 'same-origin',
+              headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
+              body: JSON.stringify(payload),
+            }).then(function (r) {
+              return r.json().then(function (data) { return { status: r.status, data: data }; });
+            }).then(function (res) {
+              if (res.data.ok) {
+                targets.forEach(function (el) { initial[el.name] = el.value; });
+                flash('保存しました', true);
+              } else if (res.data.errors) {
+                showErrors(res.data.errors);
+                flash('入力エラーがあります', false);
+              } else {
+                flash(res.data.message || '保存に失敗しました', false);
+              }
+            }).catch(function () { flash('保存に失敗しました（通信エラー）', false); });
+          }
+        })();
+      </script>
+    {% endif %}
+  </section>
+
+  {% if not is_create %}
+    {% if not is_frozen %}
+      {# Step 2: タグ選択 + プレビュー + 保存（未凍結のときのみ、rev14.1 §11.4.3） #}
+      <section class="app-card">
+        <h2 style="margin-bottom:12px;">Step 2：タグ選択でメンバー組成</h2>
+        <p class="app-muted" style="margin-bottom:12px;">
+          同一カテゴリ内 OR、カテゴリ間 AND で抽出します。条件を変更すると下のプレビュー件数が更新されます。
+        </p>
+
+        {% if tags_by_category %}
+          <form id="js-mailing-list-freeze" data-mailing-list-id="{{ mailing_list.id|default:object.id }}"
+                data-current-member-count="{{ members|length }}">
+            {% csrf_token %}
+            <div class="app-form-grid" style="grid-template-columns: repeat(3, 1fr);">
+              {% for cat, tags_in_cat in tags_by_category %}
+                <div class="app-form__group">
+                  <label class="app-form__label">{{ cat.name }}</label>
+                  <div style="display:flex; flex-direction:column; gap:4px;">
+                    {% for tag in tags_in_cat %}
+                      <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+                        <input type="checkbox" name="tag_ids" value="{{ tag.id }}" class="js-tag-cb">
+                        {{ tag.name }}
+                      </label>
+                    {% empty %}
+                      <span class="app-muted">（このカテゴリにタグなし）</span>
+                    {% endfor %}
+                  </div>
+                </div>
+              {% endfor %}
+            </div>
+
+            <div class="app-card" style="margin-top:16px; padding:16px;">
+              <h3 style="margin-bottom:8px;">プレビュー</h3>
+              <div>対象 Person 件数：<strong id="js-preview-count">-</strong></div>
+              <div style="margin-top:8px;">
+                <small class="app-muted">サンプル（先頭 10 件）：</small>
+                <div class="app-table-wrapper" style="margin-top:4px;">
+                  <table class="app-table app-table--nowrap">
+                    <thead>
+                      <tr>
+                        <th>氏名</th>
+                        <th>会社</th>
+                        <th>役職</th>
+                        <th>部署</th>
+                        <th>住所</th>
+                        <th style="min-width:240px;">メール</th>
+                      </tr>
+                    </thead>
+                    <tbody id="js-preview-samples"></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            <div class="app-action-area">
+              <button type="button" id="js-freeze-btn" class="app-btn app-btn--primary">
+                リスト保存
+              </button>
+            </div>
+          </form>
+
+          <script>
+            (function () {
+              var form = document.getElementById('js-mailing-list-freeze');
+              if (!form) return;
+              var listId = form.dataset.mailingListId;
+              var currentMemberCount = parseInt(form.dataset.currentMemberCount || '0', 10);
+              var countEl = document.getElementById('js-preview-count');
+              var samplesEl = document.getElementById('js-preview-samples');
+              var freezeBtn = document.getElementById('js-freeze-btn');
+              var lastPreviewCount = 0;
+
+              function getCsrf() {
+                var input = form.querySelector('[name=csrfmiddlewaretoken]');
+                return input ? input.value : '';
+              }
+              function selectedTags() {
+                return Array.prototype.map.call(
+                  form.querySelectorAll('.js-tag-cb:checked'),
+                  function (cb) { return cb.value; }
+                );
+              }
+              function postJson(url, data) {
+                return fetch(url, {
+                  method: 'POST',
+                  credentials: 'same-origin',
+                  headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrf() },
+                  body: JSON.stringify(data),
+                }).then(function (r) {
+                  if (!r.ok && r.status !== 409) throw new Error('HTTP ' + r.status);
+                  return r.json().then(function (data) { return { status: r.status, data: data }; });
+                });
+              }
+              function escapeHtml(s) {
+                return (s || '').replace(/[&<>"']/g, function (c) {
+                  return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+                });
+              }
+              function refreshPreview() {
+                postJson("{% url 'mailings:mailing_list_preview' %}", { tag_ids: selectedTags() })
+                  .then(function (res) {
+                    if (!res.data.ok) return;
+                    lastPreviewCount = res.data.count;
+                    countEl.textContent = res.data.count;
+                    samplesEl.innerHTML = '';
+                    (res.data.samples || []).forEach(function (s) {
+                      var tr = document.createElement('tr');
+                      tr.innerHTML =
+                        '<td>' + escapeHtml(s.name || '(氏名なし)') + '</td>' +
+                        '<td>' + escapeHtml(s.org || '-') + '</td>' +
+                        '<td>' + escapeHtml(s.title || '-') + '</td>' +
+                        '<td>' + escapeHtml(s.department || '-') + '</td>' +
+                        '<td>' + escapeHtml(s.address || '-') + '</td>' +
+                        '<td style="font-weight:bold;">' + escapeHtml(s.email || '-') + '</td>';
+                      samplesEl.appendChild(tr);
+                    });
+                  })
+                  .catch(function () { countEl.textContent = '(エラー)'; });
+              }
+              form.querySelectorAll('.js-tag-cb').forEach(function (cb) {
+                cb.addEventListener('change', refreshPreview);
+              });
+              refreshPreview();
+
+              freezeBtn.addEventListener('click', function () {
+                var msg =
+                  '現在のメンバー ' + currentMemberCount + ' 件を削除し、' +
+                  'タグ抽出結果 ' + lastPreviewCount + ' 件で置き換えます。よろしいですか？';
+                if (!confirm(msg)) return;
+                postJson("{% url 'mailings:mailing_list_freeze' %}", {
+                  mailing_list_id: listId,
+                  tag_ids: selectedTags(),
+                }).then(function (res) {
+                  if (res.status === 409) {
+                    alert(res.data.message || '凍結済みのため保存できません');
+                    return;
+                  }
+                  if (!res.data.ok) { alert('保存に失敗しました'); return; }
+                  alert(res.data.member_count + ' 件を保存しました。');
+                  location.reload();
+                }).catch(function () { alert('保存に失敗しました'); });
+              });
+            })();
+          </script>
+        {% else %}
+          <p class="app-muted">タグがまだ作成されていません。
+            <a href="{% url 'tags:tag_category_list' %}">タグカテゴリ一覧</a>でカテゴリとタグを作成してください。
+          </p>
+        {% endif %}
+      </section>
+      {# Step 3: 手動メンバー編集（rev14.1 §11.3.6、未凍結時のみ） #}
+      <section class="app-card">
+        <h2 style="margin-bottom:12px;">Step 3：メンバーを手動で追加・削除</h2>
+        <p class="app-muted" style="margin-bottom:12px;">
+          Step 2 でタグ抽出した結果に加えて、個別に Person を追加・削除できます。
+          配信開始時（Campaign が sending に遷移）まではメンバーは流動的です。
+        </p>
+
+        <h3 style="margin-bottom:8px;">Person 検索（active のみ）</h3>
+        {% include "persons/_search_form.html" with show_status_filter=False %}
+
+        {% if search_results is not None %}
+          <h3 style="margin-top:16px; margin-bottom:8px;">検索結果（既存メンバー除く、先頭 100 件）</h3>
+          {% if search_results %}
+            <form id="js-add-member-form" data-mailing-list-id="{{ object.id }}">
+              {% csrf_token %}
+              <div class="app-table-wrapper">
+                <table class="app-table app-table--nowrap">
+                  <thead>
+                    <tr>
+                      <th><input type="checkbox" id="js-add-select-all"></th>
+                      <th>氏名</th>
+                      <th>会社</th>
+                      <th>役職</th>
+                      <th>部署</th>
+                      <th>住所</th>
+                      <th style="min-width:240px;">メール</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for p in search_results %}
+                      <tr>
+                        <td><input type="checkbox" name="person_ids" value="{{ p.id }}" class="js-add-person-cb"></td>
+                        <td>
+                          {{ p.primary_contact.full_name|default:"(氏名なし)" }}
+                        </td>
+                        <td>{{ p.primary_contact.organization|default:"-" }}</td>
+                        <td>{{ p.primary_contact.title|default:"-" }}</td>
+                        <td>{{ p.primary_contact.department|default:"-" }}</td>
+                        <td>{{ p.primary_contact.address|default:"-" }}</td>
+                        <td style="font-weight:bold;">{{ p.primary_contact.email|default:"-" }}</td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+              <div class="app-action-area" style="margin-top:12px;">
+                <button type="button" id="js-add-member-btn" class="app-btn app-btn--primary">
+                  選択した Person を追加
+                </button>
+              </div>
+            </form>
+          {% else %}
+            <p class="app-muted">検索結果はありません（または既に全員メンバーに入っています）。</p>
+          {% endif %}
+        {% endif %}
+
+        <h3 style="margin-top:24px; margin-bottom:8px;">現在のメンバー一覧（{{ members|length }} 件）</h3>
+        {% if members %}
+          <div class="app-table-wrapper">
+            <table class="app-table app-table--nowrap js-member-table">
+              <thead>
+                <tr>
+                  <th class="app-table__col--action">操作</th>
+                  <th>氏名</th>
+                  <th>会社</th>
+                  <th>役職</th>
+                  <th>部署</th>
+                  <th>住所</th>
+                  <th style="min-width:240px;">メール</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for m in members %}
+                  <tr data-member-id="{{ m.id }}">
+                    <td class="app-table__col--action">
+                      <button type="button" class="app-btn app-btn--warning app-btn--sm js-member-remove">削除</button>
+                    </td>
+                    <td>
+                      {{ m.person.primary_contact.full_name|default:"(氏名なし)" }}
+                    </td>
+                    <td>{{ m.person.primary_contact.organization|default:"-" }}</td>
+                    <td>{{ m.person.primary_contact.title|default:"-" }}</td>
+                    <td>{{ m.person.primary_contact.department|default:"-" }}</td>
+                    <td>{{ m.person.primary_contact.address|default:"-" }}</td>
+                    <td style="font-weight:bold;">{{ m.person.primary_contact.email|default:"-" }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <p class="app-muted">メンバーがまだいません。Step 2 のタグ抽出か上記の Person 検索から追加してください。</p>
+        {% endif %}
+
+        <script>
+          (function () {
+            function getCsrf() {
+              var input = document.querySelector('[name=csrfmiddlewaretoken]');
+              return input ? input.value : '';
+            }
+            var selectAll = document.getElementById('js-add-select-all');
+            if (selectAll) {
+              selectAll.addEventListener('change', function () {
+                document.querySelectorAll('.js-add-person-cb').forEach(function (cb) {
+                  cb.checked = selectAll.checked;
+                });
+              });
+            }
+            var addBtn = document.getElementById('js-add-member-btn');
+            if (addBtn) {
+              addBtn.addEventListener('click', function () {
+                var listId = document.getElementById('js-add-member-form').dataset.mailingListId;
+                var ids = Array.prototype.map.call(
+                  document.querySelectorAll('.js-add-person-cb:checked'),
+                  function (cb) { return cb.value; }
+                );
+                if (ids.length === 0) { alert('追加する Person を選択してください'); return; }
+                if (!confirm(ids.length + ' 件の Person をメンバーに追加します。よろしいですか？')) return;
+                fetch("/mailings/lists/" + listId + "/add-member/", {
+                  method: 'POST',
+                  credentials: 'same-origin',
+                  headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrf() },
+                  body: JSON.stringify({ person_ids: ids }),
+                }).then(function (r) {
+                  if (r.status === 409) { return r.json().then(function (d) { alert(d.message || '凍結済みのため追加できません'); throw new Error('frozen'); }); }
+                  if (!r.ok) throw new Error('HTTP ' + r.status);
+                  return r.json();
+                }).then(function (data) {
+                  if (!data.ok) { alert('追加に失敗しました'); return; }
+                  alert(data.created_count + ' 件追加しました。');
+                  location.reload();
+                }).catch(function (e) { if (e.message !== 'frozen') alert('追加に失敗しました'); });
+              });
+            }
+            var table = document.querySelector('.js-member-table');
+            if (table) {
+              table.addEventListener('click', function (event) {
+                var btn = event.target.closest('.js-member-remove');
+                if (!btn) return;
+                var row = btn.closest('tr');
+                var memberId = row.dataset.memberId;
+                if (!confirm('このメンバーを削除します。よろしいですか？')) return;
+                var listId = "{{ object.id }}";
+                fetch("/mailings/lists/" + listId + "/remove-member/", {
+                  method: 'POST',
+                  credentials: 'same-origin',
+                  headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrf() },
+                  body: JSON.stringify({ member_id: memberId }),
+                }).then(function (r) {
+                  if (r.status === 409) { return r.json().then(function (d) { alert(d.message || '凍結済みのため削除できません'); throw new Error('frozen'); }); }
+                  if (!r.ok) throw new Error('HTTP ' + r.status);
+                  return r.json();
+                }).then(function (data) {
+                  if (!data.ok) { alert('削除に失敗しました'); return; }
+                  row.remove();
+                }).catch(function (e) { if (e.message !== 'frozen') alert('削除に失敗しました'); });
+              });
+            }
+          })();
+        </script>
+      </section>
+    {% else %}
+      {% comment %}
+        凍結後：注意メッセージ + メンバー一覧（閲覧のみ、rev14.1 §11.3.6 / §11.4.3）
+        本体（Step 1）は AJAX 自動保存で凍結時も編集可能（修正 4）
+      {% endcomment %}
+      <section class="app-card">
+        <h2 style="margin-bottom:12px;">
+          <i class="bi bi-lock-fill" style="color:#64748b; margin-right:6px;"></i>凍結メンバー一覧（{{ members|length }} 件）
+        </h2>
+        <div class="app-message app-message--warning" style="margin-bottom:12px;">
+          <i class="bi bi-lock-fill" style="margin-right:6px;"></i>
+          このリストは凍結済み（{{ mailing_list.members_frozen_at|date:"Y/m/d H:i:s" }}）のため、メンバーの追加・削除はできません。
+          リスト本体（name / description）の編集は引き続き可能です。
+        </div>
+        {% if members %}
+          <div class="app-table-wrapper">
+            <table class="app-table app-table--nowrap">
+              <thead>
+                <tr>
+                  <th>氏名</th>
+                  <th>会社</th>
+                  <th>役職</th>
+                  <th>部署</th>
+                  <th>住所</th>
+                  <th style="min-width:240px;">メール</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for m in members %}
+                  <tr>
+                    <td>
+                      {{ m.person.primary_contact.full_name|default:"(氏名なし)" }}
+                    </td>
+                    <td>{{ m.person.primary_contact.organization|default:"-" }}</td>
+                    <td>{{ m.person.primary_contact.title|default:"-" }}</td>
+                    <td>{{ m.person.primary_contact.department|default:"-" }}</td>
+                    <td>{{ m.person.primary_contact.address|default:"-" }}</td>
+                    <td style="font-weight:bold;">{{ m.person.primary_contact.email|default:"-" }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <p class="app-muted">凍結メンバーが 0 件です。</p>
+        {% endif %}
+      </section>
+    {% endif %}
+  {% endif %}
+{% endblock %}

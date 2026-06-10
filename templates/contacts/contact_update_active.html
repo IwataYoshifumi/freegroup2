@@ -10,12 +10,8 @@
       <h1>アクティブコンタクト修正</h1>
     </div>
     <div class="app-action-area">
-      {% if back.back_exist %}
-        <a href="{% back_url back %}" class="app-btn app-btn--secondary">戻る</a>
-      {% endif %}
-      {% if back.back_all_exist %}
-        <a href="{% back_all_url back %}" class="app-btn app-btn--secondary">最初に戻る</a>
-      {% endif %}
+      {% back_all_link back %}
+      {% back_link back %}
     </div>
   </div>
 
@@ -214,23 +210,20 @@
       </div>
     {% endblock %}
 
-    {# ==================== 確認チェックボックス（low/mid 未確認フィールドのみ動的） ==================== #}
+    {# ==================== 確認トグル（low/mid 未確認フィールドのみ動的、HIG v1.2 §4.1） ==================== #}
     <div class="app-section__header" style="margin-top:var(--app-space-md);">
       <h2>確認チェック</h2>
-      <p class="app-muted">信頼度の低い項目について、内容を確認したことを示すチェックを入れてください。</p>
+      <p class="app-muted">信頼度の低い項目について、内容を確認したことを「確認しました」に切り替えてください。</p>
     </div>
-    <div class="app-form__group">
-      {% for field in form %}
-        {% if field.name|slice:":10" == "confirmed_" %}
-          <div class="app-form__group">
-            <label>
-              {{ field }} {{ field.label }}
-            </label>
-            {{ field.errors }}
-          </div>
-        {% endif %}
-      {% endfor %}
-    </div>
+    {% for field in form %}
+      {% if field.name|slice:":10" == "confirmed_" %}
+        <div class="app-form__group">
+          <div class="app-form__label">{{ field.label }}</div>
+          {{ field }}
+          {{ field.errors }}
+        </div>
+      {% endif %}
+    {% endfor %}
 
     {# ==================== 備考 ==================== #}
     <div class="app-section__header" style="margin-top:var(--app-space-md);"><h2>備考</h2></div>
@@ -242,13 +235,9 @@
 
     {# ==================== 操作ボタン ==================== #}
     <div class="app-action-area" style="margin-top:24px;">
-      <button type="submit" class="app-btn app-btn--primary">保存</button>
-      {% if back.back_exist %}
-        <a href="{% back_url back %}" class="app-btn app-btn--secondary">戻る</a>
-      {% endif %}
-      {% if back.back_all_exist %}
-        <a href="{% back_all_url back %}" class="app-btn app-btn--secondary">最初に戻る</a>
-      {% endif %}
+      {% back_all_link back %}
+      {% back_link back %}
+      <button type="submit" class="app-btn app-btn--success">保存</button>
     </div>
   </form>
 {% endblock %}

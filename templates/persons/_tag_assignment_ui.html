@@ -1,0 +1,147 @@
+{% comment %}
+Person タグ付与・解除 UI partial（v1.6 Phase 1b-β、仕様書 §5.2.3 / §5.1 No.25・No.26）。
+
+person_detail_orphan / merged / archived から {% include %} で共通利用。
+{% if perms.tags.assign_tag %} ガード付き（Phase 1a で Meta.permissions 登録済み）。
+
+期待 context:
+  person: Person（タグ付与対象）
+  person_tag_assignments: list[TagAssignment]（現在付与中、tag/category prefetch 済み）
+  tags_by_category: list[(TagCategory, list[Tag])]（選択可能タグ）
+{% endcomment %}
+{% if perms.tags.assign_tag %}
+<section class="app-card" style="max-width:1100px; margin-top:var(--app-space-md);">
+  <div class="app-section__header"><h2>タグ</h2></div>
+
+  <div class="js-person-tag-block" data-person-id="{{ person.id }}">
+    <div class="app-form__group">
+      <label class="app-form__label">付与中のタグ</label>
+      <div class="js-person-tag-current" style="display:flex; flex-wrap:wrap; gap:8px; min-height:32px;">
+        {% for asg in person_tag_assignments %}
+          <span class="app-status-badge js-person-tag-chip" data-tag-id="{{ asg.tag.id }}">
+            <span class="app-muted" style="margin-right:4px;">[{{ asg.tag.category.name }}]</span>
+            {{ asg.tag.name }}
+            <button type="button" class="app-btn--icon js-person-tag-remove"
+                    data-tag-id="{{ asg.tag.id }}"
+                    aria-label="このタグを解除"
+                    style="margin-left:6px;">×</button>
+          </span>
+        {% empty %}
+          <span class="app-muted js-person-tag-empty">付与されているタグはありません</span>
+        {% endfor %}
+      </div>
+    </div>
+
+    {% if tags_by_category %}
+      <div class="app-form__group" style="margin-top:16px;">
+        <label class="app-form__label" for="js_person_tag_select">タグを追加</label>
+        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+          <select id="js_person_tag_select" class="app-input js-person-tag-select" style="min-width:280px;">
+            <option value="">-- タグを選択 --</option>
+            {% for cat, tags_in_cat in tags_by_category %}
+              {% if tags_in_cat %}
+                <optgroup label="{{ cat.name }}">
+                  {% for tag in tags_in_cat %}
+                    <option value="{{ tag.id }}" data-category="{{ cat.name }}" data-tag-name="{{ tag.name }}">{{ tag.name }}</option>
+                  {% endfor %}
+                </optgroup>
+              {% endif %}
+            {% endfor %}
+          </select>
+          <button type="button" class="app-btn app-btn--primary app-btn--sm js-person-tag-add">＋付与</button>
+        </div>
+      </div>
+    {% else %}
+      <p class="app-muted">タグがまだ作成されていません。
+        <a href="{% url 'tags:tag_list' %}">タグ一覧画面</a>で作成してください。
+      </p>
+    {% endif %}
+  </div>
+</section>
+
+<script>
+  (function () {
+    var block = document.querySelector('.js-person-tag-block[data-person-id="{{ person.id }}"]');
+    if (!block) return;
+
+    var personId = block.dataset.personId;
+    var current = block.querySelector('.js-person-tag-current');
+    var emptyLabel = block.querySelector('.js-person-tag-empty');
+
+    function getCsrf() {
+      var input = document.querySelector('[name=csrfmiddlewaretoken]');
+      if (input) return input.value;
+      var match = document.cookie.match(/csrftoken=([^;]+)/);
+      return match ? match[1] : '';
+    }
+
+    function postJson(url, data) {
+      return fetch(url, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': getCsrf(),
+        },
+        body: JSON.stringify(data),
+      }).then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      });
+    }
+
+    function renderChip(tagId, tagName, categoryName) {
+      if (emptyLabel) { emptyLabel.remove(); }
+      var chip = document.createElement('span');
+      chip.className = 'app-status-badge js-person-tag-chip';
+      chip.dataset.tagId = tagId;
+      chip.innerHTML =
+        '<span class="app-muted" style="margin-right:4px;">[' + categoryName + ']</span>' +
+        tagName +
+        ' <button type="button" class="app-btn--icon js-person-tag-remove" data-tag-id="' + tagId +
+        '" aria-label="このタグを解除" style="margin-left:6px;">×</button>';
+      current.appendChild(chip);
+    }
+
+    block.addEventListener('click', function (event) {
+      var add = event.target.closest('.js-person-tag-add');
+      if (add) {
+        var select = block.querySelector('.js-person-tag-select');
+        var tagId = select.value;
+        if (!tagId) return;
+        var opt = select.options[select.selectedIndex];
+        postJson("{% url 'tags:tag_assign' %}", { person_id: personId, tag_id: tagId })
+          .then(function (data) {
+            if (!data.ok) { alert('付与に失敗しました'); return; }
+            // 既存 chip があれば追加しない（重複防止）
+            if (current.querySelector('.js-person-tag-chip[data-tag-id="' + tagId + '"]')) return;
+            renderChip(tagId, data.tag_name, data.category_name);
+            select.value = '';
+          })
+          .catch(function () { alert('付与に失敗しました'); });
+        return;
+      }
+      var remove = event.target.closest('.js-person-tag-remove');
+      if (remove) {
+        var tagId2 = remove.dataset.tagId;
+        if (!confirm('このタグを解除しますか？')) return;
+        postJson("{% url 'tags:tag_unassign' %}", { person_id: personId, tag_id: tagId2 })
+          .then(function (data) {
+            if (!data.ok) { alert('解除に失敗しました'); return; }
+            var chip = current.querySelector('.js-person-tag-chip[data-tag-id="' + tagId2 + '"]');
+            if (chip) chip.remove();
+            if (current.children.length === 0) {
+              var span = document.createElement('span');
+              span.className = 'app-muted js-person-tag-empty';
+              span.textContent = '付与されているタグはありません';
+              current.appendChild(span);
+            }
+          })
+          .catch(function () { alert('解除に失敗しました'); });
+      }
+    });
+  })();
+</script>
+{% endif %}
+{# CSRF token form for JS to read（POST フォームが他にあれば省略可、ここはガード） #}
+<form style="display:none;">{% csrf_token %}</form>

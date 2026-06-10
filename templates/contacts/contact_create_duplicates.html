@@ -13,12 +13,8 @@
       </p>
     </div>
     <div class="app-action-area">
-      {% if back.back_exist %}
-        <a href="{% back_url back %}" class="app-btn app-btn--secondary">戻る</a>
-      {% endif %}
-      {% if back.back_all_exist %}
-        <a href="{% back_all_url back %}" class="app-btn app-btn--secondary">最初に戻る</a>
-      {% endif %}
+      {% back_all_link back %}
+      {% back_link back %}
     </div>
   </div>
 
@@ -53,6 +49,10 @@
                   <span class="app-status-badge app-status-badge--error">完全一致</span>
                 {% elif rank == "possible_high" %}
                   <span class="app-status-badge app-status-badge--warning">高確信度</span>
+                {% elif rank == "possible_mid" %}
+                  <span class="app-status-badge app-status-badge--muted">中確信度</span>
+                {% elif rank == "possible_low" %}
+                  <span class="app-status-badge app-status-badge--muted">低確信度</span>
                 {% else %}
                   <span class="app-status-badge app-status-badge--muted">{{ rank }}</span>
                 {% endif %}
@@ -99,16 +99,12 @@
     {% endif %}
 
     <div class="app-action-area" style="margin-top:0;">
+      {% back_all_link back %}
+      {% back_link back %}
       <button type="submit" name="force_create" value="1"
-              class="app-btn app-btn--danger">
+              class="app-btn app-btn--warning">
         強制作成
       </button>
-      {% if back.back_exist %}
-        <a href="{% back_url back %}" class="app-btn app-btn--secondary">戻る</a>
-      {% endif %}
-      {% if back.back_all_exist %}
-        <a href="{% back_all_url back %}" class="app-btn app-btn--secondary">最初に戻る</a>
-      {% endif %}
     </div>
   </form>
 

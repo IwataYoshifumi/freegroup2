@@ -7,13 +7,21 @@
     <section class="app-card">
       <div class="app-section__header">
         <h1>ユーザ管理一覧</h1>
-        <div>
-          {% if request.GET.show_retired == '1' %}
-            <a href="?" class="app-btn app-btn--secondary app-btn--sm">現職者のみ表示</a>
-          {% else %}
-            <a href="?show_retired=1" class="app-btn app-btn--secondary app-btn--sm">退職者も表示</a>
-          {% endif %}
-        </div>
+        {% comment %}
+        HIG v1.3 §3.6・§4.1：ON/OFF を視覚的に区別する隠し input+label トグル。
+        mailings/mailing_list_list の同型 UI と同じパターン（ON=primary/OFF=secondary）。
+        {% endcomment %}
+        <form method="get" style="margin:0;">
+          <label for="id_show_retired"
+                 class="app-btn app-btn--sm {% if request.GET.show_retired == '1' %}app-btn--primary{% else %}app-btn--secondary{% endif %}"
+                 style="cursor:pointer;">
+            {% if request.GET.show_retired == '1' %}✓ {% endif %}退職者も表示
+          </label>
+          <input type="checkbox" id="id_show_retired" name="show_retired" value="1"
+                 style="position:absolute; opacity:0; pointer-events:none;"
+                 onchange="this.form.submit();"
+                 {% if request.GET.show_retired == '1' %}checked{% endif %}>
+        </form>
       </div>
 
       {% if messages %}

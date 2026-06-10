@@ -19,7 +19,7 @@ class Person(models.Model):
         """Person のステータス（仕様書 §4.5.1 / 別表 C.11）。"""
 
         ACTIVE = "active", _("通常")
-        MERGED = "merged", _("統合済み")
+        MERGED = "merged", _("マージ済み")
         ARCHIVED = "archived", _("アーカイブ")
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -296,6 +296,77 @@ class Person(models.Model):
             return self.user
         except ObjectDoesNotExist:
             return None
+
+    # ------------------------------------------------------------------
+    # 配信停止（v1.6 §4.14.2 / §9.5 / §9.8、Phase 5 で追加）
+    # ------------------------------------------------------------------
+
+    def recompute_unsubscribed_state(self):
+        """is_unsubscribed を Unsubscribe レコードの正本から再計算する（§4.14.2 / §4.14.2.1）。
+
+        [性質] 副作用あり（DB 書込：自身の is_unsubscribed を 1 件更新する場合あり）
+        [入力] なし
+        [出力] None
+
+        正本：アクティブな（cancelled_at が NULL の）Unsubscribe レコードが 1 件以上あれば
+              is_unsubscribed=True、なければ False。
+
+        通常運用では `unsubscribe_person()` / `cancel_unsubscribe()` 経由で bulk update
+        により同期されるため、本メソッドは呼ばれない。例外的経路（Django admin から
+        個別 Unsubscribe レコードを cancelled_at 更新で解除する等）でのみ明示呼び出しする
+        （仕様書 §4.14.2 / §9.3.1）。
+
+        【注意】同一人物ユニット伝播は行わない（self 単独のフィールドのみ整合）。
+        ユニット全員に揃えたい場合はサービス関数経由（unsubscribe_person /
+        cancel_unsubscribe）を使う。
+        """
+        from mailings.models import Unsubscribe  # 循環 import 回避のため遅延
+
+        has_active = Unsubscribe.objects.filter(
+            person=self, cancelled_at__isnull=True
+        ).exists()
+        if self.is_unsubscribed != has_active:
+            self.is_unsubscribed = has_active
+            self.save(update_fields=["is_unsubscribed", "updated_at"])
+
+    def set_unsubscribed_by_admin(self, user, note=""):
+        """管理者代行による配信停止操作（§9.8 / §4.14.2）。
+
+        [性質] 副作用あり（DB 書込：ユニット全員に Unsubscribe + is_unsubscribed
+               同期 + ActionLog 1 件）
+        [入力] user: CustomUser（操作した管理者、ActionLog の actor / Unsubscribe の
+               cancelled_by 候補ではなく、source='manual' の意味記録 + ActionLog 用）
+               note: str（補足説明、Unsubscribe.note と ActionLog.note に記録）
+        [出力] None
+        [例外] ValueError（self.primary_contact が NULL、または email が空の場合：
+               source_email を確定できないため）
+
+        内部処理：
+          1. unsubscribe_person(target_person=self, source='manual',
+             source_email=self.primary_contact.email, user=user, note=note)
+             でユニット全員に Unsubscribe レコード作成 + is_unsubscribed=True 同期
+          2. record_unsubscribe_by_admin_action(user, self, note) で ActionLog 記録
+             （v1.4.2 §4.11.3 record_*_action パターン踏襲）
+        """
+        from mailings.services.audit import (  # 循環 import 回避のため遅延
+            record_unsubscribe_by_admin_action,
+        )
+        from mailings.services.unsubscribe import unsubscribe_person
+
+        if self.primary_contact is None or not self.primary_contact.email:
+            raise ValueError(
+                f"Person {self.id} has no primary_contact email; "
+                "set_unsubscribed_by_admin requires a source_email."
+            )
+
+        unsubscribe_person(
+            target_person=self,
+            source="manual",
+            source_email=self.primary_contact.email,
+            user=user,
+            note=note,
+        )
+        record_unsubscribe_by_admin_action(user=user, person=self, note=note)
 
     # ------------------------------------------------------------------
     # クラスメソッド（仕様書 §10.4.2）

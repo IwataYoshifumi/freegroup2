@@ -1,0 +1,185 @@
+{% extends "mailings/app_base.html" %}
+{% load back_tags %}
+
+{% block title %}配信リスト一覧 — FreeGroup2{% endblock %}
+
+{% block content %}
+  <div class="app-page-header">
+    <div>
+      <div class="app-breadcrumb">メール配信 / 配信リスト一覧</div>
+      <h1>配信リスト一覧</h1>
+    </div>
+    {# 戻る導線は右上（HIG 3.2 / 付録）。 #}
+    <div class="app-page-header__actions">
+      {% back_all_link back %}
+      {% back_link back %}
+    </div>
+  </div>
+
+  {# 遷移導線（新規作成）はタイトル直下・左寄せに集約（HIG 3.1 / 7.3、「＋」除去）。 #}
+  <div class="app-action-area" style="justify-content:flex-start; margin-bottom:16px;">
+    {# 旧 mailing_list_create (単一画面 CreateView) は View/URL/テスト残置、リンクのみウィザード入口に張替 #}
+    {% url 'mailings:new_list_meta' as create_url %}
+    <a href="{% append_back_url create_url back %}" class="app-btn app-btn--primary">新規リスト作成</a>
+  </div>
+
+  {% comment %}
+    検索フォーム（HIG 第6章・キャンペーン一覧と同構造／§2）：
+    テキスト（リスト名）は折りたたみの外＝常時表示。状態トグルは「状態」折りたたみの中。
+    状態とソートの折りたたみは横並び・初期閉。
+  {% endcomment %}
+  <section class="app-card" style="margin-bottom:16px;">
+    <form method="get" class="app-form-grid-edit">
+      <input type="hidden" name="searched" value="1">
+      <div class="app-form-grid app-search-grid">
+        <div class="app-form__group">
+          <label class="app-form__label" for="id_name">リスト名</label>
+          <input type="text" id="id_name" name="name" value="{{ search_name }}" class="app-input">
+        </div>
+      </div>
+
+      <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:flex-start;">
+        {# 状態の絞り込み（トグル・複数選択）。初期閉・幅は中身に合わせる。 #}
+        <div class="app-collapsible app-person-filter-collapsible" style="flex:0 1 auto;">
+          <button type="button" class="app-collapsible__header" data-action="toggle-collapsible"
+                  aria-expanded="false">
+            <span>状態</span>
+            <span class="app-collapsible__icon">▸</span>
+          </button>
+          <div class="app-collapsible-body">
+            <div class="app-person-filter-box" style="margin-top:var(--app-space-sm);">
+              {# トグルは2列折り返し＋枠を詰める。 #}
+              <div class="app-form__group">
+                <ul class="app-radio-toggle" style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                  <li>
+                    <label style="padding:5px 12px; min-height:32px;">
+                      <input type="checkbox" name="status" value="active"
+                             {% if "active" in selected_statuses %}checked{% endif %}>
+                      アクティブ
+                    </label>
+                  </li>
+                  <li>
+                    <label style="padding:5px 12px; min-height:32px;">
+                      <input type="checkbox" name="status" value="archived"
+                             {% if "archived" in selected_statuses %}checked{% endif %}>
+                      アーカイブ済み
+                    </label>
+                  </li>
+                  <li>
+                    <label style="padding:5px 12px; min-height:32px;">
+                      <input type="checkbox" name="status" value="frozen"
+                             {% if "frozen" in selected_statuses %}checked{% endif %}>
+                      凍結（編集不可）
+                    </label>
+                  </li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {# ソート（折りたたみ・指定があれば開く）。 #}
+        <div style="flex:1 1 320px; min-width:280px;">
+          {% include "mailings/_sort_control.html" %}
+        </div>
+      </div>
+
+      <div class="app-action-area app-action-area--search">
+        <button type="submit" class="app-btn app-btn--primary">検索</button>
+        <a href="{% url 'mailings:mailing_list_list' %}" class="app-btn app-btn--secondary">リセット</a>
+      </div>
+    </form>
+  </section>
+
+  <section class="app-card">
+    {% if mailing_lists %}
+      {# 表示列選択は表の左上に置く（HIG 6.2）。 #}
+      <div style="display:flex; justify-content:flex-start; margin-bottom:12px;">
+        {% include "mailings/_column_toggle_list.html" with columns=column_defs storage_key=column_storage_key %}
+      </div>
+      <div class="app-table-wrapper">
+        {# js-mailings-page-sort：列見出しクリックの現在ページ内DOMソート（補助系統、URL不変）。 #}
+        <table class="app-table app-table--nowrap js-mailings-page-sort">
+          <thead>
+            <tr>
+              <th class="app-table__col--action">操作</th>
+              <th data-sort-col>リスト名</th>
+              <th data-col-key="description" data-sort-col>説明</th>
+              <th data-col-key="member_count" data-sort-col>メンバー数</th>
+              <th data-col-key="status" data-sort-col>状態</th>
+              <th data-col-key="created_by" data-sort-col>作成者</th>
+              <th class="app-table__col--date" data-col-key="updated_at" data-sort-col>更新日時</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for ml in mailing_lists %}
+              {% url 'mailings:mailing_list_detail' pk=ml.id as detail_url %}
+              {% url 'mailings:mailing_list_update' pk=ml.id as update_url %}
+              {% url 'mailings:mailing_list_delete' pk=ml.id as delete_url %}
+              <tr>
+                <td class="app-table__col--action">
+                  <a href="{% append_back_url detail_url back %}" class="app-btn app-btn--outline-secondary app-btn--sm">詳細</a>
+                  {% if not ml.is_archived %}
+                    <a href="{% append_back_url update_url back %}" class="app-btn app-btn--success app-btn--sm">編集</a>
+                    <button type="button" class="app-btn app-btn--outline-secondary app-btn--sm js-row-archive-toggle"
+                            data-target="js-row-archive-{{ ml.id }}"
+                            aria-haspopup="true" aria-expanded="false">
+                      <i class="bi bi-caret-down-fill"></i>
+                    </button>
+                    <span id="js-row-archive-{{ ml.id }}" style="display:none;">
+                      <a href="{% append_back_url delete_url back %}" class="app-btn app-btn--warning app-btn--sm">アーカイブ化</a>
+                    </span>
+                  {% endif %}
+                </td>
+                <td>
+                  {% if ml.members_frozen_at %}
+                    <i class="bi bi-lock-fill" style="color:#64748b; margin-right:4px;"
+                       title="凍結: {{ ml.members_frozen_at|date:'Y/m/d H:i' }}"></i>
+                  {% endif %}
+                  {{ ml.name }}
+                </td>
+                <td data-col-key="description">
+                  {% if ml.description %}
+                    <span class="app-ellipsis" data-tooltip="{{ ml.description }}" style="display:inline-block; max-width:280px; overflow:hidden; text-overflow:ellipsis; vertical-align:bottom;">{{ ml.description|truncatechars:40 }}</span>
+                  {% else %}-{% endif %}
+                </td>
+                <td data-col-key="member_count">{{ ml.member_count }}</td>
+                <td data-col-key="status">
+                  {% if ml.is_archived %}
+                    <span class="app-status-badge app-status-badge--muted">アーカイブ済み</span>
+                  {% else %}
+                    <span class="app-status-badge app-status-badge--success">アクティブ</span>
+                  {% endif %}
+                </td>
+                <td data-col-key="created_by">{{ ml.created_by.username|default:"-" }}</td>
+                <td data-col-key="updated_at">{{ ml.updated_at|date:"Y/m/d H:i" }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      {% if is_paginated %}
+        {% include "persons/_pagination.html" %}
+      {% endif %}
+    {% else %}
+      <p class="app-muted">
+        条件に一致する配信リストがありません（状態トグルや絞り込みを変更、または「新規リスト作成」から作成してください）。
+      </p>
+    {% endif %}
+  </section>
+
+  <script>
+    (function () {
+      document.querySelectorAll('.js-row-archive-toggle').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var target = document.getElementById(btn.dataset.target);
+          if (!target) return;
+          var opening = target.style.display === 'none' || target.style.display === '';
+          target.style.display = opening ? 'inline' : 'none';
+          btn.setAttribute('aria-expanded', opening ? 'true' : 'false');
+        });
+      });
+    })();
+  </script>
+{% endblock %}

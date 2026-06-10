@@ -9,7 +9,7 @@ import logging
 import statistics
 from collections import Counter
 
-from django.contrib.auth import get_user_model
+from django.contrib.auth.mixins import LoginRequiredMixin, PermissionRequiredMixin
 from django.core.files.base import ContentFile
 from django.db.models import Count, Exists, OuterRef, Q
 from django.http import HttpResponse, HttpResponseRedirect
@@ -30,25 +30,14 @@ from contacts.models import Contact, ContactFieldConfidence
 
 logger = logging.getLogger(__name__)
 
-User = get_user_model()
-
-
-def get_current_user(request):
-    """認証未実装のための仮処理（将来認証実装時に削除）。
-
-    request.user が認証済みならそれを返し、未認証なら最初のスーパーユーザーを返す。
-    OriginalImage.user は仕様書 §4.2 で必須なので、保存に必要な User を確保する。
-    """
-    if request.user.is_authenticated:
-        return request.user
-    return User.objects.filter(is_superuser=True).first()
-
 
 def placeholder_view(request):
     return HttpResponse("準備中", content_type="text/plain; charset=utf-8")
 
 
-class UploadView(FormView):
+class UploadView(LoginRequiredMixin, PermissionRequiredMixin, FormView):
+    # 認可（Phase 7 段3-2、rev20 No.2 ★2）：OriginalImage 作成 → add_originalimage。
+    permission_required = "cards.add_originalimage"
     template_name = "cards/upload.html"
     form_class = UploadForm
 
@@ -60,7 +49,7 @@ class UploadView(FormView):
         exif_json = extract_exif_to_json(uploaded_file)
         jpeg_bytes = convert_to_jpeg(uploaded_file)
 
-        user = get_current_user(self.request)
+        user = self.request.user
         original = OriginalImage(
             user=user,
             status=OriginalImage.STATUS_PENDING,
@@ -84,7 +73,9 @@ class UploadView(FormView):
         return context
 
 
-class OriginalListView(ListView):
+class OriginalListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
+    # 認可（Phase 7 段3-2、rev20 No.5 ★2）：OriginalImage 閲覧 → view_originalimage。
+    permission_required = "cards.view_originalimage"
     model = OriginalImage
     template_name = "cards/original_list.html"
     context_object_name = "originals"
@@ -96,7 +87,7 @@ class OriginalListView(ListView):
         return 20
 
     def get_queryset(self):
-        user = get_current_user(self.request)
+        user = self.request.user
         qs = (
             OriginalImage.objects.filter(user=user)
             .select_related("user")
@@ -132,7 +123,7 @@ class OriginalListView(ListView):
         context = super().get_context_data(**kwargs)
 
         back = BackNavigator(self.request)
-        back.push_current("元画像一覧", ["status", "date_from", "date_to", "page", "per_page"])
+        back.push_current("", ["status", "date_from", "date_to", "page", "per_page"])
         context["back"] = back
 
         context["active_app"] = "cards"
@@ -145,14 +136,16 @@ class OriginalListView(ListView):
         return context
 
 
-class OriginalDetailView(DetailView):
+class OriginalDetailView(LoginRequiredMixin, PermissionRequiredMixin, DetailView):
+    # 認可（Phase 7 段3-2、rev20 No.6 ★2）：OriginalImage 閲覧 → view_originalimage。
+    permission_required = "cards.view_originalimage"
     model = OriginalImage
     template_name = "cards/original_detail.html"
     context_object_name = "original"
     pk_url_kwarg = "pk"
 
     def get_queryset(self):
-        user = get_current_user(self.request)
+        user = self.request.user
         return OriginalImage.objects.filter(user=user)
 
     def get_context_data(self, **kwargs):
@@ -509,7 +502,7 @@ def _build_overlay_polygons(debug_json):
     return items
 
 
-class RecalcDebugView(View):
+class RecalcDebugView(LoginRequiredMixin, View):
     """OpenCV デバッグキャッシュを再計算し、元画像詳細にリダイレクトする（POST 専用）。
 
     recalc_opencv_debug() で 3 ステップ（clear → detect → save）を実行する。
@@ -518,30 +511,34 @@ class RecalcDebugView(View):
     """
 
     def post(self, request, pk):
-        user = get_current_user(request)
+        user = request.user
         original = get_object_or_404(OriginalImage, pk=pk, user=user)
         recalc_opencv_debug(original)
         return redirect("originals:original_detail", pk=original.id)
 
 
-class CardDeleteView(View):
+class CardDeleteView(LoginRequiredMixin, PermissionRequiredMixin, View):
     """BusinessCard を削除し、元画像詳細にリダイレクトする（POST 専用）。
 
     削除対象は本人所有の BC のみ（user スコープで絞り込み）。
     Contact / ContactFieldConfidence は CASCADE で自動削除、card_image の FS 実体は
     post_delete シグナルで自動削除される。OriginalImage.raw_json は温存される。
     GET / その他メソッドは Django 標準の 405 応答（method_not_allowed）が返る。
+
+    認可（Phase 7 段3-2、rev20 No.22 ★2）：BusinessCard 削除 → delete_businesscard。
     """
 
+    permission_required = "cards.delete_businesscard"
+
     def post(self, request, pk):
-        user = get_current_user(request)
+        user = request.user
         bc = get_object_or_404(BusinessCard, pk=pk, original_image__user=user)
         original_image_id = bc.original_image_id
         bc.delete()
         return redirect("originals:original_detail", pk=original_image_id)
 
 
-class CardListView(ListView):
+class CardListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
     """名刺一覧画面（仕様書 v1.2.2 / Phase 4）。
 
     BusinessCard を Contact 情報とともに一覧表示する。
@@ -549,6 +546,8 @@ class CardListView(ListView):
     tel は personal_phone / mobile_phone / personal_fax の OR 一致。
     """
 
+    # 認可（Phase 7 段3-2、rev20 No.3 ★2）：BusinessCard 閲覧 → view_businesscard。
+    permission_required = "cards.view_businesscard"
     model = BusinessCard
     template_name = "cards/card_list.html"
     context_object_name = "cards"
@@ -603,7 +602,7 @@ class CardListView(ListView):
         return q
 
     def get_queryset(self):
-        user = get_current_user(self.request)
+        user = self.request.user
         # confidence ドットは DUPLICATE_CHECK_FIELDS のみ対象、confirmed_at で
         # 「未確認」を区別する（DEBUG=True 時のみ表示）。
         selected = self._selected_ocr_filters()
@@ -666,7 +665,7 @@ class CardListView(ListView):
 
         back = BackNavigator(self.request)
         back.push_current(
-            "名刺一覧",
+            "",
             ["name", "organization", "department", "title", "email", "tel", "address", "ocr_result", "page"],
         )
         context["back"] = back
@@ -680,7 +679,7 @@ class CardListView(ListView):
         return context
 
 
-class CardDetailView(DetailView):
+class CardDetailView(LoginRequiredMixin, PermissionRequiredMixin, DetailView):
     """名刺詳細画面（仕様書 v1.4.2 / Phase 4）。
 
     OpenCV デバッグ情報の閲覧と Contact フィールド編集（ContactDetailView と同じ
@@ -689,13 +688,15 @@ class CardDetailView(DetailView):
     is_editable）を提供する。
     """
 
+    # 認可（Phase 7 段3-2、rev20 No.4 ★2）：BusinessCard 閲覧 → view_businesscard。
+    permission_required = "cards.view_businesscard"
     model = BusinessCard
     template_name = "cards/card_detail.html"
     context_object_name = "card"
     pk_url_kwarg = "pk"
 
     def get_queryset(self):
-        user = get_current_user(self.request)
+        user = self.request.user
         return (
             BusinessCard.objects.filter(original_image__user=user)
             .select_related("original_image", "contact", "contact__person")

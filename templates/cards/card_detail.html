@@ -16,12 +16,8 @@
       </div>
     </div>
     <div class="app-action-area">
-      {% if back.back_exist %}
-        <a href="{% back_url back %}" class="app-btn app-btn--secondary">戻る</a>
-      {% endif %}
-      {% if back.back_all_exist %}
-        <a href="{% back_all_url back %}" class="app-btn app-btn--secondary">最初に戻る</a>
-      {% endif %}
+      {% back_all_link back %}
+      {% back_link back %}
     </div>
   </div>
 
@@ -235,20 +231,20 @@
 
   <div class="app-action-area" style="margin-top:24px; max-width:1100px;">
     {% if debug %}
+      {% comment %}
+      HIG v1.3 §3.3：物理削除の入口はトラッシュ＋黒系。最終実行（confirm 後）に danger を残す方針。
+      デバッグ用直接削除のため confirm 画面は js-card-delete-btn の JS が出す。js- フックは維持。
+      {% endcomment %}
       <form method="post" action="{% url 'cards:card_delete' pk=card.id %}"
             class="js-card-delete-form" style="margin: 0;">
         {% csrf_token %}
-        <button type="submit" class="app-btn app-btn--danger js-card-delete-btn">
-          <span class="app-icon--delete"></span> 削除（デバッグ中限定）
+        <button type="submit" class="app-btn-trash js-card-delete-btn" title="削除（デバッグ中限定）">
+          🗑 削除（デバッグ中限定）
         </button>
       </form>
     {% endif %}
-    {% if back.back_exist %}
-      <a href="{% back_url back %}" class="app-btn app-btn--secondary">戻る</a>
-    {% endif %}
-    {% if back.back_all_exist %}
-      <a href="{% back_all_url back %}" class="app-btn app-btn--secondary">最初に戻る</a>
-    {% endif %}
+    {% back_all_link back %}
+    {% back_link back %}
   </div>
 
   {% if debug %}

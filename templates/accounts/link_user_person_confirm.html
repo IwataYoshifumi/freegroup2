@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% load back_tags %}
 
-{% block title %}User-Person 紐付け確認 — FreeGroup2{% endblock %}
+{% block title %}ユーザーと人物の紐付け確認 — FreeGroup2{% endblock %}
 
 {% block app_content %}
   <main class="app-main">
@@ -14,10 +14,9 @@
     {% endif %}
 
     <div class="app-section__header">
-      <h1>User-Person 紐付け確認</h1>
-      {% if back.back_exist %}
-        <a href="{% back_url back %}" class="app-btn app-btn--secondary app-btn--sm">戻る</a>
-      {% endif %}
+      <h1>ユーザーと人物の紐付け確認</h1>
+      {% back_all_link back %}
+      {% back_link back %}
     </div>
 
     {# ---- User と Person を横並びで表示 ---- #}
@@ -26,7 +25,7 @@
       {# ---- ログイン中 User 情報 ---- #}
       <section class="app-card" style="flex: 1; min-width: 260px;">
         <div class="app-section__header">
-          <h2>あなた（User）</h2>
+          <h2>あなた（ユーザー）</h2>
         </div>
         <div class="app-detail-item">
           <div class="app-detail-label">ユーザ名</div>
@@ -49,7 +48,7 @@
       {# ---- 対象 Person 情報 ---- #}
       <section class="app-card" style="flex: 1; min-width: 260px;">
         <div class="app-section__header">
-          <h2>対象 Person</h2>
+          <h2>対象人物</h2>
         </div>
         {% with c=person.primary_contact %}
           {% if c %}
@@ -74,7 +73,7 @@
               <div class="app-detail-value">{{ c.title|default:"-" }}</div>
             </div>
           {% else %}
-            <p class="app-muted">（primary_contact 未設定の Person です）</p>
+            <p class="app-muted">（主コンタクト未設定の人物です）</p>
           {% endif %}
         {% endwith %}
       </section>
@@ -85,15 +84,14 @@
       {% if not linked %}
         {# 未紐付け：紐付けボタン #}
         <section class="app-card" style="margin-top: var(--app-space-md);">
-          <p class="app-muted">この Person はまだユーザーに紐付けられていません。あなたのユーザーと紐付けますか？</p>
+          <p class="app-muted">この人物はまだユーザーに紐付けられていません。あなたのユーザーと紐付けますか？</p>
           <form method="post" action="">
             {% csrf_token %}
             <input type="hidden" name="action" value="link">
             <div class="app-action-area">
+              {% back_all_link back %}
+              {% back_link back %}
               <button type="submit" class="app-btn app-btn--primary">紐付ける</button>
-              {% if back.back_exist %}
-                <a href="{% back_url back %}" class="app-btn app-btn--secondary">キャンセル</a>
-              {% endif %}
             </div>
           </form>
         </section>
@@ -101,15 +99,14 @@
       {% elif linked == user %}
         {# 本人紐付け済み：解除ボタン #}
         <section class="app-card" style="margin-top: var(--app-space-md);">
-          <p class="app-muted">この Person はあなた（{{ user.username }}）に紐付けられています。紐付けを解除しますか？</p>
+          <p class="app-muted">この人物はあなた（{{ user.username }}）に紐付けられています。紐付けを解除しますか？</p>
           <form method="post" action="">
             {% csrf_token %}
             <input type="hidden" name="action" value="unlink">
             <div class="app-action-area">
+              {% back_all_link back %}
+              {% back_link back %}
               <button type="submit" class="app-btn app-btn--danger">解除する</button>
-              {% if back.back_exist %}
-                <a href="{% back_url back %}" class="app-btn app-btn--secondary">キャンセル</a>
-              {% endif %}
             </div>
           </form>
         </section>
@@ -117,14 +114,11 @@
       {% else %}
         {# 他 User に紐付け済み：警告のみ #}
         <div class="app-alert app-alert--warning" style="margin-top: var(--app-space-md);">
-          この Person は別のユーザー（{{ linked.username }} さん）に紐付けられています。操作できません。
+          この人物は別のユーザー（{{ linked.username }} さん）に紐付けられています。操作できません。
         </div>
         <div class="app-action-area" style="margin-top: var(--app-space-md);">
-          {% if back.back_exist %}
-            <a href="{% back_url back %}" class="app-btn app-btn--secondary">戻る</a>
-          {% else %}
-            <a href="{% url 'accounts:profile' %}" class="app-btn app-btn--secondary">プロフィールへ</a>
-          {% endif %}
+          {% back_all_link back %}
+          {% back_link back %}
         </div>
       {% endif %}
     {% endwith %}

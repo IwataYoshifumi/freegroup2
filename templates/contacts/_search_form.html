@@ -1,0 +1,92 @@
+{% comment %}
+コンタクト検索フォーム partial（タスクD-1。HIG v1.5 §6.2）。
+
+contact_list.html からインライン直書きを切り出したもの。検索項目・挙動は現状維持
+（氏名/会社名/部署名/役職/メール/電話[personal/mobile/personal_fax のOR]/住所/status/searched）。
+ステータスは素の checkbox・英字ラベル（primary/active/inactive）を据え置く（業務語化は D-2）。
+
+検索フォーム内に多段ソートコントロール（persons と共有の _sort_control.html）を載せる。
+共有のため、呼び出し側ビュー（ContactListView）が sort_rows / sort_is_active / sort_value を渡す。
+
+期待 context（include 側で渡す）:
+  name / organization / department / title / email / tel / address: str
+  selected_statuses: list[str]
+  sort_rows / sort_is_active / sort_value: ソートコントロール用（_contact_sort_context 由来）
+{% endcomment %}
+<form method="get" class="app-form-grid-edit">
+  <input type="hidden" name="searched" value="1">
+  <div class="app-form-grid app-search-grid">
+    <div class="app-form__group">
+      <label class="app-form__label" for="id_name">氏名</label>
+      <input type="text" id="id_name" name="name" value="{{ name }}" class="app-input">
+    </div>
+    <div class="app-form__group">
+      <label class="app-form__label" for="id_organization">会社名</label>
+      <input type="text" id="id_organization" name="organization" value="{{ organization }}" class="app-input">
+    </div>
+    <div class="app-form__group">
+      <label class="app-form__label" for="id_department">部署名</label>
+      <input type="text" id="id_department" name="department" value="{{ department }}" class="app-input">
+    </div>
+    <div class="app-form__group">
+      <label class="app-form__label" for="id_title">役職</label>
+      <input type="text" id="id_title" name="title" value="{{ title }}" class="app-input">
+    </div>
+
+    <div class="app-form__group">
+      <label class="app-form__label" for="id_email">メール</label>
+      <input type="text" id="id_email" name="email" value="{{ email }}" class="app-input">
+    </div>
+    <div class="app-form__group">
+      <label class="app-form__label" for="id_tel">電話</label>
+      <input type="text" id="id_tel" name="tel" value="{{ tel }}" class="app-input">
+    </div>
+    <div class="app-form__group" style="grid-column: span 2;">
+      <label class="app-form__label" for="id_address">住所</label>
+      <input type="text" id="id_address" name="address" value="{{ address }}" class="app-input">
+    </div>
+
+    {# ステータスフィルタ：persons と同じ app-collapsible 折りたたみ・初期閉（HIG 原則7）。業務語ラベルのみ、内部値/name/複数選択は不変。 #}
+    <div class="app-collapsible app-person-filter-collapsible">
+      <button type="button" class="app-collapsible__header" data-action="toggle-collapsible"
+              aria-expanded="false">
+        <span>ステータス</span>
+        <span class="app-collapsible__icon">▸</span>
+      </button>
+      <div class="app-collapsible-body">
+        <div class="app-person-filter-box">
+          <ul class="app-radio-toggle">
+            <li>
+              <label>
+                <input type="checkbox" name="status" value="primary"
+                       {% if "primary" in selected_statuses %}checked{% endif %}>
+                主コンタクト
+              </label>
+            </li>
+            <li>
+              <label>
+                <input type="checkbox" name="status" value="active"
+                       {% if "active" in selected_statuses %}checked{% endif %}>
+                有効
+              </label>
+            </li>
+            <li>
+              <label>
+                <input type="checkbox" name="status" value="inactive"
+                       {% if "inactive" in selected_statuses %}checked{% endif %}>
+                履歴
+              </label>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    {% include "persons/_sort_control.html" %}
+  </div>
+
+  <div class="app-action-area app-action-area--search">
+    <button type="submit" class="app-btn app-btn--primary">検索</button>
+    <a href="{% url 'contacts:contact_list' %}" class="app-btn app-btn--secondary">リセット</a>
+  </div>
+</form>

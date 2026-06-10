@@ -32,7 +32,7 @@ JS フック（static/js/app.js 末尾の IIFE が処理）：
         </div>
         <div class="app-sns-formset__cell app-sns-formset__delete">
           {{ sns_form.DELETE }}
-          <button type="button" class="app-btn app-btn--danger app-btn--sm js-sns-remove-btn" aria-label="このSNSを削除">×</button>
+          <button type="button" class="app-btn-trash js-sns-remove-btn" aria-label="このSNSを削除" title="このSNSを削除">🗑</button>
         </div>
       </div>
     {% endfor %}
@@ -53,7 +53,7 @@ JS フック（static/js/app.js 末尾の IIFE が処理）：
       </div>
       <div class="app-sns-formset__cell app-sns-formset__delete">
         {{ formset.empty_form.DELETE }}
-        <button type="button" class="app-btn app-btn--danger app-btn--sm js-sns-remove-btn" aria-label="このSNSを削除">×</button>
+        <button type="button" class="app-btn-trash js-sns-remove-btn" aria-label="このSNSを削除" title="このSNSを削除">🗑</button>
       </div>
     </div>
   </template>

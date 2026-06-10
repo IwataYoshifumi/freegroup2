@@ -1,0 +1,190 @@
+{% extends "mailings/app_base.html" %}
+{% load back_tags %}
+
+{% block title %}タグカテゴリ詳細：{{ category.name }} — FreeGroup2{% endblock %}
+
+{% block content %}
+  <div class="app-page-header">
+    <div>
+      <div class="app-breadcrumb">タグカテゴリ一覧 / 詳細</div>
+      <h1 style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+        <span>{{ category.name }}</span>
+        <button type="button" class="js-info-toggle"
+                aria-haspopup="true" aria-expanded="false" aria-controls="js-info-popover"
+                aria-label="詳細情報"
+                style="background:none; border:none; cursor:pointer; padding:0; color:#64748b; font-size:0.85em;">
+          <i class="bi bi-info-circle"></i>
+        </button>
+        {% if category.is_archived %}
+          <span class="app-status-badge app-status-badge--muted">アーカイブ済み</span>
+        {% endif %}
+      </h1>
+      <div style="margin-top:4px; color:#475569;">{{ category.description|default:"-" }}</div>
+
+      {# ⓘ ポップオーバー：状態・並び順・作成日時・更新日時 #}
+      <div id="js-info-popover" hidden
+           style="position:absolute; z-index:1000; margin-top:4px; padding:12px 16px;
+                  background:#fff; border:1px solid #cbd5e1; border-radius:6px;
+                  box-shadow:0 4px 12px rgba(0,0,0,0.12); min-width:280px;">
+        <dl style="margin:0; display:grid; grid-template-columns:auto 1fr; gap:4px 12px;">
+          <dt style="color:#64748b;">状態</dt>
+          <dd style="margin:0;">
+            {% if category.is_archived %}
+              <span class="app-status-badge app-status-badge--muted">アーカイブ済み</span>
+            {% else %}
+              <span class="app-status-badge app-status-badge--success">アクティブ</span>
+            {% endif %}
+          </dd>
+          <dt style="color:#64748b;">並び順</dt>
+          <dd style="margin:0;">{{ category.sort_order }}</dd>
+          <dt style="color:#64748b;">作成日時</dt>
+          <dd style="margin:0;">{{ category.created_at|date:"Y/m/d H:i:s" }}</dd>
+          <dt style="color:#64748b;">更新日時</dt>
+          <dd style="margin:0;">{{ category.updated_at|date:"Y/m/d H:i:s" }}</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="app-action-area">
+      {% back_all_link back %}
+      {% back_link back %}
+      {% url 'tags:tag_category_update' pk=category.id as update_url %}
+      {% if category.is_archived %}
+        <span class="app-btn app-btn--success" style="opacity:0.5; pointer-events:none;" aria-disabled="true">編集</span>
+        <form method="post" action="{% url 'tags:tag_category_unarchive' pk=category.id %}" style="display:inline;"
+              onsubmit="return confirm('「{{ category.name }}」を非アーカイブ化します。よろしいですか？');">
+          {% csrf_token %}
+          {{ back.hidden_fields }}
+          <button type="submit" class="app-btn app-btn--warning">非アーカイブ化</button>
+        </form>
+      {% else %}
+        <a href="{% append_back_url update_url back %}" class="app-btn app-btn--success">編集</a>
+        <button type="button" class="app-btn app-btn--outline-secondary js-archive-toggle"
+                aria-haspopup="true" aria-expanded="false" aria-controls="js-archive-form">
+          <i class="bi bi-caret-down-fill"></i>
+        </button>
+        <form id="js-archive-form" method="post" action="{% url 'tags:tag_category_delete' pk=category.id %}"
+              style="display:none;"
+              onsubmit="return confirm('「{{ category.name }}」をアーカイブ化します。よろしいですか？');">
+          {% csrf_token %}
+          <button type="submit" class="app-btn app-btn--warning">アーカイブ化</button>
+        </form>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if messages %}
+    <section class="app-card">
+      {% for message in messages %}
+        <div class="app-message{% if message.tags %} app-message--{{ message.tags }}{% endif %}">{{ message }}</div>
+      {% endfor %}
+    </section>
+  {% endif %}
+
+  <section class="app-card">
+    <div class="app-section__header">
+      <h2>配下タグ一覧（{{ tag_total }} 件）</h2>
+    </div>
+
+    <form method="get" style="margin-bottom:12px;">
+      <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+        <label for="id_archived_only"
+               class="app-btn {% if archived_only %}app-btn--primary{% else %}app-btn--secondary{% endif %}"
+               style="cursor:pointer; margin-left:auto;">
+          {% if archived_only %}✓ {% endif %}アーカイブ済みのみを表示
+        </label>
+        <input type="checkbox" id="id_archived_only" name="archived_only" value="1"
+               style="position:absolute; opacity:0; pointer-events:none;"
+               onchange="this.form.submit();"
+               {% if archived_only %}checked{% endif %}>
+      </div>
+    </form>
+
+    {% if page_obj.object_list %}
+      <div class="app-table-wrapper">
+        <table class="app-table app-table--nowrap">
+          <thead>
+            <tr>
+              <th class="app-table__col--action">操作</th>
+              <th>タグ名</th>
+              <th>付与 Person 数</th>
+              <th>状態</th>
+              <th class="app-table__col--date">更新日時</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for tag in page_obj.object_list %}
+              {% url 'tags:tag_detail' pk=tag.id as tag_detail_url %}
+              {% url 'tags:tag_update' pk=tag.id as tag_update_url %}
+              <tr>
+                <td class="app-table__col--action">
+                  <a href="{% append_back_url tag_detail_url back %}" class="app-btn app-btn--outline-secondary app-btn--sm">詳細</a>
+                  {% if not tag.is_archived %}
+                    <a href="{% append_back_url tag_update_url back %}" class="app-btn app-btn--success app-btn--sm">編集</a>
+                  {% endif %}
+                </td>
+                <td>{{ tag.name }}</td>
+                <td>{{ tag.person_count }}</td>
+                <td>
+                  {% if tag.is_archived %}
+                    <span class="app-status-badge app-status-badge--muted">アーカイブ済み</span>
+                  {% else %}
+                    <span class="app-status-badge app-status-badge--success">アクティブ</span>
+                  {% endif %}
+                </td>
+                <td>{{ tag.updated_at|date:"Y/m/d H:i" }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      {% if is_paginated %}
+        {% include "persons/_pagination.html" %}
+      {% endif %}
+    {% else %}
+      <p class="app-muted">
+        {% if archived_only %}このカテゴリにアーカイブ済みのタグはありません。
+        {% else %}このカテゴリにアクティブなタグはありません（「アーカイブ済みのみを表示」でアーカイブ済みを確認できます）。
+        {% endif %}
+      </p>
+    {% endif %}
+
+    {# ε.4：戻るボタン画面下部 #}
+    <div class="app-action-area" style="margin-top:16px; justify-content:flex-start;">
+      {% back_all_link back %}
+      {% back_link back %}
+    </div>
+  </section>
+
+  <script>
+    (function () {
+      // ▼ アーカイブ化展開トグル
+      var toggle = document.querySelector('.js-archive-toggle');
+      var form = document.getElementById('js-archive-form');
+      if (toggle && form) {
+        toggle.addEventListener('click', function () {
+          var opening = form.style.display === 'none' || form.style.display === '';
+          form.style.display = opening ? 'inline' : 'none';
+          toggle.setAttribute('aria-expanded', opening ? 'true' : 'false');
+        });
+      }
+      // ⓘ ポップオーバー
+      var infoBtn = document.querySelector('.js-info-toggle');
+      var infoPop = document.getElementById('js-info-popover');
+      if (infoBtn && infoPop) {
+        infoBtn.addEventListener('click', function (e) {
+          e.stopPropagation();
+          var opening = infoPop.hidden;
+          infoPop.hidden = !opening;
+          infoBtn.setAttribute('aria-expanded', opening ? 'true' : 'false');
+        });
+        document.addEventListener('click', function (e) {
+          if (!infoPop.hidden && !infoPop.contains(e.target) && e.target !== infoBtn) {
+            infoPop.hidden = true;
+            infoBtn.setAttribute('aria-expanded', 'false');
+          }
+        });
+      }
+    })();
+  </script>
+{% endblock %}

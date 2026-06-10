@@ -51,11 +51,14 @@ INSTALLED_APPS = [
     "accounts",
     "home",
     "back_navigator",
+    "ui_components",
     "cards",
     "persons",
     "contacts",
     "duplicates",
     "actionlogs",
+    "tags",
+    "mailings",
 ]
 
 AUTH_USER_MODEL = "accounts.CustomUser"
@@ -219,3 +222,30 @@ if AUTH_BACKEND in ("ldap", "both"):
 else:
     # AUTH_BACKEND=local（および未知値の fallback）：LDAP モジュールは一切ロードしない。
     AUTHENTICATION_BACKENDS = ["django.contrib.auth.backends.ModelBackend"]
+
+
+# --- メール送信設定 ---
+# .env から os.getenv で読む（既存方式に統一）。.env 不在でも壊れない既定値を持たせる。
+# 型変換：PORT は int、USE_TLS/USE_SSL は DEBUG 行と同じ bool 慣用。
+# 注意：EMAIL_USE_TLS と EMAIL_USE_SSL を同時 True にしない（Django 起動時エラー）。
+#       587 運用なら TLS=True / SSL=False。
+EMAIL_BACKEND = os.getenv(
+    "EMAIL_BACKEND", "django.core.mail.backends.smtp.EmailBackend"
+)
+EMAIL_HOST = os.getenv("EMAIL_HOST", "localhost")
+EMAIL_PORT = int(os.getenv("EMAIL_PORT", "587"))
+EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "False").lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
+EMAIL_USE_SSL = os.getenv("EMAIL_USE_SSL", "False").lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
+EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
+DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "")

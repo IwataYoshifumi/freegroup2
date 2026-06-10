@@ -1,0 +1,229 @@
+{% extends "mailings/app_base.html" %}
+{% load back_tags %}
+
+{% block title %}テンプレート編集 — {{ campaign.name }}{% endblock %}
+
+{% block content %}
+  <div class="app-page-header">
+    <div>
+      <div class="app-breadcrumb">メール配信 / キャンペーン / テンプレート編集</div>
+      <h1>テンプレート編集：{{ campaign.name }}</h1>
+    </div>
+  </div>
+
+  {% if messages %}
+    {% for message in messages %}
+      <section class="app-card">
+        <div class="app-message">{{ message }}</div>
+      </section>
+    {% endfor %}
+  {% endif %}
+
+  <section class="app-card" style="max-width: 800px; margin: 0 auto;">
+    <p class="app-muted" style="margin-bottom:12px;">
+      件名・本文はプレーンテキストで入力します（HTML タグは書きません）。本文に置ける記法は
+      差し込み変数 <code>{% verbatim %}{{会社名}}{% endverbatim %}</code> 等・
+      <code>{% verbatim %}{% tracked_link %}…{% endtracked_link %}{% endverbatim %}</code>・
+      <code>{% verbatim %}{% unsubscribe_link %}{% endverbatim %}</code> の 3 種です。
+    </p>
+
+    <form method="post" class="app-form-grid-edit">
+      {% csrf_token %}
+
+      <div class="app-form-grid" style="grid-template-columns: 1fr;">
+        <div class="app-form__group">
+          <label class="app-form__label" for="{{ form.subject.id_for_label }}">
+            {{ form.subject.label }}
+          </label>
+          {{ form.subject }}
+          {% if form.subject.errors %}{{ form.subject.errors }}{% endif %}
+        </div>
+
+        <div class="app-form__group">
+          <label class="app-form__label" for="{{ form.body.id_for_label }}">
+            {{ form.body.label }}
+          </label>
+          {{ form.body }}
+          {% if form.body.errors %}{{ form.body.errors }}{% endif %}
+        </div>
+
+        <fieldset class="app-form__group">
+          <legend>挿入支援</legend>
+          <p class="app-muted" style="margin:4px 0 8px;">
+            差し込み変数：クリックで本文のカーソル位置に挿入します。値が空の場合、配信時に記法がそのまま残ります（Sansan 互換）。
+          </p>
+          <div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px;">
+            <strong style="width:100%;">受信者情報</strong>
+            <button type="button" class="app-btn app-btn--sm js-insert-merge" data-tag="{% verbatim %}{{会社名}}{% endverbatim %}">{% verbatim %}{{会社名}}{% endverbatim %}</button>
+            <button type="button" class="app-btn app-btn--sm js-insert-merge" data-tag="{% verbatim %}{{部署}}{% endverbatim %}">{% verbatim %}{{部署}}{% endverbatim %}</button>
+            <button type="button" class="app-btn app-btn--sm js-insert-merge" data-tag="{% verbatim %}{{役職}}{% endverbatim %}">{% verbatim %}{{役職}}{% endverbatim %}</button>
+            <button type="button" class="app-btn app-btn--sm js-insert-merge" data-tag="{% verbatim %}{{支店}}{% endverbatim %}">{% verbatim %}{{支店}}{% endverbatim %}</button>
+            <button type="button" class="app-btn app-btn--sm js-insert-merge" data-tag="{% verbatim %}{{フルネーム}}{% endverbatim %}">{% verbatim %}{{フルネーム}}{% endverbatim %}</button>
+            <button type="button" class="app-btn app-btn--sm js-insert-merge" data-tag="{% verbatim %}{{姓}}{% endverbatim %}">{% verbatim %}{{姓}}{% endverbatim %}</button>
+            <button type="button" class="app-btn app-btn--sm js-insert-merge" data-tag="{% verbatim %}{{名}}{% endverbatim %}">{% verbatim %}{{名}}{% endverbatim %}</button>
+            <button type="button" class="app-btn app-btn--sm js-insert-merge" data-tag="{% verbatim %}{{宛名}}{% endverbatim %}">{% verbatim %}{{宛名}}{% endverbatim %}</button>
+            <button type="button" class="app-btn app-btn--sm js-insert-merge" data-tag="{% verbatim %}{{住所}}{% endverbatim %}">{% verbatim %}{{住所}}{% endverbatim %}</button>
+            <button type="button" class="app-btn app-btn--sm js-insert-merge" data-tag="{% verbatim %}{{郵便番号}}{% endverbatim %}">{% verbatim %}{{郵便番号}}{% endverbatim %}</button>
+            <button type="button" class="app-btn app-btn--sm js-insert-merge" data-tag="{% verbatim %}{{メール}}{% endverbatim %}">{% verbatim %}{{メール}}{% endverbatim %}</button>
+            <button type="button" class="app-btn app-btn--sm js-insert-merge" data-tag="{% verbatim %}{{個人電話}}{% endverbatim %}">{% verbatim %}{{個人電話}}{% endverbatim %}</button>
+            <button type="button" class="app-btn app-btn--sm js-insert-merge" data-tag="{% verbatim %}{{会社電話}}{% endverbatim %}">{% verbatim %}{{会社電話}}{% endverbatim %}</button>
+            <button type="button" class="app-btn app-btn--sm js-insert-merge" data-tag="{% verbatim %}{{携帯}}{% endverbatim %}">{% verbatim %}{{携帯}}{% endverbatim %}</button>
+            <button type="button" class="app-btn app-btn--sm js-insert-merge" data-tag="{% verbatim %}{{個人FAX}}{% endverbatim %}">{% verbatim %}{{個人FAX}}{% endverbatim %}</button>
+            <button type="button" class="app-btn app-btn--sm js-insert-merge" data-tag="{% verbatim %}{{会社FAX}}{% endverbatim %}">{% verbatim %}{{会社FAX}}{% endverbatim %}</button>
+          </div>
+          <div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px;">
+            <strong style="width:100%;">差出人情報</strong>
+            <button type="button" class="app-btn app-btn--sm js-insert-merge" data-tag="{% verbatim %}{{差出人の氏名}}{% endverbatim %}">{% verbatim %}{{差出人の氏名}}{% endverbatim %}</button>
+            <button type="button" class="app-btn app-btn--sm js-insert-merge" data-tag="{% verbatim %}{{差出人の署名}}{% endverbatim %}">{% verbatim %}{{差出人の署名}}{% endverbatim %}</button>
+          </div>
+          <div style="display:flex; flex-wrap:wrap; gap:6px;">
+            <strong style="width:100%;">カスタムタグ・フッター</strong>
+            <button type="button" class="app-btn app-btn--sm" id="js-insert-tracked-link">トラッキングリンク挿入</button>
+            <button type="button" class="app-btn app-btn--sm" id="js-insert-unsubscribe-link">配信停止リンク挿入</button>
+            <button type="button" class="app-btn app-btn--sm" id="js-insert-footer">フッター挿入</button>
+          </div>
+        </fieldset>
+
+        <div class="app-form__group">
+          <label class="app-form__label" for="{{ form.body_text.id_for_label }}">
+            {{ form.body_text.label }}
+          </label>
+          {{ form.body_text }}
+          {% if form.body_text.errors %}{{ form.body_text.errors }}{% endif %}
+        </div>
+
+        <div class="app-form__group">
+          <label>
+            {{ form.body_text_is_manual }}
+            {{ form.body_text_is_manual.label }}
+          </label>
+          {% if form.body_text_is_manual.errors %}{{ form.body_text_is_manual.errors }}{% endif %}
+        </div>
+      </div>
+
+      <div class="app-action-area">
+        <button type="submit" name="action" value="save_return" class="app-btn app-btn--primary">保存して戻る</button>
+        <button type="submit" name="action" value="preview" class="app-btn app-btn--secondary">プレビュー</button>
+        <a class="app-btn" href="{% url 'mailings:campaign_list' %}">戻る</a>
+      </div>
+    </form>
+  </section>
+
+  {# プレビューモーダル：既存 app.js の openPreviewModal 機構に対応（#previewModal ID 必須）。 #}
+  <div id="previewModal" class="app-modal" hidden role="dialog" aria-modal="true" aria-labelledby="previewModalTitle">
+    <div class="app-modal__panel">
+      <header class="app-modal__header">
+        <h2 id="previewModalTitle">プレビュー</h2>
+        <button type="button" class="app-btn app-btn--sm" data-action="close-modal">閉じる</button>
+      </header>
+      <div class="app-modal__body"><p>読み込み中…</p></div>
+    </div>
+  </div>
+
+  {# data-* 属性で JS にプレビュー URL と起動条件を渡す（インライン JS の Django テンプレ依存を最小化）。 #}
+  <div
+    id="js-preview-config"
+    data-preview-requested="{% if preview_requested %}1{% else %}0{% endif %}"
+    {% if preview_person_id %}data-preview-url="{% url 'mailings:campaign_preview' pk=campaign.pk person_id=preview_person_id %}"{% endif %}
+    hidden></div>
+
+  <script>
+  (function () {
+    // 1) 差し込み変数・カスタムタグ・フッター挿入：body textarea のカーソル位置を操作する。
+    const textarea = document.getElementById('{{ form.body.id_for_label }}');
+    if (!textarea) return;
+
+    function insertAtCursor(text) {
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      const before = textarea.value.substring(0, start);
+      const after = textarea.value.substring(end);
+      textarea.value = before + text + after;
+      const pos = start + text.length;
+      textarea.selectionStart = textarea.selectionEnd = pos;
+      textarea.focus();
+    }
+
+    function wrapSelection(prefix, suffix) {
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      const selected = textarea.value.substring(start, end);
+      const before = textarea.value.substring(0, start);
+      const after = textarea.value.substring(end);
+      textarea.value = before + prefix + selected + suffix + after;
+      // 選択範囲を保持（カスタムタグの中身を再編集しやすくする）。
+      textarea.selectionStart = start + prefix.length;
+      textarea.selectionEnd = start + prefix.length + selected.length;
+      textarea.focus();
+    }
+
+    document.querySelectorAll('.js-insert-merge').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        insertAtCursor(btn.getAttribute('data-tag'));
+      });
+    });
+
+    const trackedBtn = document.getElementById('js-insert-tracked-link');
+    if (trackedBtn) {
+      trackedBtn.addEventListener('click', function () {
+        // 形態 2（URL 指定 + 表示テキスト）。選択範囲がある場合は表示テキストにする。
+        wrapSelection('{% verbatim %}{% tracked_link "https://example.com/" %}{% endverbatim %}', '{% verbatim %}{% endtracked_link %}{% endverbatim %}');
+      });
+    }
+
+    const unsubBtn = document.getElementById('js-insert-unsubscribe-link');
+    if (unsubBtn) {
+      unsubBtn.addEventListener('click', function () {
+        // 形態 2（テキスト指定）。選択範囲があればそのテキストを使う。
+        wrapSelection('{% verbatim %}{% unsubscribe_link %}{% endverbatim %}', '{% verbatim %}{% endunsubscribe_link %}{% endverbatim %}');
+      });
+    }
+
+    // 仕様書 §7.4.8.2 確定版フッター（プレーンテキスト、文言・項目構成はコード君改変禁止）。
+    const FOOTER_TEXT = (
+      '\n\n--\n' +
+      '{% verbatim %}{{Settings.company_name}}{% endverbatim %}\n' +
+      '{% verbatim %}{{Settings.company_address}}{% endverbatim %}\n\n' +
+      '配信停止に関するお問い合わせ：{% verbatim %}{{Settings.unsubscribe_contact}}{% endverbatim %}\n' +
+      '配信を停止する場合は下のリンクをクリックしてください：\n' +
+      '{% verbatim %}{% unsubscribe_link %}配信停止はこちら{% endunsubscribe_link %}{% endverbatim %}\n'
+    );
+    const footerBtn = document.getElementById('js-insert-footer');
+    if (footerBtn) {
+      footerBtn.addEventListener('click', function () {
+        // フッターは「本文末尾」に挿入（仕様書 §7.4.8.1）。カーソル位置ではない。
+        textarea.value = textarea.value + FOOTER_TEXT;
+        textarea.focus();
+      });
+    }
+
+    // 2) ?preview=1 検知時：プレビューモーダルを開く（既存 openPreviewModal 機構を直接呼ぶ）。
+    const cfg = document.getElementById('js-preview-config');
+    if (!cfg) return;
+    if (cfg.getAttribute('data-preview-requested') !== '1') return;
+    const previewUrl = cfg.getAttribute('data-preview-url');
+    if (!previewUrl) {
+      // 代表 Person が見つからなかった場合：モーダルに案内を出す。
+      const modal = document.getElementById('previewModal');
+      const backdrop = document.querySelector('.app-modal-backdrop');
+      if (modal && backdrop) {
+        const body = modal.querySelector('.app-modal__body');
+        if (body) {
+          body.innerHTML = '<p>プレビュー対象 Person が見つかりません（宛先リストが空、または primary_contact のメアドが空）。</p>';
+        }
+        backdrop.hidden = false;
+        modal.hidden = false;
+      }
+      return;
+    }
+    // 既存 app.js の openPreviewModal は data-preview-url を持つ trigger を要求するため、
+    // 仮想 trigger を作って同 trigger をクリックする（既存ロジックを変えずに起動）。
+    const fakeTrigger = document.createElement('button');
+    fakeTrigger.setAttribute('data-action', 'open-preview-modal');
+    fakeTrigger.setAttribute('data-preview-url', previewUrl);
+    fakeTrigger.hidden = true;
+    document.body.appendChild(fakeTrigger);
+    fakeTrigger.click();
+  })();
+  </script>
+{% endblock %}

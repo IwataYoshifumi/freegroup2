@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% comment %}
+  メール配信アプリ用ベース。base.html を継承し、サイドバー（mailings/_sidebar.html）を組み込む。
+  tags 系画面（タグカテゴリ一覧・タグ一覧・検索＆一括タグ付け）と mailings 系画面
+  （配信リスト一覧・配信設定 等）はトップバー「メール配信」配下の共通サイドバーを持つため、
+  tags/templates/tags/*.html もこの app_base.html を extends する。
+{% endcomment %}
+
+{% block app_name %}メール配信{% endblock %}
+{% block drawer_title %}メール配信{% endblock %}
+
+{% block app_content %}
+  <div class="app-main-area">
+    {% include "mailings/_sidebar.html" %}
+    <main class="app-main">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+  {% comment %}
+    共通モーダル背景（app.js openModal が querySelector('.app-modal-backdrop') で参照）。
+    base.html には無いため mailings/tags 全画面分をここで1個供給する（個別配置の二重を排除）。
+    ※複数行コメントは {# #} だと画面に出力されるため {% comment %} を使う。
+  {% endcomment %}
+  <div class="app-modal-backdrop" hidden></div>
+{% endblock %}
+
+{% block drawer_content %}
+  {% include "mailings/_sidebar.html" %}
+{% endblock %}

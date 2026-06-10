@@ -1,0 +1,46 @@
+{% comment %}
+メール配信サイドバー部品（include 専用）。app_base.html から呼ばれる。
+アコーディオン（2階層）を廃し、フラットな単層メニューに統一（v1.6 UI 整え）。
+項目順：キャンペーン一覧 / タグ一覧 / リスト一覧 / 配信停止リスト / 配信設定。
+各項目は遷移先 View の実 Permission で表示ガードする（権限の無い項目は出さない＝403 リンクを作らない）。
+「配信設定」は change_mailingconfig 保持者のみ表示（No.60）。
+active_menu（各 View が context で渡す）と一致する項目に is-active を付与する。
+{% endcomment %}
+<nav class="app-sidebar" aria-label="メール配信メニュー">
+  <div class="app-sidebar__section-title">メール配信</div>
+
+  {% if perms.mailings.view_campaign or perms.mailings.view_all_campaigns %}
+  <a href="{% url 'mailings:campaign_list' %}"
+     class="app-sidebar__subitem{% if active_menu == 'mailings:campaign_list' %} is-active{% endif %}">
+    キャンペーン一覧
+  </a>
+  {% endif %}
+
+  {% if perms.tags.view_tag %}
+  <a href="{% url 'tags:tag_list' %}"
+     class="app-sidebar__subitem{% if active_menu == 'tags:tag_list' %} is-active{% endif %}">
+    タグ一覧
+  </a>
+  {% endif %}
+
+  {% if perms.mailings.view_mailinglist %}
+  <a href="{% url 'mailings:mailing_list_list' %}"
+     class="app-sidebar__subitem{% if active_menu == 'mailings:mailing_list_list' %} is-active{% endif %}">
+    リスト一覧
+  </a>
+  {% endif %}
+
+  {% if perms.mailings.view_suppressedemail %}
+  <a href="{% url 'mailings:suppressed_list' %}"
+     class="app-sidebar__subitem{% if active_menu == 'mailings:suppressed_list' %} is-active{% endif %}">
+    配信拒否リスト
+  </a>
+  {% endif %}
+
+  {% if perms.mailings.change_mailingconfig %}
+  <a href="{% url 'mailings:config_edit' %}"
+     class="app-sidebar__subitem{% if active_menu == 'mailings:config_edit' %} is-active{% endif %}">
+    配信設定
+  </a>
+  {% endif %}
+</nav>

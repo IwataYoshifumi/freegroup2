@@ -11,11 +11,8 @@
       <h1>元画像詳細</h1>
     </div>
     <div class="app-action-area">
-      {% if back.back_exist %}
-        <a href="{% back_url back %}" class="app-btn app-btn--secondary">
-          <span class="app-icon--back"></span> 戻る
-        </a>
-      {% endif %}
+      {% back_all_link back %}
+      {% back_link back %}
     </div>
   </div>
 
@@ -83,12 +80,13 @@
           {% elif original.status == "failed" %}
             <span class="app-status-badge app-status-badge--error">処理失敗</span>
           {% else %}
-            <span class="app-status-badge">{{ original.status }}</span>
+            {# HIG v1.4 原則4：未知状態の生値は開発者向け。debug 時のみ表示。 #}
+            {% if debug %}<span class="app-status-badge">{{ original.status }}</span>{% endif %}
           {% endif %}
         </div>
       </div>
       <div class="app-detail-item">
-        <div class="app-detail-label">検出枚数 (BusinessCard)</div>
+        <div class="app-detail-label">検出した名刺の枚数</div>
         <div class="app-detail-value">{% if original.detected_count %}{{ original.detected_count }}{% else %}-{% endif %}</div>
       </div>
       <div class="app-detail-item">
@@ -100,6 +98,9 @@
         <div class="app-detail-value">{{ original.updated_at|date:"Y/m/d H:i:s" }}</div>
       </div>
 
+      {# HIG v1.4 原則4：検出統計はチューニング用の開発者向け数値。debug 時のみ表示。 #}
+      {# 検出枚数（detected_count, 上の「検出した名刺の枚数」）はユーザー向けでガード外。 #}
+      {% if debug %}
       {% if debug_summary %}
         <div class="app-detail-item">
           <div class="app-detail-label">画像サイズ (W × H)</div>
@@ -144,6 +145,7 @@
           <div class="app-detail-value">{{ debug_summary.computed_at }}</div>
         </div>
       {% endif %}
+      {% endif %}
     </div>
 
     {% if original.error_message %}
@@ -162,6 +164,8 @@
   </section>
 
   {# ========== セクション 3: OpenCV マスク画像（attempt 別ブロック） ========== #}
+  {# HIG v1.4 原則4：マスク画像は OpenCV 中間生成物。debug 時のみ表示。 #}
+  {% if debug %}
   <section class="app-card app-collapsible is-open">
     <button type="button" class="app-collapsible__header" data-action="toggle-collapsible" aria-expanded="true">
       <span>OpenCV マスク画像</span>
@@ -221,8 +225,11 @@
       {% endif %}
     </div>
   </section>
+  {% endif %}
 
   {# ========== セクション 4: OpenCV 候補一覧テーブル ========== #}
+  {# HIG v1.4 原則4：候補一覧は OpenCV 中間データ。debug 時のみ表示。 #}
+  {% if debug %}
   <section class="app-card app-collapsible is-open">
     <button type="button" class="app-collapsible__header" data-action="toggle-collapsible" aria-expanded="true">
       <span>OpenCV 候補一覧テーブル</span>
@@ -272,7 +279,8 @@
                       <span class="app-status-badge app-status-badge--error">✗ 除外</span>
                     {% endif %}
                   </td>
-                  <td>{% if c.reject_reason %}{{ c.reject_reason }}{% else %}-{% endif %}</td>
+                  {# HIG v1.4 原則4：reject_reason の生値は開発者向け。debug 時のみ表示。 #}
+                  <td>{% if debug and c.reject_reason %}{{ c.reject_reason }}{% else %}-{% endif %}</td>
                 </tr>
               {% endfor %}
             </tbody>
@@ -283,8 +291,11 @@
       {% endif %}
     </div>
   </section>
+  {% endif %}
 
   {# ========== セクション 5: 重複除去結果 ========== #}
+  {# HIG v1.4 原則4：重複除去結果は OpenCV 中間データ。debug 時のみ表示。 #}
+  {% if debug %}
   <section class="app-card app-collapsible">
     <button type="button" class="app-collapsible__header" data-action="toggle-collapsible" aria-expanded="false">
       <span>OpenCV 重複除去結果</span>
@@ -327,8 +338,11 @@
       {% endif %}
     </div>
   </section>
+  {% endif %}
 
   {# ========== セクション 6: warp 失敗候補（warp_failures が空なら出さない） ========== #}
+  {# HIG v1.4 原則4：warp 失敗候補は OpenCV 中間データ。debug 時のみ表示。 #}
+  {% if debug %}
   {% if warp_failures %}
     <section class="app-card app-collapsible">
       <button type="button" class="app-collapsible__header" data-action="toggle-collapsible" aria-expanded="false">
@@ -367,6 +381,7 @@
         </div>
       </div>
     </section>
+  {% endif %}
   {% endif %}
 
   {# ========== セクション 7: 検出された名刺（既存維持） ========== #}
@@ -448,6 +463,8 @@
   </section>
 
   {# ========== セクション 9: debug_json 全体 (json-viewer) ========== #}
+  {# HIG v1.4 原則4：JSON 生データは開発者向け。debug 時のみ表示。 #}
+  {% if debug %}
   <section class="app-card app-collapsible">
     <button type="button" class="app-collapsible__header" data-action="toggle-collapsible" aria-expanded="false">
       <span>debug_json 全体</span>
@@ -469,9 +486,13 @@
       {% endif %}
     </div>
   </section>
+  {% endif %}
 
   {# ===== このブランチ専用スクリプト（A 側マージ時に共通化判断） ===== #}
+  {# andypf-json-viewer は debug_json 表示専用のため debug 時のみ読み込む（HIG v1.4 原則4）。 #}
+  {% if debug %}
   <script src="https://cdn.jsdelivr.net/npm/@andypf/json-viewer@2.4.0/dist/iife/index.js"></script>
+  {% endif %}
   <script>
     (function () {
       // 候補一覧テーブルの除外候補トグル

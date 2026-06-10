@@ -7,7 +7,7 @@
     <section class="app-card">
       <div class="app-section__header">
         <h1>退職処理</h1>
-        <a href="{% url 'accounts:user_detail' user_id=target_user.id %}" class="app-btn app-btn--secondary app-btn--sm">キャンセル</a>
+        <a href="{% url 'accounts:user_detail' user_id=target_user.id %}" class="app-btn app-btn--secondary app-btn--sm">戻る</a>
       </div>
 
       <div class="app-detail-item">
@@ -26,7 +26,7 @@
 
     <section class="app-card" style="margin-top: var(--app-space-md);">
       <h2>後継者を選択</h2>
-      <p class="app-muted">退職者が担当していた Person・Contact は後継者に引き継がれます。この操作は取り消せません。</p>
+      <p class="app-muted">退職者が担当していた人物・連絡先は後継者に引き継がれます。この操作は取り消せません。</p>
 
       <form method="post" action="">
         {% csrf_token %}
@@ -41,8 +41,8 @@
         </div>
 
         <div class="app-action-area" style="margin-top: var(--app-space-md);">
-          <button type="submit" class="app-btn app-btn--danger">退職処理を実行</button>
-          <a href="{% url 'accounts:user_detail' user_id=target_user.id %}" class="app-btn app-btn--secondary">キャンセル</a>
+          <a href="{% url 'accounts:user_detail' user_id=target_user.id %}" class="app-btn app-btn--secondary">戻る</a>
+          <button type="submit" class="app-btn app-btn--warning">退職処理を実行</button>
         </div>
       </form>
     </section>

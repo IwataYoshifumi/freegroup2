@@ -153,11 +153,20 @@ class ContactBaseForm(forms.ModelForm):
         [性質] 副作用あり（self.fields の widget.attrs を変更、DB 操作なし）
 
         Form の動的フィールド追加後に呼ぶことで change_reason / note /
-        confirmed_<field> にも付与される。チェックボックスには付けない。
+        confirmed_<field> にも付与される。チェックボックス・ラジオ・複数選択は
+        付与すると <input> 側に当たって形が崩れるためスキップ（HIG v1.2 §4.1 の
+        app-radio-toggle と整合）。
         """
         for field in self.fields.values():
             widget = field.widget
-            if isinstance(widget, forms.CheckboxInput):
+            if isinstance(
+                widget,
+                (
+                    forms.CheckboxInput,
+                    forms.RadioSelect,
+                    forms.CheckboxSelectMultiple,
+                ),
+            ):
                 continue
             css = widget.attrs.get("class", "")
             if "app-input" not in css.split():
@@ -275,14 +284,22 @@ class ContactUpdateForm(ContactBaseForm):
         kwargs.pop("instance", None)
         super().__init__(*args, **kwargs)
 
-        # low/mid かつ未確認のフィールドにだけ確認チェックボックスを動的追加（§11.6.2）。
+        # low/mid かつ未確認のフィールドにだけ確認トグルを動的追加（§11.6.2、HIG v1.2 §4.1）。
         # high 扱い（CFC レコードなしの疑似 high）と confirmed 済みは追加しない。
+        # widget 差し替え型のトグル化：BooleanField のまま widget を RadioSelect に差し替えて
+        # 「確認しました／未確認」の 2 ボタン表示。値は to_python が 'True'/'False' を bool に
+        # 変換するので clean() の `if not cleaned.get(chk_name)` 判定はそのまま動く。
         confidences = self.target_contact.get_field_confidences()
         for field_name, conf in confidences.items():
             if conf.confidence in ("low", "mid") and conf.confirmed_at is None:
                 self.fields[f"confirmed_{field_name}"] = forms.BooleanField(
                     required=False,
-                    label=f"『{field_name}』フィールドを確認しました",
+                    initial=False,
+                    label=f"『{field_name}』フィールド",
+                    widget=forms.RadioSelect(
+                        choices=[(True, "確認しました"), (False, "未確認")],
+                        attrs={"class": "app-radio-toggle"},
+                    ),
                 )
 
         self._apply_widget_classes()

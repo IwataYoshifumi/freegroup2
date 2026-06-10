@@ -26,6 +26,25 @@ from persons.models import Person
 User = get_user_model()
 
 
+def _grant_contact_perms(user):
+    """Phase 7 段3-2：Contact List/Detail/Create/Update/Preview に標準 CRUD 権限ガードが
+    入った（rev20 No.10-14/23 ★2）。これらの View を叩く既存テストの正常系を保つため、
+    view/add/change/delete_contact を一括付与する補正ヘルパー。"""
+    from django.contrib.auth.models import Permission
+
+    user.user_permissions.add(
+        *Permission.objects.filter(
+            content_type__app_label="contacts",
+            codename__in=[
+                "view_contact",
+                "add_contact",
+                "change_contact",
+                "delete_contact",
+            ],
+        )
+    )
+
+
 def _empty_sns_management_form(prefix="sns"):
     """ContactSns InlineFormSet の空 management_form（POST テスト用、Phase F1 §11.6.7）。"""
     return {
@@ -337,6 +356,8 @@ class _ContactAjaxTestBase(TestCase):
             # （補完されると salutation_name の CFC が増えてカウントがずれるため）。
             salutation_name="テスト 様",
             salutation_name_is_manual=True,
+            # Phase 7 段2-B：所有者ガード導入後、正常系はログインユーザーが所有者である前提。
+            created_by=self.user,
         )
         self.person_a.primary_contact = self.contact_a
         self.person_a.save(update_fields=["primary_contact", "updated_at"])
@@ -750,6 +771,129 @@ class ContactAjaxConfirmFieldsViewTests(_ContactAjaxTestBase):
         self.assertEqual(resp.json()["unconfirmed_count"], 2)
 
 
+class CanEditContactTests(TestCase):
+    """can_edit_contact の単体テスト（Phase 7 段2-B、所有者ガードの正本）。
+
+    判定 4 ケース：created_by 本人 / managed_by 本人 / 横断権限保持者 / 他人。
+    """
+
+    def setUp(self):
+        from django.contrib.auth.models import Permission
+
+        self.owner = User.objects.create_user(username="ce_owner", password="x")
+        self.manager = User.objects.create_user(username="ce_manager", password="x")
+        self.privileged = User.objects.create_user(username="ce_priv", password="x")
+        self.stranger = User.objects.create_user(username="ce_stranger", password="x")
+
+        # privileged に横断権限 contacts.edit_all_contacts を付与
+        perm = Permission.objects.get(
+            codename="edit_all_contacts", content_type__app_label="contacts"
+        )
+        self.privileged.user_permissions.add(perm)
+        # has_perm のキャッシュを避けるため取り直す
+        self.privileged = User.objects.get(pk=self.privileged.pk)
+
+        self.person = Person.objects.create()
+        self.contact = Contact.objects.create(
+            person=self.person,
+            status=Contact.Status.PRIMARY,
+            full_name="Owner-name",
+            created_by=self.owner,
+            managed_by=self.manager,
+        )
+
+    def test_created_by_owner_can_edit(self):
+        """created_by 本人は編集可。"""
+        from contacts.services.permissions import can_edit_contact
+
+        self.assertTrue(can_edit_contact(self.owner, self.contact))
+
+    def test_managed_by_user_can_edit(self):
+        """managed_by 本人は編集可。"""
+        from contacts.services.permissions import can_edit_contact
+
+        self.assertTrue(can_edit_contact(self.manager, self.contact))
+
+    def test_cross_cutting_permission_can_edit(self):
+        """横断権限 contacts.edit_all_contacts 保持者は編集可。"""
+        from contacts.services.permissions import can_edit_contact
+
+        self.assertTrue(can_edit_contact(self.privileged, self.contact))
+
+    def test_stranger_cannot_edit(self):
+        """所有者でも管理者でも横断権限保持者でもない他人は編集不可。"""
+        from contacts.services.permissions import can_edit_contact
+
+        self.assertFalse(can_edit_contact(self.stranger, self.contact))
+
+
+class ContactAjaxOwnerGuardTests(_ContactAjaxTestBase):
+    """AJAX 2 View の所有者ガード結合テスト（Phase 7 段2-B）。
+
+    _ContactAjaxTestBase の contact_a は created_by=self.user。別ユーザーで
+    ログインした場合に編集・確認が 403 で弾かれること、本人なら通ることを実証する。
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.stranger = User.objects.create_user(
+            username="d3c_stranger", password="dummy"
+        )
+        self.stranger_client = Client()
+        self.stranger_client.force_login(self.stranger)
+
+    def _update_url(self):
+        return reverse(
+            "contacts:ajax_update_field", kwargs={"pk": self.contact_a.pk}
+        )
+
+    def _confirm_url(self):
+        return reverse(
+            "contacts:ajax_confirm_fields", kwargs={"pk": self.contact_a.pk}
+        )
+
+    def test_update_field_by_stranger_forbidden(self):
+        """他人による update_field → 403、値は変わらない。"""
+        before = self.contact_a.organization
+        resp = self._post_json(
+            self._update_url(),
+            {"field_name": "organization", "new_value": "HACKED"},
+            client=self.stranger_client,
+        )
+        self.assertEqual(resp.status_code, 403)
+        self.assertFalse(resp.json()["success"])
+        self.contact_a.refresh_from_db()
+        self.assertEqual(self.contact_a.organization, before)
+
+    def test_update_field_by_owner_ok(self):
+        """本人（created_by）による update_field → 200。"""
+        resp = self._post_json(
+            self._update_url(),
+            {"field_name": "organization", "new_value": "owner-edit"},
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.contact_a.refresh_from_db()
+        self.assertEqual(self.contact_a.organization, "owner-edit")
+
+    def test_confirm_fields_by_stranger_forbidden(self):
+        """他人による confirm_fields → 403。"""
+        resp = self._post_json(
+            self._confirm_url(),
+            {"field_names": ["organization"]},
+            client=self.stranger_client,
+        )
+        self.assertEqual(resp.status_code, 403)
+        self.assertFalse(resp.json()["success"])
+
+    def test_confirm_fields_by_owner_ok(self):
+        """本人（created_by）による confirm_fields → 200。"""
+        resp = self._post_json(
+            self._confirm_url(),
+            {"field_names": ["organization"]},
+        )
+        self.assertEqual(resp.status_code, 200)
+
+
 class ContactDetailViewTests(TestCase):
     """ContactDetailView の単体テスト（D-3b §8.1）。"""
 
@@ -757,6 +901,7 @@ class ContactDetailViewTests(TestCase):
         self.user = User.objects.create_user(
             username="d3b_test_user", password="dummy"
         )
+        _grant_contact_perms(self.user)
         # primary Contact のセットアップ
         self.person_a = Person.objects.create()
         self.contact_a = Contact.objects.create(
@@ -942,14 +1087,12 @@ class ContactDetailViewTests(TestCase):
         resp = self.client.get(url)
         self.assertEqual(resp.status_code, 404)
 
-    def test_e2_unauthenticated_returns_200(self):
-        """E2: 未ログイン → 200（仮認証スタイル、論点 1）。"""
+    def test_e2_unauthenticated_redirects_to_login(self):
+        """E2: 未ログイン → 302（LoginRequiredMixin でログインへリダイレクト、Phase 7 段1）。"""
         c = Client()  # 未ログイン
-        # スーパーユーザーが存在しないと get_current_user が None を返すが
-        # このテストは仮認証「スタイル」（LoginRequiredMixin 未使用）の確認
-        User.objects.create_superuser(username="su", password="dummy")
         resp = c.get(self._url())
-        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.status_code, 302)
+        self.assertTrue(resp.url.startswith(reverse("accounts:login")))
 
     # ---- レスポンス検証 ----
 
@@ -1044,7 +1187,10 @@ class ContactDetailViewTests(TestCase):
     def test_r6_confirmed_field_no_edit_ui(self):
         """R6: 編集可能モードでも confirmed フィールドには修正 UI が出力されない。
 
-        バッジは「確認済み」が描画され、行フックは維持される。
+        確認済みバッジは恒常表示しない（HIG v1.4 原則4）。行フック・
+        data-confidence-state="confirmed"・バッジスロットは維持されるが、
+        緑バッジ・「確認済み」テキストはサーバー描画されない
+        （確認直後の一時表示は app.js の applyConfirmedState が担う）。
         """
         # email に confirmed_at セット済みの CFC を作成
         ContactFieldConfidence.objects.create(
@@ -1055,11 +1201,13 @@ class ContactDetailViewTests(TestCase):
             confirmed_by=self.user,
         )
         rendered = self._render_field("email", "a@example.com")
-        # 行レベルのフック + 確認済みバッジ
+        # 行レベルのフック・状態属性・バッジスロットは維持
         self.assertIn("js-contact-field-row", rendered)
         self.assertIn('data-confidence-state="confirmed"', rendered)
-        self.assertIn("app-status-badge--success", rendered)
-        self.assertIn("確認済み", rendered)
+        self.assertIn("js-contact-field-badge-slot", rendered)
+        # 確認済みの恒常バッジは描画しない（原則4）
+        self.assertNotIn("app-status-badge--success", rendered)
+        self.assertNotIn("確認済み", rendered)
         # 修正 UI フックは出力されない
         self.assertNotIn("js-contact-field-action", rendered)
         self.assertNotIn("js-contact-field-confirm-btn", rendered)
@@ -1219,8 +1367,12 @@ class ConfidenceTagTests(TestCase):
         self.assertIn("app-status-badge--error", rendered)
         self.assertIn("低", rendered)
 
-    def test_c4_confirmed_shows_confirmed_badge(self):
-        """C4: confirmed_at IS NOT NULL → 確認済みバッジ表示。"""
+    def test_c4_confirmed_shows_nothing(self):
+        """C4: confirmed_at IS NOT NULL → 恒常バッジを描画しない（HIG v1.4 原則4）。
+
+        確認済みは恒常表示しない。確認直後の一時バッジは app.js が
+        クライアント挿入する（原則5）。サーバー描画は空文字。
+        """
         ContactFieldConfidence.objects.create(
             contact=self.contact,
             field_name="email",
@@ -1229,8 +1381,9 @@ class ConfidenceTagTests(TestCase):
             confirmed_by=self.user,
         )
         rendered = self._render(self.contact, "email")
-        self.assertIn("app-status-badge--success", rendered)
-        self.assertIn("確認済み", rendered)
+        self.assertEqual(rendered.strip(), "")
+        self.assertNotIn("確認済み", rendered)
+        self.assertNotIn("app-status-badge--success", rendered)
 
 
 class ContactConfidenceTagTests(TestCase):
@@ -1307,6 +1460,7 @@ class ContactListViewTests(TestCase):
         self.user = User.objects.create_user(
             username="contact_list_test_user", password="dummy"
         )
+        _grant_contact_perms(self.user)
         self.person_a = Person.objects.create()
         self.contact_a = Contact.objects.create(
             person=self.person_a,
@@ -1528,12 +1682,149 @@ class ContactListViewTests(TestCase):
         resp2 = self.client.get(self.url, {"page": "2"})
         self.assertEqual(len(list(resp2.context["contacts"])), 1)
 
-    def test_unauthenticated_returns_200(self):
-        """未ログイン → 200（仮認証スタイル、ContactDetailView と同じ）。"""
-        # スーパーユーザーがいなくても ContactListView は user フィルタしないので 200
+    def test_unauthenticated_redirects_to_login(self):
+        """未ログイン → 302（LoginRequiredMixin でログインへリダイレクト、ContactDetailView と同じ）。"""
         c = Client()
         resp = c.get(self.url)
-        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.status_code, 302)
+        self.assertTrue(resp.url.startswith(reverse("accounts:login")))
+
+    # ---- HIG v1.5 §6.2：多段サーバー側ソート（単一 sort パラメータ、例 ?sort=company,-title,name）----
+
+    def test_single_key_sort_asc_and_desc(self):
+        """?sort=company（昇順）/ ?sort=-company（降順）で会社順に並ぶ。"""
+        c_c = self._make_primary(full_name="C", organization="Cccorp")
+        c_a = self._make_primary(full_name="A", organization="Aaacorp")
+        c_b = self._make_primary(full_name="B", organization="Bbbcorp")
+
+        resp = self.client.get(self.url, {"sort": "company"})
+        ids = [c.id for c in resp.context["contacts"]]
+        self.assertLess(ids.index(c_a.id), ids.index(c_b.id))
+        self.assertLess(ids.index(c_b.id), ids.index(c_c.id))
+        self.assertTrue(resp.context["sort_is_active"])
+        self.assertEqual(resp.context["sort_rows"][0], {"key": "company", "dir": "asc"})
+
+        resp = self.client.get(self.url, {"sort": "-company"})
+        ids = [c.id for c in resp.context["contacts"]]
+        self.assertLess(ids.index(c_c.id), ids.index(c_b.id))
+        self.assertLess(ids.index(c_b.id), ids.index(c_a.id))
+        self.assertEqual(resp.context["sort_rows"][0], {"key": "company", "dir": "desc"})
+
+    def test_multi_key_sort_priority(self):
+        """?sort=company,-name で 会社昇順 → 同社内は氏名（読み）降順（多段・全件）。"""
+        # 同じ会社 "Same" の 2 人。氏名ソートは phonetic_name 順なので読みを付ける。
+        c_same_z = self._make_primary(
+            full_name="Zoe", organization="Same", phonetic_name="ゾエ"
+        )
+        c_same_a = self._make_primary(
+            full_name="Amy", organization="Same", phonetic_name="エイミー"
+        )
+        c_other = self._make_primary(
+            full_name="Mike", organization="Zzcorp", phonetic_name="マイク"
+        )
+        resp = self.client.get(self.url, {"sort": "company,-name"})
+        ids = [c.id for c in resp.context["contacts"]]
+        # 会社 "Same" グループが "Zzcorp" より前、グループ内は読み降順 ゾエ→エイミー
+        self.assertLess(ids.index(c_same_z.id), ids.index(c_same_a.id))
+        self.assertLess(ids.index(c_same_a.id), ids.index(c_other.id))
+        self.assertEqual(resp.context["sort_rows"][0], {"key": "company", "dir": "asc"})
+        self.assertEqual(resp.context["sort_rows"][1], {"key": "name", "dir": "desc"})
+
+    def test_name_sort_uses_phonetic_name(self):
+        """氏名ソート（?sort=name）は漢字コード順でなく phonetic_name（カタカナ読み）の五十音順。"""
+        # 漢字順なら 佐(U+4F50) < 田(U+7530) < 鈴(U+9234) で sato→tanaka→suzuki になり、
+        # 読み順（sato→suzuki→tanaka）と食い違うため、読みで並んでいることを区別できる。
+        c_tanaka = self._make_primary(full_name="田中", phonetic_name="タナカ")
+        c_suzuki = self._make_primary(full_name="鈴木", phonetic_name="スズキ")
+        c_sato = self._make_primary(full_name="佐藤", phonetic_name="サトウ")
+
+        resp = self.client.get(self.url, {"sort": "name"})
+        ids = [c.id for c in resp.context["contacts"]]
+        self.assertLess(ids.index(c_sato.id), ids.index(c_suzuki.id))
+        self.assertLess(ids.index(c_suzuki.id), ids.index(c_tanaka.id))
+
+        resp = self.client.get(self.url, {"sort": "-name"})
+        ids = [c.id for c in resp.context["contacts"]]
+        self.assertLess(ids.index(c_tanaka.id), ids.index(c_suzuki.id))
+        self.assertLess(ids.index(c_suzuki.id), ids.index(c_sato.id))
+
+    def test_invalid_keys_ignored_in_multi(self):
+        """許可リスト外キー（department/address）は無視され、有効キーだけ適用される。"""
+        c_z = self._make_primary(full_name="Z", organization="Zzcorp")
+        c_a = self._make_primary(full_name="A", organization="Aaacorp")
+        resp = self.client.get(self.url, {"sort": "department,company,address"})
+        ids = [c.id for c in resp.context["contacts"]]
+        self.assertLess(ids.index(c_a.id), ids.index(c_z.id))
+        self.assertTrue(resp.context["sort_is_active"])
+        self.assertEqual(resp.context["sort_rows"][0], {"key": "company", "dir": "asc"})
+
+    def test_all_invalid_or_empty_sort_keeps_default(self):
+        """全キーが不正（or 空）なら sort 無効＝既定の並び（-updated_at,-created_at）を維持。"""
+        resp = self.client.get(self.url, {"sort": "department,address"})
+        self.assertFalse(resp.context["sort_is_active"])
+        self.assertEqual(resp.context["sort_value"], "")
+        self.assertTrue(all(r["key"] == "" for r in resp.context["sort_rows"]))
+
+        resp_empty = self.client.get(self.url, {"sort": ""})
+        self.assertFalse(resp_empty.context["sort_is_active"])
+
+    def test_no_sort_param_keeps_default_order(self):
+        """sort 未指定なら既定並び（updated_at 降順）を維持し、折りたたみは閉じ判定。"""
+        from datetime import timedelta
+
+        c_old = self._make_primary(full_name="Old", organization="ZZZ")
+        c_new = self._make_primary(full_name="New", organization="AAA")
+        now = timezone.now()
+        Contact.objects.filter(pk=c_old.pk).update(updated_at=now - timedelta(hours=1))
+        Contact.objects.filter(pk=c_new.pk).update(updated_at=now)
+
+        resp = self.client.get(self.url)
+        ids = [c.id for c in resp.context["contacts"]]
+        # 会社順ではなく updated_at 降順（new が old より前）
+        self.assertLess(ids.index(c_new.id), ids.index(c_old.id))
+        self.assertFalse(resp.context["sort_is_active"])
+        self.assertEqual(resp.context["sort_value"], "")
+
+    def test_duplicate_key_first_wins(self):
+        """同一キーの二重指定は先勝ち（?sort=-company,company → company 降順のみ）。"""
+        resp = self.client.get(self.url, {"sort": "-company,company"})
+        rows = resp.context["sort_rows"]
+        self.assertEqual(rows[0], {"key": "company", "dir": "desc"})
+        self.assertEqual(rows[1]["key"], "")
+
+    def test_sort_control_and_page_sort_markers_rendered(self):
+        """検索フォーム内ソートコントロール＋補助JSソート＋列切替のマーカーが描画される。"""
+        resp = self.client.get(self.url)
+        body = resp.content.decode("utf-8")
+        # 検索フォーム内ソートコントロール（共有 _sort_control.html）
+        self.assertIn("js-person-sort-control", body)
+        self.assertIn('name="sort"', body)
+        for label in ("指定なし", "氏名", "会社", "役職", "連絡先"):
+            self.assertIn(label, body)
+        # 補助JSソート（contacts 用フック）＋氏名セルの読みキー
+        self.assertIn("js-contact-page-sort", body)
+        self.assertIn("data-sort-col", body)
+        self.assertIn("data-sort-key", body)
+        # 列切替（contacts 専用 localStorage キー）
+        self.assertIn("data-col-key", body)
+        self.assertIn("contact_list_visible_columns", body)
+
+    def test_pagination_preserves_sort_query(self):
+        """ソート状態でページ送りしても sort が失われない（共有 _pagination.html）。"""
+        for i in range(25):
+            self._make_primary(full_name=f"pp-{i:02d}", organization=f"org{i:02d}")
+        resp = self.client.get(self.url, {"sort": "-company"})
+        self.assertTrue(resp.context["is_paginated"])
+        body = resp.content.decode("utf-8")
+        self.assertTrue("sort=-company" in body or "sort=%2Dcompany" in body)
+
+    def test_push_current_captures_sort(self):
+        """戻る復元用に push_current が sort を取り込む（HIG §6.1）。"""
+        resp = self.client.get(self.url, {"sort": "company,-title"})
+        back = resp.context["back"]
+        urls = " ".join(entry.get("url", "") for entry in back.back_stack)
+        self.assertIn("sort=", urls)
+        self.assertIn("company", urls)
 
 
 # ======================================================================
@@ -1766,6 +2057,7 @@ class UpdateActiveContactViewTests(TestCase):
         self.user = User.objects.create_user(
             username="update_active_user", password="dummy"
         )
+        _grant_contact_perms(self.user)
         self.person = Person.objects.create()
         self.primary = Contact.objects.create(
             person=self.person,
@@ -1908,6 +2200,7 @@ class UpdatePrimaryContactViewTests(TestCase):
         self.user = User.objects.create_user(
             username="update_primary_user", password="dummy"
         )
+        _grant_contact_perms(self.user)
         self.person = Person.objects.create()
         self.primary = Contact.objects.create(
             person=self.person,
@@ -2208,6 +2501,7 @@ class ContactCreateViewTests(TestCase):
         self.user = User.objects.create_user(
             username="contact_create_user", password="dummy"
         )
+        _grant_contact_perms(self.user)
         self.client = Client()
         self.client.force_login(self.user)
         self.url = reverse("contacts:contact_create")
@@ -2407,6 +2701,7 @@ class PreviewContactViewTests(TestCase):
         self.user = User.objects.create_user(
             username="preview_test_user", password="dummy"
         )
+        _grant_contact_perms(self.user)
         self.person = Person.objects.create()
         self.contact = Contact.objects.create(
             person=self.person,
@@ -2490,6 +2785,7 @@ class ContactDetailDebugUidTests(TestCase):
 
     def setUp(self):
         self.user = User.objects.create_user(username="debug_uid_user", password="dummy")
+        _grant_contact_perms(self.user)
         self.person = Person.objects.create()
         self.contact = Contact.objects.create(
             person=self.person,
@@ -2919,6 +3215,7 @@ class UpdatePrimaryContactSnsTests(TestCase):
 
     def setUp(self):
         self.user = User.objects.create_user(username="up_sns_user", password="x")
+        _grant_contact_perms(self.user)
         self.person = Person.objects.create()
         self.primary = Contact.objects.create(
             person=self.person,
@@ -3007,6 +3304,7 @@ class UpdateActiveContactSnsTests(TestCase):
 
     def setUp(self):
         self.user = User.objects.create_user(username="ua_sns_user", password="x")
+        _grant_contact_perms(self.user)
         self.person = Person.objects.create()
         self.primary = Contact.objects.create(
             person=self.person, status=Contact.Status.PRIMARY, full_name="P"
@@ -3045,6 +3343,7 @@ class ContactCreateSnsTests(TestCase):
 
     def setUp(self):
         self.user = User.objects.create_user(username="cc_sns_user", password="x")
+        _grant_contact_perms(self.user)
         self.client = Client()
         self.client.force_login(self.user)
         self.url = reverse("contacts:contact_create")
@@ -3074,6 +3373,7 @@ class ContactSnsTemplateRenderTests(TestCase):
 
     def setUp(self):
         self.user = User.objects.create_user(username="render_sns_user", password="x")
+        _grant_contact_perms(self.user)
         self.person = Person.objects.create()
         self.primary = Contact.objects.create(
             person=self.person, status=Contact.Status.PRIMARY, full_name="P"
@@ -3111,6 +3411,7 @@ class CommentLeakRegressionTests(TestCase):
 
     def setUp(self):
         self.user = User.objects.create_user(username="leak_user", password="x")
+        _grant_contact_perms(self.user)
         self.person = Person.objects.create()
         self.contact = Contact.objects.create(
             person=self.person,
@@ -3156,4 +3457,90 @@ class SnsFormsetHiddenRowCssTests(TestCase):
         )
         self.assertIn(".app-sns-formset__row[hidden]", css)
         self.assertIn("display: none !important", css)
+
+
+class Phase7ContactsViewAuthTests(TestCase):
+    """Phase 7 段3-2：contacts 6 View の Django 標準 CRUD 権限ガード（rev20 No.10-14/23 ★2）。
+
+    owner 判定は追加しない（v1.7+ 先送り）。view_contact / add_contact / change_contact の
+    各粒度で「権限なし→403・権限あり→正常」を検証する。
+    """
+
+    def setUp(self):
+        self.person = Person.objects.create()
+        self.primary = Contact.objects.create(
+            person=self.person, status=Contact.Status.PRIMARY, full_name="主名義"
+        )
+        self.person.primary_contact = self.primary
+        self.person.save(update_fields=["primary_contact", "updated_at"])
+        self.active = Contact.objects.create(
+            person=self.person, status=Contact.Status.ACTIVE, full_name="役名義"
+        )
+
+    def _user_with(self, *codenames):
+        import uuid as _uuid
+
+        from django.contrib.auth.models import Permission
+
+        u = User.objects.create_user(
+            username=f"ct_auth_{_uuid.uuid4().hex[:8]}", password="x"
+        )
+        for cn in codenames:
+            u.user_permissions.add(
+                Permission.objects.get(
+                    codename=cn, content_type__app_label="contacts"
+                )
+            )
+        return u
+
+    def _client(self, user):
+        c = Client()
+        c.force_login(user)
+        return c
+
+    def test_list_requires_view_contact(self):
+        url = reverse("contacts:contact_list")
+        self.assertEqual(self._client(self._user_with()).get(url).status_code, 403)
+        self.assertEqual(
+            self._client(self._user_with("view_contact")).get(url).status_code, 200
+        )
+
+    def test_detail_requires_view_contact(self):
+        url = reverse("contacts:contact_detail", kwargs={"pk": self.primary.pk})
+        self.assertEqual(self._client(self._user_with()).get(url).status_code, 403)
+        self.assertEqual(
+            self._client(self._user_with("view_contact")).get(url).status_code, 200
+        )
+
+    def test_preview_requires_view_contact(self):
+        url = reverse("contacts:contact_preview", kwargs={"pk": self.primary.pk})
+        self.assertEqual(self._client(self._user_with()).get(url).status_code, 403)
+        self.assertEqual(
+            self._client(self._user_with("view_contact")).get(url).status_code, 200
+        )
+
+    def test_create_requires_add_contact(self):
+        url = reverse("contacts:contact_create")
+        self.assertEqual(self._client(self._user_with()).get(url).status_code, 403)
+        self.assertEqual(
+            self._client(self._user_with("add_contact")).get(url).status_code, 200
+        )
+
+    def test_update_primary_requires_change_contact(self):
+        url = reverse(
+            "contacts:contact_update_primary", kwargs={"pk": self.primary.pk}
+        )
+        self.assertEqual(self._client(self._user_with()).get(url).status_code, 403)
+        self.assertEqual(
+            self._client(self._user_with("change_contact")).get(url).status_code, 200
+        )
+
+    def test_update_active_requires_change_contact(self):
+        url = reverse(
+            "contacts:contact_update_active", kwargs={"pk": self.active.pk}
+        )
+        self.assertEqual(self._client(self._user_with()).get(url).status_code, 403)
+        self.assertEqual(
+            self._client(self._user_with("change_contact")).get(url).status_code, 200
+        )
 

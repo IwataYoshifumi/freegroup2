@@ -1,0 +1,122 @@
+{% comment %}
+列表示切替 partial（Phase 1c-α UI 改善 要望2）。
+
+ドロップダウン UI + チェックボックスでテーブルの列を表示/非表示し、
+状態を localStorage に永続化する。詳細・選択・確認の 5 画面で共通利用。
+
+期待 context:
+  storage_key: str  ← localStorage キー（画面ごとに分離）。例 "mailing_list_visible_columns_detail"
+
+利用前提（呼び出し側のマークアップ）：
+  <th data-col-key="company">会社</th>
+  <td data-col-key="company">...</td>
+  退会済みバッジは <span class="js-unsubscribed-badge">退会済み</span>
+
+挙動：
+  - デフォルト：全列表示
+  - 「氏名」列は固定（disabled checked、非表示不可）
+  - 列ヘッダ・列セル：[data-col-key="<key>"] を一括で display 切替
+  - 退会済みバッジ：.js-unsubscribed-badge を一括で display 切替
+  - localStorage が空 / JSON 不正なら全列表示で復元
+{% endcomment %}
+<div class="js-column-toggle" data-storage-key="{{ storage_key }}"
+     style="position:relative; display:inline-block;">
+  <button type="button" class="app-btn app-btn--outline-secondary app-btn--sm js-column-toggle__btn"
+          aria-haspopup="true" aria-expanded="false">
+    <i class="bi bi-layout-three-columns"></i> 表示列を選択
+  </button>
+  <div class="js-column-toggle__menu" hidden
+       style="position:absolute; top:100%; right:0; z-index:1000;
+              background:#fff; border:1px solid #cbd5e1; border-radius:6px;
+              box-shadow:0 4px 12px rgba(0,0,0,0.12); padding:8px;
+              min-width:200px; text-align:left;">
+    <label style="display:flex; align-items:center; gap:6px; padding:4px;">
+      <input type="checkbox" disabled checked> 氏名
+      <span style="color:#94a3b8; font-size:0.85em;">(必須)</span>
+    </label>
+    <label style="display:flex; align-items:center; gap:6px; padding:4px; cursor:pointer;">
+      <input type="checkbox" class="js-column-toggle__cb"
+             data-col-key="company" data-col-type="column"> 会社
+    </label>
+    <label style="display:flex; align-items:center; gap:6px; padding:4px; cursor:pointer;">
+      <input type="checkbox" class="js-column-toggle__cb"
+             data-col-key="title" data-col-type="column"> 役職
+    </label>
+    <label style="display:flex; align-items:center; gap:6px; padding:4px; cursor:pointer;">
+      <input type="checkbox" class="js-column-toggle__cb"
+             data-col-key="department" data-col-type="column"> 部署
+    </label>
+    <label style="display:flex; align-items:center; gap:6px; padding:4px; cursor:pointer;">
+      <input type="checkbox" class="js-column-toggle__cb"
+             data-col-key="address" data-col-type="column"> 住所
+    </label>
+    <label style="display:flex; align-items:center; gap:6px; padding:4px; cursor:pointer;">
+      <input type="checkbox" class="js-column-toggle__cb"
+             data-col-key="email" data-col-type="column"> メール
+    </label>
+    <label style="display:flex; align-items:center; gap:6px; padding:4px; cursor:pointer;">
+      <input type="checkbox" class="js-column-toggle__cb"
+             data-col-key="unsubscribed" data-col-type="badge"> 退会済みバッジ
+    </label>
+  </div>
+</div>
+<script>
+  (function () {
+    if (window.__columnToggleInit) return;
+    window.__columnToggleInit = true;
+    document.querySelectorAll('.js-column-toggle').forEach(function (wrap) {
+      var storageKey = wrap.dataset.storageKey;
+      var btn = wrap.querySelector('.js-column-toggle__btn');
+      var menu = wrap.querySelector('.js-column-toggle__menu');
+      var cbs = wrap.querySelectorAll('.js-column-toggle__cb');
+
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var opening = menu.hidden;
+        menu.hidden = !opening;
+        btn.setAttribute('aria-expanded', opening ? 'true' : 'false');
+      });
+      document.addEventListener('click', function (e) {
+        if (menu.hidden) return;
+        if (!menu.contains(e.target) && e.target !== btn && !btn.contains(e.target)) {
+          menu.hidden = true;
+          btn.setAttribute('aria-expanded', 'false');
+        }
+      });
+
+      var saved = {};
+      try { saved = JSON.parse(localStorage.getItem(storageKey) || '{}'); } catch (e) { saved = {}; }
+      cbs.forEach(function (cb) {
+        var key = cb.dataset.colKey;
+        cb.checked = saved.hasOwnProperty(key) ? !!saved[key] : true;
+        apply(cb);
+      });
+      cbs.forEach(function (cb) {
+        cb.addEventListener('change', function () {
+          apply(cb);
+          save();
+        });
+      });
+
+      function apply(cb) {
+        var key = cb.dataset.colKey;
+        var type = cb.dataset.colType;
+        var visible = cb.checked;
+        if (type === 'badge') {
+          document.querySelectorAll('.js-unsubscribed-badge').forEach(function (el) {
+            el.style.display = visible ? '' : 'none';
+          });
+        } else {
+          document.querySelectorAll('[data-col-key="' + key + '"]').forEach(function (el) {
+            el.style.display = visible ? '' : 'none';
+          });
+        }
+      }
+      function save() {
+        var state = {};
+        cbs.forEach(function (cb) { state[cb.dataset.colKey] = cb.checked; });
+        try { localStorage.setItem(storageKey, JSON.stringify(state)); } catch (e) { /* ignore quota */ }
+      }
+    });
+  })();
+</script>

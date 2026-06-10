@@ -1,0 +1,9 @@
+{% comment %}
+退会済みバッジ partial（Phase 1c-α #11、仕様書 §3 / §10）。
+
+is_unsubscribed=True の Person にバッジを表示する共通部品。
+個別追加・個別削除・各確認画面・詳細画面メンバー一覧で氏名セル末尾に挿入する。
+
+期待 context:
+  person: Person インスタンス（必須、is_unsubscribed を持つ）
+{% endcomment %}{% if person.is_unsubscribed %}<span class="app-status-badge app-status-badge--warning js-unsubscribed-badge" style="margin-left:6px; font-size:0.85em;" title="メール配信停止フラグが立っています">退会済み</span>{% endif %}

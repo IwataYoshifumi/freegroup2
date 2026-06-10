@@ -388,6 +388,115 @@ class CardDetailDebugUidTests(TestCase):
         self.assertNotContains(resp, "Card UID:")
 
 
+class OriginalDetailDebugGatingTests(TestCase):
+    """original_detail.html のデバッグ表示 debug ガード（HIG v1.4 原則4）。
+
+    JSON 系・チューニング数値・内部語は DEBUG=True かつ INTERNAL_IPS 内のときだけ
+    出し、本番（DEBUG=False）では出さない。検出枚数（日本語ラベル）は常に表示。
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_superuser(
+            username="orig_dbg_user", password="dummy"
+        )
+        self.client = Client()
+        self.client.force_login(self.user)
+        self.original = OriginalImage.objects.create(
+            user=self.user,
+            status=OriginalImage.STATUS_EXTRACTED,
+            detected_count=3,
+            debug_json={
+                "image_size": {"width": 100, "height": 100, "area": 10000},
+                "computed_at": "2026-05-31T00:00:00",
+                "attempts": [
+                    {
+                        "attempt_no": 1,
+                        "contours_count": 1,
+                        "candidates_filter": [
+                            {
+                                "passed": False,
+                                "reject_reason": "area_too_small",
+                                "area": 10,
+                            },
+                        ],
+                        "candidates_dedup": [],
+                        "results": [],
+                        "warp_failures": [
+                            {
+                                "polygon": {
+                                    "top_left": {"x": 0, "y": 0},
+                                    "top_right": {"x": 10, "y": 0},
+                                    "bottom_right": {"x": 10, "y": 10},
+                                    "bottom_left": {"x": 0, "y": 10},
+                                },
+                                "computed_width": 10,
+                                "computed_height": 10,
+                                "min_required": [50, 50],
+                            }
+                        ],
+                    }
+                ],
+            },
+        )
+
+    def _url(self):
+        return reverse("originals:original_detail", kwargs={"pk": self.original.id})
+
+    @override_settings(DEBUG=True)
+    def test_debug_terms_shown_in_debug_mode(self):
+        resp = self.client.get(self._url())
+        # セクション2 検出統計サマリーの各数値
+        self.assertContains(resp, "画像サイズ")
+        self.assertContains(resp, "輪郭検出数")
+        self.assertContains(resp, "フィルタ通過 / 全候補")
+        self.assertContains(resp, "重複除去後 / 通過候補")
+        self.assertContains(resp, "透視変換失敗")
+        self.assertContains(resp, "最終検出名刺数")
+        self.assertContains(resp, "最終計算日時")
+        self.assertContains(resp, "reject_reason 別件数")
+        self.assertContains(resp, "has_minimum_info")
+        self.assertContains(resp, "検出 vs BC 化ギャップ")
+        # セクション3〜6（中間生成物・候補/重複/warp 表）
+        self.assertContains(resp, "OpenCV マスク画像")
+        self.assertContains(resp, "OpenCV 候補一覧テーブル")
+        self.assertContains(resp, "OpenCV 重複除去結果")
+        self.assertContains(resp, "透視変換失敗候補")  # セクション6 warp 表
+        self.assertContains(resp, "area_too_small")  # 候補表セルの生値
+        self.assertContains(resp, "debug_json 全体")  # JSON viewer セクション
+        # 検出枚数（ユーザー向け）は debug でも当然表示
+        self.assertContains(resp, "検出した名刺の枚数")
+
+    @override_settings(DEBUG=False)
+    def test_debug_terms_hidden_in_production(self):
+        resp = self.client.get(self._url())
+        # セクション2 検出統計サマリーの各数値
+        self.assertNotContains(resp, "画像サイズ")
+        self.assertNotContains(resp, "輪郭検出数")
+        self.assertNotContains(resp, "フィルタ通過 / 全候補")
+        self.assertNotContains(resp, "重複除去後 / 通過候補")
+        self.assertNotContains(resp, "最終検出名刺数")
+        self.assertNotContains(resp, "最終計算日時")
+        self.assertNotContains(resp, "reject_reason")
+        self.assertNotContains(resp, "has_minimum_info")
+        self.assertNotContains(resp, "検出 vs BC 化ギャップ")
+        # セクション3〜6 のセクション見出し（中間生成物）
+        self.assertNotContains(resp, "OpenCV マスク画像")
+        self.assertNotContains(resp, "OpenCV 候補一覧テーブル")
+        self.assertNotContains(resp, "OpenCV 重複除去結果")
+        self.assertNotContains(resp, "透視変換失敗候補")  # セクション6 warp 表
+        self.assertNotContains(resp, "area_too_small")  # 生値は出さない
+        self.assertNotContains(resp, "debug_json 全体")  # JSON viewer セクション非表示
+
+    @override_settings(DEBUG=False)
+    def test_user_facing_info_shown_in_production(self):
+        resp = self.client.get(self._url())
+        # 日本語化した検出枚数ラベル（英字 BusinessCard を外したもの）は本番でも表示
+        self.assertContains(resp, "検出した名刺の枚数")
+        self.assertNotContains(resp, "検出枚数 (BusinessCard)")
+        # 検出枚数の値（detected_count=3）も表示される
+        self.assertContains(resp, "検出した名刺の枚数")
+
+
 @override_settings(MEDIA_ROOT=tempfile.mkdtemp(prefix="phase_g_exif_"))
 class PhaseGExifUploadTests(TestCase):
     """Phase G：UploadView 経由で OriginalImage.exif_json が正しく保存される
@@ -528,4 +637,92 @@ class PhaseGExifDetailViewTests(TestCase):
         self.assertContains(resp, "GPSLatitudeRef")
         self.assertContains(resp, "21.59")
         self.assertContains(resp, "29.86")
+
+
+class Phase7CardsViewAuthTests(TestCase):
+    """Phase 7 段3-2：cards 6 View の Django 標準 CRUD 権限ガード（rev20 No.2-6/22 ★2）。
+
+    既存の owner 分離（filter(user=user)）は不変で、permission 層のみを検証する。
+    破壊的な CardDeleteView は 403 時に削除されないことまで確認。
+    """
+
+    def _user_with(self, *codenames):
+        import uuid as _uuid
+
+        from django.contrib.auth.models import Permission
+
+        u = User.objects.create_user(
+            username=f"cards_auth_{_uuid.uuid4().hex[:8]}", password="x"
+        )
+        for cn in codenames:
+            u.user_permissions.add(
+                Permission.objects.get(
+                    codename=cn, content_type__app_label="cards"
+                )
+            )
+        return u
+
+    def _client(self, user):
+        c = Client()
+        c.force_login(user)
+        return c
+
+    def test_upload_requires_add_originalimage(self):
+        url = reverse("cards:card_upload")
+        self.assertEqual(self._client(self._user_with()).get(url).status_code, 403)
+        self.assertEqual(
+            self._client(self._user_with("add_originalimage")).get(url).status_code,
+            200,
+        )
+
+    def test_original_list_requires_view_originalimage(self):
+        url = reverse("originals:original_list")
+        self.assertEqual(self._client(self._user_with()).get(url).status_code, 403)
+        self.assertEqual(
+            self._client(self._user_with("view_originalimage")).get(url).status_code,
+            200,
+        )
+
+    def test_original_detail_requires_view_originalimage(self):
+        viewer = self._user_with("view_originalimage")
+        original = OriginalImage.objects.create(
+            user=viewer, status=OriginalImage.STATUS_EXTRACTED
+        )
+        url = reverse("originals:original_detail", kwargs={"pk": original.pk})
+        self.assertEqual(self._client(self._user_with()).get(url).status_code, 403)
+        self.assertEqual(self._client(viewer).get(url).status_code, 200)
+
+    def test_card_list_requires_view_businesscard(self):
+        url = reverse("cards:card_list")
+        self.assertEqual(self._client(self._user_with()).get(url).status_code, 403)
+        self.assertEqual(
+            self._client(self._user_with("view_businesscard")).get(url).status_code,
+            200,
+        )
+
+    def test_card_detail_requires_view_businesscard(self):
+        viewer = self._user_with("view_businesscard")
+        original = OriginalImage.objects.create(
+            user=viewer, status=OriginalImage.STATUS_EXTRACTED
+        )
+        bc = BusinessCard.objects.create(original_image=original, card_index=0)
+        url = reverse("cards:card_detail", kwargs={"pk": bc.pk})
+        self.assertEqual(self._client(self._user_with()).get(url).status_code, 403)
+        self.assertEqual(self._client(viewer).get(url).status_code, 200)
+
+    def test_card_delete_requires_delete_businesscard(self):
+        owner = self._user_with("delete_businesscard")
+        original = OriginalImage.objects.create(
+            user=owner, status=OriginalImage.STATUS_EXTRACTED
+        )
+        bc = BusinessCard.objects.create(original_image=original, card_index=0)
+        url = reverse("cards:card_delete", kwargs={"pk": bc.pk})
+        # 権限なし → 403、BusinessCard は削除されない（破壊的操作の防御）
+        resp = self._client(self._user_with()).post(url)
+        self.assertEqual(resp.status_code, 403)
+        self.assertTrue(BusinessCard.objects.filter(pk=bc.pk).exists())
+        # 権限あり（かつ owner）→ 302、削除される
+        resp = self._client(owner).post(url)
+        self.assertEqual(resp.status_code, 302)
+        self.assertFalse(BusinessCard.objects.filter(pk=bc.pk).exists())
 
