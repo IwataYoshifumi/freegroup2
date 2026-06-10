@@ -15,6 +15,19 @@ from persons.models import Person
 User = get_user_model()
 
 
+def _grant_view_person(user):
+    """Phase 7 段3-1：PersonListView / PersonDetailView は persons.view_person を要求する
+    （URL一覧表 rev20 No.7 / No.8 ★1）。これらの View を叩く既存テストの正常系を保つため、
+    テストユーザーに閲覧権限を付与する補正ヘルパー。"""
+    from django.contrib.auth.models import Permission
+
+    user.user_permissions.add(
+        Permission.objects.get(
+            codename="view_person", content_type__app_label="persons"
+        )
+    )
+
+
 def _empty_sns_management_form(prefix="sns"):
     """ContactSns InlineFormSet の空 management_form（POST テスト用、Phase F1 §11.6.7）。"""
     return {
@@ -47,6 +60,7 @@ class PersonListViewTests(TestCase):
         self.user = User.objects.create_user(
             username="person_list_test_user", password="dummy"
         )
+        _grant_view_person(self.user)
         self.person_a = Person.objects.create()
         self.contact_a = Contact.objects.create(
             person=self.person_a,
@@ -446,6 +460,7 @@ class PersonDetailViewTests(TestCase):
         self.user = User.objects.create_user(
             username="person_detail_test_user", password="dummy"
         )
+        _grant_view_person(self.user)
         self.client = Client()
         self.client.force_login(self.user)
 
@@ -783,6 +798,7 @@ class PersonDetailDebugUidTests(TestCase):
 
     def setUp(self):
         self.user = User.objects.create_user(username="person_dbg", password="dummy")
+        _grant_view_person(self.user)
         self.client = Client()
         self.client.force_login(self.user)
 
@@ -820,6 +836,7 @@ class PersonDetailDebugUidOffTests(TestCase):
 
     def setUp(self):
         self.user = User.objects.create_user(username="person_dbg_off", password="dummy")
+        _grant_view_person(self.user)
         self.client = Client()
         self.client.force_login(self.user)
 
@@ -927,3 +944,35 @@ class PersonAddAdditionalRoleRenderTests(TestCase):
         resp = self.client.get(self._url())
         self.assertContains(resp, "app-form__label")
         self.assertContains(resp, "js-sns-formset-container")
+
+
+class Phase7PersonViewAuthTests(TestCase):
+    """Phase 7 段3-1：PersonListView / PersonDetailView の persons.view_person ガード
+    （URL一覧表 rev20 No.7 / No.8 ★1）。owner 判定は持たない（v1.7+ 先送り）。"""
+
+    def setUp(self):
+        self.viewer = User.objects.create_user(username="pv_viewer", password="x")
+        _grant_view_person(self.viewer)
+        self.noperm = User.objects.create_user(username="pv_noperm", password="x")
+        # 詳細が 200 を返す orphan Person（active + primary_contact NULL）
+        self.person = Person.objects.create()
+
+    def _client(self, user):
+        c = Client()
+        c.force_login(user)
+        return c
+
+    def test_list_requires_view_person(self):
+        url = reverse("persons:person_list")
+        self.assertEqual(self._client(self.noperm).get(url).status_code, 403)
+        self.assertEqual(self._client(self.viewer).get(url).status_code, 200)
+
+    def test_detail_requires_view_person(self):
+        url = reverse("persons:person_detail", kwargs={"pk": self.person.pk})
+        self.assertEqual(self._client(self.noperm).get(url).status_code, 403)
+        # orphan Person 詳細は 200（active + primary_contact あり なら ContactDetail へ 302）
+        self.assertEqual(self._client(self.viewer).get(url).status_code, 200)
+
+    def test_list_anonymous_redirects(self):
+        """未ログインは LoginRequiredMixin で 302（段1 の回帰確認）。"""
+        self.assertEqual(Client().get(reverse("persons:person_list")).status_code, 302)

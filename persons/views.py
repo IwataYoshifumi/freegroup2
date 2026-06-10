@@ -9,13 +9,14 @@ PersonDetailView：人物詳細画面（URL 8 番）。Person.status で 4 分�
 PersonAddAdditionalRoleView：別肩書追加画面（URL 9 番、D-Form ステップ2）。
   active Person 配下に新規 active Contact を作成。CFC は作らない（§10.12）。
 
-認証は ContactListView / ContactDetailView と同じく LoginRequiredMixin 未使用の
-仮認証スタイル（仕様書 §18.1 / §18.2）。Person も user FK を持たないため全 Person 対象。
-ただし PersonAddAdditionalRoleView は書込系のため LoginRequiredMixin を使う
-（UpdateActiveContactView と同じ慣例）。
+認証・認可：全 View が LoginRequiredMixin（Phase 7 段1 で付与）。さらに
+PersonListView / PersonDetailView は PermissionRequiredMixin で persons.view_person
+を要求する（URL一覧表 rev20 No.7 / No.8 ★1、Phase 7 段3-1）。owner / 閲覧スコープ
+判定は持たない（Person は user FK を持たず全 Person 対象、owner スコープは v1.7+ 先送り）。
+PersonAddAdditionalRoleView は書込系で LoginRequiredMixin のみ（権限は★2未確定）。
 """
 
-from django.contrib.auth.mixins import LoginRequiredMixin
+from django.contrib.auth.mixins import LoginRequiredMixin, PermissionRequiredMixin
 from django.db import transaction
 from django.http import Http404, HttpResponseRedirect
 from django.shortcuts import get_object_or_404, render
@@ -128,7 +129,7 @@ def _person_sort_context(params):
     }
 
 
-class PersonListView(LoginRequiredMixin, ListView):
+class PersonListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
     """人物一覧画面（仕様書 §11.4 7 番）。
 
     GET 専用。デフォルトは status='active' のみ表示。検索フォームに 7 フィールド
@@ -136,6 +137,9 @@ class PersonListView(LoginRequiredMixin, ListView):
     チェックボックス（active / merged / archived）。primary_contact NULL の Person
     もリストに含まれる（氏名検索すると自動除外）。
     """
+
+    # 認可（Phase 7 段3-1、URL一覧表 rev20 No.7 ★1）：persons.view_person。
+    permission_required = "persons.view_person"
 
     model = Person
     template_name = "persons/person_list.html"
@@ -191,7 +195,7 @@ class PersonListView(LoginRequiredMixin, ListView):
         return context
 
 
-class PersonDetailView(LoginRequiredMixin, DetailView):
+class PersonDetailView(LoginRequiredMixin, PermissionRequiredMixin, DetailView):
     """人物詳細画面（仕様書 §11.5 8 番）。
 
     Person.status で 4 分岐：
@@ -200,6 +204,9 @@ class PersonDetailView(LoginRequiredMixin, DetailView):
       - merged → merged 画面（merged_into リンク + マージ履歴）
       - archived → archived 画面（マージ履歴 + inactive 履歴）
     """
+
+    # 認可（Phase 7 段3-1、URL一覧表 rev20 No.8 ★1）：persons.view_person。
+    permission_required = "persons.view_person"
 
     model = Person
     pk_url_kwarg = "pk"
