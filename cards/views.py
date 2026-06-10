@@ -15,8 +15,7 @@ from io import BytesIO
 import numpy as np
 from django.conf import settings
 from django.contrib import messages
-from django.contrib.auth import get_user_model
-from django.contrib.auth.mixins import LoginRequiredMixin
+from django.contrib.auth.mixins import LoginRequiredMixin, PermissionRequiredMixin
 from django.core.exceptions import ValidationError
 from django.core.files.base import ContentFile
 from django.db import transaction
@@ -47,19 +46,6 @@ from config.constants import DUPLICATE_CHECK_FIELDS
 from contacts.models import Contact, ContactFieldConfidence
 
 logger = logging.getLogger(__name__)
-
-User = get_user_model()
-
-
-def get_current_user(request):
-    """認証未実装のための仮処理（将来認証実装時に削除）。
-
-    request.user が認証済みならそれを返し、未認証なら最初のスーパーユーザーを返す。
-    OriginalImage.user は仕様書 §4.2 で必須なので、保存に必要な User を確保する。
-    """
-    if request.user.is_authenticated:
-        return request.user
-    return User.objects.filter(is_superuser=True).first()
 
 
 def placeholder_view(request):
@@ -104,7 +90,7 @@ def _rotate_and_overwrite_card_image(card, direction):
         _overwrite_image_file(rotated, path, image_format)
 
 
-class UploadView(View):
+class UploadView(LoginRequiredMixin, PermissionRequiredMixin, View):
     """名刺画像アップロード画面（複数ファイル + ドラッグ&ドロップ対応）。
 
     GET：ドロップゾーン付きフォームを表示。
@@ -119,6 +105,9 @@ class UploadView(View):
       （単一ファイルアップロードの既存挙動・既存テストを維持）。複数 / 部分失敗時はアップロード
       画面に結果サマリ（成功 N 件 / スキップ M 件と理由）を表示する。
     """
+
+    # 認可（Phase 7 段3-2 を v1.7 へ適用、rev20 No.2 ★2）：OriginalImage 作成 → add_originalimage。
+    permission_required = "cards.add_originalimage"
 
     template_name = "cards/upload.html"
 
@@ -135,7 +124,7 @@ class UploadView(View):
                 self._context(request, form_error="ファイルが選択されていません。"),
             )
 
-        user = get_current_user(request)
+        user = request.user
         created = []
         skipped = []
         for uploaded_file in files:
@@ -198,7 +187,9 @@ class UploadView(View):
         }
 
 
-class OriginalListView(ListView):
+class OriginalListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
+    # 認可（Phase 7 段3-2 を v1.7 へ適用、rev20 No.5 ★2）：OriginalImage 閲覧 → view_originalimage。
+    permission_required = "cards.view_originalimage"
     model = OriginalImage
     template_name = "cards/original_list.html"
     context_object_name = "originals"
@@ -210,7 +201,7 @@ class OriginalListView(ListView):
         return 20
 
     def get_queryset(self):
-        user = get_current_user(self.request)
+        user = self.request.user
         qs = (
             OriginalImage.objects.filter(user=user)
             .select_related("user")
@@ -259,14 +250,16 @@ class OriginalListView(ListView):
         return context
 
 
-class OriginalDetailView(DetailView):
+class OriginalDetailView(LoginRequiredMixin, PermissionRequiredMixin, DetailView):
+    # 認可（Phase 7 段3-2 を v1.7 へ適用、rev20 No.6 ★2）：OriginalImage 閲覧 → view_originalimage。
+    permission_required = "cards.view_originalimage"
     model = OriginalImage
     template_name = "cards/original_detail.html"
     context_object_name = "original"
     pk_url_kwarg = "pk"
 
     def get_queryset(self):
-        user = get_current_user(self.request)
+        user = self.request.user
         return OriginalImage.objects.filter(user=user)
 
     def get_context_data(self, **kwargs):
@@ -762,7 +755,7 @@ def _build_overlay_polygons(debug_json):
     return items
 
 
-class RecalcDebugView(View):
+class RecalcDebugView(LoginRequiredMixin, View):
     """OpenCV デバッグキャッシュを再計算し、元画像詳細にリダイレクトする（POST 専用）。
 
     recalc_opencv_debug() で 3 ステップ（clear → detect → save）を実行する。
@@ -777,7 +770,7 @@ class RecalcDebugView(View):
     def post(self, request, pk):
         if not settings.DEBUG:
             raise Http404("recalc_debug is available only when DEBUG is enabled")
-        user = get_current_user(request)
+        user = request.user
         original = get_object_or_404(OriginalImage, pk=pk, user=user)
         recalc_opencv_debug(original)
         return redirect("originals:original_detail", pk=original.id)
@@ -858,7 +851,7 @@ def _prepare_manual_warp(original, points_payload):
     return warp_result, None
 
 
-class ManualCropView(View):
+class ManualCropView(LoginRequiredMixin, PermissionRequiredMixin, View):
     """元画像上で手動指定された4点から名刺を切り出し BusinessCard を作る（POST 専用・JSON）。
 
     自動検出（OpenCV）が取りこぼした名刺を、ユーザーが元画像上で4隅を指定して切り出す経路。
@@ -866,14 +859,17 @@ class ManualCropView(View):
         {"points": [[x, y], [x, y], [x, y], [x, y]], "rotation": 0|90|180|270}
         points  : 元画像ピクセル座標の4点（任意順）。[x, y] / {"x":, "y":} の両形式可。
         rotation: 切り出し後に適用する時計回り角度（apply_upright に渡す）。
-    所有者スコープは既存 View 群を踏襲（get_current_user + user 付き get_object_or_404）。
+    所有者スコープは既存 View 群を踏襲（request.user + user 付き get_object_or_404）。
     成功時 201 で BusinessCard の id / card_index / 詳細 URL を JSON で返す。
     入力不正・小さすぎ等は 400、作成失敗は 500（いずれも JSON エラー応答・例外を外に漏らさない）。
     GET / その他メソッドは Django 標準の 405 応答。
     """
 
+    # 認可（Phase 7 段3-2 を v1.7 へ適用）：手動切り出し＝BusinessCard 作成 → add_businesscard。
+    permission_required = "cards.add_businesscard"
+
     def post(self, request, pk):
-        user = get_current_user(request)
+        user = request.user
         original = get_object_or_404(OriginalImage, pk=pk, user=user)
 
         # ── 入力パース＋バリデーション（400・500 で落とさない） ──
@@ -987,7 +983,7 @@ class ManualCropView(View):
         original.save(update_fields=["debug_json", "updated_at"])
 
 
-class ManualPreviewView(View):
+class ManualPreviewView(LoginRequiredMixin, PermissionRequiredMixin, View):
     """手動指定された4点を素 warp して切り出し画像（base64 PNG）を返す（POST 専用・JSON）。
 
     段2-c2-② の回転モーダル用プレビュー。保存・BC 生成・debug_json 追記・回転は一切行わず、
@@ -999,8 +995,11 @@ class ManualPreviewView(View):
     所有者スコープは既存 View 群を踏襲。GET / その他メソッドは Django 標準の 405。
     """
 
+    # 認可（Phase 7 段3-2 を v1.7 へ適用）：手動切り出しプレビュー（同フロー）→ add_businesscard。
+    permission_required = "cards.add_businesscard"
+
     def post(self, request, pk):
-        user = get_current_user(request)
+        user = request.user
         original = get_object_or_404(OriginalImage, pk=pk, user=user)
 
         try:
@@ -1031,7 +1030,7 @@ class ManualPreviewView(View):
         return JsonResponse({"success": True, "image": data_url}, status=200)
 
 
-class CardDeleteView(View):
+class CardDeleteView(LoginRequiredMixin, PermissionRequiredMixin, View):
     """BusinessCard を削除し、元画像詳細にリダイレクトする（POST 専用）。
 
     削除対象は本人所有の BC のみ（user スコープで絞り込み）。
@@ -1040,15 +1039,18 @@ class CardDeleteView(View):
     GET / その他メソッドは Django 標準の 405 応答（method_not_allowed）が返る。
     """
 
+    # 認可（Phase 7 段3-2 を v1.7 へ適用、rev20 No.22 ★2）：BusinessCard 削除 → delete_businesscard。
+    permission_required = "cards.delete_businesscard"
+
     def post(self, request, pk):
-        user = get_current_user(request)
+        user = request.user
         bc = get_object_or_404(BusinessCard, pk=pk, original_image__user=user)
         original_image_id = bc.original_image_id
         bc.delete()
         return redirect("originals:original_detail", pk=original_image_id)
 
 
-class CardListView(ListView):
+class CardListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
     """名刺一覧画面（仕様書 v1.2.2 / Phase 4）。
 
     BusinessCard を Contact 情報とともに一覧表示する。
@@ -1056,6 +1058,8 @@ class CardListView(ListView):
     tel は personal_phone / mobile_phone / personal_fax の OR 一致。
     """
 
+    # 認可（Phase 7 段3-2 を v1.7 へ適用、rev20 No.3 ★2）：BusinessCard 閲覧 → view_businesscard。
+    permission_required = "cards.view_businesscard"
     model = BusinessCard
     template_name = "cards/card_list.html"
     context_object_name = "cards"
@@ -1110,7 +1114,7 @@ class CardListView(ListView):
         return q
 
     def get_queryset(self):
-        user = get_current_user(self.request)
+        user = self.request.user
         # confidence ドットは DUPLICATE_CHECK_FIELDS のみ対象、confirmed_at で
         # 「未確認」を区別する（DEBUG=True 時のみ表示）。
         selected = self._selected_ocr_filters()
@@ -1187,7 +1191,7 @@ class CardListView(ListView):
         return context
 
 
-class CardDetailView(DetailView):
+class CardDetailView(LoginRequiredMixin, PermissionRequiredMixin, DetailView):
     """名刺詳細画面（仕様書 v1.4.2 / Phase 4）。
 
     OpenCV デバッグ情報の閲覧と Contact フィールド編集（ContactDetailView と同じ
@@ -1196,13 +1200,15 @@ class CardDetailView(DetailView):
     is_editable）を提供する。
     """
 
+    # 認可（Phase 7 段3-2 を v1.7 へ適用、rev20 No.4 ★2）：BusinessCard 閲覧 → view_businesscard。
+    permission_required = "cards.view_businesscard"
     model = BusinessCard
     template_name = "cards/card_detail.html"
     context_object_name = "card"
     pk_url_kwarg = "pk"
 
     def get_queryset(self):
-        user = get_current_user(self.request)
+        user = self.request.user
         return (
             BusinessCard.objects.filter(original_image__user=user)
             .select_related("original_image", "contact", "contact__person")
@@ -1263,7 +1269,7 @@ class CardDetailView(DetailView):
         return context
 
 
-class CardEditView(LoginRequiredMixin, View):
+class CardEditView(LoginRequiredMixin, PermissionRequiredMixin, View):
     """名刺（BusinessCard）編集画面（v1.7、代替OCR運用の手動終端化）。
 
     対象は **Contact 未生成の BC のみ**（Contact を持つ BC は編集不可。詳細は下記ガード）。
@@ -1285,11 +1291,14 @@ class CardEditView(LoginRequiredMixin, View):
     （テンプレ側の「編集」ボタン非表示と二重構え）。所有者スコープ（original_image__user）も既存流儀に揃える。
     """
 
+    # 認可（Phase 7 段3-2 を v1.7 へ適用）：BusinessCard 編集 → change_businesscard。
+    permission_required = "cards.change_businesscard"
+
     template_name = "cards/card_edit.html"
 
     def _get_editable_bc(self, request, pk):
         """編集可能な BC を取得する。Contact 済みなら (None, redirect) を返す。"""
-        user = get_current_user(request)
+        user = request.user
         bc = get_object_or_404(
             BusinessCard.objects.select_related("original_image", "contact"),
             pk=pk,
@@ -1381,7 +1390,7 @@ class CardEditView(LoginRequiredMixin, View):
         }
 
 
-class CardRotateView(LoginRequiredMixin, View):
+class CardRotateView(LoginRequiredMixin, PermissionRequiredMixin, View):
     """名刺画像の 90° 回転焼き直し（v1.7）。
 
     対象は **Contact 未生成の BC のみ**（CardEditView と同じ業務ガード）。POST 専用で、
@@ -1394,8 +1403,12 @@ class CardRotateView(LoginRequiredMixin, View):
     所有者スコープ（original_image__user）も既存流儀に揃える。
     """
 
+    # 認可（Phase 7 段3-2 を v1.7 へ適用）：回転対象は BusinessCard.card_image（orientation も
+    # BusinessCard を更新）→ change_businesscard。
+    permission_required = "cards.change_businesscard"
+
     def post(self, request, pk):
-        user = get_current_user(request)
+        user = request.user
         bc = get_object_or_404(
             BusinessCard.objects.select_related("original_image", "contact"),
             pk=pk,
