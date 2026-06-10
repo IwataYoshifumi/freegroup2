@@ -8158,9 +8158,13 @@ class V16ListSearchAndSidebarSmokeTests(TestCase):
             name="配信日テストキャンペーン", template=tpl, mailing_list=self.ml,
             status=Campaign.Status.SCHEDULED, scheduled_at=now, created_by=self.user,
         )
-        today = now.date().isoformat()
-        tomorrow = (now + _td(days=1)).date().isoformat()
-        yesterday = (now - _td(days=1)).date().isoformat()
+        # 一覧ビューは scheduled_at を JST ローカル日付で絞り込むため、テスト側も
+        # UTC 日付（now.date()）ではなく JST ローカル日付を基準にする（UTC/JST 日付
+        # ズレ窓＝UTC 15:00〜24:00 でも安定させる、TZ 基準統一）。
+        local_today = timezone.localdate(now)
+        today = local_today.isoformat()
+        tomorrow = (local_today + _td(days=1)).isoformat()
+        yesterday = (local_today - _td(days=1)).isoformat()
         # 当日を含む範囲 → 出る。
         r = self.client.get(
             reverse("mailings:campaign_list"),
