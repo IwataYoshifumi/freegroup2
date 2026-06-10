@@ -273,7 +273,7 @@ class PersonDetailView(LoginRequiredMixin, PermissionRequiredMixin, DetailView):
         return context
 
 
-class PersonAddAdditionalRoleView(LoginRequiredMixin, FormView):
+class PersonAddAdditionalRoleView(LoginRequiredMixin, PermissionRequiredMixin, FormView):
     """別肩書追加画面（9 番、仕様書 §3.6 / §10.12 / §11.4.5）。
 
     既存 active Person 配下に新規 active Contact を追加する。OCR を経由しない
@@ -289,6 +289,10 @@ class PersonAddAdditionalRoleView(LoginRequiredMixin, FormView):
     直書き（§10.12 通り）、save 系の services 関数は作らない。
     """
 
+    # 認可（Phase 7 段3-2、rev20 No.9 ★2）：操作の実体は active Person 配下への
+    # 新規 Contact 作成（form_valid で Contact を作り contact_detail へ遷移、Person は
+    # 変更しない）ため、Contact 作成権限 contacts.add_contact を付与（ContactCreateView と対称）。
+    permission_required = "contacts.add_contact"
     form_class = ContactAddAdditionalRoleForm
     template_name = "persons/person_add_additional_role.html"
 

@@ -2372,3 +2372,16 @@ class Phase7DuplicatesViewAuthTests(_PersonMergeLogViewTestBase):
         # ログは UNDOABLE のまま・復元は実行されていない（DB 状態不変）
         log.refresh_from_db()
         self.assertEqual(log.status, PersonMergeLog.Status.UNDOABLE)
+
+    # ---- No.19 マージログ一覧: persons.merge_person（Phase 7 段3-2）----
+    def test_merge_log_list_requires_merge_person(self):
+        url = reverse("duplicates:merge_log_list")
+        self.assertEqual(self.noperm_client.get(url).status_code, 403)
+        self.assertEqual(self.client.get(url).status_code, 200)
+
+    # ---- No.20 マージログ詳細: persons.merge_person（Phase 7 段3-2）----
+    def test_merge_log_detail_requires_merge_person(self):
+        log = self._make_log(status=PersonMergeLog.Status.UNDOABLE)
+        url = reverse("duplicates:merge_log_detail", kwargs={"pk": log.pk})
+        self.assertEqual(self.noperm_client.get(url).status_code, 403)
+        self.assertEqual(self.client.get(url).status_code, 200)

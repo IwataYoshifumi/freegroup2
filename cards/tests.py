@@ -638,3 +638,91 @@ class PhaseGExifDetailViewTests(TestCase):
         self.assertContains(resp, "21.59")
         self.assertContains(resp, "29.86")
 
+
+class Phase7CardsViewAuthTests(TestCase):
+    """Phase 7 段3-2：cards 6 View の Django 標準 CRUD 権限ガード（rev20 No.2-6/22 ★2）。
+
+    既存の owner 分離（filter(user=user)）は不変で、permission 層のみを検証する。
+    破壊的な CardDeleteView は 403 時に削除されないことまで確認。
+    """
+
+    def _user_with(self, *codenames):
+        import uuid as _uuid
+
+        from django.contrib.auth.models import Permission
+
+        u = User.objects.create_user(
+            username=f"cards_auth_{_uuid.uuid4().hex[:8]}", password="x"
+        )
+        for cn in codenames:
+            u.user_permissions.add(
+                Permission.objects.get(
+                    codename=cn, content_type__app_label="cards"
+                )
+            )
+        return u
+
+    def _client(self, user):
+        c = Client()
+        c.force_login(user)
+        return c
+
+    def test_upload_requires_add_originalimage(self):
+        url = reverse("cards:card_upload")
+        self.assertEqual(self._client(self._user_with()).get(url).status_code, 403)
+        self.assertEqual(
+            self._client(self._user_with("add_originalimage")).get(url).status_code,
+            200,
+        )
+
+    def test_original_list_requires_view_originalimage(self):
+        url = reverse("originals:original_list")
+        self.assertEqual(self._client(self._user_with()).get(url).status_code, 403)
+        self.assertEqual(
+            self._client(self._user_with("view_originalimage")).get(url).status_code,
+            200,
+        )
+
+    def test_original_detail_requires_view_originalimage(self):
+        viewer = self._user_with("view_originalimage")
+        original = OriginalImage.objects.create(
+            user=viewer, status=OriginalImage.STATUS_EXTRACTED
+        )
+        url = reverse("originals:original_detail", kwargs={"pk": original.pk})
+        self.assertEqual(self._client(self._user_with()).get(url).status_code, 403)
+        self.assertEqual(self._client(viewer).get(url).status_code, 200)
+
+    def test_card_list_requires_view_businesscard(self):
+        url = reverse("cards:card_list")
+        self.assertEqual(self._client(self._user_with()).get(url).status_code, 403)
+        self.assertEqual(
+            self._client(self._user_with("view_businesscard")).get(url).status_code,
+            200,
+        )
+
+    def test_card_detail_requires_view_businesscard(self):
+        viewer = self._user_with("view_businesscard")
+        original = OriginalImage.objects.create(
+            user=viewer, status=OriginalImage.STATUS_EXTRACTED
+        )
+        bc = BusinessCard.objects.create(original_image=original, card_index=0)
+        url = reverse("cards:card_detail", kwargs={"pk": bc.pk})
+        self.assertEqual(self._client(self._user_with()).get(url).status_code, 403)
+        self.assertEqual(self._client(viewer).get(url).status_code, 200)
+
+    def test_card_delete_requires_delete_businesscard(self):
+        owner = self._user_with("delete_businesscard")
+        original = OriginalImage.objects.create(
+            user=owner, status=OriginalImage.STATUS_EXTRACTED
+        )
+        bc = BusinessCard.objects.create(original_image=original, card_index=0)
+        url = reverse("cards:card_delete", kwargs={"pk": bc.pk})
+        # 権限なし → 403、BusinessCard は削除されない（破壊的操作の防御）
+        resp = self._client(self._user_with()).post(url)
+        self.assertEqual(resp.status_code, 403)
+        self.assertTrue(BusinessCard.objects.filter(pk=bc.pk).exists())
+        # 権限あり（かつ owner）→ 302、削除される
+        resp = self._client(owner).post(url)
+        self.assertEqual(resp.status_code, 302)
+        self.assertFalse(BusinessCard.objects.filter(pk=bc.pk).exists())
+

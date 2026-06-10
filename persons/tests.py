@@ -28,6 +28,18 @@ def _grant_view_person(user):
     )
 
 
+def _grant_add_contact(user):
+    """Phase 7 段3-2：PersonAddAdditionalRoleView は新規 Contact 作成のため
+    contacts.add_contact を要求する（rev20 No.9 ★2）。add-role 系テストの正常系を保つ補正。"""
+    from django.contrib.auth.models import Permission
+
+    user.user_permissions.add(
+        Permission.objects.get(
+            codename="add_contact", content_type__app_label="contacts"
+        )
+    )
+
+
 def _empty_sns_management_form(prefix="sns"):
     """ContactSns InlineFormSet の空 management_form（POST テスト用、Phase F1 §11.6.7）。"""
     return {
@@ -567,6 +579,7 @@ class PersonAddAdditionalRoleViewTests(TestCase):
         self.user = User.objects.create_user(
             username="add_role_test_user", password="dummy"
         )
+        _grant_add_contact(self.user)
         self.person = Person.objects.create()
         self.primary = Contact.objects.create(
             person=self.person,
@@ -860,6 +873,7 @@ class PersonAddAdditionalRoleSnsTests(TestCase):
 
     def setUp(self):
         self.user = User.objects.create_user(username="add_sns_user", password="x")
+        _grant_add_contact(self.user)
         self.person = Person.objects.create()
         self.primary = Contact.objects.create(
             person=self.person,
@@ -914,6 +928,7 @@ class PersonAddAdditionalRoleRenderTests(TestCase):
 
     def setUp(self):
         self.user = User.objects.create_user(username="add_render_user", password="x")
+        _grant_add_contact(self.user)
         self.person = Person.objects.create()
         self.primary = Contact.objects.create(
             person=self.person, status=Contact.Status.PRIMARY, full_name="P"
@@ -976,3 +991,16 @@ class Phase7PersonViewAuthTests(TestCase):
     def test_list_anonymous_redirects(self):
         """未ログインは LoginRequiredMixin で 302（段1 の回帰確認）。"""
         self.assertEqual(Client().get(reverse("persons:person_list")).status_code, 302)
+
+    def test_add_additional_role_requires_add_contact(self):
+        """Phase 7 段3-2 No.9：別肩書追加は contacts.add_contact を要求する
+        （実体は active Person 配下への Contact 作成）。"""
+        url = reverse(
+            "persons:person_add_additional_role", kwargs={"pk": self.person.pk}
+        )
+        # contacts.add_contact なし → 403
+        self.assertEqual(self._client(self.noperm).get(url).status_code, 403)
+        # contacts.add_contact あり → 200（active Person 配下のフォーム表示）
+        adder = User.objects.create_user(username="pv_adder", password="x")
+        _grant_add_contact(adder)
+        self.assertEqual(self._client(adder).get(url).status_code, 200)

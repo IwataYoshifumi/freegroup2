@@ -723,7 +723,7 @@ class DuplicateCandidateGroupUpdateView(
         )
 
 
-class PersonMergeLogListView(LoginRequiredMixin, ListView):
+class PersonMergeLogListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
     """マージログ一覧画面（19 番、仕様書 §11.3 / D-4f-1）。
 
     PersonMergeLog を全件対象に -executed_at 降順で表示。絞り込み GET パラメータ：
@@ -736,6 +736,10 @@ class PersonMergeLogListView(LoginRequiredMixin, ListView):
     N+1 対策：surviving / merged の primary_contact、executed_by / undone_by を
     select_related。
     """
+
+    # 認可（Phase 7 段3-2、rev20 No.19 ★2）：マージ実行者が履歴を閲覧する対応として
+    # persons.merge_person を付与（No.15-17 マージ系と同一権限、段2-A と整合）。
+    permission_required = "persons.merge_person"
 
     template_name = "duplicates/merge_log_list.html"
     context_object_name = "merge_logs"
@@ -801,7 +805,7 @@ class PersonMergeLogListView(LoginRequiredMixin, ListView):
         return context
 
 
-class PersonMergeLogDetailView(LoginRequiredMixin, View):
+class PersonMergeLogDetailView(LoginRequiredMixin, PermissionRequiredMixin, View):
     """マージログ詳細画面（20 番、仕様書 §11.3 / D-4f-1）。
 
     URL kwarg `pk`（UUID）で受け取り、PersonMergeLog を 1 件取得。存在しない pk は
@@ -812,7 +816,11 @@ class PersonMergeLogDetailView(LoginRequiredMixin, View):
 
     復元ボタン：is_undoable=True のときテンプレ側で「準備中」グレーアウト表示
     （21 番 PersonMergeLogConfirmUndoView は D-4f-2 で別途実装）。
+
+    認可（Phase 7 段3-2、rev20 No.20 ★2）：persons.merge_person（No.19 一覧と同一）。
     """
+
+    permission_required = "persons.merge_person"
 
     template_name = "duplicates/merge_log_detail.html"
 

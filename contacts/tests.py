@@ -26,6 +26,25 @@ from persons.models import Person
 User = get_user_model()
 
 
+def _grant_contact_perms(user):
+    """Phase 7 段3-2：Contact List/Detail/Create/Update/Preview に標準 CRUD 権限ガードが
+    入った（rev20 No.10-14/23 ★2）。これらの View を叩く既存テストの正常系を保つため、
+    view/add/change/delete_contact を一括付与する補正ヘルパー。"""
+    from django.contrib.auth.models import Permission
+
+    user.user_permissions.add(
+        *Permission.objects.filter(
+            content_type__app_label="contacts",
+            codename__in=[
+                "view_contact",
+                "add_contact",
+                "change_contact",
+                "delete_contact",
+            ],
+        )
+    )
+
+
 def _empty_sns_management_form(prefix="sns"):
     """ContactSns InlineFormSet の空 management_form（POST テスト用、Phase F1 §11.6.7）。"""
     return {
@@ -882,6 +901,7 @@ class ContactDetailViewTests(TestCase):
         self.user = User.objects.create_user(
             username="d3b_test_user", password="dummy"
         )
+        _grant_contact_perms(self.user)
         # primary Contact のセットアップ
         self.person_a = Person.objects.create()
         self.contact_a = Contact.objects.create(
@@ -1440,6 +1460,7 @@ class ContactListViewTests(TestCase):
         self.user = User.objects.create_user(
             username="contact_list_test_user", password="dummy"
         )
+        _grant_contact_perms(self.user)
         self.person_a = Person.objects.create()
         self.contact_a = Contact.objects.create(
             person=self.person_a,
@@ -2036,6 +2057,7 @@ class UpdateActiveContactViewTests(TestCase):
         self.user = User.objects.create_user(
             username="update_active_user", password="dummy"
         )
+        _grant_contact_perms(self.user)
         self.person = Person.objects.create()
         self.primary = Contact.objects.create(
             person=self.person,
@@ -2178,6 +2200,7 @@ class UpdatePrimaryContactViewTests(TestCase):
         self.user = User.objects.create_user(
             username="update_primary_user", password="dummy"
         )
+        _grant_contact_perms(self.user)
         self.person = Person.objects.create()
         self.primary = Contact.objects.create(
             person=self.person,
@@ -2478,6 +2501,7 @@ class ContactCreateViewTests(TestCase):
         self.user = User.objects.create_user(
             username="contact_create_user", password="dummy"
         )
+        _grant_contact_perms(self.user)
         self.client = Client()
         self.client.force_login(self.user)
         self.url = reverse("contacts:contact_create")
@@ -2677,6 +2701,7 @@ class PreviewContactViewTests(TestCase):
         self.user = User.objects.create_user(
             username="preview_test_user", password="dummy"
         )
+        _grant_contact_perms(self.user)
         self.person = Person.objects.create()
         self.contact = Contact.objects.create(
             person=self.person,
@@ -2760,6 +2785,7 @@ class ContactDetailDebugUidTests(TestCase):
 
     def setUp(self):
         self.user = User.objects.create_user(username="debug_uid_user", password="dummy")
+        _grant_contact_perms(self.user)
         self.person = Person.objects.create()
         self.contact = Contact.objects.create(
             person=self.person,
@@ -3189,6 +3215,7 @@ class UpdatePrimaryContactSnsTests(TestCase):
 
     def setUp(self):
         self.user = User.objects.create_user(username="up_sns_user", password="x")
+        _grant_contact_perms(self.user)
         self.person = Person.objects.create()
         self.primary = Contact.objects.create(
             person=self.person,
@@ -3277,6 +3304,7 @@ class UpdateActiveContactSnsTests(TestCase):
 
     def setUp(self):
         self.user = User.objects.create_user(username="ua_sns_user", password="x")
+        _grant_contact_perms(self.user)
         self.person = Person.objects.create()
         self.primary = Contact.objects.create(
             person=self.person, status=Contact.Status.PRIMARY, full_name="P"
@@ -3315,6 +3343,7 @@ class ContactCreateSnsTests(TestCase):
 
     def setUp(self):
         self.user = User.objects.create_user(username="cc_sns_user", password="x")
+        _grant_contact_perms(self.user)
         self.client = Client()
         self.client.force_login(self.user)
         self.url = reverse("contacts:contact_create")
@@ -3344,6 +3373,7 @@ class ContactSnsTemplateRenderTests(TestCase):
 
     def setUp(self):
         self.user = User.objects.create_user(username="render_sns_user", password="x")
+        _grant_contact_perms(self.user)
         self.person = Person.objects.create()
         self.primary = Contact.objects.create(
             person=self.person, status=Contact.Status.PRIMARY, full_name="P"
@@ -3381,6 +3411,7 @@ class CommentLeakRegressionTests(TestCase):
 
     def setUp(self):
         self.user = User.objects.create_user(username="leak_user", password="x")
+        _grant_contact_perms(self.user)
         self.person = Person.objects.create()
         self.contact = Contact.objects.create(
             person=self.person,
@@ -3426,4 +3457,90 @@ class SnsFormsetHiddenRowCssTests(TestCase):
         )
         self.assertIn(".app-sns-formset__row[hidden]", css)
         self.assertIn("display: none !important", css)
+
+
+class Phase7ContactsViewAuthTests(TestCase):
+    """Phase 7 段3-2：contacts 6 View の Django 標準 CRUD 権限ガード（rev20 No.10-14/23 ★2）。
+
+    owner 判定は追加しない（v1.7+ 先送り）。view_contact / add_contact / change_contact の
+    各粒度で「権限なし→403・権限あり→正常」を検証する。
+    """
+
+    def setUp(self):
+        self.person = Person.objects.create()
+        self.primary = Contact.objects.create(
+            person=self.person, status=Contact.Status.PRIMARY, full_name="主名義"
+        )
+        self.person.primary_contact = self.primary
+        self.person.save(update_fields=["primary_contact", "updated_at"])
+        self.active = Contact.objects.create(
+            person=self.person, status=Contact.Status.ACTIVE, full_name="役名義"
+        )
+
+    def _user_with(self, *codenames):
+        import uuid as _uuid
+
+        from django.contrib.auth.models import Permission
+
+        u = User.objects.create_user(
+            username=f"ct_auth_{_uuid.uuid4().hex[:8]}", password="x"
+        )
+        for cn in codenames:
+            u.user_permissions.add(
+                Permission.objects.get(
+                    codename=cn, content_type__app_label="contacts"
+                )
+            )
+        return u
+
+    def _client(self, user):
+        c = Client()
+        c.force_login(user)
+        return c
+
+    def test_list_requires_view_contact(self):
+        url = reverse("contacts:contact_list")
+        self.assertEqual(self._client(self._user_with()).get(url).status_code, 403)
+        self.assertEqual(
+            self._client(self._user_with("view_contact")).get(url).status_code, 200
+        )
+
+    def test_detail_requires_view_contact(self):
+        url = reverse("contacts:contact_detail", kwargs={"pk": self.primary.pk})
+        self.assertEqual(self._client(self._user_with()).get(url).status_code, 403)
+        self.assertEqual(
+            self._client(self._user_with("view_contact")).get(url).status_code, 200
+        )
+
+    def test_preview_requires_view_contact(self):
+        url = reverse("contacts:contact_preview", kwargs={"pk": self.primary.pk})
+        self.assertEqual(self._client(self._user_with()).get(url).status_code, 403)
+        self.assertEqual(
+            self._client(self._user_with("view_contact")).get(url).status_code, 200
+        )
+
+    def test_create_requires_add_contact(self):
+        url = reverse("contacts:contact_create")
+        self.assertEqual(self._client(self._user_with()).get(url).status_code, 403)
+        self.assertEqual(
+            self._client(self._user_with("add_contact")).get(url).status_code, 200
+        )
+
+    def test_update_primary_requires_change_contact(self):
+        url = reverse(
+            "contacts:contact_update_primary", kwargs={"pk": self.primary.pk}
+        )
+        self.assertEqual(self._client(self._user_with()).get(url).status_code, 403)
+        self.assertEqual(
+            self._client(self._user_with("change_contact")).get(url).status_code, 200
+        )
+
+    def test_update_active_requires_change_contact(self):
+        url = reverse(
+            "contacts:contact_update_active", kwargs={"pk": self.active.pk}
+        )
+        self.assertEqual(self._client(self._user_with()).get(url).status_code, 403)
+        self.assertEqual(
+            self._client(self._user_with("change_contact")).get(url).status_code, 200
+        )
 

@@ -19,7 +19,7 @@ D-3c で追加した AJAX 2 エンドポイント、および D-3b で追加し�
 
 import json
 
-from django.contrib.auth.mixins import LoginRequiredMixin
+from django.contrib.auth.mixins import LoginRequiredMixin, PermissionRequiredMixin
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Q
@@ -139,7 +139,7 @@ def _contact_sort_context(params):
     }
 
 
-class ContactListView(LoginRequiredMixin, ListView):
+class ContactListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
     """Contact 一覧画面（v1.4.2 仕様変更で追加、仕様書改訂は別途）。
 
     GET 専用。デフォルトは active Person 配下の primary / active のみ表示。
@@ -148,6 +148,8 @@ class ContactListView(LoginRequiredMixin, ListView):
     同形（7 フィールド AND、tel は personal_phone / mobile_phone / personal_fax の OR）。
     """
 
+    # 認可（Phase 7 段3-2、rev20 No.23 ★2）：Contact 閲覧 → view_contact。
+    permission_required = "contacts.view_contact"
     model = Contact
     template_name = "contacts/contact_list.html"
     context_object_name = "contacts"
@@ -243,7 +245,7 @@ class ContactListView(LoginRequiredMixin, ListView):
         return context
 
 
-class ContactDetailView(LoginRequiredMixin, DetailView):
+class ContactDetailView(LoginRequiredMixin, PermissionRequiredMixin, DetailView):
     """Contact 詳細画面（仕様書 §11.3 11 番、D-3b）。
 
     GET 専用、業務メイン画面（active な Person を見る画面）。Contact.status と
@@ -261,6 +263,8 @@ class ContactDetailView(LoginRequiredMixin, DetailView):
     （D-3b 論点 3）。
     """
 
+    # 認可（Phase 7 段3-2、rev20 No.11 ★2）：Contact 閲覧 → view_contact。
+    permission_required = "contacts.view_contact"
     model = Contact
     template_name = "contacts/contact_detail.html"
     context_object_name = "contact"
@@ -504,7 +508,7 @@ class ContactAjaxConfirmFieldsView(_ContactAjaxBase):
         )
 
 
-class UpdatePrimaryContactView(LoginRequiredMixin, UpdateView):
+class UpdatePrimaryContactView(LoginRequiredMixin, PermissionRequiredMixin, UpdateView):
     """primary Contact 修正画面（12 番、仕様書 §11.3 / §11.4.1 / §11.4.2）。
 
     GET：フォーム表示。POST：change_reason の値で処理を分岐：
@@ -522,6 +526,8 @@ class UpdatePrimaryContactView(LoginRequiredMixin, UpdateView):
     スタックを引き継ぐ（A-2-追加 で確立、b9f8776）。
     """
 
+    # 認可（Phase 7 段3-2、rev20 No.12 ★2）：Contact 変更 → change_contact。
+    permission_required = "contacts.change_contact"
     model = Contact
     form_class = ContactUpdateForm
     template_name = "contacts/contact_update_primary.html"
@@ -597,7 +603,7 @@ class UpdatePrimaryContactView(LoginRequiredMixin, UpdateView):
         )
 
 
-class UpdateActiveContactView(LoginRequiredMixin, UpdateView):
+class UpdateActiveContactView(LoginRequiredMixin, PermissionRequiredMixin, UpdateView):
     """active Contact 修正画面（13 番、仕様書 §11.6 / §11.7）。
 
     GET：フォーム表示。POST：フォーム値で Contact.fix() を呼び、Contact 詳細画面へ
@@ -613,6 +619,8 @@ class UpdateActiveContactView(LoginRequiredMixin, UpdateView):
     {% back_url back %} を使ってキャンセル時の戻り先（呼び出し元）を解決する。
     """
 
+    # 認可（Phase 7 段3-2、rev20 No.13 ★2）：Contact 変更 → change_contact。
+    permission_required = "contacts.change_contact"
     model = Contact
     form_class = ContactUpdateActiveForm
     template_name = "contacts/contact_update_active.html"
@@ -812,7 +820,7 @@ def _promote_new_contact_as_primary(form, target_contact, user):
     return new_contact
 
 
-class ContactCreateView(LoginRequiredMixin, View):
+class ContactCreateView(LoginRequiredMixin, PermissionRequiredMixin, View):
     """手動 Contact 新規作成画面（10 番、仕様書 §11.4.4 / §11.6.5）。
 
     GET：空フォームを表示。
@@ -829,6 +837,8 @@ class ContactCreateView(LoginRequiredMixin, View):
     （仕様書 §10.6.4、PersonAddAdditionalRoleView と同じ流儀）。
     """
 
+    # 認可（Phase 7 段3-2、rev20 No.10 ★2）：Contact 作成 → add_contact。
+    permission_required = "contacts.add_contact"
     template_name = "contacts/contact_create.html"
     duplicates_template_name = "contacts/contact_create_duplicates.html"
 
@@ -912,7 +922,7 @@ class ContactCreateView(LoginRequiredMixin, View):
         }
 
 
-class PreviewContactView(LoginRequiredMixin, View):
+class PreviewContactView(LoginRequiredMixin, PermissionRequiredMixin, View):
     """Contact プレビュー（14 番、仕様書 §11.3 / §11.4.4 AJAX 連携）。
 
     GET のみ。HTML フラグメント（_preview_modal_body.html）を返す。
@@ -924,6 +934,8 @@ class PreviewContactView(LoginRequiredMixin, View):
       - 将来的に Contact 一覧画面のモーダルプレビューでも使用（§11.3 14 番）
     """
 
+    # 認可（Phase 7 段3-2、rev20 No.14 ★2）：Contact 閲覧 → view_contact。
+    permission_required = "contacts.view_contact"
     template_name = "contacts/_preview_modal_body.html"
 
     def get(self, request, pk):

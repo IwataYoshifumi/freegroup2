@@ -9,7 +9,7 @@ import logging
 import statistics
 from collections import Counter
 
-from django.contrib.auth.mixins import LoginRequiredMixin
+from django.contrib.auth.mixins import LoginRequiredMixin, PermissionRequiredMixin
 from django.core.files.base import ContentFile
 from django.db.models import Count, Exists, OuterRef, Q
 from django.http import HttpResponse, HttpResponseRedirect
@@ -35,7 +35,9 @@ def placeholder_view(request):
     return HttpResponse("準備中", content_type="text/plain; charset=utf-8")
 
 
-class UploadView(LoginRequiredMixin, FormView):
+class UploadView(LoginRequiredMixin, PermissionRequiredMixin, FormView):
+    # 認可（Phase 7 段3-2、rev20 No.2 ★2）：OriginalImage 作成 → add_originalimage。
+    permission_required = "cards.add_originalimage"
     template_name = "cards/upload.html"
     form_class = UploadForm
 
@@ -71,7 +73,9 @@ class UploadView(LoginRequiredMixin, FormView):
         return context
 
 
-class OriginalListView(LoginRequiredMixin, ListView):
+class OriginalListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
+    # 認可（Phase 7 段3-2、rev20 No.5 ★2）：OriginalImage 閲覧 → view_originalimage。
+    permission_required = "cards.view_originalimage"
     model = OriginalImage
     template_name = "cards/original_list.html"
     context_object_name = "originals"
@@ -132,7 +136,9 @@ class OriginalListView(LoginRequiredMixin, ListView):
         return context
 
 
-class OriginalDetailView(LoginRequiredMixin, DetailView):
+class OriginalDetailView(LoginRequiredMixin, PermissionRequiredMixin, DetailView):
+    # 認可（Phase 7 段3-2、rev20 No.6 ★2）：OriginalImage 閲覧 → view_originalimage。
+    permission_required = "cards.view_originalimage"
     model = OriginalImage
     template_name = "cards/original_detail.html"
     context_object_name = "original"
@@ -511,14 +517,18 @@ class RecalcDebugView(LoginRequiredMixin, View):
         return redirect("originals:original_detail", pk=original.id)
 
 
-class CardDeleteView(LoginRequiredMixin, View):
+class CardDeleteView(LoginRequiredMixin, PermissionRequiredMixin, View):
     """BusinessCard を削除し、元画像詳細にリダイレクトする（POST 専用）。
 
     削除対象は本人所有の BC のみ（user スコープで絞り込み）。
     Contact / ContactFieldConfidence は CASCADE で自動削除、card_image の FS 実体は
     post_delete シグナルで自動削除される。OriginalImage.raw_json は温存される。
     GET / その他メソッドは Django 標準の 405 応答（method_not_allowed）が返る。
+
+    認可（Phase 7 段3-2、rev20 No.22 ★2）：BusinessCard 削除 → delete_businesscard。
     """
+
+    permission_required = "cards.delete_businesscard"
 
     def post(self, request, pk):
         user = request.user
@@ -528,7 +538,7 @@ class CardDeleteView(LoginRequiredMixin, View):
         return redirect("originals:original_detail", pk=original_image_id)
 
 
-class CardListView(LoginRequiredMixin, ListView):
+class CardListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
     """名刺一覧画面（仕様書 v1.2.2 / Phase 4）。
 
     BusinessCard を Contact 情報とともに一覧表示する。
@@ -536,6 +546,8 @@ class CardListView(LoginRequiredMixin, ListView):
     tel は personal_phone / mobile_phone / personal_fax の OR 一致。
     """
 
+    # 認可（Phase 7 段3-2、rev20 No.3 ★2）：BusinessCard 閲覧 → view_businesscard。
+    permission_required = "cards.view_businesscard"
     model = BusinessCard
     template_name = "cards/card_list.html"
     context_object_name = "cards"
@@ -667,7 +679,7 @@ class CardListView(LoginRequiredMixin, ListView):
         return context
 
 
-class CardDetailView(LoginRequiredMixin, DetailView):
+class CardDetailView(LoginRequiredMixin, PermissionRequiredMixin, DetailView):
     """名刺詳細画面（仕様書 v1.4.2 / Phase 4）。
 
     OpenCV デバッグ情報の閲覧と Contact フィールド編集（ContactDetailView と同じ
@@ -676,6 +688,8 @@ class CardDetailView(LoginRequiredMixin, DetailView):
     is_editable）を提供する。
     """
 
+    # 認可（Phase 7 段3-2、rev20 No.4 ★2）：BusinessCard 閲覧 → view_businesscard。
+    permission_required = "cards.view_businesscard"
     model = BusinessCard
     template_name = "cards/card_detail.html"
     context_object_name = "card"
