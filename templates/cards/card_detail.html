@@ -1,5 +1,6 @@
 {% extends "cards/app_base.html" %}
 {% load back_tags %}
+{% load ui_tags %}
 
 {% block title %}名刺詳細 — FreeGroup2{% endblock %}
 
@@ -13,6 +14,12 @@
            class="app-btn app-btn--secondary app-btn--sm">
           名刺画像アップロード
         </a>
+        {# Contact 未生成の BC のみ編集可（押せないボタンは出さない。サーバ側ガードと二重構え、v1.7） #}
+        {% if not contact %}
+          {% url 'cards:card_edit' pk=card.id as card_edit_url %}
+          <a href="{% append_back_url card_edit_url back %}"
+             class="app-btn app-btn--secondary app-btn--sm">名刺を編集</a>
+        {% endif %}
       </div>
     </div>
     <div class="app-action-area">
@@ -20,6 +27,14 @@
       {% back_link back %}
     </div>
   </div>
+
+  {% if messages %}
+    <div style="max-width:1100px; margin-bottom:var(--app-space-md);">
+      {% for message in messages %}
+        <div class="app-alert app-alert--danger">{{ message }}</div>
+      {% endfor %}
+    </div>
+  {% endif %}
 
   {% if debug %}
     <div style="max-width:1100px; margin-bottom:var(--app-space-sm); font-size:12px;">
@@ -33,7 +48,7 @@
         <div class="app-section__header"><h2>名刺画像</h2></div>
 
         {% if card.card_image %}
-          <img src="{{ card.card_image.url }}"
+          <img src="{{ card.get_card_image_url_busted }}"
                alt="名刺画像"
                style="max-width:300px; width:100%; cursor:pointer; border-radius:8px;"
                data-action="open-modal"
@@ -56,6 +71,28 @@
               {% endif %}
             </div>
           </div>
+
+          {# OCR処理結果。一覧と同じ ocr_result_badge を流用。空(business_card/done+null)時のみ get_ocr_result_display にフォールバック #}
+          {# v1.7: 既存 ocr_result バッジの隣に ocr_status バッジ（別表 C.13 ラベル）を併記する（置換ではない・表示のみ） #}
+          <div class="app-detail-item" style="margin-top: var(--app-space-sm);">
+            <div class="app-detail-label">OCR処理結果</div>
+            <div class="app-detail-value" style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
+              {% ocr_result_badge card as ocr_badge_html %}
+              {% if ocr_badge_html %}{{ ocr_badge_html }}{% else %}{{ card.get_ocr_result_display|default:"—" }}{% endif %}
+              {% if card.ocr_status == "pending" %}<span class="app-status-badge app-status-badge--muted">OCR待ち</span>
+              {% elif card.ocr_status == "processing" %}<span class="app-status-badge app-status-badge--info">OCR中</span>
+              {% elif card.ocr_status == "done" %}<span class="app-status-badge app-status-badge--success">完了</span>
+              {% elif card.ocr_status == "failed" %}<span class="app-status-badge app-status-badge--error">失敗</span>{% endif %}
+            </div>
+          </div>
+
+          {# BusinessCard.error_message（人手入力 or OCR 集約のエラー文）。OSD エラー表示（開発用情報・osd 由来）とは別物。空なら枠ごと出さない #}
+          {% if card.error_message %}
+            <div class="app-detail-item" style="margin-top: var(--app-space-sm);">
+              <div class="app-detail-label">エラーメッセージ</div>
+              <div class="app-detail-value" style="white-space:pre-wrap;">{{ card.error_message }}</div>
+            </div>
+          {% endif %}
 
           {% if debug and card.contact %}
             {% url 'contacts:contact_detail' pk=card.contact.id as contact_detail_url %}
@@ -155,6 +192,18 @@
           {% endif %}
         {% else %}
           <p class="app-muted">Contact が紐付いていません。</p>
+          {# v1.7: 新規コンタクト作成は OCR 判定未確定（can_create_contact＝View 側で ocr_result is None を厳密判定）の BC でのみ表示 #}
+          {% if can_create_contact %}
+            {% url 'contacts:contact_create' as contact_create_url %}
+            {% with bc_id=card.id|stringformat:"s" %}
+              <div style="margin-top: var(--app-space-md);">
+                <a href="{% append_back_url contact_create_url|add:"?business_card="|add:bc_id back %}"
+                   class="app-btn app-btn--primary">
+                  新規コンタクト作成
+                </a>
+              </div>
+            {% endwith %}
+          {% endif %}
         {% endif %}
       </div>
     </div>
@@ -167,6 +216,36 @@
         <div class="app-section__header"><h2>元画像</h2></div>
         {% url 'originals:original_detail' pk=card.original_image.id as original_url %}
         <a href="{% append_back_url original_url back %}">元画像の詳細画面へ</a>
+
+        {# OSD 向き判定（Tesseract 由来・OCR前）。上の Claude orientation バッジとは別物。 #}
+        <div class="app-section__header" style="margin-top:var(--app-space-md);">
+          <h2>OSD 向き判定（Tesseract・Claude orientation とは別）</h2>
+        </div>
+        {% if osd %}
+          <div class="app-detail-value" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            {% if osd.error %}
+              <span class="app-status-badge app-status-badge--error">OSD失敗</span>
+              <span class="app-muted">{{ osd.error }}</span>
+            {% else %}
+              <span>rotate: <strong>{{ osd.rotate|default_if_none:"—" }}°</strong></span>
+              <span class="app-muted">
+                現在角 {{ osd.orientation_deg|default_if_none:"—" }}°
+                / conf {{ osd.orientation_conf|default_if_none:"—" }}
+                {% if osd.script %}/ script {{ osd.script }}{% endif %}
+              </span>
+              {% if osd_rotate_zero %}
+                <span class="app-status-badge app-status-badge--info">回さない判定 (rotate=0)</span>
+                <span class="app-status-badge app-status-badge--warning">conf を確認（低conf＝逆さ誤判定の疑い）</span>
+              {% endif %}
+            {% endif %}
+          </div>
+          <div class="app-muted" style="font-size:12px;margin-top:4px;">
+            ※ これは Tesseract OSD の判定値で、card_image は OSD 正立化後の画像。
+            アップロード日時欄の向きバッジは Claude の card_meta.orientation であり別物。
+          </div>
+        {% else %}
+          <div class="app-detail-value app-muted">OSD 情報なし（未処理 or 記録なし）</div>
+        {% endif %}
 
         {# 1 回目 OCR raw_json（andypf-json-viewer で表示、初期は折りたたみ） #}
         <div class="app-section__header" style="margin-top:var(--app-space-md);">
@@ -212,7 +291,7 @@
               <a href="{% append_back_url sibling_url back %}" class="app-list-card" style="display:flex; align-items:center; gap:var(--app-space-sm); text-decoration:none; color:inherit;">
                 <div style="flex:0 0 auto;">
                   {% if sibling.card_image %}
-                    <img src="{{ sibling.card_image.url }}" alt="名刺サムネイル" style="max-height:56px; max-width:120px; border-radius:4px;">
+                    <img src="{{ sibling.get_card_image_url_busted }}" alt="名刺サムネイル" style="max-height:56px; max-width:120px; border-radius:4px;">
                   {% else %}
                     <span class="app-muted" style="display:inline-block; min-width:96px; text-align:center;">画像なし</span>
                   {% endif %}
@@ -297,7 +376,7 @@
           <button class="app-btn app-btn--sm" data-action="close-modal">閉じる</button>
         </div>
         <div class="app-modal__body" style="text-align:center;">
-          <img src="{{ card.card_image.url }}" alt="名刺画像" style="max-width:100%;">
+          <img src="{{ card.get_card_image_url_busted }}" alt="名刺画像" style="max-width:100%;">
         </div>
       </div>
     </div>

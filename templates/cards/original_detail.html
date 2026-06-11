@@ -24,6 +24,27 @@
     </div>
   {% endif %}
 
+  {# 手動切り出し導線：アラート直下・元画像カードの外（上）に左寄せ配置（HIG 7.3/3.1）。新規作成系なので primary（青）。 #}
+  {% if original.image_file %}
+  <div class="app-manual-crop-controls"
+       data-preview-url="{% url 'originals:manual_crop_preview' pk=original.id %}"
+       data-submit-url="{% url 'originals:manual_crop' pk=original.id %}">
+    <button type="button" class="app-btn app-btn--primary app-btn--sm js-manual-crop-start">
+      手動名刺切り出し
+    </button>
+    <span class="js-manual-crop-active" hidden>
+      <span class="app-manual-crop-hint">
+        名刺の四隅を4点クリック（<span class="js-manual-crop-count">0</span>/4）
+      </span>
+      <button type="button" class="app-btn app-btn--secondary app-btn--sm js-manual-crop-reset">やり直し</button>
+      <button type="button" class="app-btn app-btn--secondary app-btn--sm js-manual-crop-cancel">キャンセル</button>
+    </span>
+    {# JS から .click() して app.js の openModal を通すための隠しトリガ。 #}
+    <button type="button" class="js-manual-crop-open" data-action="open-modal"
+            data-target="manualCropModal" hidden></button>
+  </div>
+  {% endif %}
+
   {# ========== セクション 1: 元画像 + polygon オーバーレイ ========== #}
   <section class="app-card">
     <div class="app-section__header">
@@ -38,16 +59,20 @@
                preserveAspectRatio="xMidYMid meet"
                xmlns="http://www.w3.org/2000/svg">
             {% for p in overlay_polygons %}
-              <polygon class="app-debug-polygon{% if p.is_giant %} app-debug-polygon--giant{% endif %}"
+              <polygon class="app-debug-polygon{% if p.is_giant %} app-debug-polygon--giant{% endif %}{% if p.is_manual %} app-debug-polygon--manual{% endif %}"
                        points="{{ p.points_str }}"></polygon>
-              <text class="app-debug-polygon__label{% if p.is_giant %} app-debug-polygon__label--giant{% endif %}"
+              <text class="app-debug-polygon__label{% if p.is_giant %} app-debug-polygon__label--giant{% endif %}{% if p.is_manual %} app-debug-polygon__label--manual{% endif %}"
                     x="{{ p.centroid_x|floatformat:1 }}"
                     y="{{ p.centroid_y|floatformat:1 }}"
                     text-anchor="middle"
-                    dominant-baseline="central">{{ p.card_index }}</text>
+                    dominant-baseline="central">{% if p.is_manual %}手{% else %}{{ p.card_index }}{% endif %}</text>
             {% endfor %}
           </svg>
         {% endif %}
+        {# 手動切り出しクリック面（最前面・既存枠SVGの後＝DOM上で上に重なる）。viewBox は画像の自然寸法基準で JS が設定。OFF時は pointer-events:none で操作を邪魔しない。 #}
+        <svg class="app-original-overlay__svg app-manual-crop-layer js-manual-crop-layer"
+             preserveAspectRatio="xMidYMid meet"
+             xmlns="http://www.w3.org/2000/svg"></svg>
       </div>
     {% else %}
       <p class="app-muted">画像がありません。</p>
@@ -58,6 +83,7 @@
   <section class="app-card">
     <div class="app-section__header">
       <h2>ステータス・処理情報・検出統計</h2>
+      {% if recalc_debug_enabled %}
       <form method="post" action="{% url 'originals:recalc_debug' pk=original.id %}"
             class="js-recalc-debug-form" style="margin: 0;">
         {% csrf_token %}
@@ -65,6 +91,7 @@
           OpenCV 検出を再計算
         </button>
       </form>
+      {% endif %}
     </div>
 
     <div class="app-detail-grid">
@@ -172,122 +199,129 @@
       <span class="app-collapsible__icon">▾</span>
     </button>
     <div class="app-collapsible-body">
-      <h3>1回目（通常処理）</h3>
-      <div class="app-mask-grid">
-        <div class="app-mask-grid__row">
-          {% for label, url in block1_mask_urls|slice:":3" %}
-            <div class="app-mask-grid__item">
-              <div class="app-mask-grid__label">{{ label }}</div>
-              {% if url %}
-                <a href="{{ url }}" target="_blank" rel="noopener">
-                  <img class="app-mask-grid__img" src="{{ url }}" alt="{{ label }}">
-                </a>
-              {% else %}
-                <p class="app-muted">マスク画像なし</p>
-              {% endif %}
-            </div>
-          {% endfor %}
-        </div>
-        <div class="app-mask-grid__row">
-          {% for label, url in block1_mask_urls|slice:"3:" %}
-            <div class="app-mask-grid__item">
-              <div class="app-mask-grid__label">{{ label }}</div>
-              {% if url %}
-                <a href="{{ url }}" target="_blank" rel="noopener">
-                  <img class="app-mask-grid__img" src="{{ url }}" alt="{{ label }}">
-                </a>
-              {% else %}
-                <p class="app-muted">マスク画像なし</p>
-              {% endif %}
-            </div>
-          {% endfor %}
-        </div>
-      </div>
+      <p class="app-muted" style="margin-top:0;">
+        クローズ後マスクに、そのマスク自身の候補を重畳：<span class="app-mask-legend app-mask-legend--passed">緑=採用</span>
+        / <span class="app-mask-legend app-mask-legend--near">赤=惜しい棄却</span>（aspect_invalid・面積比0.03以上のtoo_small／理由ラベル付き）。
+        ノイズ（zero_size・極小too_small）は描画しません。番号はセクション4テーブルの「#（マスク内）」と一致。
+      </p>
 
-      {% if block2_mask_urls %}
-        <h3>2回目（反転リトライ）</h3>
-        <div class="app-mask-grid">
-          <div class="app-mask-grid__row">
-            {% for label, url in block2_mask_urls %}
-              <div class="app-mask-grid__item">
-                <div class="app-mask-grid__label">{{ label }}</div>
-                {% if url %}
-                  <a href="{{ url }}" target="_blank" rel="noopener">
-                    <img class="app-mask-grid__img" src="{{ url }}" alt="{{ label }}">
-                  </a>
-                {% else %}
-                  <p class="app-muted">マスク画像なし</p>
-                {% endif %}
-              </div>
-            {% endfor %}
+      {% for blk in mask_attempt_blocks %}
+        <h3>{{ blk.title }}</h3>
+        {% if blk.raw %}
+          <div class="app-mask-grid">
+            <div class="app-mask-grid__row">
+              {% for m in blk.raw %}
+                <div class="app-mask-grid__item">
+                  <div class="app-mask-grid__label">{{ m.label }}</div>
+                  {% if m.url %}
+                    <a href="{{ m.url }}" target="_blank" rel="noopener">
+                      <img class="app-mask-grid__img" src="{{ m.url }}" alt="{{ m.label }}">
+                    </a>
+                  {% else %}
+                    <p class="app-muted">マスク画像なし</p>
+                  {% endif %}
+                </div>
+              {% endfor %}
+            </div>
           </div>
-        </div>
-      {% endif %}
+        {% endif %}
+        {% if blk.closed %}
+          <div class="app-mask-grid" style="margin-top:var(--app-space-md);">
+            <div class="app-mask-grid__row">
+              {% for m in blk.closed %}
+                <div class="app-mask-grid__item">
+                  <div class="app-mask-grid__label">{{ m.label }}（候補 {{ m.overlay|length }} 件）</div>
+                  {% if m.url %}
+                    {% if m.overlay and debug_json.image_size %}
+                      <div class="app-mask-overlay">
+                        <a href="{{ m.url }}" target="_blank" rel="noopener">
+                          <img class="app-mask-grid__img" src="{{ m.url }}" alt="{{ m.label }}">
+                        </a>
+                        <svg class="app-mask-overlay__svg"
+                             viewBox="0 0 {{ debug_json.image_size.width }} {{ debug_json.image_size.height }}"
+                             preserveAspectRatio="xMidYMid meet"
+                             xmlns="http://www.w3.org/2000/svg">
+                          {% for c in m.overlay %}
+                            <polygon class="app-debug-polygon app-debug-polygon--{{ c.category }}"
+                                     points="{{ c.points_str }}"></polygon>
+                            <text class="app-debug-polygon__label app-debug-polygon__label--mask"
+                                  x="{{ c.cx|floatformat:1 }}" y="{{ c.cy|floatformat:1 }}"
+                                  text-anchor="middle" dominant-baseline="central">{{ c.idx }}</text>
+                          {% endfor %}
+                        </svg>
+                      </div>
+                    {% else %}
+                      <a href="{{ m.url }}" target="_blank" rel="noopener">
+                        <img class="app-mask-grid__img" src="{{ m.url }}" alt="{{ m.label }}">
+                      </a>
+                    {% endif %}
+                  {% else %}
+                    <p class="app-muted">マスク画像なし</p>
+                  {% endif %}
+                </div>
+              {% endfor %}
+            </div>
+          </div>
+        {% endif %}
+      {% empty %}
+        <p class="app-muted">マスク画像がありません。</p>
+      {% endfor %}
     </div>
   </section>
   {% endif %}
 
-  {# ========== セクション 4: OpenCV 候補一覧テーブル ========== #}
-  {# HIG v1.4 原則4：候補一覧は OpenCV 中間データ。debug 時のみ表示。 #}
+  {# ========== セクション 4: OpenCV 候補一覧テーブル（描画対象のみ・マスク別／マスク内 idx） ========== #}
+  {# HIG v1.4 原則4：候補一覧は OpenCV 中間データ。debug 時のみ表示（v1.6 のガードを維持）。 #}
   {% if debug %}
   <section class="app-card app-collapsible is-open">
     <button type="button" class="app-collapsible__header" data-action="toggle-collapsible" aria-expanded="true">
-      <span>OpenCV 候補一覧テーブル</span>
+      <span>OpenCV 候補一覧テーブル（マスク上に描画した候補）</span>
       <span class="app-collapsible__icon">▾</span>
     </button>
     <div class="app-collapsible-body">
-      {% if candidates_all %}
-        <div class="app-candidates-toolbar">
-          <label class="app-candidates-toggle">
-            <input type="checkbox" class="js-show-rejected">
-            除外候補も表示する
-          </label>
-          <span class="app-candidates-counter">
-            表示中：<span class="js-candidates-visible">{{ candidates_passed|length }}</span> 件
-            / 全 <span class="js-candidates-total">{{ candidates_all|length }}</span> 件
-          </span>
-        </div>
+      {% if candidates_table %}
+        <p class="app-muted" style="margin-top:0;">
+          描画対象（採用＋惜しい棄却）のみ {{ candidates_table|length }} 件。# はマスク内連番でマスク画像の番号と一致。
+        </p>
         <div class="app-table-wrapper">
-          <table class="app-table app-candidates-table"
-                 data-passed-count="{{ candidates_passed|length }}"
-                 data-all-count="{{ candidates_all|length }}">
+          <table class="app-table">
             <thead>
               <tr>
-                <th>#</th>
-                <th>面積 (比率)</th>
-                <th>中心 (x, y)</th>
-                <th>サイズ (W × H)</th>
-                <th>角度</th>
+                <th>attempt</th>
+                <th>マスク</th>
+                <th># (マスク内)</th>
+                <th>採否</th>
+                <th>理由</th>
                 <th>縦横比</th>
-                <th>結果</th>
-                <th>除外理由</th>
+                <th>面積 (比率)</th>
+                <th>サイズ (W × H)</th>
               </tr>
             </thead>
             <tbody>
-              {% for c in candidates_all %}
+              {% for c in candidates_table %}
                 <tr class="{% if not c.passed %}is-rejected{% endif %}">
-                  <td>{{ c.index }}</td>
-                  <td>{{ c.area_str }} ({{ c.area_ratio_pct_str }}%)</td>
-                  <td>({{ c.rect_cx_str }}, {{ c.rect_cy_str }})</td>
-                  <td>{{ c.rect_w_str }} × {{ c.rect_h_str }}</td>
-                  <td>{{ c.rect_angle_str }}°</td>
-                  <td>{{ c.aspect_ratio_str }}</td>
+                  <td>{{ c.attempt_no }}</td>
+                  <td>{{ c.mask_name }}</td>
+                  <td>{{ c.idx }}</td>
                   <td>
                     {% if c.passed %}
-                      <span class="app-status-badge app-status-badge--success">✓ 通過</span>
+                      <span class="app-status-badge app-status-badge--success">✓ 採用</span>
                     {% else %}
-                      <span class="app-status-badge app-status-badge--error">✗ 除外</span>
+                      <span class="app-status-badge app-status-badge--error">✗ 惜しい棄却</span>
                     {% endif %}
                   </td>
-                  {# HIG v1.4 原則4：reject_reason の生値は開発者向け。debug 時のみ表示。 #}
-                  <td>{% if debug and c.reject_reason %}{{ c.reject_reason }}{% else %}-{% endif %}</td>
+                  {# セクション全体が {% if debug %} 配下のため、各セルの個別 debug ガードは不要。 #}
+                  <td>{% if c.reason %}{{ c.reason }}{% else %}-{% endif %}</td>
+                  <td>{{ c.aspect_ratio_str }}</td>
+                  <td>{{ c.area_str }} ({{ c.area_ratio_pct_str }}%)</td>
+                  <td>{{ c.rect_w_str }} × {{ c.rect_h_str }}</td>
                 </tr>
               {% endfor %}
             </tbody>
           </table>
         </div>
       {% else %}
-        <p class="app-muted">候補がありません。</p>
+        <p class="app-muted">描画対象の候補がありません。</p>
       {% endif %}
     </div>
   </section>
@@ -390,13 +424,7 @@
       <h2>検出された名刺</h2>
     </div>
 
-    {% if original.status == "pending" %}
-      <p class="app-muted">処理待ちです。</p>
-    {% elif original.status == "garbage" %}
-      <p class="app-muted">名刺が検出されませんでした。</p>
-    {% elif original.status == "failed" %}
-      <p class="app-muted">処理に失敗しました。</p>
-    {% elif original.status == "extracted" %}
+    {% if business_cards %}
       <div class="app-table-wrapper">
         <table class="app-table app-table--nowrap">
           <thead>
@@ -420,7 +448,7 @@
                 </td>
                 <td>
                   {% if card.card_image %}
-                    <img src="{{ card.card_image.url }}" alt="名刺サムネイル" style="max-height:96px;max-width:200px;border-radius:4px;display:block;">
+                    <img src="{{ card.get_card_image_url_busted }}" alt="名刺サムネイル" style="max-height:96px;max-width:200px;border-radius:4px;display:block;">
                   {% else %}
                     <span class="app-muted">画像なし</span>
                   {% endif %}
@@ -438,6 +466,12 @@
           </tbody>
         </table>
       </div>
+    {% elif original.status == "pending" %}
+      <p class="app-muted">処理待ちです。</p>
+    {% elif original.status == "garbage" %}
+      <p class="app-muted">名刺が検出されませんでした。</p>
+    {% elif original.status == "failed" %}
+      <p class="app-muted">処理に失敗しました。</p>
     {% else %}
       <p class="app-muted">処理中です。</p>
     {% endif %}
@@ -486,6 +520,31 @@
       {% endif %}
     </div>
   </section>
+  {% endif %}
+
+  {# ========== 手動切り出し：プレビュー・向き調整モーダル（段2-c2-②） ========== #}
+  {% if original.image_file %}
+    <div class="app-modal-backdrop" hidden></div>
+    <div class="app-modal" id="manualCropModal" hidden>
+      <div class="app-modal__panel" style="width:min(720px,95vw);">
+        <div class="app-modal__header">
+          <h2>切り出しプレビュー・向き調整</h2>
+          <button type="button" class="app-btn app-btn--sm" data-action="close-modal">閉じる</button>
+        </div>
+        <div class="app-modal__body" style="text-align:center;">
+          <div class="app-manual-crop-preview-wrap">
+            <img class="js-manual-crop-preview app-manual-crop-preview" alt="切り出しプレビュー">
+          </div>
+          <div class="app-manual-crop-modal-actions">
+            <button type="button" class="app-btn app-btn--secondary app-btn--sm js-manual-crop-rotate-left">⟲ 左回転</button>
+            <button type="button" class="app-btn app-btn--secondary app-btn--sm js-manual-crop-rotate-right">右回転 ⟳</button>
+            <button type="button" class="app-btn app-btn--primary app-btn--sm js-manual-crop-confirm">確定</button>
+            <button type="button" class="app-btn app-btn--secondary app-btn--sm js-manual-crop-modal-cancel"
+                    data-action="close-modal">キャンセル</button>
+          </div>
+        </div>
+      </div>
+    </div>
   {% endif %}
 
   {# ===== このブランチ専用スクリプト（A 側マージ時に共通化判断） ===== #}
@@ -540,6 +599,204 @@
         // フォールバック（非対応環境）
         document.addEventListener('DOMContentLoaded', loadAllViewers);
       }
+    })();
+
+    // ===== 段2-c2-①：手動名刺切り出し（4点クリック取得・表示・やり直し） =====
+    // プレビュー/回転/保存は段2-c2-②送り。ここは座標取得と表示のみ。
+    (function () {
+      const overlay = document.querySelector('.app-original-overlay');
+      if (!overlay) return;
+      const img = overlay.querySelector('.app-original-overlay__img');
+      const layer = overlay.querySelector('.js-manual-crop-layer');
+      const startBtn = document.querySelector('.js-manual-crop-start');
+      const activeBox = document.querySelector('.js-manual-crop-active');
+      const resetBtn = document.querySelector('.js-manual-crop-reset');
+      const cancelBtn = document.querySelector('.js-manual-crop-cancel');
+      const countEl = document.querySelector('.js-manual-crop-count');
+      if (!img || !layer || !startBtn) return;
+
+      const SVGNS = 'http://www.w3.org/2000/svg';
+      let active = false;
+      let points = [];          // [{x, y}] 元画像ピクセル座標（②でプレビュー/保存に使う）
+      let natW = 0;
+      let natH = 0;
+
+      // <img> の自然寸法を取得（未ロードだと naturalWidth=0 のため complete を確認）。
+      function ensureNatural() {
+        if (img.complete && img.naturalWidth) {
+          natW = img.naturalWidth;
+          natH = img.naturalHeight;
+          layer.setAttribute('viewBox', '0 0 ' + natW + ' ' + natH);
+          return true;
+        }
+        return false;
+      }
+
+      function clearMarks() {
+        while (layer.firstChild) layer.removeChild(layer.firstChild);
+      }
+
+      function redraw() {
+        clearMarks();
+        if (points.length >= 2) {
+          const poly = document.createElementNS(SVGNS, 'polygon');
+          poly.setAttribute('class', 'app-manual-crop__polygon');
+          poly.setAttribute(
+            'points',
+            points.map(function (p) { return p.x.toFixed(1) + ',' + p.y.toFixed(1); }).join(' ')
+          );
+          layer.appendChild(poly);
+        }
+        const r = Math.max(natW, natH) / 120 || 6;   // 表示でほどよく見える半径
+        points.forEach(function (p) {
+          const c = document.createElementNS(SVGNS, 'circle');
+          c.setAttribute('class', 'app-manual-crop__marker');
+          c.setAttribute('cx', p.x);
+          c.setAttribute('cy', p.y);
+          c.setAttribute('r', r);
+          layer.appendChild(c);
+        });
+        if (countEl) countEl.textContent = String(points.length);
+      }
+
+      // クリック点（画面px）→ 元画像px（viewBox=自然寸法）に変換。
+      function toImagePoint(evt) {
+        if (!layer.createSVGPoint) return null;
+        const pt = layer.createSVGPoint();
+        pt.x = evt.clientX;
+        pt.y = evt.clientY;
+        const ctm = layer.getScreenCTM();
+        if (!ctm) return null;
+        const p = pt.matrixTransform(ctm.inverse());
+        return { x: p.x, y: p.y };
+      }
+
+      function enterMode() {
+        if (!ensureNatural()) {
+          img.addEventListener('load', enterMode, { once: true });
+          return;
+        }
+        active = true;
+        points = [];
+        redraw();
+        layer.classList.add('is-active');
+        startBtn.hidden = true;
+        if (activeBox) activeBox.hidden = false;
+      }
+
+      function exitMode() {
+        active = false;
+        points = [];
+        clearMarks();
+        layer.classList.remove('is-active');
+        startBtn.hidden = false;
+        if (activeBox) activeBox.hidden = true;
+        if (countEl) countEl.textContent = '0';
+      }
+
+      startBtn.addEventListener('click', enterMode);
+      if (cancelBtn) cancelBtn.addEventListener('click', exitMode);
+      if (resetBtn) {
+        resetBtn.addEventListener('click', function () {
+          points = [];
+          redraw();
+        });
+      }
+
+      layer.addEventListener('click', function (evt) {
+        if (!active || points.length >= 4) return;   // 5点目以降は無視
+        const p = toImagePoint(evt);
+        if (!p) return;
+        // 端クリックの軽微なはみ出しを自然寸法内にクランプ。
+        p.x = Math.min(Math.max(p.x, 0), natW);
+        p.y = Math.min(Math.max(p.y, 0), natH);
+        points.push(p);
+        redraw();
+        if (points.length === 4) requestPreview();   // 4点目で素warpプレビューへ
+      });
+
+      // ===== 段2-c2-②：プレビュー→回転モーダル→確定→名刺詳細遷移 =====
+      // ①と同じクロージャ（points/exitMode 等）を共有する。
+      const controls = document.querySelector('.app-manual-crop-controls');
+      const previewUrl = controls ? controls.dataset.previewUrl : '';
+      const submitUrl = controls ? controls.dataset.submitUrl : '';
+      const opener = document.querySelector('.js-manual-crop-open');
+      const previewImg = document.querySelector('.js-manual-crop-preview');
+      const rotLeftBtn = document.querySelector('.js-manual-crop-rotate-left');
+      const rotRightBtn = document.querySelector('.js-manual-crop-rotate-right');
+      const confirmBtn = document.querySelector('.js-manual-crop-confirm');
+      const modalCancelBtn = document.querySelector('.js-manual-crop-modal-cancel');
+      let rotation = 0;   // {0,90,180,270} 時計回り
+
+      function pointsPayload() {
+        return points.map(function (p) { return [p.x, p.y]; });
+      }
+
+      function applyRotationStyle() {
+        if (previewImg) previewImg.style.transform = 'rotate(' + rotation + 'deg)';
+      }
+
+      // 4点そろったらサーバで素warpしてプレビュー画像を取得→モーダルを開く。
+      function requestPreview() {
+        if (!window.appAjax || !previewUrl || points.length !== 4) return;
+        window.appAjax.postJson(previewUrl, { points: pointsPayload() }).then(function (result) {
+          if (result.ok && result.data && result.data.image) {
+            rotation = 0;
+            if (previewImg) previewImg.src = result.data.image;
+            applyRotationStyle();
+            if (opener) opener.click();   // app.js openModal 経由（activeModal を正しく設定）
+          } else if (result.data && result.data.error) {
+            window.appAjax.showToastMessage(result.data.error);
+          }
+        });
+      }
+
+      if (rotLeftBtn) {
+        rotLeftBtn.addEventListener('click', function () {
+          rotation = (rotation + 270) % 360;   // 左90°
+          applyRotationStyle();
+        });
+      }
+      if (rotRightBtn) {
+        rotRightBtn.addEventListener('click', function () {
+          rotation = (rotation + 90) % 360;    // 右90°
+          applyRotationStyle();
+        });
+      }
+
+      if (confirmBtn) {
+        confirmBtn.addEventListener('click', function () {
+          if (!window.appAjax || !submitUrl) return;
+          confirmBtn.disabled = true;   // 二重投稿防止
+          window.appAjax
+            .postJson(submitUrl, { points: pointsPayload(), rotation: rotation })
+            .then(function (result) {
+              if (result.ok && result.data && result.data.card_detail_url) {
+                window.location = result.data.card_detail_url;   // 名刺詳細へ遷移
+              } else {
+                if (result.data && result.data.error) {
+                  window.appAjax.showToastMessage(result.data.error);
+                }
+                confirmBtn.disabled = false;   // 失敗時のみ再操作可
+              }
+            });
+        });
+      }
+
+      // モーダルのキャンセル：data-action="close-modal" で app.js がモーダルを閉じ、
+      // ここで①の点をクリアしてモードを抜ける。
+      if (modalCancelBtn) {
+        modalCancelBtn.addEventListener('click', function () {
+          rotation = 0;
+          exitMode();
+        });
+      }
+
+      // 段2-c2-① が取得済み4点を読めるよう最小の読み取り口を公開（保持はクロージャ）。
+      window.manualCrop = {
+        getPoints: function () { return points.slice(); },
+        isActive: function () { return active; }
+      };
     })();
   </script>
 {% endblock %}

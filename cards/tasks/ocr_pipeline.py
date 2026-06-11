@@ -266,6 +266,42 @@ def process_cardimage_with_ocr(business_card, ocr_service):
     if second_attempt_error is not None:
         error_msgs.append(f"2回目 OCR 失敗: {second_attempt_error}")
 
+    # ⑦〜⑨ ocr_result 判定 + BC 更新 + Contact 作成（判定は atomic 外・生成は BC 単位 atomic 内）
+    _judge_and_persist_ocr_result(
+        business_card,
+        adopted_raw_json,
+        orientation_detected,
+        raw_json_1,
+        raw_json_2,
+        error_msgs,
+    )
+
+    # ⑩ OriginalImage 集計遷移（別 atomic + select_for_update）
+    _update_original_image_status(original_image_id)
+
+
+def _judge_and_persist_ocr_result(
+    business_card,
+    adopted_raw_json,
+    orientation_detected,
+    raw_json_1,
+    raw_json_2,
+    error_msgs,
+):
+    """採用 raw_json を判定し BC 確定 + Contact 系生成までを行う。
+
+    [性質] 副作用あり（DB 書込）/ 判定（_determine_ocr_result）は atomic 外で行い、
+      BC の save と Person / Contact / ContactFieldConfidence / ContactSns の生成を
+      BC 単位の transaction.atomic() 内で行う（現状の atomic 境界を不変のまま括り出したもの）。
+    [入力]
+      business_card        : BusinessCard インスタンス
+      adopted_raw_json     : 採用 raw_json（raw_json_2 優先）
+      orientation_detected : 1 回目で検出した orientation（BC.orientation に保存）
+      raw_json_1           : 1 回目 OCR の生 JSON 全体（BC.raw_json_1 に保存）
+      raw_json_2           : 2 回目 OCR の生 JSON 全体 or None（BC.raw_json_2 に保存）
+      error_msgs           : 前段で積み上げた警告/エラーの list（判定エラーを追記し改行連結で保存）
+    [出力] None（副作用は DB に集約）
+    """
     # ⑦ ocr_result 判定
     ocr_result_value, contact_dict, confidence_map, judge_errors = (
         _determine_ocr_result(adopted_raw_json, orientation_detected)
@@ -308,9 +344,6 @@ def process_cardimage_with_ocr(business_card, ocr_service):
             # adopted_raw_json は採用 raw_json（raw_json_2 優先）、card_index=0。
             sns_entries = extract_sns_entries(adopted_raw_json, 0)
             create_sns_records_for_contact(contact, sns_entries)
-
-    # ⑩ OriginalImage 集計遷移（別 atomic + select_for_update）
-    _update_original_image_status(original_image_id)
 
 
 def _finalize_failed(business_card, *, ocr_result, error_text):

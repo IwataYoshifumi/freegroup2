@@ -10,12 +10,16 @@ OCR は呼ばない（OCR cron 側で別途実行）。Contact / Person も作�
 
 import logging
 import os
+from typing import NamedTuple
 
 from django.conf import settings
 from django.db import transaction
 
 from cards.models import BusinessCard, OriginalImage
-from cards.services.detectors.opencv_detector import detect_cards_with_debug
+from cards.services.detectors.opencv_detector import (
+    detect_cards_with_debug,
+    results_from_debug_result,
+)
 from cards.services.opencv_debug_cache import save_debug_data
 from cards.services.osd import (
     apply_upright,
@@ -80,9 +84,10 @@ class Run_Crop_Cards_From_OriginalImage:
 
         try:
             debug_result = detect_cards_with_debug(self.original_image.image_file.path)
-            attempts = debug_result.get("attempts") or []
-            last_attempt = attempts[-1] if attempts else {}
-            detections = last_attempt.get("results") or []
+            # rev2/rev3：最終検出結果は通常・反転を横断統合した integrated_results。
+            # 在り処を知る唯一の窓口 results_from_debug_result() を通す（attempts[-1].results を
+            # 直読みすると反転 attempt だけを拾い件数が落ちる移植漏れ。43739da 由来）。
+            detections = results_from_debug_result(debug_result)
             self.original_image.detected_count = len(detections)
 
             try:
@@ -183,7 +188,9 @@ class Run_Crop_Cards_From_OriginalImage:
 
         warp と save の間で OSD 正立化＋記録を行い（_build_osd_record）、正立画像を
         card_image として保存し、osd_json を BC に書き込む。OSD は内部で全例外を握りつぶす
-        ため、OSD が失敗しても切り出しは完走する。
+        ため、OSD が失敗しても切り出しは完走する。save→BC 作成自体は
+        save_and_create_business_card に委譲し、本メソッドは created_count /
+        error_messages（インスタンス状態）の更新のみを担う。
         失敗パターン：
           - 画像書き込み失敗 → BC を card_image=None で作成、error_message に追記
           - BC 作成失敗（書き込み済み画像あり）→ ファイル削除、error_message に追記
@@ -191,57 +198,94 @@ class Run_Crop_Cards_From_OriginalImage:
         # warp と save の間：OSD 正立化＋osd_json 組み立て（例外は内部で握りつぶす）。
         upright_image, osd_json = self._build_osd_record(warped_image, card_index)
 
-        # 正立化後の画像を card_image として保存する（結線の主目的）。
-        crop_success, final_rel, crop_error = save_card_image(
-            upright_image, str(self.original_image.id), card_index,
+        # 正立化後の画像を保存し BC を作成する（回転は OSD 側で適用済み・本経路は回転しない）。
+        result = save_and_create_business_card(
+            upright_image, self.original_image, card_index, osd_json=osd_json,
         )
 
-        if not crop_success:
+        if not result.crop_success:
             self.error_messages.append(
-                f"card_index={card_index}: 切り抜き失敗 ({crop_error})"
+                f"card_index={card_index}: 切り抜き失敗 ({result.crop_error})"
             )
-            try:
-                with transaction.atomic():
-                    BusinessCard.objects.create(
-                        original_image=self.original_image,
-                        card_image=None,
-                        card_index=card_index,
-                        ocr_status=BusinessCard.OcrStatus.PENDING,
-                        osd_json=osd_json,
-                    )
-                self.created_count += 1
-            except Exception as e:
-                self.error_messages.append(
-                    f"card_index={card_index}: DB保存失敗 ({type(e).__name__}: {e})"
-                )
-            return
+        if result.business_card is not None:
+            self.created_count += 1
+        elif result.db_error is not None:
+            self.error_messages.append(
+                f"card_index={card_index}: DB保存失敗 ({result.db_error})"
+            )
 
+
+class SaveAndCreateResult(NamedTuple):
+    """save_and_create_business_card の結果。
+
+    呼び出し側が created_count / error_messages を更新するための情報を返す。
+    [business_card] 作成された BusinessCard。BC 作成自体が失敗したときのみ None。
+    [crop_success]  画像保存（save_card_image）が成功したか。
+    [crop_error]    画像保存失敗の理由（成功時は ""）。
+    [db_error]      BC 作成例外の "型名: メッセージ"（成功時は None）。
+    """
+
+    business_card: BusinessCard | None
+    crop_success: bool
+    crop_error: str
+    db_error: str | None
+
+
+def save_and_create_business_card(final_image, original_image, card_index, osd_json=None):
+    """回転適用済みの最終画像を card_image として保存し、BusinessCard を作成する。
+
+    [性質] 副作用あり（ファイル書き込み・DB 書き込み・失敗時ファイル削除）
+    [入力] final_image:    保存する最終画像（回転は呼び出し側で適用済み・本関数は回転しない）
+           original_image: OriginalImage インスタンス（.id を保存パスと FK に使う）
+           card_index:     int
+           osd_json:       dict | None（BC.osd_json にそのまま格納）
+    [出力] SaveAndCreateResult（created_count / error_messages の更新は呼び出し側の責務）
+    [方針] 画像保存失敗時は card_image=None で BC を作成し、BC 作成が保存済み画像を残して
+           失敗したときは書き込んだ画像を削除する（ロールバック）。
+    """
+    crop_success, final_rel, crop_error = save_card_image(
+        final_image, str(original_image.id), card_index,
+    )
+
+    if not crop_success:
         try:
             with transaction.atomic():
-                BusinessCard.objects.create(
-                    original_image=self.original_image,
-                    card_image=final_rel,
+                business_card = BusinessCard.objects.create(
+                    original_image=original_image,
+                    card_image=None,
                     card_index=card_index,
                     ocr_status=BusinessCard.OcrStatus.PENDING,
                     osd_json=osd_json,
                 )
-            self.created_count += 1
+            return SaveAndCreateResult(business_card, False, crop_error, None)
         except Exception as e:
-            self.error_messages.append(
-                f"card_index={card_index}: DB保存失敗 ({type(e).__name__}: {e})"
-            )
-            self._unlink_card_image(final_rel)
+            return SaveAndCreateResult(None, False, crop_error, f"{type(e).__name__}: {e}")
 
-    def _unlink_card_image(self, relative_path):
-        """[性質] 副作用あり（ファイル削除）/ ロールバック時のクリーンアップ。"""
-        if not relative_path:
-            return
-        abs_path = os.path.join(settings.MEDIA_ROOT, relative_path)
-        try:
-            os.unlink(abs_path)
-        except FileNotFoundError:
-            pass
-        except OSError as e:
-            logger.warning(
-                "card_image cleanup failed for %s: %s", abs_path, e,
+    try:
+        with transaction.atomic():
+            business_card = BusinessCard.objects.create(
+                original_image=original_image,
+                card_image=final_rel,
+                card_index=card_index,
+                ocr_status=BusinessCard.OcrStatus.PENDING,
+                osd_json=osd_json,
             )
+        return SaveAndCreateResult(business_card, True, crop_error, None)
+    except Exception as e:
+        _unlink_card_image(final_rel)
+        return SaveAndCreateResult(None, True, crop_error, f"{type(e).__name__}: {e}")
+
+
+def _unlink_card_image(relative_path):
+    """[性質] 副作用あり（ファイル削除）/ ロールバック時のクリーンアップ。"""
+    if not relative_path:
+        return
+    abs_path = os.path.join(settings.MEDIA_ROOT, relative_path)
+    try:
+        os.unlink(abs_path)
+    except FileNotFoundError:
+        pass
+    except OSError as e:
+        logger.warning(
+            "card_image cleanup failed for %s: %s", abs_path, e,
+        )

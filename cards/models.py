@@ -246,6 +246,22 @@ class BusinessCard(models.Model):
         """
         return self.card_image.url if self.card_image else ""
 
+    def get_card_image_url_busted(self):
+        """キャッシュバスティング付き card_image URL を返す（v1.7 回転焼き直し用）。
+
+        [性質] 純関数（DB 操作なし、card_image.url に updated_at ベースのクエリを付すだけ）
+        [入力] なし
+        [出力] str（"<card_image.url>?v=<updated_at の epoch 秒>"、空なら空文字列）
+
+        回転焼き直し（CardRotateView）が card_image を同一パスへ上書きするため、ブラウザ／
+        プロキシのキャッシュで旧画像が残らないよう更新時刻ベースのクエリを付与する。テンプレートの
+        `card_image.url` 直貼り箇所はこれに置き換える。
+        """
+        if not self.card_image:
+            return ""
+        version = int(self.updated_at.timestamp()) if self.updated_at else 0
+        return f"{self.card_image.url}?v={version}"
+
 
 def _debug_mask_upload_path(instance, filename):
     """[性質] 純関数 / DebugMask の ImageField の保存先を組み立てる。

@@ -42,6 +42,19 @@ _ADAPTIVE_C = 10
 _ASPECT_MIN = 1.52
 _ASPECT_MAX = 1.8
 
+# 面積比の固定下限（候補面積 ÷ 画像全体面積）。これ未満は小片ゴミ（文字ブロック・ロゴ・
+# 帯状の小片）として棄却する。絶対px下限 _DEFAULT_MIN_CARD_AREA_PX とは別軸の、画像解像度に
+# 依存しない相対下限（高解像度画像では絶対8000px²が実質無効になるのを補う）。img7(56aa7858)の
+# 177×102＝面積比0.6%の小片を落とす目的で 1.0% に設定。分母はベースライン測定と同じ画像全体面積。
+_AREA_RATIO_MIN = 0.01
+
+# 長軸占有率の上限（候補の長辺 ÷ 画像の対応する辺）。これ以上は画像全域を覆う巨大ブロブ
+# （机ごと全体を 1 枚化した候補等）として棄却する。横長候補は長辺÷画像幅、縦長候補は
+# 長辺÷画像高さで測る（前回 img7 番号0＝縦辺2047/2048＝100% を算出したのと同基準）。
+# img7(56aa7858) の番号0（面積比86.3%・長軸占有率100%）を落とす目的で 90% に設定。
+# 名刺2枚くっつき（長軸占有率47%）は対象外（この閾値では落ちない）。
+_LONG_AXIS_OCCUPANCY_MAX = 0.90
+
 # ── 未確定パラメータ（settings から読む・仮値・評価基準で詰める） ──
 # rev2 §1.2.4（絶対下限）／§1.4・§4.2（統合の IoU・中心距離）参照。ハードコードせず
 # settings 値を優先し、settings 未設定時のみ下記フォールバック（= settings の仮値と同値）。
@@ -425,6 +438,24 @@ def _run_attempt(
     }
 
 
+def _long_axis_occupancy(rect, image_w: int, image_h: int) -> float:
+    """[性質] 純関数 / 候補の長辺が画像の対応辺をどれだけ占めるかの比率を返す（論点2）。
+
+    minAreaRect の boxPoints から長辺ベクトルを取り、横向き（|dx|≧|dy|）なら画像幅、
+    縦向きなら画像高さで長辺長を割る。angle 規約に依存しないため版差に強い。
+    [入力] rect: cv2.minAreaRect の戻り、image_w/image_h: 画像の幅・高さ[px]
+    [出力] float（長軸占有率。0〜。画像辺が 0 のときは 0.0）
+    """
+    box = cv2.boxPoints(rect)
+    e0 = box[1] - box[0]
+    e1 = box[2] - box[1]
+    len0 = float((e0[0] ** 2 + e0[1] ** 2) ** 0.5)
+    len1 = float((e1[0] ** 2 + e1[1] ** 2) ** 0.5)
+    long_vec, long_len = (e0, len0) if len0 >= len1 else (e1, len1)
+    denom = image_w if abs(long_vec[0]) >= abs(long_vec[1]) else image_h
+    return (long_len / denom) if denom > 0 else 0.0
+
+
 def _extract_candidates_from_mask(mask_closed: np.ndarray, image_area: int) -> tuple:
     """[性質] 純関数 / クローズ済み 1 マスクから候補を抽出し、フィルタ判定を全件記録する。
 
@@ -440,6 +471,7 @@ def _extract_candidates_from_mask(mask_closed: np.ndarray, image_area: int) -> t
         mask_closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
     )
 
+    image_h, image_w = mask_closed.shape[:2]  # 長軸占有率の分母（画像辺）に使う
     min_area = _min_card_area_px()
     candidates_filter: list = []
     passed: list = []
@@ -450,6 +482,12 @@ def _extract_candidates_from_mask(mask_closed: np.ndarray, image_area: int) -> t
         hull = cv2.convexHull(cnt)
         rect = cv2.minAreaRect(hull)
         (cx, cy), (rw, rh), angle = rect
+        # 候補面積比は minAreaRect の矩形面積 ÷ 画像全体面積（＝ベースライン測定の面積%と同基準）。
+        # contourArea(area) はエッジ輪郭だと矩形より大幅に小さく出るため、面積比下限には使わない。
+        rect_area_ratio = ((rw * rh) / image_area) if image_area > 0 else 0.0
+        # 長軸占有率（論点2）：長辺が横向きなら画像幅、縦向きなら画像高さで割る。向きは
+        # boxPoints の長辺ベクトルで判定（minAreaRect の angle 規約差に依存しないため）。
+        long_axis_occupancy = _long_axis_occupancy(rect, image_w, image_h)
 
         passed_flag = False
         reject_reason = ""
@@ -460,6 +498,12 @@ def _extract_candidates_from_mask(mask_closed: np.ndarray, image_area: int) -> t
         elif area < min_area:
             # OCR 不能な極小候補を落とす緩い絶対下限のみ（採否の主基準ではない・rev2 §1.2.4）
             reject_reason = "too_small"
+        elif rect_area_ratio < _AREA_RATIO_MIN:
+            # 画像全体に対し小さすぎる小片（文字ブロック・ロゴ等）を落とす固定下限（論点1）
+            reject_reason = "area_ratio_too_small"
+        elif long_axis_occupancy >= _LONG_AXIS_OCCUPANCY_MAX:
+            # 画像全域を覆う巨大ブロブ（机ごと全体を1枚化した候補等）を落とす上限（論点2）
+            reject_reason = "long_axis_too_large"
         else:
             aspect_ratio = max(rw, rh) / min(rw, rh)
             if not (_ASPECT_MIN <= aspect_ratio <= _ASPECT_MAX):
@@ -668,6 +712,29 @@ def _warp_card(np_rgb: np.ndarray, src_pts: np.ndarray) -> tuple[np.ndarray | No
     M = cv2.getPerspectiveTransform(src_pts, dst_pts)
     warped = cv2.warpPerspective(np_rgb, M, (w, h), flags=cv2.INTER_LANCZOS4)
     return warped, w, h
+
+
+def warp_card_from_points(np_rgb: np.ndarray, points) -> tuple[Image.Image, dict] | None:
+    """[性質] 純関数 / 任意順の4点と元画像 np_rgb から正対化済み画像と整列 polygon を返す。
+
+    手動切り出し経路の唯一の warp 入口。private な _sort_corners / _warp_card を内部で
+    呼び、View から直接叩かせない（4点の整列規約・最小サイズ判定をこの関数に閉じ込める）。
+
+    [入力] np_rgb: 元画像全体の np.ndarray（RGB, shape (H, W, 3)）
+           points: 4 点の座標（任意順・元画像ピクセル座標）。[[x, y], ...] 相当の
+                   shape (4, 2) に変換可能な list / tuple / np.ndarray。
+    [出力] (warped_image, polygon) のタプル、または None。
+             warped_image: 透視変換済み PIL.Image（向き補正なし）
+             polygon:      _sort_corners 整列後（TL/TR/BR/BL 順）の polygon dict（{x, y}）。
+                           自動枠（_pts_to_polygon）と同一形式。
+           サイズ基準未満（_MIN_WARP_WIDTH / _MIN_WARP_HEIGHT）で切り出せないときは None。
+    """
+    src_pts = np.array(points, dtype=np.float32)
+    sorted_pts = _sort_corners(src_pts)
+    warped_rgb, _w, _h = _warp_card(np_rgb, sorted_pts)
+    if warped_rgb is None:
+        return None
+    return Image.fromarray(warped_rgb), _pts_to_polygon(sorted_pts)
 
 
 def _expand_polygon(

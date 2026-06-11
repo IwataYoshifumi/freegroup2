@@ -1827,6 +1827,124 @@ form:has(.js-decision-additional_role:checked) .app-merge-survivor__label--prima
   stroke: rgba(120, 0, 30, 0.85);
 }
 
+/* 手動切り出し枠（debug_json.manual_results 由来）= 青。自動枠（緑）/giant（赤）と区別する。 */
+.app-debug-polygon--manual {
+  fill: rgba(37, 99, 235, 0.18);
+  stroke: rgb(37, 99, 235);
+  stroke-width: 4;
+}
+
+.app-debug-polygon__label--manual {
+  fill: #dbeafe;
+  stroke: rgba(12, 36, 97, 0.85);
+}
+
+/* 手動切り出しクリック面（段2-c2）。既存枠SVGの上に重ねる別レイヤ。
+   OFF時は pointer-events:none で通常操作を邪魔しない。ON時のみクリックを受ける。 */
+.app-manual-crop-layer {
+  pointer-events: none;
+}
+.app-manual-crop-layer.is-active {
+  pointer-events: auto;
+  cursor: crosshair;
+}
+
+/* クリックした四隅マーカー（橙＝自動の緑/手動枠の青と区別）。 */
+.app-manual-crop__marker {
+  fill: rgba(234, 88, 12, 0.9);
+  stroke: #ffffff;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+/* クリック順に結ぶ確定ポリゴン（橙・破線で「作業中」を示す）。 */
+.app-manual-crop__polygon {
+  fill: rgba(234, 88, 12, 0.12);
+  stroke: rgb(234, 88, 12);
+  stroke-width: 3;
+  stroke-dasharray: 10 6;
+  vector-effect: non-scaling-stroke;
+}
+
+/* 手動切り出し操作群（元画像カードの外・直前に左寄せ配置）。 */
+.app-manual-crop-controls {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: var(--app-space-md);
+}
+.app-manual-crop-hint {
+  font-size: 13px;
+  color: #475569;
+}
+
+/* 段2-c2-②：回転モーダルのプレビュー画像。90/270度回転で縦長化してもはみ出さないよう
+   中央寄せ＋max制約。transform:rotate はレイアウト箱を変えないため overflow:hidden で吸収。 */
+.app-manual-crop-preview-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 60vh;
+  overflow: hidden;
+}
+.app-manual-crop-preview {
+  max-width: 80%;
+  max-height: 60vh;
+  transition: transform 0.15s ease;
+}
+.app-manual-crop-modal-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+/* セクション 3: クローズ後マスクへ候補矩形を重畳（マスク別・描画対象=採用/惜しい棄却のみ）。 */
+.app-mask-overlay {
+  position: relative;
+  display: inline-block;
+  max-width: 320px;
+  width: 100%;
+  line-height: 0;
+}
+
+.app-mask-overlay__svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+/* 採用=緑（基底 .app-debug-polygon を流用）／惜しい棄却=赤。基底の後に定義して上書きする。 */
+.app-debug-polygon--passed {
+  fill: rgba(34, 197, 94, 0.18);
+  stroke: rgb(34, 197, 94);
+}
+
+.app-debug-polygon--near {
+  fill: rgba(244, 63, 94, 0.16);
+  stroke: rgb(244, 63, 94);
+  stroke-width: 3;
+}
+
+/* マスクサムネ用ラベル（元画像用 120px は過大なため縮小）。 */
+.app-debug-polygon__label--mask {
+  font-size: 56px;
+  stroke-width: 1.5;
+}
+
+/* 凡例スウォッチ（緑=採用 / 赤=惜しい棄却）。 */
+.app-mask-legend {
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+.app-mask-legend--passed { color: #166534; background: rgba(34, 197, 94, 0.18); }
+.app-mask-legend--near { color: #991b1b; background: rgba(244, 63, 94, 0.16); }
+
 /* 検出失敗警告ストライプ（セクション 1 の上に表示） */
 .app-warning-stripe {
   background: #fee2e2;

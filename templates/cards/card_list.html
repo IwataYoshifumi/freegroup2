@@ -101,12 +101,13 @@
                   {% if card.card_image %}
                     <button type="button" data-action="open-modal" data-target="card-img-modal-{{ card.id }}"
                             style="background:none;border:none;padding:0;cursor:zoom-in;flex-shrink:0;">
-                      <img src="{{ card.card_image.url }}" alt="名刺" style="max-height:96px;max-width:200px;border-radius:4px;display:block;">
+                      <img src="{{ card.get_card_image_url_busted }}" alt="名刺" style="max-height:96px;max-width:200px;border-radius:4px;display:block;">
                     </button>
                   {% else %}
                     <span class="app-muted">画像なし</span>
                   {% endif %}
-                  <div style="display:flex;flex-direction:column;gap:4px;">
+                  {# align-items:flex-start で各バッジをコンテンツ幅 pill に揃え、長文OSD理由は省略で行高を揃える #}
+                  <div style="display:flex;flex-direction:column;align-items:flex-start;gap:4px;min-width:0;max-width:200px;">
                     {% if card.orientation != "normal" %}
                       <span class="app-status-badge app-status-badge--warning">
                         {% if card.orientation == "rotate_90_cw" %}右90°
@@ -115,6 +116,10 @@
                       </span>
                     {% endif %}
                     {% ocr_result_badge card %}
+                    {# OSD 向き判定のデバッグ表示（DEBUG時のみ）。一覧は理由長文を出さずバッジのみ（§D） #}
+                    {% if debug %}
+                      {% osd_debug_badge card show_reason=False %}
+                    {% endif %}
                   </div>
                 </div>
               </td>
@@ -214,7 +219,7 @@
           <button type="button" class="app-btn--icon" data-action="close-modal" aria-label="閉じる">×</button>
         </div>
         <div class="app-modal__body" style="text-align:center;">
-          <img src="{{ card.card_image.url }}" alt="名刺画像" style="max-width:100%;max-height:75vh;border-radius:4px;">
+          <img src="{{ card.get_card_image_url_busted }}" alt="名刺画像" style="max-width:100%;max-height:75vh;border-radius:4px;">
         </div>
       </div>
     </div>
