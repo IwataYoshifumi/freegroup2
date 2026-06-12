@@ -17,9 +17,9 @@ from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 
 from cards.models import BusinessCard
+from cards.tasks.ocr_factory import get_ocr_backend
 from cards.tasks.ocr_pipeline import process_cardimage_with_ocr
 from cards.tasks.ocr_recovery import reset_bc_to_pending
-from cards.tasks.ocr_service import OcrService
 
 logger = logging.getLogger(__name__)
 
@@ -80,8 +80,9 @@ class Command(BaseCommand):
 
         self.stdout.write(f"process_ocr: {len(target_ids)} 件を試行")
 
-        # OcrService は 1 起動 = 1 インスタンス（プロンプト/スキーマキャッシュ共有）
-        ocr_service = OcrService()
+        # OCR バックエンドは 1 起動 = 1 インスタンス（プロンプト/スキーマキャッシュ共有）。
+        # settings.OCR_BACKEND で API（OcrService）/ ワー君JSON（FileOcrBackend）を切替。
+        ocr_service = get_ocr_backend()
 
         processed = 0
         skipped = 0

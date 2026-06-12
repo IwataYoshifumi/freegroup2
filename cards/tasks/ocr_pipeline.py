@@ -25,6 +25,8 @@ from PIL import Image, ImageOps
 
 from cards.models import BusinessCard, OriginalImage
 from cards.services.has_minimum_info import has_minimum_info
+from cards.tasks.ocr_exceptions import OcrSourceNotReady
+from cards.tasks.ocr_recovery import reset_bc_to_pending
 from contacts.services.json_parser import (
     calc_orientation_adjusted_confidence_map,
     create_sns_records_for_contact,
@@ -74,13 +76,15 @@ _ROTATE_ANGLE_TO_CORRECT = {
 }
 
 
-def extract_carddata_via_ocr(card_image, ocr_service):
+def extract_carddata_via_ocr(card_image, ocr_service, business_card=None):
     """1 枚の card_image に対して 1〜2 回 OCR を実行し結果を辞書で返す。
 
     [性質] 副作用あり（API 呼び出し / DB 操作なし・ファイル書き込みなし）
     [入力]
-      card_image  : PIL.Image.Image（粗切り抜き済み・EXIF 補正済み）
-      ocr_service : OcrService インスタンス（呼び出し元で 1 cron = 1 インスタンス使い回し前提）
+      card_image    : PIL.Image.Image（粗切り抜き済み・EXIF 補正済み）
+      ocr_service   : OCR バックエンド（run_ocr を持つ。1 cron = 1 インスタンス使い回し前提）
+      business_card : BusinessCard。run_ocr に貫通させる（FileOcrBackend がファイル特定に使う。
+                      OcrService は無視）。API 経路では None でもよい
     [出力] dict:
       {
         "raw_json_1": dict,                     # 1回目の生 JSON 全体 {"cards": [...], "api_response": {...}}
@@ -96,7 +100,7 @@ def extract_carddata_via_ocr(card_image, ocr_service):
       2 回目 OCR の例外は捕捉し、second_attempt_error にメッセージを格納して return する
       （「2 回目失敗時は 1 回目結果を採用」の確定方針）。
     """
-    raw_json_1 = ocr_service.run_ocr(card_image)
+    raw_json_1 = ocr_service.run_ocr(card_image, business_card=business_card)
 
     orientation = _extract_orientation(raw_json_1)
 
@@ -112,7 +116,7 @@ def extract_carddata_via_ocr(card_image, ocr_service):
     corrected = _rotate_card_image(card_image, orientation)
 
     try:
-        raw_json_2 = ocr_service.run_ocr(corrected)
+        raw_json_2 = ocr_service.run_ocr(corrected, business_card=business_card)
         second_attempt_error = None
     except Exception as e:
         raw_json_2 = None
@@ -229,7 +233,25 @@ def process_cardimage_with_ocr(business_card, ocr_service):
 
     # ③ OCR 実行（1〜2 回）
     try:
-        result = extract_carddata_via_ocr(card_image, ocr_service)
+        result = extract_carddata_via_ocr(
+            card_image, ocr_service, business_card=business_card
+        )
+    except OcrSourceNotReady as e:
+        # ワー君JSON 未着：エラーにせず pending に戻す（error_message を汚さない、ログのみ）。
+        # claim 済みで processing 化されているため reset_bc_to_pending で pending へ。
+        # リトライ上限は設けない（次回 cron が再び拾う）。
+        logger.info(
+            "process_cardimage_with_ocr: OCR source not ready for BC %s: %s",
+            business_card.id, e,
+        )
+        reset_bc_to_pending(
+            business_card,
+            expected_statuses=(
+                BusinessCard.OcrStatus.PROCESSING,
+                BusinessCard.OcrStatus.PENDING,
+            ),
+        )
+        return
     except Exception as e:
         logger.warning(
             "process_cardimage_with_ocr: OCR failed for BC %s: %s: %s",

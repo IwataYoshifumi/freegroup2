@@ -39,11 +39,13 @@ class OcrService:
         self._tool_input_schema_cache = None
         self._prompt_cache = None
 
-    def run_ocr(self, image: Image.Image) -> dict:
+    def run_ocr(self, image: Image.Image, business_card=None) -> dict:
         """粗切り抜き PIL Image を Claude API に送信し、OCR 結果（dict）を返す。
 
         [性質] 副作用あり（API 呼び出し）
         [入力] image: 粗切り抜き済みの PIL Image オブジェクト（EXIF 補正済みであること）
+               business_card: 共通口（FileOcrBackend）と引数を揃えるための引数。
+                              API バックエンドでは使用しない（受け取って無視する）。
         [出力] dict: {"cards": [...], "api_response": {"model": ..., "stop_reason": ..., "usage": {...}}}
         [例外] OcrApiError: API 通信失敗、応答抽出失敗、設定不正のいずれか
         """

@@ -34,7 +34,7 @@ SECRET_KEY = os.getenv(
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv("DEBUG", "True").lower() in ("1", "true", "yes", "on")
 
-ALLOWED_HOSTS = ["127.0.0.1", "localhost", "192.168.3.135"]
+ALLOWED_HOSTS = ["127.0.0.1", "localhost", "192.168.3.135", "192.168.1.135"]
 
 INTERNAL_IPS = ["127.0.0.1", "192.168.3.135"]
 
@@ -148,6 +148,10 @@ MEDIA_ROOT = BASE_DIR / "media"
 
 # Card detector backend ("opencv" | "ai")
 CARD_DETECTOR_BACKEND = os.getenv("CARD_DETECTOR_BACKEND", "opencv")
+
+# OCR backend ("claude_sonnet_4_6" | "worker_cowork")
+# claude_sonnet_4_6: Claude API（OcrService）。worker_cowork: media/ocr_json の JSON を読む。
+OCR_BACKEND = os.getenv("OCR_BACKEND", "claude_sonnet_4_6")
 
 # OCR pipeline: processing 状態が stuck と判断するまでの分数（stuck sweeper 用）
 OCR_STUCK_THRESHOLD_MINUTES = 30
