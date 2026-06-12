@@ -129,6 +129,59 @@ class PersonEditorViewPersonTests(TestCase):
         self.assertIn(("persons", "view_person"), _group_perms("person_editor"))
 
 
+class PersonAdminViewPersonTests(TestCase):
+    """0009：person_admin に persons.view_person が付与されていること。
+
+    person_admin のみ保有ユーザーが /persons/（PersonListView / PersonDetailView、
+    要求 persons.view_person）で 403 になっていた穴の回帰防止。0008 で person_editor は
+    塞いだが person_admin が見落とされていた。
+    """
+
+    def test_person_admin_has_view_person(self):
+        self.assertIn(("persons", "view_person"), _group_perms("person_admin"))
+
+    def test_person_admin_keeps_existing_custom_perms(self):
+        # 既存の高権限（merge/undo/link）が 0009 で失われていないこと。
+        perms = _group_perms("person_admin")
+        self.assertIn(("persons", "merge_person"), perms)
+        self.assertIn(("persons", "undo_merge"), perms)
+        self.assertIn(("persons", "link_user"), perms)
+
+
+class AdminGroupsHavePrimaryViewPermissionTests(TestCase):
+    """再発防止：各 *_admin グループは自アプリの一次一覧 View 要求権限（view_*）を持つ。
+
+    Phase 7 で各一次一覧 View に付与した permission_required（下記対応表）を、グループ
+    初期データが満たしていることをグループ単位で明示アサートする。view_* の張替漏れ
+    （0008 が person_editor は直し person_admin を見落とした類のバグ）を構造的に検出する。
+
+    対応表（グループ → 一次一覧 View が要求する view 権限）:
+      card_admin     → cards.view_businesscard   (cards 一覧 View)
+      contact_admin  → contacts.view_contact     (contacts 一覧 View)
+      person_admin   → persons.view_person       (PersonListView)
+      tag_admin      → tags.view_tag             (tags 一覧 View)
+      campaign_admin → mailings.view_campaign     (CampaignListView)
+    """
+
+    REQUIRED_PRIMARY_VIEW_PERM = {
+        "card_admin": ("cards", "view_businesscard"),
+        "contact_admin": ("contacts", "view_contact"),
+        "person_admin": ("persons", "view_person"),
+        "tag_admin": ("tags", "view_tag"),
+        "campaign_admin": ("mailings", "view_campaign"),
+    }
+
+    def test_each_admin_group_has_its_primary_view_permission(self):
+        for group_name, required in self.REQUIRED_PRIMARY_VIEW_PERM.items():
+            with self.subTest(group=group_name):
+                self.assertIn(
+                    required,
+                    _group_perms(group_name),
+                    f"{group_name} が一次一覧 View 要求権限 "
+                    f"{required[0]}.{required[1]} を持っていない（403 の穴）",
+                )
+
+
 class RoleDefaultGroupsTests(TestCase):
     """default_groups の最終形。
 
