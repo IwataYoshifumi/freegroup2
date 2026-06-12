@@ -198,12 +198,37 @@ def _render_custom_tags_production(
     from mailings.models import TrackingLink as TL
     from mailings.models import UnsubscribeLink as UL
 
+    # tracked_link の dedup（宿題T-2、同根対称修正）：同一 (campaign, person, original_url)
+    # は 1 つの TrackingLink を使い回す。original_url ごとに build 済みリンクを引き、初出時
+    # のみ build + append する。UniqueConstraint(campaign, person, original_url) と整合し、
+    # 本文に同一 URL の tracked_link を複数書いても、本文に焼くトークン＝永続化トークンに
+    # なる（重複 build → bulk_create で 2 件目が落ちて本文トークンが宙に浮く事故の防止）。
+    tracking_by_url = {}
+
+    def _get_tracking_link(url):
+        link = tracking_by_url.get(url)
+        if link is None:
+            link = TL.build(campaign=campaign, person=person, original_url=url)
+            tracking_by_url[url] = link
+            tracking_links.append(link)
+        return link
+
+    # unsubscribe の dedup（宿題T-1）：同一 (campaign, person) は本文に
+    # {% unsubscribe_link %} が何個あっても（with_text / bare 混在でも）単一の
+    # UnsubscribeLink（単一トークン）を使い回す。bare 経路にしか無かった既存 dedup を
+    # with_text 経路にも広げて対称化する。UniqueConstraint(campaign, person) と整合。
+    def _get_unsubscribe_link():
+        if unsubscribe_links:
+            return unsubscribe_links[0]
+        link = UL.build(campaign=campaign, person=person, target_email=to_email)
+        unsubscribe_links.append(link)
+        return link
+
     # tracked_link 形態 2 を先に処理（&quot;URL&quot; 付きが形態 1 にもマッチしてしまうため順序重要）。
     def _replace_tracked_with_url(match):
         url = html.unescape(match.group(1))  # &amp;→&, &quot;→" を生 URL に戻す
         text = match.group(2)  # ② でエスケープ済みのまま <a> 内に残す
-        link = TL.build(campaign=campaign, person=person, original_url=url)
-        tracking_links.append(link)
+        link = _get_tracking_link(url)
         return f'<a href="{_track_url(link.token)}">{text}</a>'
 
     body = _RE_TRACKED_LINK_WITH_URL.sub(_replace_tracked_with_url, body)
@@ -211,8 +236,7 @@ def _render_custom_tags_production(
     def _replace_tracked_bare(match):
         url_escaped = match.group(1).strip()
         url = html.unescape(url_escaped)
-        link = TL.build(campaign=campaign, person=person, original_url=url)
-        tracking_links.append(link)
+        link = _get_tracking_link(url)
         # リンクテキスト表示は ② エスケープ済み文字列をそのまま使う（二重エスケープ回避）
         return f'<a href="{_track_url(link.token)}">{url_escaped}</a>'
 
@@ -221,20 +245,13 @@ def _render_custom_tags_production(
     # 形態 2（テキスト指定）を先に処理して、形態 1（単独タグ）が拾ってしまわないようにする。
     def _replace_unsubscribe_with_text(match):
         text = match.group(1)
-        link = UL.build(campaign=campaign, person=person, target_email=to_email)
-        unsubscribe_links.append(link)
+        link = _get_unsubscribe_link()
         return f'<a href="{_unsubscribe_url(link.token)}">{text}</a>'
 
     body = _RE_UNSUBSCRIBE_LINK_WITH_TEXT.sub(_replace_unsubscribe_with_text, body)
 
     def _replace_unsubscribe_bare(_match):
-        # 同一キャンペーン × Person で複数の {% unsubscribe_link %} が現れた場合も
-        # 1 つの UL レコードに集約（UniqueConstraint(campaign, person) と整合）。
-        if unsubscribe_links:
-            link = unsubscribe_links[0]
-        else:
-            link = UL.build(campaign=campaign, person=person, target_email=to_email)
-            unsubscribe_links.append(link)
+        link = _get_unsubscribe_link()
         return f'<a href="{_unsubscribe_url(link.token)}">{UNSUBSCRIBE_DEFAULT_LABEL}</a>'
 
     body = _RE_UNSUBSCRIBE_LINK_BARE.sub(_replace_unsubscribe_bare, body)

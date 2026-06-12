@@ -171,18 +171,18 @@ def send_one_recipient(campaign: Campaign, history: DeliveryHistory) -> bool:
             return False
 
         # 成功：build 済み TrackingLink/UnsubscribeLink を永続化（§7.4.3.3）。
+        # 宿題T-3：ignore_conflicts=True を外す。prepare 側の dedup（宿題T-1/T-2）で
+        # 同一 (campaign, person[, original_url]) の重複 build は発生しなくなったため、
+        # 同一送信内での制約衝突は設計上起きない。衝突が起きた場合は無言破棄せず
+        # IntegrityError で顕在化させる（本文に焼いたトークンが永続化されない事故の再発防止）。
         if ctx.tracking_links:
             from mailings.models import TrackingLink
 
-            TrackingLink.objects.bulk_create(
-                list(ctx.tracking_links), ignore_conflicts=True
-            )
+            TrackingLink.objects.bulk_create(list(ctx.tracking_links))
         if ctx.unsubscribe_links:
             from mailings.models import UnsubscribeLink
 
-            UnsubscribeLink.objects.bulk_create(
-                list(ctx.unsubscribe_links), ignore_conflicts=True
-            )
+            UnsubscribeLink.objects.bulk_create(list(ctx.unsubscribe_links))
 
         history.status = DeliveryHistory.Status.SENT
         history.sent_at = timezone.now()

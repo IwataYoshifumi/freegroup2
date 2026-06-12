@@ -4466,6 +4466,159 @@ class SendOneRecipientTests(_Phase3TestBase):
         self.assertTrue(DeliveryHistory.is_finally_failed(self.history))
 
 
+class TokenDedupTests(_Phase3TestBase):
+    """宿題T：本文に同種カスタムタグが複数あっても、受信者あたり 1 リンク・
+    「本文に焼くトークン＝永続化トークン」を保証する。
+
+    回帰対象の事故（調査で確定）：テンプレに {% unsubscribe_link %} が複数あると
+    WITH_TEXT 経路に dedup が無く受信者あたり複数トークンを build、
+    UniqueConstraint(campaign, person) × bulk_create(ignore_conflicts=True) が 2 件目を
+    無言破棄し、本文の可視リンクに捨てられた側のトークンが焼かれて /u/ 無効化する。
+    同一 URL の tracked_link 複数記述も UniqueConstraint(campaign, person, original_url)
+    に対し同根。
+    """
+
+    def _u_tokens(self, html_body):
+        """本文中の全 /u/<token>/ のトークンを抽出（トークンレス /u/ は拾わない）。"""
+        import re
+
+        return re.findall(r"/u/([A-Za-z0-9_-]+)/", html_body)
+
+    def _t_tokens(self, html_body):
+        """本文中の全 /t/<token>/ のトークンを抽出。"""
+        import re
+
+        return re.findall(r"/t/([A-Za-z0-9_-]+)/", html_body)
+
+    def _two_unsubscribe_template(self):
+        # 実機の【テスト2】テンプレと同型：空文言タグ ＋ 文言付きタグの 2 個。
+        return EmailTemplate.objects.create(
+            name="T_2UNSUB",
+            subject="件名",
+            body=(
+                "ご案内本文です。\n\n"
+                "{% unsubscribe_link %}{% endunsubscribe_link %}\n\n"
+                "--\n"
+                "配信を停止する場合は下のリンク：\n"
+                "{% unsubscribe_link %}配信停止はこちら{% endunsubscribe_link %}"
+            ),
+            created_by=self.user,
+        )
+
+    def _make_sending_campaign(self, template, name):
+        return Campaign.objects.create(
+            name=name,
+            template=template,
+            mailing_list=self.mailing_list,
+            scheduled_at=timezone.now() - timedelta(minutes=1),
+            status=Campaign.Status.SENDING,
+            created_by=self.user,
+        )
+
+    def test_multiple_unsubscribe_tags_single_link_and_token_match(self):
+        """宿題T-1：unsubscribe タグ 2 個（空文言＋文言付き）でも
+        (a) 受信者あたり UnsubscribeLink 1 件、(b) 本文の全 /u/ トークン＝DB 保存値。
+        """
+        person = self._make_person()
+        tpl = self._two_unsubscribe_template()
+        campaign = self._make_sending_campaign(tpl, "C_2UNSUB")
+
+        # prepare 段階の不変条件：リンクは 1 件、本文の全 /u/ トークンが単一で一致。
+        ctx = EmailContext.prepare(campaign, person, EmailMode.PRODUCTION)
+        self.assertEqual(len(ctx.unsubscribe_links), 1)
+        body_tokens = self._u_tokens(ctx.body_html)
+        self.assertEqual(len(body_tokens), 2)  # タグ 2 個 → <a> 2 本
+        self.assertEqual(set(body_tokens), {ctx.unsubscribe_links[0].token})
+
+        # 送信 end-to-end：(a) DB 1 件、(b) 送信メール本文の全 /u/ トークン＝DB 保存値。
+        self._add_member(self.mailing_list, person)
+        history = DeliveryHistory.objects.create(
+            campaign=campaign,
+            person=person,
+            contact=person.primary_contact,
+            to_email=person.primary_contact.email,
+            status=DeliveryHistory.Status.PENDING,
+        )
+        mail.outbox = []
+        ok = send_one_recipient(campaign, history)
+        self.assertTrue(ok)
+        links = UnsubscribeLink.objects.filter(campaign=campaign)
+        self.assertEqual(links.count(), 1)
+        db_token = links.first().token
+        html_alt = mail.outbox[0].alternatives[0][0]
+        sent_tokens = set(self._u_tokens(html_alt))
+        self.assertEqual(sent_tokens, {db_token})
+
+    def test_duplicate_same_url_tracked_link_single_link_and_token_match(self):
+        """宿題T-2：同一 URL の tracked_link 2 個でも
+        (a) 受信者あたり TrackingLink 1 件、(b) 本文の全 /t/ トークン＝DB 保存値。
+        """
+        person = self._make_person()
+        tpl = EmailTemplate.objects.create(
+            name="T_2TRACK",
+            subject="件名",
+            body=(
+                "リンクA：{% tracked_link %}https://example.com/same{% endtracked_link %}\n"
+                'リンクB：{% tracked_link "https://example.com/same" %}こちら{% endtracked_link %}'
+            ),
+            created_by=self.user,
+        )
+        campaign = self._make_sending_campaign(tpl, "C_2TRACK")
+
+        ctx = EmailContext.prepare(campaign, person, EmailMode.PRODUCTION)
+        self.assertEqual(len(ctx.tracking_links), 1)
+        body_tokens = self._t_tokens(ctx.body_html)
+        self.assertEqual(len(body_tokens), 2)
+        self.assertEqual(set(body_tokens), {ctx.tracking_links[0].token})
+
+        self._add_member(self.mailing_list, person)
+        history = DeliveryHistory.objects.create(
+            campaign=campaign,
+            person=person,
+            contact=person.primary_contact,
+            to_email=person.primary_contact.email,
+            status=DeliveryHistory.Status.PENDING,
+        )
+        mail.outbox = []
+        ok = send_one_recipient(campaign, history)
+        self.assertTrue(ok)
+        links = TrackingLink.objects.filter(campaign=campaign)
+        self.assertEqual(links.count(), 1)
+        db_token = links.first().token
+        html_alt = mail.outbox[0].alternatives[0][0]
+        self.assertEqual(set(self._t_tokens(html_alt)), {db_token})
+
+    def test_distinct_url_tracked_links_remain_separate(self):
+        """dedup が URL キーで効く（異なる URL は別リンクのまま）ことのネガティブ担保。"""
+        person = self._make_person()
+        tpl = EmailTemplate.objects.create(
+            name="T_2URL",
+            subject="件名",
+            body=(
+                "A：{% tracked_link %}https://example.com/a{% endtracked_link %}\n"
+                "B：{% tracked_link %}https://example.com/b{% endtracked_link %}"
+            ),
+            created_by=self.user,
+        )
+        campaign = self._make_sending_campaign(tpl, "C_2URL")
+        ctx = EmailContext.prepare(campaign, person, EmailMode.PRODUCTION)
+        self.assertEqual(len(ctx.tracking_links), 2)
+        self.assertEqual(len({tl.token for tl in ctx.tracking_links}), 2)
+
+    def test_test_and_preview_modes_create_no_links_with_multiple_tags(self):
+        """設計遵守：テスト・プレビューはタグが複数でもリンクレコードを作らない（§19.1 論点5）。"""
+        person = self._make_person()
+        tpl = self._two_unsubscribe_template()
+        campaign = self._make_sending_campaign(tpl, "C_MODE")
+        for mode in (EmailMode.TEST, EmailMode.PREVIEW):
+            ctx = EmailContext.prepare(campaign, person, mode)
+            self.assertEqual(len(ctx.unsubscribe_links), 0)
+            self.assertEqual(len(ctx.tracking_links), 0)
+            # トークン無し独立ルート /u/ が使われる（/u/<token>/ ではない）。
+            self.assertIn(f"{MAILING_SITE_URL}/u/", ctx.body_html)
+            self.assertEqual(self._u_tokens(ctx.body_html), [])
+
+
 class ExecuteCampaignSendTests(_Phase3TestBase):
     def test_first_invocation_sets_sending_and_records_actionlog(self):
         p1 = self._make_person("Alice")
