@@ -6,6 +6,8 @@ Source-available business card organizer
 
 FreeGroup2 is a business-support application built around business card management. Uploaded card images flow through a four-layer data model — OriginalImage → BusinessCard → Contact → Person — separating raw scans, recognized cards, normalized contact data, and consolidated people. The project is under active development: core data models are complete through v1.5, and v1.6 email-delivery features are in preparation.
 
+OCR runs via the Claude API by default; for the external worker route (`OCR_BACKEND=worker_cowork`), the operator prompt for the worker (Cowork) is [`cards/prompts/worker_cowork_ocr_prompt.txt`](cards/prompts/worker_cowork_ocr_prompt.txt).
+
 ## Roadmap
 
 - **v1.6**: email delivery with click tracking.
