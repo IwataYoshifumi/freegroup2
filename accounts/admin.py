@@ -81,8 +81,28 @@ class CustomUserAdmin(UserAdmin):
     search_fields = ("username", "email", "first_name", "last_name")
     list_select_related = ("role", "department")
 
+    # 変更フォームに追加する CustomUser 独自フィールドのセクション（宿題S-(2)）。
+    # role を選んで保存すると save_model() の apply_role() が発火する経路の UI 入口。
+    # person は含めない（紐付けは Service 層 link_user_to_person 経由が正本。admin 直編集は
+    # 両側ガード・ActionLog を迂回するため禁止、仕様書 §12）。
+    ROLE_FIELDSET = (
+        "ロール・所属（v1.5）",
+        {"fields": ("role", "department", "auth_source")},
+    )
+
+    # 新規作成フォーム（add_fieldsets）にも role を出す。新規作成時に Role を選んで保存すると
+    # save_model() の `not change` 分岐で apply_role() が発火し default_groups が展開される。
+    add_fieldsets = UserAdmin.add_fieldsets + (
+        ("ロール設定", {"classes": ("wide",), "fields": ("role",)}),
+    )
+
     def get_fieldsets(self, request, obj=None):
-        """user_permissions を fieldsets から動的に除外（仕様書 §4.1）。"""
+        """user_permissions を fieldsets から動的に除外しつつ、CustomUser 独自フィールド
+        （role / department / auth_source）の編集セクションを追加する（仕様書 §4.1 / 宿題S-(2)）。
+
+        新規作成（obj is None）では super() が add_fieldsets を返し、そこに role を含めて
+        いるため ROLE_FIELDSET は追加しない（二重追加・department/auth_source の早期要求を回避）。
+        """
         fieldsets = super().get_fieldsets(request, obj)
         cleaned = []
         for name, opts in fieldsets:
@@ -91,6 +111,8 @@ class CustomUserAdmin(UserAdmin):
                 cleaned.append((name, {**opts, "fields": new_fields}))
             else:
                 cleaned.append((name, opts))
+        if obj is not None:
+            cleaned.append(self.ROLE_FIELDSET)
         return tuple(cleaned)
 
     def get_form(self, request, obj=None, **kwargs):
