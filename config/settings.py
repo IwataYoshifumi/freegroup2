@@ -36,7 +36,7 @@ DEBUG = os.getenv("DEBUG", "True").lower() in ("1", "true", "yes", "on")
 
 ALLOWED_HOSTS = ["127.0.0.1", "localhost", "192.168.3.135", "192.168.1.135"]
 
-INTERNAL_IPS = ["127.0.0.1", "192.168.3.135"]
+INTERNAL_IPS = ["127.0.0.1", "192.168.3.135", "192.168.1.135"]
 
 
 # Application definition
