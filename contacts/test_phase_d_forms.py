@@ -25,7 +25,10 @@ User = get_user_model()
 
 def _grant_contact_perms(user):
     """Phase 7 段3-2：Contact 系 View に標準 CRUD 権限ガードが入ったため、View を叩く
-    既存テストの正常系を保つよう view/add/change/delete_contact を一括付与する補正。"""
+    既存テストの正常系を保つよう view/add/change/delete_contact を一括付与する補正。
+
+    宿題F（v1.7+）：Update 系フォーム経路にも owner ガード（can_edit_contact）が入った。
+    既存テストの Contact は所有者未設定のため、横断権限 edit_all_contacts も併せて付与する。"""
     from django.contrib.auth.models import Permission
 
     user.user_permissions.add(
@@ -36,6 +39,7 @@ def _grant_contact_perms(user):
                 "add_contact",
                 "change_contact",
                 "delete_contact",
+                "edit_all_contacts",
             ],
         )
     )

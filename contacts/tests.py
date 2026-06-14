@@ -29,7 +29,12 @@ User = get_user_model()
 def _grant_contact_perms(user):
     """Phase 7 段3-2：Contact List/Detail/Create/Update/Preview に標準 CRUD 権限ガードが
     入った（rev20 No.10-14/23 ★2）。これらの View を叩く既存テストの正常系を保つため、
-    view/add/change/delete_contact を一括付与する補正ヘルパー。"""
+    view/add/change/delete_contact を一括付与する補正ヘルパー。
+
+    宿題F（v1.7+）：Update 系フォーム経路にも owner ガード（can_edit_contact）が入った。
+    既存テストの Contact は created_by/managed_by 未設定（所有者なし）のため、横断権限
+    edit_all_contacts も併せて付与して正常系を保つ（owner ガード自体の検証は
+    ContactFormOwnerGuardTests で別途行う）。"""
     from django.contrib.auth.models import Permission
 
     user.user_permissions.add(
@@ -40,6 +45,7 @@ def _grant_contact_perms(user):
                 "add_contact",
                 "change_contact",
                 "delete_contact",
+                "edit_all_contacts",
             ],
         )
     )
@@ -3462,8 +3468,11 @@ class SnsFormsetHiddenRowCssTests(TestCase):
 class Phase7ContactsViewAuthTests(TestCase):
     """Phase 7 段3-2：contacts 6 View の Django 標準 CRUD 権限ガード（rev20 No.10-14/23 ★2）。
 
-    owner 判定は追加しない（v1.7+ 先送り）。view_contact / add_contact / change_contact の
-    各粒度で「権限なし→403・権限あり→正常」を検証する。
+    view_contact / add_contact / change_contact の各粒度で「権限なし→403・権限あり→正常」を
+    検証する。Update 系フォーム経路は宿題F（v1.7+）で owner ガード（can_edit_contact）が
+    追加されたため、change_contact だけでは不十分になった。本クラスの update 系テストは
+    所有者なし Contact を横断権限 edit_all_contacts 保持者が編集できることで「権限あり→正常」を
+    検証する（owner ガード自体の網羅は ContactFormOwnerGuardTests）。
     """
 
     def setUp(self):
@@ -3531,8 +3540,16 @@ class Phase7ContactsViewAuthTests(TestCase):
             "contacts:contact_update_primary", kwargs={"pk": self.primary.pk}
         )
         self.assertEqual(self._client(self._user_with()).get(url).status_code, 403)
+        # 宿題F：所有者なし Contact のため change_contact 単独では owner ガードで 403。
+        # 横断権限を併せ持てば正常（権限ガード自体が効いていることの確認）。
         self.assertEqual(
-            self._client(self._user_with("change_contact")).get(url).status_code, 200
+            self._client(self._user_with("change_contact")).get(url).status_code, 403
+        )
+        self.assertEqual(
+            self._client(
+                self._user_with("change_contact", "edit_all_contacts")
+            ).get(url).status_code,
+            200,
         )
 
     def test_update_active_requires_change_contact(self):
@@ -3540,7 +3557,159 @@ class Phase7ContactsViewAuthTests(TestCase):
             "contacts:contact_update_active", kwargs={"pk": self.active.pk}
         )
         self.assertEqual(self._client(self._user_with()).get(url).status_code, 403)
+        # 宿題F：所有者なし Contact のため change_contact 単独では owner ガードで 403。
         self.assertEqual(
-            self._client(self._user_with("change_contact")).get(url).status_code, 200
+            self._client(self._user_with("change_contact")).get(url).status_code, 403
         )
+        self.assertEqual(
+            self._client(
+                self._user_with("change_contact", "edit_all_contacts")
+            ).get(url).status_code,
+            200,
+        )
+
+
+class ContactFormOwnerGuardTests(TestCase):
+    """宿題F：UpdatePrimary/UpdateActiveContactView の owner ガード結合テスト。
+
+    AJAX 経路（ContactAjaxOwnerGuardTests）と同じ can_edit_contact 判定をフォーム経路にも
+    効かせたことを検証する。全ユーザーに change_contact を付与して PermissionRequiredMixin を
+    通過させ、owner ガード単独の効きを切り分ける。created_by 本人 / managed_by 本人 /
+    edit_all_contacts 保持者は GET/POST でき、いずれでもない他人は GET/POST とも 403
+    （PermissionDenied）になることを確認する。
+    """
+
+    def setUp(self):
+        from django.contrib.auth.models import Permission
+
+        change_perm = Permission.objects.get(
+            codename="change_contact", content_type__app_label="contacts"
+        )
+        edit_all_perm = Permission.objects.get(
+            codename="edit_all_contacts", content_type__app_label="contacts"
+        )
+
+        self.owner = User.objects.create_user(username="fog_owner", password="x")
+        self.manager = User.objects.create_user(username="fog_manager", password="x")
+        self.privileged = User.objects.create_user(username="fog_priv", password="x")
+        self.stranger = User.objects.create_user(username="fog_stranger", password="x")
+        # 全員に change_contact を付与（PermissionRequiredMixin は通過させ、403 が
+        # owner ガード由来であることを保証する）。
+        for u in (self.owner, self.manager, self.privileged, self.stranger):
+            u.user_permissions.add(change_perm)
+        self.privileged.user_permissions.add(edit_all_perm)
+        # has_perm のキャッシュを避けるため取り直す
+        self.privileged = User.objects.get(pk=self.privileged.pk)
+
+        self.person = Person.objects.create()
+        self.primary = Contact.objects.create(
+            person=self.person,
+            status=Contact.Status.PRIMARY,
+            full_name="FOG-primary",
+            organization="FOG-co",
+            created_by=self.owner,
+            managed_by=self.manager,
+        )
+        self.person.primary_contact = self.primary
+        self.person.save(update_fields=["primary_contact", "updated_at"])
+        self.active = Contact.objects.create(
+            person=self.person,
+            status=Contact.Status.ACTIVE,
+            full_name="FOG-active",
+            organization="FOG-active-co",
+            created_by=self.owner,
+            managed_by=self.manager,
+        )
+
+    def _client(self, user):
+        c = Client()
+        c.force_login(user)
+        return c
+
+    def _primary_url(self):
+        return reverse(
+            "contacts:contact_update_primary", kwargs={"pk": self.primary.pk}
+        )
+
+    def _active_url(self):
+        return reverse(
+            "contacts:contact_update_active", kwargs={"pk": self.active.pk}
+        )
+
+    def _primary_post_data(self):
+        data = {f: getattr(self.primary, f) or "" for f in Contact.UPDATABLE_FIELDS}
+        data["change_reason"] = "fix"
+        data["note"] = ""
+        data.update(_empty_sns_management_form())
+        return data
+
+    def _active_post_data(self):
+        data = {f: getattr(self.active, f) or "" for f in Contact.UPDATABLE_FIELDS}
+        data["note"] = ""
+        data.update(_empty_sns_management_form())
+        return data
+
+    # ---- 他人（change_contact のみ・非所有・非横断）は GET / POST とも 403 ----
+
+    def test_stranger_get_primary_forbidden(self):
+        resp = self._client(self.stranger).get(self._primary_url())
+        self.assertEqual(resp.status_code, 403)
+
+    def test_stranger_post_primary_forbidden(self):
+        resp = self._client(self.stranger).post(
+            self._primary_url(), data=self._primary_post_data()
+        )
+        self.assertEqual(resp.status_code, 403)
+
+    def test_stranger_get_active_forbidden(self):
+        resp = self._client(self.stranger).get(self._active_url())
+        self.assertEqual(resp.status_code, 403)
+
+    def test_stranger_post_active_forbidden(self):
+        resp = self._client(self.stranger).post(
+            self._active_url(), data=self._active_post_data()
+        )
+        self.assertEqual(resp.status_code, 403)
+
+    # ---- created_by 本人 / managed_by 本人 / 横断権限保持者は編集できる ----
+    # GET 200 は owner ガードを通過し編集画面に到達したことを示す。owner ガードは
+    # get_object にあり GET/POST 共通経路のため、GET 通過は POST 通過も担保する。
+
+    def test_owner_get_primary_ok(self):
+        resp = self._client(self.owner).get(self._primary_url())
+        self.assertEqual(resp.status_code, 200)
+
+    def test_manager_get_primary_ok(self):
+        resp = self._client(self.manager).get(self._primary_url())
+        self.assertEqual(resp.status_code, 200)
+
+    def test_privileged_get_primary_ok(self):
+        resp = self._client(self.privileged).get(self._primary_url())
+        self.assertEqual(resp.status_code, 200)
+
+    def test_owner_get_active_ok(self):
+        resp = self._client(self.owner).get(self._active_url())
+        self.assertEqual(resp.status_code, 200)
+
+    def test_manager_get_active_ok(self):
+        resp = self._client(self.manager).get(self._active_url())
+        self.assertEqual(resp.status_code, 200)
+
+    def test_privileged_get_active_ok(self):
+        resp = self._client(self.privileged).get(self._active_url())
+        self.assertEqual(resp.status_code, 200)
+
+    # POST も owner ガードを通過し、実際に編集（リダイレクト）まで到達することを実証。
+
+    def test_owner_post_primary_edits(self):
+        resp = self._client(self.owner).post(
+            self._primary_url(), data=self._primary_post_data()
+        )
+        self.assertEqual(resp.status_code, 302)
+
+    def test_owner_post_active_edits(self):
+        resp = self._client(self.owner).post(
+            self._active_url(), data=self._active_post_data()
+        )
+        self.assertEqual(resp.status_code, 302)
 

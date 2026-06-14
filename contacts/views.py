@@ -21,7 +21,7 @@ import json
 
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin, PermissionRequiredMixin
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.db.models import Q
 from django.http import Http404, HttpResponseRedirect, JsonResponse
@@ -538,6 +538,11 @@ class UpdatePrimaryContactView(LoginRequiredMixin, PermissionRequiredMixin, Upda
 
     def get_object(self, queryset=None):
         obj = super().get_object(queryset=queryset)
+        # 所有者ガード（宿題F、正本は services.permissions.can_edit_contact）。
+        # AJAX 経路（_ContactAjaxBase._get_contact_or_error）と同じ判定をフォーム経路にも
+        # 効かせ、GET / POST どちらも get_object を通るため両方でガードされる。
+        if not can_edit_contact(self.request.user, obj):
+            raise PermissionDenied("You do not have permission to edit this contact.")
         if obj.status != Contact.Status.PRIMARY:
             raise Http404("This view is only for primary contacts.")
         return obj
@@ -631,6 +636,11 @@ class UpdateActiveContactView(LoginRequiredMixin, PermissionRequiredMixin, Updat
 
     def get_object(self, queryset=None):
         obj = super().get_object(queryset=queryset)
+        # 所有者ガード（宿題F、正本は services.permissions.can_edit_contact）。
+        # AJAX 経路（_ContactAjaxBase._get_contact_or_error）と同じ判定をフォーム経路にも
+        # 効かせ、GET / POST どちらも get_object を通るため両方でガードされる。
+        if not can_edit_contact(self.request.user, obj):
+            raise PermissionDenied("You do not have permission to edit this contact.")
         if obj.status != Contact.Status.ACTIVE:
             raise Http404("This view is only for active contacts.")
         return obj
