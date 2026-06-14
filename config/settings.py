@@ -156,6 +156,12 @@ OCR_BACKEND = os.getenv("OCR_BACKEND", "claude_sonnet_4_6")
 # OCR pipeline: processing 状態が stuck と判断するまでの分数（stuck sweeper 用）
 OCR_STUCK_THRESHOLD_MINUTES = 30
 
+# 名刺向き正位化バックエンド（"PP-LCNet" | "OSD" | "none"）
+# PP-LCNet: ONNX+onnxruntime（既定）。OSD: Tesseract 殻（温存）。none: パススルー（既存挙動へ復帰）。
+ORIENTATION_BACKEND = os.getenv("ORIENTATION_BACKEND", "PP-LCNet")
+# 向き判定スコア閾値（PP-LCNet softmax 確率。これ未満は据え置き）。既定 0.7。
+ORIENTATION_SCORE_THRESHOLD = float(os.getenv("ORIENTATION_SCORE_THRESHOLD", "0.7"))
+
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/6.0/ref/settings/#default-auto-field

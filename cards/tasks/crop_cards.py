@@ -21,18 +21,11 @@ from cards.services.detectors.opencv_detector import (
     results_from_debug_result,
 )
 from cards.services.opencv_debug_cache import save_debug_data
-from cards.services.osd import (
-    apply_upright,
-    detect_osd_info,
-    detect_osd_rotation,
-    run_tesseract_ocr,
-)
+from cards.orientation.correct import resolve_orientation
+from cards.orientation.factory import get_orientation_backend
 from cards.tasks.card_cropper import save_card_image
 
 logger = logging.getLogger(__name__)
-
-# BC.osd_json の構造バージョン（OSD 記録専用。OCR 本体の combined_response とは別系統）。
-_OSD_JSON_SCHEMA_VERSION = "1.0.0"
 
 
 class Run_Crop_Cards_From_OriginalImage:
@@ -126,92 +119,45 @@ class Run_Crop_Cards_From_OriginalImage:
                     ]
                 )
 
-    def _build_osd_record(self, warped_image, card_index):
-        """[性質] 副作用あり（外部プロセス OSD/OCR 呼び出し）/ 正立画像と osd_json dict を返す。
-
-        osd.py は例外送出のみで normal フォールバック・error 包みは呼び出し元の責務。
-        本ヘルパーが OSD/OCR の全呼び出しを try/except で包み、何が起きても切り出しを
-        止めない（例外は normal フォールバック＋error 記録で握りつぶす）。OSD 例外が
-        _create_card の外へ伝播して切り出し全体を落とすことは無い。
-        [入力] warped_image: 透視変換済みクロップ（PIL.Image）、card_index: int
-        [出力] (upright_image: PIL.Image, osd_json: dict)
-          upright_image: 正立化後の画像。OSD 失敗・回転不要（rotate=0）時は warped_image そのまま。
-          osd_json: {"schema_version", "osd", "tesseract_ocr"}。osd は detect_osd_info の戻り、
-                    失敗時 {"error": ...}。tesseract_ocr は run_tesseract_ocr の戻り
-                    （本番 lang のみ／DEBUG 時 text/data）、失敗時 {"error": ...}。
-        [方針] OSD は元クロップ、OCR は正立後画像に対して取る（第1段の対象画像の使い分けを踏襲）。
-               detect_osd_rotation / detect_osd_info には timeout を設ける（ハング対策）。
-        """
-        timeout = float(getattr(settings, "OSD_TIMEOUT_SEC", 10))
-
-        # ① 正立化（rotate 量のみ使用。例外は normal フォールバック、rotate=0 は元画像）。
-        upright_image = warped_image
-        try:
-            rotate_deg = detect_osd_rotation(warped_image, timeout=timeout)
-            if rotate_deg % 360:
-                upright_image = apply_upright(warped_image, rotate_deg)
-        except Exception as e:
-            logger.info(
-                "OSD 正立化失敗→normal フォールバック card_index=%s: %s: %s",
-                card_index, type(e).__name__, e,
-            )
-
-        # ② osd ブロック（元クロップに対して取る）。例外は {"error": ...} に包む。
-        try:
-            osd_block = detect_osd_info(warped_image, timeout=timeout)
-        except Exception as e:
-            osd_block = {"error": f"{type(e).__name__}: {e}"}
-            logger.info(
-                "OSD info 取得失敗（記録のみ・無視）card_index=%s: %s: %s",
-                card_index, type(e).__name__, e,
-            )
-
-        # ③ tesseract_ocr ブロック（正立後画像に対して取る）。例外は {"error": ...} に包む。
-        try:
-            tess_block = run_tesseract_ocr(upright_image, timeout=timeout)
-        except Exception as e:
-            tess_block = {"error": f"{type(e).__name__}: {e}"}
-            logger.info(
-                "Tesseract OCR 取得失敗（記録のみ・無視）card_index=%s: %s: %s",
-                card_index, type(e).__name__, e,
-            )
-
-        osd_json = {
-            "schema_version": _OSD_JSON_SCHEMA_VERSION,
-            "osd": osd_block,
-            "tesseract_ocr": tess_block,
-        }
-        return upright_image, osd_json
-
     def _create_card(self, warped_image, card_index):
         """[性質] 副作用あり（DB 書き込み・ファイル書き込み）/ 1 card 単位の同期書き＋BC 作成。
 
-        warp と save の間で OSD 正立化＋記録を行い（_build_osd_record）、正立画像を
-        card_image として保存し、osd_json を BC に書き込む。OSD は内部で全例外を握りつぶす
-        ため、OSD が失敗しても切り出しは完走する。save→BC 作成自体は
-        save_and_create_business_card に委譲し、本メソッドは created_count /
+        warp と save の間に向き正位化（ORIENTATION_BACKEND コンセント）を 1 箇所だけ挟む。
+        判定器の例外は基底 detect() のフェイルセーフで握りつぶし（label0/score0/failed）、
+        据え置きで切り出しを完走する。回転は transpose（rotate 禁止）。判定記録は
+        orientation_correction / orientation_score（バックエンド共通）へ書く。osd_json は
+        OSD 殻経路のときのみ従来どおり充填（既定 PP-LCNet / none では None）。
+        save→BC 作成は save_and_create_business_card に委譲し、本メソッドは created_count /
         error_messages（インスタンス状態）の更新のみを担う。
         失敗パターン：
           - 画像書き込み失敗 → BC を card_image=None で作成、error_message に追記
           - BC 作成失敗（書き込み済み画像あり）→ ファイル削除、error_message に追記
         """
-        # warp と save の間：OSD 正立化＋osd_json 組み立て（例外は内部で握りつぶす）。
-        upright_image, osd_json = self._build_osd_record(warped_image, card_index)
+        # warp と save の間：向き判定（コンセント）→ 閾値分岐で transpose 正位化 or 据え置き。
+        backend = get_orientation_backend()
+        result = backend.detect(warped_image)  # (label, score, status)。例外は基底で捕捉。
+        threshold = float(getattr(settings, "ORIENTATION_SCORE_THRESHOLD", 0.7))
+        final_image, correction, score = resolve_orientation(
+            warped_image, result, threshold,
+        )
+        osd_json = getattr(backend, "osd_json", None)  # OSD 殻のみ充填／既定は None
 
-        # 正立化後の画像を保存し BC を作成する（回転は OSD 側で適用済み・本経路は回転しない）。
-        result = save_and_create_business_card(
-            upright_image, self.original_image, card_index, osd_json=osd_json,
+        save_result = save_and_create_business_card(
+            final_image, self.original_image, card_index,
+            osd_json=osd_json,
+            orientation_correction=correction,
+            orientation_score=score,
         )
 
-        if not result.crop_success:
+        if not save_result.crop_success:
             self.error_messages.append(
-                f"card_index={card_index}: 切り抜き失敗 ({result.crop_error})"
+                f"card_index={card_index}: 切り抜き失敗 ({save_result.crop_error})"
             )
-        if result.business_card is not None:
+        if save_result.business_card is not None:
             self.created_count += 1
-        elif result.db_error is not None:
+        elif save_result.db_error is not None:
             self.error_messages.append(
-                f"card_index={card_index}: DB保存失敗 ({result.db_error})"
+                f"card_index={card_index}: DB保存失敗 ({save_result.db_error})"
             )
 
 
@@ -231,7 +177,10 @@ class SaveAndCreateResult(NamedTuple):
     db_error: str | None
 
 
-def save_and_create_business_card(final_image, original_image, card_index, osd_json=None):
+def save_and_create_business_card(
+    final_image, original_image, card_index, osd_json=None,
+    orientation_correction=None, orientation_score=None,
+):
     """回転適用済みの最終画像を card_image として保存し、BusinessCard を作成する。
 
     [性質] 副作用あり（ファイル書き込み・DB 書き込み・失敗時ファイル削除）
@@ -239,6 +188,8 @@ def save_and_create_business_card(final_image, original_image, card_index, osd_j
            original_image: OriginalImage インスタンス（.id を保存パスと FK に使う）
            card_index:     int
            osd_json:       dict | None（BC.osd_json にそのまま格納）
+           orientation_correction: str | None（BC.orientation_correction。none 経路は None）
+           orientation_score:      float | None（BC.orientation_score）
     [出力] SaveAndCreateResult（created_count / error_messages の更新は呼び出し側の責務）
     [方針] 画像保存失敗時は card_image=None で BC を作成し、BC 作成が保存済み画像を残して
            失敗したときは書き込んだ画像を削除する（ロールバック）。
@@ -256,6 +207,8 @@ def save_and_create_business_card(final_image, original_image, card_index, osd_j
                     card_index=card_index,
                     ocr_status=BusinessCard.OcrStatus.PENDING,
                     osd_json=osd_json,
+                    orientation_correction=orientation_correction,
+                    orientation_score=orientation_score,
                 )
             return SaveAndCreateResult(business_card, False, crop_error, None)
         except Exception as e:
@@ -269,6 +222,8 @@ def save_and_create_business_card(final_image, original_image, card_index, osd_j
                 card_index=card_index,
                 ocr_status=BusinessCard.OcrStatus.PENDING,
                 osd_json=osd_json,
+                orientation_correction=orientation_correction,
+                orientation_score=orientation_score,
             )
         return SaveAndCreateResult(business_card, True, crop_error, None)
     except Exception as e:

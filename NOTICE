@@ -1,0 +1,7 @@
+FreeGroup2 — 第三者ライセンス帰属一覧（NOTICE）
+
+本リポジトリには以下の第三者成果物を同梱しています。
+
+名刺向き正位化モデル（cards/orientation/models/pp-lcnet_x1_0_doc_ori.onnx）:
+- PP-LCNet_x1_0_doc_ori — Apache-2.0, PaddlePaddle
+- pp-lcnet_x1_0_doc_ori.onnx（ONNX 変換物）— Apache-2.0, GreatV/oar-ocr

@@ -1,0 +1,2 @@
+# 同梱 ONNX モデルはバイナリ（diff 抑制・改行変換抑止）。
+*.onnx binary

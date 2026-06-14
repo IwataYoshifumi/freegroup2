@@ -163,6 +163,14 @@ class BusinessCard(models.Model):
         DONE = "done", "OCR完了"
         FAILED = "failed", "OCR失敗"
 
+    class OrientationCorrection(models.TextChoices):
+        # ORIENTATION_BACKEND 共通の向き補正状態（既存 orientation とは別概念・別フィールド）。
+        ROTATED = "rotated", "回転補正を実行"
+        KEPT = "kept", "据え置き（スコア<閾値）"
+        STRAIGHT = "straight", "正立（補正不要）"
+        FAILED = "failed", "判定失敗で据え置き"
+        UNEXECUTED = "unexecuted", "未実行（本機能リリース前の過去データ）"
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     original_image = models.ForeignKey(
         OriginalImage,
@@ -196,6 +204,17 @@ class BusinessCard(models.Model):
     # OSD（Tesseract image_to_osd）の前段正立補正の出力を記録する（分析用）。
     # OCR 判定の orientation（BC.orientation）・raw_json_1/2 とは独立。未処理時は None。
     osd_json = models.JSONField(null=True, blank=True)
+    # 向き正位化（ORIENTATION_BACKEND 共通の判定記録）。既存 orientation とは別概念。
+    # 既存行は migration default=unexecuted（過去データ印）。none 経路は null。
+    orientation_correction = models.CharField(
+        max_length=20,
+        choices=OrientationCorrection.choices,
+        null=True,
+        blank=True,
+        default=OrientationCorrection.UNEXECUTED,
+    )
+    # 向き判定スコア（PP-LCNet の softmax 確率。据え置き判定の根拠・閾値調整の材料）。
+    orientation_score = models.FloatField(null=True, blank=True, default=None)
     claimed_at = models.DateTimeField(null=True, blank=True, default=None)
     error_message = models.TextField(blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)

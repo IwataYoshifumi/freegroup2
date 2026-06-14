@@ -86,7 +86,15 @@ def _rotate_and_overwrite_card_image(card, direction):
 
     with transaction.atomic():
         card.orientation = BusinessCard.ORIENTATION_NORMAL
-        card.save(update_fields=["orientation", "updated_at"])
+        # 自動正位化の診断値は手動回転で嘘になるためクリア（手動相当＝null へリセット）。
+        card.orientation_correction = None
+        card.orientation_score = None
+        card.save(update_fields=[
+            "orientation",
+            "orientation_correction",
+            "orientation_score",
+            "updated_at",
+        ])
         _overwrite_image_file(rotated, path, image_format)
 
 
