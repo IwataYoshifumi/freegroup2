@@ -8,6 +8,7 @@ python-dotenv
 anthropic
 jsonschema>=4.0
 opencv-python-headless
+pytesseract
 django-auth-ldap==5.3.0
 pytest
 pytest-django
