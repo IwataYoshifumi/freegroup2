@@ -12,7 +12,12 @@ from back_navigator.back_navigator import BackNavigator
 from persons.models import Person
 
 from .models import CustomUser
-from .services import link_user_to_person, retire_user, unlink_user_from_person
+from .services import (
+    is_self_link_email_match,
+    link_user_to_person,
+    retire_user,
+    unlink_user_from_person,
+)
 
 
 class ProfileView(LoginRequiredMixin, View):
@@ -35,8 +40,12 @@ class LinkUserPersonConfirmView(LoginRequiredMixin, View):
 
     def get(self, request, person_id):
         person = get_object_or_404(Person, pk=person_id)
+        # 本フローは常に本人フロー（operator == user == request.user）。
+        # メール不一致なら確認画面で link ボタンを出さず、理由を表示する（GET 時点判定）。
+        email_match = is_self_link_email_match(request.user, person)
         return render(request, self.template_name, {
             "person": person,
+            "email_match": email_match,
             "back": BackNavigator(request),
         })
 

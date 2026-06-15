@@ -32,15 +32,40 @@ def apply_role(user, role):
             user.groups.set(role.default_groups.all())
 
 
+def _normalize_email(value):
+    """[性質] 純関数（DB 操作なし・副作用なし）／メール比較用に strip + 小文字化する。
+
+    None / 空は "" を返す。
+    """
+    return (value or "").strip().lower()
+
+
+def is_self_link_email_match(user, person):
+    """本人フロー紐付けで User.email と Person.primary_contact.email が一致するか判定する。
+
+    [性質] 純関数（DB 読み取りは person.primary_contact 参照のみ・副作用なし）
+    [入力] user: CustomUser / person: Person
+    [出力] bool（両者を strip + 小文字化して完全一致なら True）
+
+    Person 側メールが空（primary_contact 無し / email 空）は一致しない（False）。
+    本人フロー（operator == user）専用のガード判定。他人紐付け経路では使わない。
+    """
+    primary = getattr(person, "primary_contact", None)
+    person_email = _normalize_email(getattr(primary, "email", "") if primary else "")
+    if not person_email:
+        return False
+    return _normalize_email(user.email) == person_email
+
+
 def link_user_to_person(operator, user, person):
-    """User と Person を紐付ける（仕様書 §12.7）。
+    """User と Person を紐付ける（仕様書 §12.7 + 本人フロー メール一致ガード）。
 
     [性質] 副作用あり（DB 書込：user.person 更新 + ActionLog 記録、transaction.atomic 内）
     [入力] operator: 操作実行者の CustomUser（ActionLog.user に記録）
            user: 紐付け対象の CustomUser
            person: 紐付け先の Person
     [出力] None
-    [例外] ValidationError（user 側 / Person 側のいずれかで既存紐付けがある場合）
+    [例外] ValidationError（user 側 / Person 側の既存紐付け、または本人フローでメール不一致）
 
     [権限チェック責務]
     本関数は権限チェックを行わない。呼び出し側 (View) で以下を保証すること:
@@ -49,6 +74,10 @@ def link_user_to_person(operator, user, person):
 
     [両側ガード] OneToOne 制約違反防止のため、user 側・person 側両方をチェック。
     person.linked_user は Phase 1 のプロパティ経由（person.user 直接参照禁止、仕様書 §12.3）。
+
+    [本人フロー メール一致ガード] operator == user のときだけ、User.email と
+    Person.primary_contact.email が一致しないと紐付けを拒否する（最終砦、新規要件）。
+    他人紐付け経路（operator != user・link_user_to_person 権限保持者）はガード対象外。
     """
     if user.person is not None:
         raise ValidationError(
@@ -61,6 +90,11 @@ def link_user_to_person(operator, user, person):
         raise ValidationError(
             f"Person は既に User ({existing_user.username}) に紐付いています。"
             "先に既存紐付けを解除してください"
+        )
+
+    if operator == user and not is_self_link_email_match(user, person):
+        raise ValidationError(
+            "メールアドレスが一致しないため紐付けできません。"
         )
 
     with transaction.atomic():

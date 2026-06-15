@@ -24,8 +24,9 @@ class LinkUserPersonConfirmTermsTests(TestCase):
         )
         self.client = Client()
         self.client.force_login(self.user)
-        # primary_contact 未設定・linked_user なしの素の Person で
-        # 「主コンタクト未設定の人物です」「この人物はまだ…」両分岐を踏む。
+        # primary_contact 未設定・linked_user なしの素の Person。
+        # 宿題F メール一致ガードにより、primary_contact 無し（＝メール空）は本人フローで
+        # 「不一致」扱いとなり、未紐付けでも link ボタンではなく不一致メッセージが出る分岐を踏む。
         self.person = Person.objects.create()
 
     def _url(self):
@@ -42,7 +43,8 @@ class LinkUserPersonConfirmTermsTests(TestCase):
         self.assertIn("ユーザーと人物の紐付け確認", body)
         self.assertIn("対象人物", body)
         self.assertIn("主コンタクト未設定の人物です", body)
-        self.assertIn("この人物は", body)
+        # メール空 Person は本人フローで不一致 → 不一致メッセージが業務語で出る
+        self.assertIn("メールアドレスが一致しないため紐づけできません。", body)
         # 内部語（英字モデル名・リレーション名）は出ない
         self.assertNotIn("User-Person 紐付け確認", body)
         self.assertNotIn("対象 Person", body)

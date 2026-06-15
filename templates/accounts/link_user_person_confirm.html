@@ -82,19 +82,30 @@
     {# ---- 状態別ボタン表示 ---- #}
     {% with linked=person.linked_user %}
       {% if not linked %}
-        {# 未紐付け：紐付けボタン #}
-        <section class="app-card" style="margin-top: var(--app-space-md);">
-          <p class="app-muted">この人物はまだユーザーに紐付けられていません。あなたのユーザーと紐付けますか？</p>
-          <form method="post" action="">
-            {% csrf_token %}
-            <input type="hidden" name="action" value="link">
-            <div class="app-action-area">
-              {% back_all_link back %}
-              {% back_link back %}
-              <button type="submit" class="app-btn app-btn--primary">紐付ける</button>
-            </div>
-          </form>
-        </section>
+        {% if email_match %}
+          {# 未紐付け かつ メール一致：紐付けボタン #}
+          <section class="app-card" style="margin-top: var(--app-space-md);">
+            <p class="app-muted">この人物はまだユーザーに紐付けられていません。あなたのユーザーと紐付けますか？</p>
+            <form method="post" action="">
+              {% csrf_token %}
+              <input type="hidden" name="action" value="link">
+              <div class="app-action-area">
+                {% back_all_link back %}
+                {% back_link back %}
+                <button type="submit" class="app-btn app-btn--primary">紐付ける</button>
+              </div>
+            </form>
+          </section>
+        {% else %}
+          {# 未紐付け だが メール不一致：理由表示・link ボタンは出さない #}
+          <div class="app-alert app-alert--danger" style="margin-top: var(--app-space-md);">
+            メールアドレスが一致しないため紐づけできません。
+          </div>
+          <div class="app-action-area" style="margin-top: var(--app-space-md);">
+            {% back_all_link back %}
+            {% back_link back %}
+          </div>
+        {% endif %}
 
       {% elif linked == user %}
         {# 本人紐付け済み：解除ボタン #}
