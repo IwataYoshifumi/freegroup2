@@ -1,0 +1,12 @@
+{# ユーザ管理（アクセス管理）サイドバー部品（include 専用）。app_base.html から呼ばれる。 #}
+<nav class="app-sidebar" aria-label="ユーザ管理メニュー">
+  <div class="app-sidebar__section-title">ユーザ管理</div>
+  {% if perms.accounts.retire_user %}
+    <a href="{% url 'accounts:user_list' %}" {% if active_menu == 'accounts:user_list' %}class="is-active"{% endif %}>ユーザ一覧</a>
+  {% endif %}
+  {% if perms.accounts.manage_role %}
+    <a href="{% url 'accounts:role_list' %}" {% if active_menu == 'accounts:role_list' %}class="is-active"{% endif %}>ロール一覧</a>
+    <a href="{% url 'accounts:group_list' %}" {% if active_menu == 'accounts:group_list' %}class="is-active"{% endif %}>グループ一覧</a>
+    <a href="{% url 'accounts:permission_list' %}" {% if active_menu == 'accounts:permission_list' %}class="is-active"{% endif %}>パーミッション一覧</a>
+  {% endif %}
+</nav>

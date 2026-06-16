@@ -1,0 +1,59 @@
+{% extends "accounts/app_base.html" %}
+
+{% block title %}{{ group.name }} — 権限グループ詳細 — FreeGroup2{% endblock %}
+
+{% block content %}
+    <section class="app-card">
+      <div class="app-section__header">
+        <h1>権限グループ詳細</h1>
+        <a href="{% url 'accounts:group_list' %}" class="app-btn app-btn--secondary app-btn--sm">戻る</a>
+      </div>
+
+      <div class="app-detail-item">
+        <div class="app-detail-label">グループ名</div>
+        <div class="app-detail-value">
+          {{ group.name }}
+          {% if is_admin_group %}<span class="app-badge">admin 系</span>{% endif %}
+        </div>
+      </div>
+      <div class="app-detail-item">
+        <div class="app-detail-label">既定に持つロール</div>
+        <div class="app-detail-value">
+          {% for r in roles %}{{ r.name }}{% if not forloop.last %}, {% endif %}{% empty %}-{% endfor %}
+        </div>
+      </div>
+      <div class="app-detail-item">
+        <div class="app-detail-label">表示中の permission</div>
+        <div class="app-detail-value">
+          {{ shown_count }} 件
+          {% if hidden_count %}（フレームワーク app 由来の {{ hidden_count }} 件は非表示）{% endif %}
+        </div>
+      </div>
+      <p class="app-muted">閲覧専用です（permission の追加・削除は Django 管理サイトで行います）。</p>
+    </section>
+
+    {% for section, perms in perm_sections.items %}
+      <section class="app-card" style="margin-top: var(--app-space-md);">
+        <h2>{{ section }}</h2>
+        <div class="app-table-wrapper">
+          <table class="app-table app-table--nowrap">
+            <thead>
+              <tr><th>codename</th><th>説明（name）</th></tr>
+            </thead>
+            <tbody>
+              {% for p in perms %}
+                <tr>
+                  <td>{{ p.codename }}</td>
+                  <td>{{ p.name }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    {% empty %}
+      <section class="app-card" style="margin-top: var(--app-space-md);">
+        <p>表示対象の permission はありません。</p>
+      </section>
+    {% endfor %}
+{% endblock %}

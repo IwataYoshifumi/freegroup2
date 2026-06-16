@@ -1,0 +1,55 @@
+{% extends "accounts/app_base.html" %}
+
+{% block title %}権限グループ一覧 — FreeGroup2{% endblock %}
+
+{% block content %}
+    <section class="app-card">
+      <div class="app-section__header">
+        <h1>権限グループ一覧</h1>
+        <span class="app-muted">閲覧専用（編集は Django 管理サイト）</span>
+      </div>
+
+      {% if messages %}
+        {% for message in messages %}
+          <div class="app-alert app-alert--{% if message.tags == 'error' %}danger{% else %}info{% endif %}">
+            {{ message }}
+          </div>
+        {% endfor %}
+      {% endif %}
+
+      <div class="app-table-wrapper">
+        <table class="app-table app-table--nowrap">
+          <thead>
+            <tr>
+              <th>グループ名</th>
+              <th>種別</th>
+              <th>permission 数</th>
+              <th>このグループを既定に持つロール</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for info in groups_info %}
+              <tr>
+                <td>
+                  <a href="{% url 'accounts:group_detail' pk=info.group.pk %}">{{ info.group.name }}</a>
+                </td>
+                <td>
+                  {% if info.is_admin %}<span class="app-badge">admin 系</span>{% else %}-{% endif %}
+                </td>
+                <td>{{ info.num_perms }}</td>
+                <td>
+                  {% for r in info.roles %}{{ r.name }}{% if not forloop.last %}, {% endif %}{% empty %}-{% endfor %}
+                </td>
+                <td>
+                  <a href="{% url 'accounts:group_detail' pk=info.group.pk %}" class="app-btn app-btn--secondary app-btn--sm">詳細</a>
+                </td>
+              </tr>
+            {% empty %}
+              <tr><td colspan="5">グループがありません</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+{% endblock %}

@@ -24,4 +24,12 @@ urlpatterns = [
     path("users/", views.UserListView.as_view(), name="user_list"),
     path("users/<int:user_id>/", views.UserDetailView.as_view(), name="user_detail"),
     path("users/<int:user_id>/retire/", views.RetireUserView.as_view(), name="retire_user"),
+    path("users/<int:user_id>/assign-role/", views.AssignRoleView.as_view(), name="assign_role"),
+    path("roles/", views.RoleListView.as_view(), name="role_list"),
+    path("roles/new/", views.RoleCreateView.as_view(), name="role_create"),
+    path("roles/<int:pk>/edit/", views.RoleUpdateView.as_view(), name="role_update"),
+    path("roles/<int:pk>/delete/", views.RoleDeleteView.as_view(), name="role_delete"),
+    path("groups/", views.GroupListView.as_view(), name="group_list"),
+    path("groups/<int:pk>/", views.GroupDetailView.as_view(), name="group_detail"),
+    path("permissions/", views.PermissionListView.as_view(), name="permission_list"),
 ]

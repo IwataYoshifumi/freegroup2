@@ -65,6 +65,8 @@ class CustomUser(AbstractUser):
         permissions = [
             ("link_user_to_person", "User と Person の紐付けを管理できる"),
             ("retire_user", "ユーザを退職処理できる"),
+            ("assign_role_to_user", "ユーザにロールを割り当てられる"),
+            ("manage_role", "業務ロールを管理できる"),
         ]
 
 

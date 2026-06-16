@@ -1,0 +1,70 @@
+{% extends "accounts/app_base.html" %}
+
+{% block title %}{% if mode == 'edit' %}ロール編集{% else %}ロール作成{% endif %} — FreeGroup2{% endblock %}
+
+{% block content %}
+    <section class="app-card">
+      <div class="app-section__header">
+        <h1>{% if mode == 'edit' %}ロール編集{% else %}ロール作成{% endif %}</h1>
+        <a href="{% url 'accounts:role_list' %}" class="app-btn app-btn--secondary app-btn--sm">戻る</a>
+      </div>
+
+      {% if messages %}
+        {% for message in messages %}
+          <div class="app-alert app-alert--{% if message.tags == 'error' %}danger{% else %}info{% endif %}">
+            {{ message }}
+          </div>
+        {% endfor %}
+      {% endif %}
+
+      {% if mode == 'edit' %}
+        <div class="app-detail-item">
+          <div class="app-detail-label">code（変更不可）</div>
+          <div class="app-detail-value">{{ role.code }}</div>
+        </div>
+        {% if holder_count %}
+          <div class="app-alert app-alert--info">
+            このロールは現在 {{ holder_count }} 人（退職者含む）に割り当てられています。
+            既定グループ（default_groups）を変更して保存すると、対象者全員に即時反映されます。
+          </div>
+        {% endif %}
+      {% endif %}
+
+      <form method="post" action="">
+        {% csrf_token %}
+
+        <div class="app-form__group">
+          <label class="app-form__label" for="{{ form.name.id_for_label }}">表示名</label>
+          {{ form.name }}
+          {% if form.name.errors %}<div class="app-alert app-alert--danger">{{ form.name.errors }}</div>{% endif %}
+        </div>
+
+        <div class="app-form__group">
+          <label class="app-form__label" for="{{ form.sort_order.id_for_label }}">並び順</label>
+          {{ form.sort_order }}
+        </div>
+
+        <div class="app-form__group">
+          <label class="app-form__label" for="{{ form.memo.id_for_label }}">メモ</label>
+          {{ form.memo }}
+        </div>
+
+        {% if mode == 'edit' %}
+          <div class="app-form__group">
+            <label class="app-form__label">既定グループ（default_groups）</label>
+            <p class="app-muted">このロールを付与した際に自動で入るグループ。現状はグループのコード名で表示します。</p>
+            <div class="app-checkbox-list">
+              {% for checkbox in form.default_groups %}
+                <label class="app-checkbox">{{ checkbox.tag }} {{ checkbox.choice_label }}</label>
+              {% endfor %}
+            </div>
+          </div>
+        {% endif %}
+
+        <div class="app-action-area" style="margin-top: var(--app-space-md);">
+          <a href="{% url 'accounts:role_list' %}" class="app-btn app-btn--secondary">キャンセル</a>
+          <button type="submit" class="app-btn app-btn--primary">{% if mode == 'edit' %}保存{% else %}作成{% endif %}</button>
+        </div>
+      </form>
+    </section>
+{% endblock %}

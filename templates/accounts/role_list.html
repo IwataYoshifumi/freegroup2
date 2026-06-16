@@ -1,0 +1,60 @@
+{% extends "accounts/app_base.html" %}
+
+{% block title %}ロール管理 — FreeGroup2{% endblock %}
+
+{% block content %}
+    <section class="app-card">
+      <div class="app-section__header">
+        <h1>ロール管理</h1>
+        <a href="{% url 'accounts:role_create' %}" class="app-btn app-btn--primary app-btn--sm">＋ ロールを作成</a>
+      </div>
+
+      {% if messages %}
+        {% for message in messages %}
+          <div class="app-alert app-alert--{% if message.tags == 'error' %}danger{% else %}info{% endif %}">
+            {{ message }}
+          </div>
+        {% endfor %}
+      {% endif %}
+
+      <div class="app-table-wrapper">
+        <table class="app-table app-table--nowrap">
+          <thead>
+            <tr>
+              <th>表示名</th>
+              <th>code</th>
+              <th>並び順</th>
+              <th>割り当て中</th>
+              <th>状態</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for role in roles %}
+              <tr>
+                <td>{{ role.name }}</td>
+                <td>{{ role.code }}</td>
+                <td>{{ role.sort_order }}</td>
+                <td>{{ role.num_holders }} 人</td>
+                <td>
+                  {% if role.code == admin_role_code %}
+                    <span class="app-badge">read-only（Django管理）</span>
+                  {% elif role.is_active %}有効{% else %}無効{% endif %}
+                </td>
+                <td>
+                  {% if role.code == admin_role_code %}
+                    -
+                  {% else %}
+                    <a href="{% url 'accounts:role_update' pk=role.pk %}" class="app-btn app-btn--secondary app-btn--sm">編集</a>
+                    <a href="{% url 'accounts:role_delete' pk=role.pk %}" class="app-btn app-btn--danger app-btn--sm">削除</a>
+                  {% endif %}
+                </td>
+              </tr>
+            {% empty %}
+              <tr><td colspan="6">ロールがありません</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+{% endblock %}

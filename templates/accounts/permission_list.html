@@ -1,0 +1,68 @@
+{% extends "accounts/app_base.html" %}
+
+{% block title %}パーミッション一覧 — FreeGroup2{% endblock %}
+
+{% block content %}
+    <section class="app-card">
+      <div class="app-section__header">
+        <h1>パーミッション一覧</h1>
+        <span class="app-muted">閲覧専用（permission はコード定義・編集は Django 管理サイト）</span>
+      </div>
+
+      {% if messages %}
+        {% for message in messages %}
+          <div class="app-alert app-alert--{% if message.tags == 'error' %}danger{% else %}info{% endif %}">
+            {{ message }}
+          </div>
+        {% endfor %}
+      {% endif %}
+
+      <p class="app-muted">各 permission を「含むグループ」を逆引き表示します。フレームワーク app（admin/auth/contenttypes/sessions）由来は除外しています。</p>
+
+      <form method="get" class="app-form-grid" style="margin-bottom: var(--app-space-md);">
+        <div class="app-form__group">
+          <label class="app-form__label" for="id_q">検索</label>
+          <input type="text" id="id_q" name="q" value="{{ q }}" class="app-input"
+                 placeholder="codename・name・app／モデル">
+        </div>
+        <div class="app-action-area">
+          <button type="submit" class="app-btn app-btn--secondary app-btn--sm">検索</button>
+          {% if q %}
+            <a href="{% url 'accounts:permission_list' %}" class="app-btn app-btn--secondary app-btn--sm">クリア</a>
+          {% endif %}
+        </div>
+      </form>
+    </section>
+
+    {% for section, perms in perm_sections.items %}
+      <section class="app-card" style="margin-top: var(--app-space-md);">
+        <h2>{{ section }}</h2>
+        <div class="app-table-wrapper">
+          <table class="app-table app-table--nowrap">
+            <thead>
+              <tr><th>codename</th><th>説明（name）</th><th>含むグループ</th></tr>
+            </thead>
+            <tbody>
+              {% for p in perms %}
+                <tr>
+                  <td>{{ p.codename }}</td>
+                  <td>{{ p.name }}</td>
+                  <td>
+                    {% for g in p.group_set.all %}
+                      <a href="{% url 'accounts:group_detail' pk=g.pk %}">{{ g.name }}</a>{% if not forloop.last %}, {% endif %}
+                    {% empty %}
+                      <span class="app-muted">（どのグループにも未付与）</span>
+                    {% endfor %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    {% empty %}
+      <section class="app-card" style="margin-top: var(--app-space-md);">
+        <p>該当する permission はありません。</p>
+      </section>
+    {% endfor %}
+{% endblock %}

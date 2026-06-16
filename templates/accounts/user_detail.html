@@ -1,9 +1,8 @@
-{% extends "base.html" %}
+{% extends "accounts/app_base.html" %}
 
 {% block title %}{{ object.username }} — ユーザ詳細 — FreeGroup2{% endblock %}
 
-{% block app_content %}
-  <main class="app-main">
+{% block content %}
     {% if messages %}
       {% for message in messages %}
         <div class="app-alert app-alert--{% if message.tags == 'error' %}danger{% else %}info{% endif %}">
@@ -61,18 +60,13 @@
     {% if object.is_active %}
       <div class="app-action-area" style="margin-top: var(--app-space-md);">
         <a href="{% url 'accounts:retire_user' user_id=object.id %}" class="app-btn app-btn--warning">退職処理</a>
+        {% if perms.accounts.assign_role_to_user and object.id != request.user.id and object.role.code != 'admin' %}
+          <a href="{% url 'accounts:assign_role' user_id=object.id %}" class="app-btn app-btn--primary">ロール変更</a>
+        {% endif %}
       </div>
     {% else %}
       <div class="app-action-area" style="margin-top: var(--app-space-md);">
         <span class="app-muted">このユーザは退職済みです</span>
       </div>
     {% endif %}
-  </main>
-{% endblock %}
-
-{% block drawer_content %}
-  <nav>
-    <a href="{% url 'home' %}">ホーム</a>
-    <a href="{% url 'accounts:user_list' %}" class="is-active">ユーザ一覧</a>
-  </nav>
 {% endblock %}

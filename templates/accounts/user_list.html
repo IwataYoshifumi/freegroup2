@@ -1,17 +1,18 @@
-{% extends "base.html" %}
+{% extends "accounts/app_base.html" %}
 
 {% block title %}ユーザ管理一覧 — FreeGroup2{% endblock %}
 
-{% block app_content %}
-  <main class="app-main">
+{% block content %}
     <section class="app-card">
       <div class="app-section__header">
         <h1>ユーザ管理一覧</h1>
         {% comment %}
         HIG v1.3 §3.6・§4.1：ON/OFF を視覚的に区別する隠し input+label トグル。
         mailings/mailing_list_list の同型 UI と同じパターン（ON=primary/OFF=secondary）。
+        検索キーワード（q）は hidden で引き継ぎ、トグル切替で検索条件を失わない。
         {% endcomment %}
         <form method="get" style="margin:0;">
+          {% if q %}<input type="hidden" name="q" value="{{ q }}">{% endif %}
           <label for="id_show_retired"
                  class="app-btn app-btn--sm {% if request.GET.show_retired == '1' %}app-btn--primary{% else %}app-btn--secondary{% endif %}"
                  style="cursor:pointer;">
@@ -23,6 +24,23 @@
                  {% if request.GET.show_retired == '1' %}checked{% endif %}>
         </form>
       </div>
+
+      {% comment %}検索フォーム：show_retired は hidden で引き継ぐ。{% endcomment %}
+      <form method="get" class="app-form-grid" style="margin-bottom: var(--app-space-md);">
+        {% if request.GET.show_retired == '1' %}<input type="hidden" name="show_retired" value="1">{% endif %}
+        <div class="app-form__group">
+          <label class="app-form__label" for="id_q">検索</label>
+          <input type="text" id="id_q" name="q" value="{{ q }}" class="app-input"
+                 placeholder="ユーザ名・氏名・メール・Person 名">
+        </div>
+        <div class="app-action-area">
+          <button type="submit" class="app-btn app-btn--secondary app-btn--sm">検索</button>
+          {% if q %}
+            <a href="{% url 'accounts:user_list' %}{% if request.GET.show_retired == '1' %}?show_retired=1{% endif %}"
+               class="app-btn app-btn--secondary app-btn--sm">クリア</a>
+          {% endif %}
+        </div>
+      </form>
 
       {% if messages %}
         {% for message in messages %}
@@ -42,6 +60,7 @@
               <th>部署</th>
               <th>認証</th>
               <th>状態</th>
+              <th>操作</th>
             </tr>
           </thead>
           <tbody>
@@ -55,20 +74,20 @@
                 <td>{{ user.department|default:"-" }}</td>
                 <td>{{ user.auth_source }}</td>
                 <td>{% if user.is_active %}現職{% else %}退職済{% endif %}</td>
+                <td>
+                  {% if user.is_active and perms.accounts.assign_role_to_user and user.id != request.user.id and user.role.code != 'admin' %}
+                    <a href="{% url 'accounts:assign_role' user_id=user.id %}?next={{ request.get_full_path|urlencode }}"
+                       class="app-btn app-btn--primary app-btn--sm">ロール変更</a>
+                  {% else %}
+                    -
+                  {% endif %}
+                </td>
               </tr>
             {% empty %}
-              <tr><td colspan="6">ユーザが見つかりません</td></tr>
+              <tr><td colspan="7">ユーザが見つかりません</td></tr>
             {% endfor %}
           </tbody>
         </table>
       </div>
     </section>
-  </main>
-{% endblock %}
-
-{% block drawer_content %}
-  <nav>
-    <a href="{% url 'home' %}">ホーム</a>
-    <a href="{% url 'accounts:user_list' %}" class="is-active">ユーザ一覧</a>
-  </nav>
 {% endblock %}

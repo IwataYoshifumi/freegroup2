@@ -1,0 +1,18 @@
+{# ユーザ管理（アクセス管理）アプリ用ベース。base.html を継承し、サイドバー（accounts/_sidebar.html）を組み込む。 #}
+{% extends "base.html" %}
+
+{% block app_name %}ユーザ管理{% endblock %}
+{% block drawer_title %}ユーザ管理{% endblock %}
+
+{% block app_content %}
+  <div class="app-main-area">
+    {% include "accounts/_sidebar.html" %}
+    <main class="app-main">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+{% endblock %}
+
+{% block drawer_content %}
+  {% include "accounts/_sidebar.html" %}
+{% endblock %}
