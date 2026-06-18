@@ -39,7 +39,6 @@ JS フック予約：
   {% if mode == 'create' %}
     <div class="app-page-header">
       <div>
-        <div class="app-breadcrumb">メール配信 / 配信リスト一覧 / 新規作成 / タグ選択</div>
         <h1>リスト作成（2/3）タグで対象を選ぶ</h1>
         <div style="margin-top:4px; color:#475569;">
           対象 Person をタグ条件で抽出します。条件を組み立てたあと「内容を確認」へ進んでください。
@@ -63,7 +62,6 @@ JS フック予約：
   {% elif mode == 'add_by_tag' %}
     <div class="app-page-header">
       <div>
-        <div class="app-breadcrumb">メール配信 / 配信リスト一覧 / 詳細 / タグで追加</div>
         <h1>タグで追加：{{ mailing_list.name }}（現在 {{ current_member_count }} 件）</h1>
         <div class="app-message app-message--success" style="margin-top:8px;">
           <i class="bi bi-plus-circle" style="margin-right:6px;"></i>
@@ -77,7 +75,6 @@ JS フック予約：
   {% elif mode == 'remove_by_tag' %}
     <div class="app-page-header">
       <div>
-        <div class="app-breadcrumb">メール配信 / 配信リスト一覧 / 詳細 / タグで除外</div>
         <h1>タグで除外：{{ mailing_list.name }}（現在 {{ current_member_count }} 件）</h1>
         <div class="app-message app-message--error" style="margin-top:8px;">
           <i class="bi bi-dash-circle" style="margin-right:6px;"></i>
