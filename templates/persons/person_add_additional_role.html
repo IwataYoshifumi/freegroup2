@@ -6,7 +6,6 @@
 {% block content %}
   <div class="app-page-header" style="max-width:900px;">
     <div>
-      <div class="app-breadcrumb">人物管理 / 人物一覧 / 別肩書追加</div>
       <h1>別肩書追加</h1>
       {% if person.primary_contact %}
         <p class="app-muted">{{ person.primary_contact.full_name|default:"(氏名なし)" }} の別肩書を追加します。</p>
