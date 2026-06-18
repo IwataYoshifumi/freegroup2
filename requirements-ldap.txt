@@ -1,0 +1,5 @@
+# 本番 / LDAP 利用環境（Linux）向け extras。
+# base（requirements.txt）を取り込み、python-ldap 依存の django-auth-ldap を追加する。
+# Windows ローカルは base の requirements.txt のみで起動可（AUTH_BACKEND=local）。
+-r requirements.txt
+django-auth-ldap==5.3.0
