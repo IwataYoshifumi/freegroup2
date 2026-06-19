@@ -23,18 +23,21 @@
     {# 状況の確認文はタイトル直下にアラートで集約し、色で状態を即把握できるようにする。 #}
     {# 出し分け条件は下部ボタンと同一（person.linked_user・email_match）。判定ロジックは変えない。 #}
     {% with linked=person.linked_user %}
-      {% if not linked and email_match %}
-        {# 未紐付け かつ メール一致：これから紐付け（情報）→ info（青）。 #}
-        <div class="app-alert app-alert--info">この人物はまだユーザーに紐付けられていません。あなたのユーザーと紐付けますか？</div>
-      {% elif linked == user %}
-        {# 本人紐付け済み：解除（可逆操作）→ warning（黄）。 #}
+      {% if linked == user %}
+        {# 本人紐付け済み：解除（可逆操作）→ warning（黄）。非active でも解除は可能なので status は見ない。 #}
         <div class="app-alert app-alert--warning">この人物はあなた（{{ user.username }}）に紐付けられています。紐付けを解除しますか？</div>
-      {% elif not linked and not email_match %}
-        {# 未紐付け だが メール不一致：紐付け不可 → danger（赤）。 #}
-        <div class="app-alert app-alert--danger">メールアドレスが一致しないため紐づけできません。</div>
-      {% else %}
+      {% elif linked %}
         {# 他 User に紐付け済み：操作不可 → warning（黄）。 #}
         <div class="app-alert app-alert--warning">この人物は別のユーザー（{{ linked.username }} さん）に紐付けられています。操作できません。</div>
+      {% elif not person_active %}
+        {# 未紐付け だが 非active（MERGED/ARCHIVED 等）：紐付け不可 → danger（赤）。 #}
+        <div class="app-alert app-alert--danger">この人物は通常状態（active）ではないため紐付けできません。</div>
+      {% elif email_match %}
+        {# 未紐付け・active・メール一致：これから紐付け（情報）→ info（青）。 #}
+        <div class="app-alert app-alert--info">この人物はまだユーザーに紐付けられていません。あなたのユーザーと紐付けますか？</div>
+      {% else %}
+        {# 未紐付け・active だが メール不一致：紐付け不可 → danger（赤）。 #}
+        <div class="app-alert app-alert--danger">メールアドレスが一致しないため紐づけできません。</div>
       {% endif %}
     {% endwith %}
 
@@ -99,8 +102,8 @@
     {# ---- 状態別ボタン表示 ---- #}
     {% with linked=person.linked_user %}
       {% if not linked %}
-        {% if email_match %}
-          {# 未紐付け かつ メール一致：紐付けボタン #}
+        {% if email_match and person_active %}
+          {# 未紐付け・active・メール一致：紐付けボタン #}
           <section class="app-card" style="margin-top: var(--app-space-md);">
             <form method="post" action="">
               {% csrf_token %}
@@ -113,7 +116,7 @@
             </form>
           </section>
         {% else %}
-          {# 未紐付け だが メール不一致：理由はタイトル直下のアラートで表示。link ボタンは出さない（戻る導線のみ）。 #}
+          {# 未紐付けだが 非active or メール不一致：理由はタイトル直下のアラートで表示。link ボタンは出さない（戻る導線のみ）。 #}
           <div class="app-action-area" style="margin-top: var(--app-space-md);">
             {% back_all_link back %}
             {% back_link back %}

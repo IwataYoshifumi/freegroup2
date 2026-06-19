@@ -2,17 +2,17 @@ from django.contrib.auth.mixins import LoginRequiredMixin
 from django.views.generic import TemplateView
 
 from accounts.constants import PersonLinkStatus
+from accounts.services import self_link_candidate_contacts
 from back_navigator.back_navigator import BackNavigator
-from contacts.models import Contact
-from persons.models import Person
 
 
 class HomeView(LoginRequiredMixin, TemplateView):
     """ホーム画面（仕様書 §12.4）。
 
     未紐付け User の email と一致する Contact があれば、ホーム画面に紐付け候補
-    アラートを表示する。ORM 完結クエリ（person__user__isnull=True で OneToOne
-    逆参照を直接フィルタ、Python 側ループ排除、N+1 回避）。
+    アラートを表示する。照合基準は確認画面ガードと共通の self_link_candidate_contacts
+    に集約（入口・出口で基準を揃え、primary 以外の Contact 一致による「アラートは出るが
+    確認画面で弾かれる」詰みを解消）。
     """
 
     template_name = "home/home.html"
@@ -25,13 +25,9 @@ class HomeView(LoginRequiredMixin, TemplateView):
         # ホームはルート画面でクエリ状態を持たないため push しない。dummy keys を避ける）。
         ctx["back"] = BackNavigator(self.request)
 
-        if user.person is None and user.email:
-            candidates_qs = Contact.objects.filter(
-                email=user.email,
-                person__status=Person.Status.ACTIVE,
-                person__user__isnull=True,
-            ).select_related("person")
-            candidates = list(candidates_qs)
+        if user.person is None:
+            # 入口・出口で同一基準（accounts.services の共通定義）を参照する。
+            candidates = list(self_link_candidate_contacts(user))
 
             distinct_persons = {c.person_id for c in candidates}
             if len(distinct_persons) > 1:

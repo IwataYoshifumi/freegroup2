@@ -55,9 +55,12 @@ class LinkUserPersonConfirmView(LoginRequiredMixin, View):
         # 本フローは常に本人フロー（operator == user == request.user）。
         # メール不一致なら確認画面で link ボタンを出さず、理由を表示する（GET 時点判定）。
         email_match = is_self_link_email_match(request.user, person)
+        # 出口も入口（active 限定）と揃える：非active Person には link ボタンを出さない。
+        person_active = person.status == Person.Status.ACTIVE
         return render(request, self.template_name, {
             "person": person,
             "email_match": email_match,
+            "person_active": person_active,
             "back": BackNavigator(request),
         })
 
