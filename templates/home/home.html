@@ -9,10 +9,8 @@
       {% for candidate in person_link_candidates %}
         <div class="app-alert app-alert--info">
           <p>あなたの名刺データが見つかりました: <strong>{{ candidate.full_name }}</strong></p>
-          <form method="post" action="{% url 'accounts:link_user_person' user_id=request.user.id person_id=candidate.person_id %}">
-            {% csrf_token %}
-            <button type="submit" class="app-btn app-btn--primary">紐付ける</button>
-          </form>
+          {# 紐づけは確認画面経由に統一（本人フロー前提のため person_id のみ）。 #}
+          <a href="{% url 'accounts:link_user_person_confirm' person_id=candidate.person_id %}" class="app-btn app-btn--primary">紐付ける</a>
         </div>
       {% endfor %}
 
