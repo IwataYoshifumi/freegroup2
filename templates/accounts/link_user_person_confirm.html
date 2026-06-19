@@ -1,10 +1,11 @@
-{% extends "base.html" %}
+{% extends "accounts/app_base.html" %}
 {% load back_tags %}
 
 {% block title %}ユーザーと人物の紐付け確認 — FreeGroup2{% endblock %}
 
-{% block app_content %}
-  <main class="app-main">
+{% block content %}
+    {# 全体を最大幅 960px・左寄せに絞る（他画面の検索カードと同じ収まり：max-width 960px ＋ margin-inline:0）。 #}
+    <div style="max-width: 960px; margin-inline: 0;">
     {% if messages %}
       {% for message in messages %}
         <div class="app-alert app-alert--{% if message.tags == 'error' %}danger{% else %}info{% endif %}">
@@ -19,6 +20,24 @@
       {% back_link back %}
     </div>
 
+    {# 状況の確認文はタイトル直下にアラートで集約し、色で状態を即把握できるようにする。 #}
+    {# 出し分け条件は下部ボタンと同一（person.linked_user・email_match）。判定ロジックは変えない。 #}
+    {% with linked=person.linked_user %}
+      {% if not linked and email_match %}
+        {# 未紐付け かつ メール一致：これから紐付け（情報）→ info（青）。 #}
+        <div class="app-alert app-alert--info">この人物はまだユーザーに紐付けられていません。あなたのユーザーと紐付けますか？</div>
+      {% elif linked == user %}
+        {# 本人紐付け済み：解除（可逆操作）→ warning（黄）。 #}
+        <div class="app-alert app-alert--warning">この人物はあなた（{{ user.username }}）に紐付けられています。紐付けを解除しますか？</div>
+      {% elif not linked and not email_match %}
+        {# 未紐付け だが メール不一致：紐付け不可 → danger（赤）。 #}
+        <div class="app-alert app-alert--danger">メールアドレスが一致しないため紐づけできません。</div>
+      {% else %}
+        {# 他 User に紐付け済み：操作不可 → warning（黄）。 #}
+        <div class="app-alert app-alert--warning">この人物は別のユーザー（{{ linked.username }} さん）に紐付けられています。操作できません。</div>
+      {% endif %}
+    {% endwith %}
+
     {# ---- User と Person を横並びで表示 ---- #}
     <div style="display: flex; gap: var(--app-space-md); flex-wrap: wrap; align-items: flex-start;">
 
@@ -27,6 +46,7 @@
         <div class="app-section__header">
           <h2>あなた（ユーザー）</h2>
         </div>
+        {# User が持つのは username / 氏名 / email / department（→Department）。会社・役職フィールドは無い。 #}
         <div class="app-detail-item">
           <div class="app-detail-label">ユーザ名</div>
           <div class="app-detail-value">{{ user.username }}</div>
@@ -36,11 +56,11 @@
           <div class="app-detail-value">{{ user.get_full_name|default:"-" }}</div>
         </div>
         <div class="app-detail-item">
-          <div class="app-detail-label">メール</div>
+          <div class="app-detail-label">メールアドレス</div>
           <div class="app-detail-value">{{ user.email|default:"-" }}</div>
         </div>
         <div class="app-detail-item">
-          <div class="app-detail-label">部署</div>
+          <div class="app-detail-label">部署名</div>
           <div class="app-detail-value">{{ user.department|default:"-" }}</div>
         </div>
       </section>
@@ -53,24 +73,21 @@
         {% with c=person.primary_contact %}
           {% if c %}
             <div class="app-detail-item">
-              <div class="app-detail-label">会社名</div>
-              <div class="app-detail-value">{{ c.organization|default:"-" }}</div>
-            </div>
-            <div class="app-detail-item">
               <div class="app-detail-label">氏名</div>
               <div class="app-detail-value">{{ c.full_name|default:"-" }}</div>
             </div>
             <div class="app-detail-item">
-              <div class="app-detail-label">メール</div>
+              <div class="app-detail-label">メールアドレス</div>
               <div class="app-detail-value">{{ c.email|default:"-" }}</div>
             </div>
             <div class="app-detail-item">
-              <div class="app-detail-label">部署</div>
-              <div class="app-detail-value">{{ c.department|default:"-" }}</div>
+              {# 会社名・部署名・役職を名刺のように1行で（会社 → 部署 → 役職）。全て空なら "-"。 #}
+              <div class="app-detail-label">所属（会社・部署・役職）</div>
+              <div class="app-detail-value">{% if c.organization or c.department or c.title %}{{ c.organization }} {{ c.department }} {{ c.title }}{% else %}-{% endif %}</div>
             </div>
             <div class="app-detail-item">
-              <div class="app-detail-label">役職</div>
-              <div class="app-detail-value">{{ c.title|default:"-" }}</div>
+              <div class="app-detail-label">携帯番号</div>
+              <div class="app-detail-value">{{ c.mobile_phone|default:"-" }}</div>
             </div>
           {% else %}
             <p class="app-muted">（主コンタクト未設定の人物です）</p>
@@ -85,7 +102,6 @@
         {% if email_match %}
           {# 未紐付け かつ メール一致：紐付けボタン #}
           <section class="app-card" style="margin-top: var(--app-space-md);">
-            <p class="app-muted">この人物はまだユーザーに紐付けられていません。あなたのユーザーと紐付けますか？</p>
             <form method="post" action="">
               {% csrf_token %}
               <input type="hidden" name="action" value="link">
@@ -97,10 +113,7 @@
             </form>
           </section>
         {% else %}
-          {# 未紐付け だが メール不一致：理由表示・link ボタンは出さない #}
-          <div class="app-alert app-alert--danger" style="margin-top: var(--app-space-md);">
-            メールアドレスが一致しないため紐づけできません。
-          </div>
+          {# 未紐付け だが メール不一致：理由はタイトル直下のアラートで表示。link ボタンは出さない（戻る導線のみ）。 #}
           <div class="app-action-area" style="margin-top: var(--app-space-md);">
             {% back_all_link back %}
             {% back_link back %}
@@ -108,37 +121,27 @@
         {% endif %}
 
       {% elif linked == user %}
-        {# 本人紐付け済み：解除ボタン #}
+        {# 本人紐付け済み：解除ボタン（確認文はタイトル直下のアラートに集約済み）。 #}
         <section class="app-card" style="margin-top: var(--app-space-md);">
-          <p class="app-muted">この人物はあなた（{{ user.username }}）に紐付けられています。紐付けを解除しますか？</p>
           <form method="post" action="">
             {% csrf_token %}
             <input type="hidden" name="action" value="unlink">
             <div class="app-action-area">
               {% back_all_link back %}
               {% back_link back %}
-              <button type="submit" class="app-btn app-btn--danger">解除する</button>
+              {# 解除は復帰可能（再紐付け可）なので HIG に従い danger ではなく warning（黄）。 #}
+              <button type="submit" class="app-btn app-btn--warning">連携を解除する</button>
             </div>
           </form>
         </section>
 
       {% else %}
-        {# 他 User に紐付け済み：警告のみ #}
-        <div class="app-alert app-alert--warning" style="margin-top: var(--app-space-md);">
-          この人物は別のユーザー（{{ linked.username }} さん）に紐付けられています。操作できません。
-        </div>
+        {# 他 User に紐付け済み：操作不可（理由はタイトル直下のアラートで表示）。戻る導線のみ。 #}
         <div class="app-action-area" style="margin-top: var(--app-space-md);">
           {% back_all_link back %}
           {% back_link back %}
         </div>
       {% endif %}
     {% endwith %}
-  </main>
-{% endblock %}
-
-{% block drawer_content %}
-  <nav>
-    <a href="{% url 'home' %}">ホーム</a>
-    <a href="{% url 'accounts:profile' %}">プロフィール</a>
-  </nav>
+    </div>
 {% endblock %}

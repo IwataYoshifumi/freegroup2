@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load back_tags %}
 
 {% block title %}ホーム — FreeGroup2{% endblock %}
 {% block app_name %}ホーム{% endblock %}
@@ -10,7 +11,9 @@
         <div class="app-alert app-alert--info">
           <p>あなたの名刺データが見つかりました: <strong>{{ candidate.full_name }}</strong></p>
           {# 紐づけは確認画面経由に統一（本人フロー前提のため person_id のみ）。 #}
-          <a href="{% url 'accounts:link_user_person_confirm' person_id=candidate.person_id %}" class="app-btn app-btn--primary">紐付ける</a>
+          {# 確認画面で「戻る」がホームに戻れるよう append_back_url で back_stack を付与。 #}
+          {% url 'accounts:link_user_person_confirm' person_id=candidate.person_id as confirm_url %}
+          <a href="{% append_back_url confirm_url back %}" class="app-btn app-btn--primary">紐付ける</a>
         </div>
       {% endfor %}
 

@@ -2,6 +2,7 @@ from django.contrib.auth.mixins import LoginRequiredMixin
 from django.views.generic import TemplateView
 
 from accounts.constants import PersonLinkStatus
+from back_navigator.back_navigator import BackNavigator
 from contacts.models import Contact
 from persons.models import Person
 
@@ -19,6 +20,10 @@ class HomeView(LoginRequiredMixin, TemplateView):
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
         user = self.request.user
+
+        # 確認画面リンクに back_stack を引き継げるよう BackNavigator を渡す（push_current は呼ばない＝
+        # ホームはルート画面でクエリ状態を持たないため push しない。dummy keys を避ける）。
+        ctx["back"] = BackNavigator(self.request)
 
         if user.person is None and user.email:
             candidates_qs = Contact.objects.filter(

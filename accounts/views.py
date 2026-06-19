@@ -36,7 +36,9 @@ class ProfileView(LoginRequiredMixin, View):
     template_name = "accounts/profile.html"
 
     def get(self, request):
-        return render(request, self.template_name)
+        # 確認画面リンクに back_stack を引き継げるよう BackNavigator を渡す（push_current は呼ばない＝
+        # PersonDetailView 同型。プロフィールはルート画面でクエリ状態を持たないため push しない）。
+        return render(request, self.template_name, {"back": BackNavigator(request)})
 
 
 class LinkUserPersonConfirmView(LoginRequiredMixin, View):

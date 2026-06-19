@@ -44,6 +44,7 @@ class HomeSingleCandidateLinkTests(TestCase):
             kwargs={"user_id": self.user.id, "person_id": self.person.id},
         )
         # 確認画面への GET リンクを出力し、即実行ルートは出力しない。
+        # ホームはルート画面でスタックが空のため append_back_url は素の URL を返す（back_stack 無し）。
         self.assertContains(resp, 'href="%s"' % confirm_url)
         self.assertNotContains(resp, immediate_url)
         # アラート部に即実行 POST フォームが残っていない（action=即実行URL の form 無し）。
