@@ -11,7 +11,7 @@
     </div>
   </div>
 
-  <section class="app-card">
+  <section class="app-card app-card-search">
     <form method="get" class="app-form-grid-edit">
       <div class="app-form-grid" style="grid-template-columns: repeat(4, 1fr);">
         <div class="app-form__group">
@@ -44,14 +44,112 @@
           <input type="text" id="id_address" name="address" value="{{ address }}" class="app-input">
         </div>
 
+        {# 取り込み期間（元画像のアップロード日＝OriginalImage.created_at）。折りたたまず常時表示。 #}
         <div class="app-form__group app-form__group--full" style="grid-column: 1 / -1;">
-          <label class="app-form__label">ステータス（OCR結果）</label>
-          {% for value, label in ocr_result_choices %}
-            <label style="margin-right: 12px;">
-              <input type="checkbox" name="ocr_result" value="{{ value }}" {% if value in selected_ocr_results %}checked{% endif %}>
-              {{ label }}
-            </label>
-          {% endfor %}
+          <label class="app-form__label">取り込み期間（元画像のアップロード日）</label>
+          <div class="js-date-range" style="display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
+            <input type="date" name="uploaded_after" value="{{ uploaded_after }}" class="app-input js-date-from" style="max-width:170px;">
+            <span class="app-muted">〜</span>
+            <input type="date" name="uploaded_before" value="{{ uploaded_before }}" class="app-input js-date-to" style="max-width:170px;">
+            <span style="width:1px; height:20px; background:var(--app-border); margin:0 4px;"></span>
+            <button type="button" class="app-btn app-btn--secondary app-btn--sm js-date-quick" data-range="today">今日</button>
+            <button type="button" class="app-btn app-btn--secondary app-btn--sm js-date-quick" data-range="week">今週</button>
+            <button type="button" class="app-btn app-btn--secondary app-btn--sm js-date-quick" data-range="lastweek">先週</button>
+            <button type="button" class="app-btn app-btn--secondary app-btn--sm js-date-quick" data-range="month">今月</button>
+            <button type="button" class="app-btn app-btn--secondary app-btn--sm js-date-quick" data-range="lastmonth">先月</button>
+            <button type="button" class="app-btn app-btn--secondary app-btn--sm js-date-quick" data-range="twomonths">2か月</button>
+            <button type="button" class="app-btn app-btn--secondary app-btn--sm js-date-quick" data-range="thisyear">今年</button>
+            <span style="width:1px; height:20px; background:var(--app-border); margin:0 4px;"></span>
+            <button type="button" class="app-btn app-btn--secondary app-btn--sm js-date-clear">クリア</button>
+          </div>
+        </div>
+
+        <div class="app-form__group" style="grid-column: span 2;">
+          {% comment %}ステータス（OCR結果）絞り込み。選択あり→開・なし→閉（既存 app-collapsible を再利用）。
+          横2列の左半分（4カラムグリッド中 span 2）。開いても半幅固定、中身は flex-wrap で折り返す。{% endcomment %}
+          <div class="app-collapsible{% if selected_ocr_results %} is-open{% endif %}">
+            <button type="button" class="app-collapsible__header" data-action="toggle-collapsible"
+                    aria-expanded="{% if selected_ocr_results %}true{% else %}false{% endif %}">
+              <span>ステータス（OCR結果）</span>
+              <span class="app-collapsible__icon">{% if selected_ocr_results %}▾{% else %}▸{% endif %}</span>
+            </button>
+            <div class="app-collapsible-body">
+              <div style="padding-top:8px;">
+                {# 実送信用の隠しチェックボックス：name/value は現状維持。JS がトグル状態を反映して送信する #}
+                <div class="js-ocr-hidden" hidden>
+                  {% for value, label in ocr_result_choices %}
+                    <input type="checkbox" name="ocr_result" value="{{ value }}" {% if value in selected_ocr_results %}checked{% endif %}>
+                  {% endfor %}
+                </div>
+
+                {# 個別トグル（上）：ON=primary（塗り）／OFF=secondary（淡）で ON/OFF を強コントラスト表示 #}
+                <div style="display:flex; flex-wrap:wrap; gap:8px;">
+                  {% for value, label in ocr_result_choices %}
+                    <button type="button"
+                            class="app-btn app-btn--sm js-ocr-toggle {% if value in selected_ocr_results %}app-btn--primary{% else %}app-btn--secondary{% endif %}"
+                            data-ocr-value="{{ value }}"
+                            aria-pressed="{% if value in selected_ocr_results %}true{% else %}false{% endif %}">{{ label }}</button>
+                  {% endfor %}
+                </div>
+
+                {# 個別とまとめ（グループ）の視覚的な区切り。新規CSSは足さず hr にインライン最小指定。 #}
+                <hr style="border:none; border-top:1px solid var(--app-border); margin:10px 0 8px;">
+
+                {# グループ（下・排他/非トグル）＋ クリア #}
+                <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:0;">
+                  <button type="button" class="app-btn app-btn--secondary app-btn--sm js-ocr-group" data-ocr-group="pre">OCR前</button>
+                  <button type="button" class="app-btn app-btn--secondary app-btn--sm js-ocr-group" data-ocr-group="card">名刺</button>
+                  <button type="button" class="app-btn app-btn--secondary app-btn--sm js-ocr-group" data-ocr-group="notcard">名刺ではない</button>
+                  <span style="width:1px; height:20px; background:var(--app-border); margin:0 4px;"></span>
+                  <button type="button" class="app-btn app-btn--secondary app-btn--sm js-ocr-clear">クリア</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="app-form__group" style="grid-column: span 2;">
+          {% comment %}ソート・表示件数。既定以外（ソート指定あり or 件数≠50）→開・すべて既定→閉。
+          横2列の右半分（span 2）。開いても半幅固定、中身は flex-wrap で折り返す。{% endcomment %}
+          <div class="app-collapsible js-card-sort-control{% if sort_is_active or per_page != 50 %} is-open{% endif %}">
+            <button type="button" class="app-collapsible__header" data-action="toggle-collapsible"
+                    aria-expanded="{% if sort_is_active or per_page != 50 %}true{% else %}false{% endif %}">
+              <span>ソート・表示件数</span>
+              <span class="app-collapsible__icon">{% if sort_is_active or per_page != 50 %}▾{% else %}▸{% endif %}</span>
+            </button>
+            <div class="app-collapsible-body">
+              <div style="padding-top:8px;">
+                {# 多段ソート（?sort=key,-key,...）。送信時に下の inline JS が hidden(name=sort) へ組み立てる。 #}
+                <input type="hidden" name="sort" class="js-card-sort-value" value="{{ sort_value }}"{% if not sort_is_active %} disabled{% endif %}>
+                {% for row in sort_rows %}
+                  <div class="js-card-sort-row" style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:var(--app-space-sm);">
+                    <span class="app-form__label" style="min-width:5em; margin:0;">第{{ forloop.counter }}キー</span>
+                    <select class="app-input js-card-sort-key" style="max-width:160px;">
+                      <option value="">指定なし</option>
+                      <option value="name"{% if row.key == "name" %} selected{% endif %}>氏名</option>
+                      <option value="company"{% if row.key == "company" %} selected{% endif %}>会社</option>
+                      <option value="title"{% if row.key == "title" %} selected{% endif %}>役職</option>
+                      <option value="created"{% if row.key == "created" %} selected{% endif %}>作成日時</option>
+                    </select>
+                    <ul class="app-radio-toggle">
+                      <li><label><input type="radio" name="_csortdir{{ forloop.counter }}" class="js-card-sort-dir" value="asc" {% if row.dir != "desc" %}checked{% endif %}>昇順</label></li>
+                      <li><label><input type="radio" name="_csortdir{{ forloop.counter }}" class="js-card-sort-dir" value="desc" {% if row.dir == "desc" %}checked{% endif %}>降順</label></li>
+                    </ul>
+                  </div>
+                {% endfor %}
+
+                {# 表示件数（50/100/200・既定50）。検索条件・ソートと URL 上で共存。 #}
+                <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+                  <span class="app-form__label" style="min-width:5em; margin:0;">表示件数</span>
+                  <select name="per_page" class="app-input" style="max-width:120px;">
+                    {% for n in per_page_choices %}
+                      <option value="{{ n }}"{% if n == per_page %} selected{% endif %}>{{ n }} 件</option>
+                    {% endfor %}
+                  </select>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -184,27 +282,7 @@
     </div>
 
     {% if is_paginated %}
-      <nav class="app-pagination" aria-label="ページネーション">
-        {% if page_obj.has_previous %}
-          <a href="?name={{ name }}&organization={{ organization }}&department={{ department }}&title={{ title }}&email={{ email }}&tel={{ tel }}&address={{ address }}{% for v in selected_ocr_results %}&ocr_result={{ v }}{% endfor %}&page={{ page_obj.previous_page_number }}" class="app-pagination__button">‹</a>
-        {% else %}
-          <button type="button" class="app-pagination__button" disabled>‹</button>
-        {% endif %}
-
-        {% for num in paginator.page_range %}
-          {% if num == page_obj.number %}
-            <button type="button" class="app-pagination__button is-active">{{ num }}</button>
-          {% else %}
-            <a href="?name={{ name }}&organization={{ organization }}&department={{ department }}&title={{ title }}&email={{ email }}&tel={{ tel }}&address={{ address }}{% for v in selected_ocr_results %}&ocr_result={{ v }}{% endfor %}&page={{ num }}" class="app-pagination__button">{{ num }}</a>
-          {% endif %}
-        {% endfor %}
-
-        {% if page_obj.has_next %}
-          <a href="?name={{ name }}&organization={{ organization }}&department={{ department }}&title={{ title }}&email={{ email }}&tel={{ tel }}&address={{ address }}{% for v in selected_ocr_results %}&ocr_result={{ v }}{% endfor %}&page={{ page_obj.next_page_number }}" class="app-pagination__button">›</a>
-        {% else %}
-          <button type="button" class="app-pagination__button" disabled>›</button>
-        {% endif %}
-      </nav>
+      {% include "persons/_pagination.html" %}
     {% endif %}
   </section>
 
@@ -224,4 +302,190 @@
     </div>
   {% endif %}
 {% endfor %}
+
+{% comment %}
+ステータス（OCR結果）ボタンUIの結線。送信は隠しチェックボックス（name=ocr_result）が担い、
+ボタンはその checked を操作するだけ＝送信値は現状と同一（新規JSファイルは作らずインライン、CLAUDE.md §7）。
+{% endcomment %}
+<script>
+  (function () {
+    function init() {
+      var form = document.querySelector('form.app-form-grid-edit');
+      if (!form) return;
+      var hidden = Array.prototype.slice.call(
+        form.querySelectorAll('.js-ocr-hidden input[type="checkbox"][name="ocr_result"]')
+      );
+      var toggles = Array.prototype.slice.call(form.querySelectorAll('.js-ocr-toggle'));
+      if (!hidden.length || !toggles.length) return;
+
+      // グループ（排他）の構成。値は views._OCR_FILTER_CHOICES と一致させる。
+      var GROUPS = {
+        pre: ['_pending', '_processing'],
+        card: ['business_card'],
+        notcard: ['not_business_card', 'insufficient_info', 'ocr_failed', 'others']
+      };
+
+      function cbByValue(v) {
+        for (var i = 0; i < hidden.length; i++) { if (hidden[i].value === v) return hidden[i]; }
+        return null;
+      }
+      function syncToggle(btn) {
+        var cb = cbByValue(btn.getAttribute('data-ocr-value'));
+        var on = !!(cb && cb.checked);
+        btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+        btn.classList.toggle('app-btn--primary', on);
+        btn.classList.toggle('app-btn--secondary', !on);
+      }
+      function syncAll() { toggles.forEach(syncToggle); }
+
+      // (A) 個別トグル：押すたび ON/OFF。
+      toggles.forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var cb = cbByValue(btn.getAttribute('data-ocr-value'));
+          if (cb) cb.checked = !cb.checked;
+          syncToggle(btn);
+        });
+      });
+
+      // (B) グループ：排他・非トグル（押すと該当グループのみ ON、他は OFF）。
+      Array.prototype.slice.call(form.querySelectorAll('.js-ocr-group')).forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var members = GROUPS[btn.getAttribute('data-ocr-group')] || [];
+          hidden.forEach(function (cb) { cb.checked = members.indexOf(cb.value) !== -1; });
+          syncAll();
+        });
+      });
+
+      // (C) クリア：個別7つを全 OFF。
+      var clearBtn = form.querySelector('.js-ocr-clear');
+      if (clearBtn) clearBtn.addEventListener('click', function () {
+        hidden.forEach(function (cb) { cb.checked = false; });
+        syncAll();
+      });
+
+      syncAll(); // サーバ描画初期状態（selected_ocr_results）にボタン表示を合わせる。
+    }
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', init);
+    } else {
+      init();
+    }
+  })();
+</script>
+
+{% comment %}
+ソート組み立て（persons の _sort_control 同方式を流用）。送信直前に 3 行を読んで hidden(name=sort)
+へ「優先順つきカンマ区切り・降順は先頭 -」で組み立て、方向ラジオは disabled にして URL を sort 単一に保つ。
+{% endcomment %}
+<script>
+  (function () {
+    function init() {
+      var ctrl = document.querySelector('.js-card-sort-control');
+      if (!ctrl) return;
+      var form = ctrl.closest('form');
+      if (!form) return;
+      var hidden = ctrl.querySelector('.js-card-sort-value');
+      form.addEventListener('submit', function () {
+        var parts = [];
+        var seen = {};
+        Array.prototype.slice.call(ctrl.querySelectorAll('.js-card-sort-row')).forEach(function (row) {
+          var sel = row.querySelector('.js-card-sort-key');
+          var key = sel ? sel.value : '';
+          if (!key || seen[key]) return;      // 未指定・同一列の二重指定は無視
+          seen[key] = true;
+          var dirEl = row.querySelector('.js-card-sort-dir:checked');
+          var dir = dirEl ? dirEl.value : 'asc';
+          parts.push((dir === 'desc' ? '-' : '') + key);
+        });
+        if (parts.length) {
+          hidden.value = parts.join(',');
+          hidden.disabled = false;
+        } else {
+          hidden.value = '';
+          hidden.disabled = true;             // 空なら sort= を URL に出さない
+        }
+        Array.prototype.slice.call(ctrl.querySelectorAll('.js-card-sort-dir')).forEach(function (r) {
+          r.disabled = true;                  // 方向ラジオは name を持つので送信から外す
+        });
+      });
+    }
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', init);
+    } else {
+      init();
+    }
+  })();
+</script>
+
+{% comment %}
+取り込み期間クイックボタン（今日/今週/今月/先月）。排他・非トグル：押すと裏の日付入力
+（uploaded_after / uploaded_before）にその期間の開始日・終了日をセットするだけ。週は月曜起点。
+{% endcomment %}
+<script>
+  (function () {
+    function init() {
+      var wrap = document.querySelector('.js-date-range');
+      if (!wrap) return;
+      var fromEl = wrap.querySelector('.js-date-from');
+      var toEl = wrap.querySelector('.js-date-to');
+      if (!fromEl || !toEl) return;
+
+      function fmt(d) {
+        return d.getFullYear() + '-' +
+          String(d.getMonth() + 1).padStart(2, '0') + '-' +
+          String(d.getDate()).padStart(2, '0');
+      }
+      function setRange(from, to) { fromEl.value = fmt(from); toEl.value = fmt(to); }
+
+      Array.prototype.slice.call(wrap.querySelectorAll('.js-date-quick')).forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var now = new Date();
+          var y = now.getFullYear(), m = now.getMonth(), d = now.getDate();
+          switch (btn.getAttribute('data-range')) {
+            case 'today':
+              setRange(new Date(y, m, d), new Date(y, m, d));
+              break;
+            case 'week': {
+              var offset = (now.getDay() + 6) % 7;   // 月曜起点（Mon=0 … Sun=6）
+              var mon = new Date(y, m, d - offset);
+              setRange(mon, new Date(mon.getFullYear(), mon.getMonth(), mon.getDate() + 6));
+              break;
+            }
+            case 'lastweek': {
+              var offsetL = (now.getDay() + 6) % 7;  // 今週月曜から 7 日戻すと先週月曜。
+              var lastMon = new Date(y, m, d - offsetL - 7);
+              setRange(lastMon, new Date(lastMon.getFullYear(), lastMon.getMonth(), lastMon.getDate() + 6));
+              break;
+            }
+            case 'month':
+              setRange(new Date(y, m, 1), new Date(y, m + 1, 0));
+              break;
+            case 'lastmonth':
+              setRange(new Date(y, m - 1, 1), new Date(y, m, 0));
+              break;
+            case 'twomonths':
+              // 先月1日 〜 今月末日（連続2か月）。
+              setRange(new Date(y, m - 1, 1), new Date(y, m + 1, 0));
+              break;
+            case 'thisyear':
+              setRange(new Date(y, 0, 1), new Date(y, 11, 31));
+              break;
+          }
+        });
+      });
+
+      // クリア：期間の日付欄を両方とも空に（期間フィルタ解除）。
+      var clearBtn = wrap.querySelector('.js-date-clear');
+      if (clearBtn) clearBtn.addEventListener('click', function () {
+        fromEl.value = '';
+        toEl.value = '';
+      });
+    }
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', init);
+    } else {
+      init();
+    }
+  })();
+</script>
 {% endblock %}

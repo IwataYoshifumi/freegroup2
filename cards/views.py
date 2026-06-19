@@ -195,24 +195,89 @@ class UploadView(LoginRequiredMixin, PermissionRequiredMixin, View):
         }
 
 
+# 元画像一覧の多段ソート（persons の ?sort=key,-key 機構を流用。列は元画像一覧の実カラムに限定）。
+ORIGINAL_LIST_SORT_FIELD_MAP = {
+    "uploaded": "created_at",
+    "status": "status",
+    "detected": "detected_count",
+}
+ORIGINAL_LIST_SORT_MAX_KEYS = 3
+
+
+def _parse_original_sort(params):
+    """単一 sort（例 "status,-detected"）を [(key, direction), ...] に解決（純関数）。許可外/空/二重は無視。"""
+    raw = params.get("sort") or ""
+    tokens = []
+    seen = set()
+    for chunk in raw.split(","):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        if chunk.startswith("-"):
+            direction, key = "desc", chunk[1:]
+        else:
+            direction, key = "asc", chunk
+        if key not in ORIGINAL_LIST_SORT_FIELD_MAP or key in seen:
+            continue
+        seen.add(key)
+        tokens.append((key, direction))
+        if len(tokens) >= ORIGINAL_LIST_SORT_MAX_KEYS:
+            break
+    return tokens
+
+
+def _apply_original_list_sort(qs, params):
+    """OriginalImage QuerySet に多段ソートを適用（純関数）。指定無しは qs のまま。"""
+    tokens = _parse_original_sort(params)
+    if not tokens:
+        return qs
+    order = []
+    for key, direction in tokens:
+        prefix = "-" if direction == "desc" else ""
+        order.append(prefix + ORIGINAL_LIST_SORT_FIELD_MAP[key])
+    order.append("pk")
+    return qs.order_by(*order)
+
+
+def _original_sort_context(params):
+    """ソートUI描画用 context（純関数）。sort_rows / sort_is_active / sort_value。"""
+    tokens = _parse_original_sort(params)
+    rows = [{"key": k, "dir": d} for (k, d) in tokens]
+    while len(rows) < ORIGINAL_LIST_SORT_MAX_KEYS:
+        rows.append({"key": "", "dir": "asc"})
+    return {
+        "sort_rows": rows,
+        "sort_is_active": bool(tokens),
+        "sort_value": ",".join(("-" + k if d == "desc" else k) for k, d in tokens),
+    }
+
+
 class OriginalListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
     # 認可（Phase 7 段3-2 を v1.7 へ適用、rev20 No.5 ★2）：OriginalImage 閲覧 → view_originalimage。
     permission_required = "cards.view_originalimage"
     model = OriginalImage
     template_name = "cards/original_list.html"
     context_object_name = "originals"
+    # 元画像一覧は監視用途のため 20/50/100（既定 20）。名刺一覧の 50/100/200 とは別の刻み。
+    _PER_PAGE_CHOICES = (20, 50, 100)
+
+    def _resolve_per_page(self):
+        """[性質] 純関数 / per_page を 20/50/100 に解決。無指定・不正・範囲外は 20。"""
+        try:
+            n = int(self.request.GET.get("per_page", 20))
+        except (TypeError, ValueError):
+            return 20
+        return n if n in self._PER_PAGE_CHOICES else 20
 
     def get_paginate_by(self, queryset):
-        per_page = self.request.GET.get("per_page", "20")
-        if per_page == "50":
-            return 50
-        return 20
+        return self._resolve_per_page()
 
     def get_queryset(self):
         user = self.request.user
         qs = (
             OriginalImage.objects.filter(user=user)
-            .select_related("user")
+            # user__person はアップロード者列の Person 氏名表示（N+1 回避）。
+            .select_related("user", "user__person")
             .annotate(
                 bc_business_card_count=Count(
                     "businesscard",
@@ -239,13 +304,18 @@ class OriginalListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
         if date_to:
             qs = qs.filter(created_at__date__lte=date_to)
 
-        return qs.order_by("-created_at")
+        # 既定はアップロード日時の降順。?sort=key,-key,... 指定があれば多段ソートで差し替える。
+        qs = qs.order_by("-created_at")
+        return _apply_original_list_sort(qs, self.request.GET)
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
 
         back = BackNavigator(self.request)
-        back.push_current("元画像一覧", ["status", "date_from", "date_to", "page", "per_page"])
+        back.push_current(
+            "元画像一覧",
+            ["status", "date_from", "date_to", "sort", "per_page", "page"],
+        )
         context["back"] = back
 
         context["active_app"] = "cards"
@@ -254,7 +324,10 @@ class OriginalListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
         context["selected_statuses"] = self.request.GET.getlist("status")
         context["date_from"] = self.request.GET.get("date_from", "")
         context["date_to"] = self.request.GET.get("date_to", "")
-        context["per_page"] = self.request.GET.get("per_page", "20")
+        # ソート（折りたたみ）と表示件数セレクタ用 context。
+        context.update(_original_sort_context(self.request.GET))
+        context["per_page"] = self._resolve_per_page()
+        context["per_page_choices"] = self._PER_PAGE_CHOICES
         return context
 
 
@@ -1058,6 +1131,69 @@ class CardDeleteView(LoginRequiredMixin, PermissionRequiredMixin, View):
         return redirect("originals:original_detail", pk=original_image_id)
 
 
+# 名刺一覧の多段ソート（persons の ?sort=key,-key 機構を流用。列は名刺一覧の実カラムに限定）。
+# 「画面に出ている列＝ソートできる列」を一致させる：氏名 / 会社 / 役職 / 作成日時。
+# 氏名は読み（phonetic_name＝カタカナ）の五十音順で並べる（persons と同方針）。
+CARD_LIST_SORT_FIELD_MAP = {
+    "name": "contact__phonetic_name",
+    "company": "contact__organization",
+    "title": "contact__title",
+    "created": "created_at",
+}
+CARD_LIST_SORT_MAX_KEYS = 3
+
+
+def _parse_card_sort(params):
+    """単一 sort パラメータ（例 "company,-title,created"）を [(key, direction), ...] に解決する。
+
+    [性質] 純関数（DB 操作なし・副作用なし）。許可リスト外キー・空・二重指定は無視。
+    """
+    raw = params.get("sort") or ""
+    tokens = []
+    seen = set()
+    for chunk in raw.split(","):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        if chunk.startswith("-"):
+            direction, key = "desc", chunk[1:]
+        else:
+            direction, key = "asc", chunk
+        if key not in CARD_LIST_SORT_FIELD_MAP or key in seen:
+            continue
+        seen.add(key)
+        tokens.append((key, direction))
+        if len(tokens) >= CARD_LIST_SORT_MAX_KEYS:
+            break
+    return tokens
+
+
+def _apply_card_list_sort(qs, params):
+    """BusinessCard QuerySet に多段ソートを適用する（純関数）。指定が無ければ qs をそのまま返す。"""
+    tokens = _parse_card_sort(params)
+    if not tokens:
+        return qs
+    order = []
+    for key, direction in tokens:
+        prefix = "-" if direction == "desc" else ""
+        order.append(prefix + CARD_LIST_SORT_FIELD_MAP[key])
+    order.append("pk")
+    return qs.order_by(*order)
+
+
+def _card_sort_context(params):
+    """ソートUI（折りたたみ）の描画用 context（純関数）。sort_rows / sort_is_active / sort_value。"""
+    tokens = _parse_card_sort(params)
+    rows = [{"key": k, "dir": d} for (k, d) in tokens]
+    while len(rows) < CARD_LIST_SORT_MAX_KEYS:
+        rows.append({"key": "", "dir": "asc"})
+    return {
+        "sort_rows": rows,
+        "sort_is_active": bool(tokens),
+        "sort_value": ",".join(("-" + k if d == "desc" else k) for k, d in tokens),
+    }
+
+
 class CardListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
     """名刺一覧画面（仕様書 v1.2.2 / Phase 4）。
 
@@ -1071,9 +1207,21 @@ class CardListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
     model = BusinessCard
     template_name = "cards/card_list.html"
     context_object_name = "cards"
-    paginate_by = 20
+    paginate_by = 50
+    _PER_PAGE_CHOICES = (50, 100, 200)
 
     _SEARCH_PARAMS = ("name", "organization", "department", "title", "email", "tel", "address")
+
+    def _resolve_per_page(self):
+        """[性質] 純関数 / per_page を 50/100/200 に解決する。無指定・不正値は 50。"""
+        try:
+            n = int(self.request.GET.get("per_page", 50))
+        except (TypeError, ValueError):
+            return 50
+        return n if n in self._PER_PAGE_CHOICES else 50
+
+    def get_paginate_by(self, queryset):
+        return self._resolve_per_page()
 
     # v1.5.0: フィルタは ocr_status 由来 2 値 + ocr_result 5 値 の 7 値。
     # 仮想値 "_pending" / "_processing" は実フィールドにないため、queryset 構築時に
@@ -1086,13 +1234,16 @@ class CardListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
     ) + tuple(BusinessCard.OcrResult.choices)
 
     def _selected_ocr_filters(self):
-        """有効なフィルタ値のリストを返す。0 件ならデフォルト（business_card のみ）。
+        """有効なフィルタ値のリストを返す。0 件なら空（フィルタなし＝全件）。
 
         [性質] 純関数（DB操作なし、request.GET の読み取りのみ）
 
         request.GET は通常 QueryDict だが、A 側テストが dict を直接渡すケースに
         備えて getattr で getlist の有無を確認する defensive 実装（保険）。
         本筋は呼び出し側が QueryDict を渡すこと。
+
+        v1.7 UI 改善：ステータス未選択＝全件表示に統一したため、空のときは
+        business_card デフォルトに寄せず空リストを返す（_build_filter_q が Q() を返し全件）。
         """
         valid = {v for v, _ in self._OCR_FILTER_CHOICES}
         getlist = getattr(self.request.GET, "getlist", None)
@@ -1101,10 +1252,7 @@ class CardListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
         else:
             value = self.request.GET.get("ocr_result")
             raw = [value] if value else []
-        selected = [v for v in raw if v in valid]
-        if not selected:
-            return [BusinessCard.OcrResult.BUSINESS_CARD]
-        return selected
+        return [v for v in raw if v in valid]
 
     def _build_filter_q(self, selected):
         """[性質] 純関数 / 選択フィルタを Q オブジェクトに変換する。"""
@@ -1178,7 +1326,18 @@ class CardListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
         if p.get("address", "").strip():
             qs = qs.filter(contact__address__icontains=p["address"].strip())
 
-        return qs.order_by("-created_at")
+        # 取り込み期間フィルタ：元画像（OriginalImage）のアップロード日時 = created_at で範囲絞り。
+        # 日付入力（YYYY-MM-DD）の日単位で両端含む。片側のみ・両方空（フィルタなし）も許容。
+        uploaded_after = parse_date((p.get("uploaded_after") or "").strip())
+        if uploaded_after:
+            qs = qs.filter(original_image__created_at__date__gte=uploaded_after)
+        uploaded_before = parse_date((p.get("uploaded_before") or "").strip())
+        if uploaded_before:
+            qs = qs.filter(original_image__created_at__date__lte=uploaded_before)
+
+        # 既定は作成日時の降順。?sort=key,-key,... 指定があれば多段ソートで差し替える。
+        qs = qs.order_by("-created_at")
+        return _apply_card_list_sort(qs, self.request.GET)
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -1186,7 +1345,8 @@ class CardListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
         back = BackNavigator(self.request)
         back.push_current(
             "名刺一覧",
-            ["name", "organization", "department", "title", "email", "tel", "address", "ocr_result", "page"],
+            ["name", "organization", "department", "title", "email", "tel", "address",
+             "uploaded_after", "uploaded_before", "ocr_result", "sort", "per_page", "page"],
         )
         context["back"] = back
 
@@ -1196,6 +1356,13 @@ class CardListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
             context[key] = self.request.GET.get(key, "")
         context["ocr_result_choices"] = self._OCR_FILTER_CHOICES
         context["selected_ocr_results"] = self._selected_ocr_filters()
+        # ソート（折りたたみ）と表示件数セレクタ用 context。
+        context.update(_card_sort_context(self.request.GET))
+        context["per_page"] = self._resolve_per_page()
+        context["per_page_choices"] = self._PER_PAGE_CHOICES
+        # 取り込み期間（日付入力の値差し戻し）。
+        context["uploaded_after"] = self.request.GET.get("uploaded_after", "")
+        context["uploaded_before"] = self.request.GET.get("uploaded_before", "")
         return context
 
 

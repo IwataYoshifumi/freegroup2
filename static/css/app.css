@@ -890,6 +890,17 @@ a { color: inherit; text-decoration: none; }
 .app-person-search input[name="email"] { max-width: 340px; }
 .app-person-search input[name="address"] { max-width: 100%; }
 
+/* 名刺一覧の検索カードを人物一覧と同じ収まりに揃える（全幅に伸ばさず左寄せ＋入力欄を中身相応に）。
+   値は .app-person-search と同じだが cards スコープで独立させ persons 側へ影響させない。 */
+.app-card-search { max-width: 960px; margin-inline: 0; }
+.app-card-search input[name="name"],
+.app-card-search input[name="title"],
+.app-card-search input[name="tel"] { max-width: 200px; }
+.app-card-search input[name="organization"],
+.app-card-search input[name="department"],
+.app-card-search input[name="email"] { max-width: 340px; }
+.app-card-search input[name="address"] { max-width: 100%; }
+
 /* item4/5：ステータス・ソートの折りたたみ。操作部を枠で囲い、バー（ヘッダ）と展開部（枠）の
    左右端を一致させる。グリッド配置（横並び/縦積み）もここで制御する（旧インライン grid-column を CSS へ移管）。
    デスクトップ（≥769px）は max-width 固定を外し、grid-column: span 2 のセル幅（上段4列グリッドの2列分）
