@@ -256,23 +256,122 @@ class DuplicateCandidateGroupListViewTests(_DuplicatesTestBase):
         self.assertIn(gid_valid, group_ids)
         self.assertNotIn(None, group_ids)
 
-    def test_pagination_21_records_split_to_2_pages(self):
-        """21 件以上で 2 ページ目に分かれる（paginate_by=20）。"""
-        for i in range(21):
+    def test_pagination_51_records_split_to_2_pages(self):
+        """既定表示件数 50（他一覧と整合）。51 件で 2 ページ目に分かれる。"""
+        for i in range(51):
             p1, _ = self._make_person_with_primary(f"a-{i:02d}")
             p2, _ = self._make_person_with_primary(f"b-{i:02d}")
             self._make_candidate(p1, p2, group_id=uuid.uuid4())
 
         resp = self.client.get(self.url)
         self.assertTrue(resp.context["is_paginated"])
-        self.assertEqual(
-            len(list(resp.context["enriched_groups"])), 20
-        )
+        self.assertEqual(len(list(resp.context["enriched_groups"])), 50)
 
         resp2 = self.client.get(self.url, {"page": "2"})
-        self.assertEqual(
-            len(list(resp2.context["enriched_groups"])), 1
+        self.assertEqual(len(list(resp2.context["enriched_groups"])), 1)
+
+    def test_per_page_param_changes_page_size(self):
+        """per_page=100 で 51 件が 1 ページに収まる。不正値は既定 50 にフォールバック。"""
+        for i in range(51):
+            p1, _ = self._make_person_with_primary(f"c-{i:02d}")
+            p2, _ = self._make_person_with_primary(f"d-{i:02d}")
+            self._make_candidate(p1, p2, group_id=uuid.uuid4())
+
+        resp = self.client.get(self.url, {"per_page": "100"})
+        self.assertFalse(resp.context["is_paginated"])
+        self.assertEqual(len(list(resp.context["enriched_groups"])), 51)
+        self.assertEqual(resp.context["per_page"], 100)
+
+        # 不正値 → 既定 50（is_paginated True）
+        resp2 = self.client.get(self.url, {"per_page": "37"})
+        self.assertEqual(resp2.context["per_page"], 50)
+        self.assertTrue(resp2.context["is_paginated"])
+
+    def _make_ranked_group(self, label, rank):
+        p1, _ = self._make_person_with_primary(f"{label}-a")
+        p2, _ = self._make_person_with_primary(f"{label}-b")
+        gid = uuid.uuid4()
+        self._make_candidate(p1, p2, group_id=gid, rank=rank)
+        return gid
+
+    def test_sort_default_is_rank_priority(self):
+        """既定ソートは rank 優先（完全一致→高→中→低）。"""
+        g_low = self._make_ranked_group("low", DuplicateCandidate.Rank.POSSIBLE_LOW)
+        g_exact = self._make_ranked_group("exact", DuplicateCandidate.Rank.EXACT_MATCH)
+        g_mid = self._make_ranked_group("mid", DuplicateCandidate.Rank.POSSIBLE_MID)
+        g_high = self._make_ranked_group("high", DuplicateCandidate.Rank.POSSIBLE_HIGH)
+
+        resp = self.client.get(
+            self.url,
+            {"searched": "1", "rank": ["exact_match", "possible_high", "possible_mid", "possible_low"],
+             "progress": "pending"},
         )
+        ids = [g["group_id"] for g in resp.context["enriched_groups"]]
+        self.assertEqual(ids, [g_exact, g_high, g_mid, g_low])
+
+    def test_sort_rank_desc(self):
+        """?sort=-rank で確信度の低い順（低→中→高→完全一致）になる。"""
+        g_low = self._make_ranked_group("low", DuplicateCandidate.Rank.POSSIBLE_LOW)
+        g_exact = self._make_ranked_group("exact", DuplicateCandidate.Rank.EXACT_MATCH)
+        g_mid = self._make_ranked_group("mid", DuplicateCandidate.Rank.POSSIBLE_MID)
+        g_high = self._make_ranked_group("high", DuplicateCandidate.Rank.POSSIBLE_HIGH)
+
+        resp = self.client.get(
+            self.url,
+            {"searched": "1", "rank": ["exact_match", "possible_high", "possible_mid", "possible_low"],
+             "progress": "pending", "sort": "-rank"},
+        )
+        ids = [g["group_id"] for g in resp.context["enriched_groups"]]
+        self.assertEqual(ids, [g_low, g_mid, g_high, g_exact])
+
+    def test_sort_pair_count_desc(self):
+        """?sort=-pair_count でペア件数の多いグループが先。"""
+        # group A：1 ペア
+        pa1, _ = self._make_person_with_primary("pa1")
+        pa2, _ = self._make_person_with_primary("pa2")
+        g_one = uuid.uuid4()
+        self._make_candidate(pa1, pa2, group_id=g_one)
+        # group B：2 ペア（同 group_id）
+        pb1, _ = self._make_person_with_primary("pb1")
+        pb2, _ = self._make_person_with_primary("pb2")
+        pb3, _ = self._make_person_with_primary("pb3")
+        g_two = uuid.uuid4()
+        self._make_candidate(pb1, pb2, group_id=g_two)
+        self._make_candidate(pb1, pb3, group_id=g_two)
+
+        resp = self.client.get(
+            self.url,
+            {"searched": "1", "rank": ["exact_match", "possible_high", "possible_mid", "possible_low"],
+             "progress": "pending", "sort": "-pair_count"},
+        )
+        ids = [g["group_id"] for g in resp.context["enriched_groups"]]
+        self.assertEqual(ids[0], g_two)
+        self.assertIn(g_one, ids)
+
+    def test_row_button_review_when_pending_detail_when_done(self):
+        """未レビュー残あり→レビューURL、全件処理済み→詳細URL。"""
+        # pending group
+        p1, _ = self._make_person_with_primary("rb-p1")
+        p2, _ = self._make_person_with_primary("rb-p2")
+        g_pending = uuid.uuid4()
+        self._make_candidate(p1, p2, group_id=g_pending,
+                             review_status=DuplicateCandidate.ReviewStatus.PENDING)
+        # done group（全件 merged）
+        p3, _ = self._make_person_with_primary("rb-p3")
+        p4, _ = self._make_person_with_primary("rb-p4")
+        g_done = uuid.uuid4()
+        self._make_candidate(p3, p4, group_id=g_done,
+                             review_status=DuplicateCandidate.ReviewStatus.MERGED)
+
+        resp = self.client.get(
+            self.url,
+            {"searched": "1", "rank": ["exact_match", "possible_high", "possible_mid", "possible_low"],
+             "progress": ["pending", "completed"]},
+        )
+        review_url = reverse("duplicates:duplicate_group_review", kwargs={"group_id": g_pending})
+        detail_url = reverse("duplicates:duplicate_group_detail", kwargs={"group_id": g_done})
+        self.assertContains(resp, review_url)
+        self.assertContains(resp, detail_url)
 
 
 class DuplicateCandidateGroupDetailViewTests(_DuplicatesTestBase):

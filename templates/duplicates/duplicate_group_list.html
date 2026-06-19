@@ -14,46 +14,104 @@
     </div>
   </div>
 
-  <section class="app-card">
-    <form method="get" class="app-form-grid-edit">
+  <section class="app-card app-card-search">
+    {# HIG §4.1：素のチェックボックスをトグルボタンに統一（card_list の js-ocr-toggle 方式）。 #}
+    {# 送信は隠し checkbox（name/value は現状維持＝rank/progress/user）。ボタンは checked を操作するだけ。 #}
+    <form method="get" class="app-form-grid-edit js-dup-filter">
       <input type="hidden" name="searched" value="1">
-      <div class="app-form__group" style="grid-column: span 4;">
-        <label class="app-form__label">rank</label>
-        <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:center;">
+
+      {# ---- rank（複数選択トグル・常時展開）。ラベルは業務語（テーブル表記に合わせる）。 ---- #}
+      <div class="app-form__group" style="grid-column: 1 / -1;">
+        <label class="app-form__label">rank（確信度）</label>
+        {# 実送信用の隠しチェックボックス：name=rank・value は現状維持。 #}
+        <div class="js-rank-hidden" hidden>
           {% for rank in valid_ranks %}
-            <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
-              <input type="checkbox" name="rank" value="{{ rank }}"
-                     {% if rank in selected_ranks %}checked{% endif %}>
-              {{ rank }}
-            </label>
+            <input type="checkbox" name="rank" value="{{ rank }}" {% if rank in selected_ranks %}checked{% endif %}>
           {% endfor %}
         </div>
-      </div>
-
-      <div class="app-form__group" style="grid-column: span 4;">
-        <label class="app-form__label">進捗</label>
-        <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:center;">
-          <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
-            <input type="checkbox" name="progress" value="pending"
-                   {% if "pending" in selected_progress %}checked{% endif %}>
-            未レビュー
-          </label>
-          <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
-            <input type="checkbox" name="progress" value="completed"
-                   {% if "completed" in selected_progress %}checked{% endif %}>
-            完了
-          </label>
+        <div style="display:flex; flex-wrap:wrap; gap:8px;">
+          {% for rank in valid_ranks %}
+            <button type="button"
+                    class="app-btn app-btn--sm js-rank-toggle {% if rank in selected_ranks %}app-btn--primary{% else %}app-btn--secondary{% endif %}"
+                    data-rank-value="{{ rank }}"
+                    aria-pressed="{% if rank in selected_ranks %}true{% else %}false{% endif %}">{% if rank == "exact_match" %}完全一致{% elif rank == "possible_high" %}高確信度{% elif rank == "possible_mid" %}中確信度{% elif rank == "possible_low" %}低確信度{% else %}{{ rank }}{% endif %}</button>
+          {% endfor %}
+          <span style="width:1px; height:20px; background:var(--app-border); margin:0 4px;"></span>
+          <button type="button" class="app-btn app-btn--secondary app-btn--sm js-rank-all">すべて</button>
+          <button type="button" class="app-btn app-btn--secondary app-btn--sm js-rank-clear">クリア</button>
         </div>
       </div>
 
-      <div class="app-form__group" style="grid-column: span 4;">
+      {# ---- 進捗（複数選択トグル・2値・常時展開） ---- #}
+      <div class="app-form__group" style="grid-column: 1 / -1;">
+        <label class="app-form__label">進捗</label>
+        <div class="js-progress-hidden" hidden>
+          <input type="checkbox" name="progress" value="pending" {% if "pending" in selected_progress %}checked{% endif %}>
+          <input type="checkbox" name="progress" value="completed" {% if "completed" in selected_progress %}checked{% endif %}>
+        </div>
+        <div style="display:flex; flex-wrap:wrap; gap:8px;">
+          <button type="button"
+                  class="app-btn app-btn--sm js-progress-toggle {% if "pending" in selected_progress %}app-btn--primary{% else %}app-btn--secondary{% endif %}"
+                  data-progress-value="pending"
+                  aria-pressed="{% if "pending" in selected_progress %}true{% else %}false{% endif %}">未レビュー</button>
+          <button type="button"
+                  class="app-btn app-btn--sm js-progress-toggle {% if "completed" in selected_progress %}app-btn--primary{% else %}app-btn--secondary{% endif %}"
+                  data-progress-value="completed"
+                  aria-pressed="{% if "completed" in selected_progress %}true{% else %}false{% endif %}">完了</button>
+        </div>
+      </div>
+
+      {# ---- ユーザー（単一 ON/OFF トグル）。送信は隠し checkbox name=user value=me を維持。 ---- #}
+      <div class="app-form__group" style="grid-column: 1 / -1;">
         <label class="app-form__label">ユーザー</label>
-        <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:center;">
-          <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
-            <input type="checkbox" name="user" value="me"
-                   {% if user_filter_on %}checked{% endif %}>
-            自分が読み取ったコンタクトを含むものに絞る
-          </label>
+        <div class="js-user-hidden" hidden>
+          <input type="checkbox" name="user" value="me" {% if user_filter_on %}checked{% endif %}>
+        </div>
+        <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
+          <button type="button"
+                  class="app-btn app-btn--sm js-user-toggle {% if user_filter_on %}app-btn--primary{% else %}app-btn--secondary{% endif %}"
+                  aria-pressed="{% if user_filter_on %}true{% else %}false{% endif %}">自分が読み取ったコンタクトを含むものに絞る</button>
+        </div>
+      </div>
+
+      {# ---- ソート・表示件数（card_list と同方式：折りたたみ＋多段ソート＋per_page） ---- #}
+      <div class="app-form__group" style="grid-column: 1 / -1;">
+        <div class="app-collapsible js-dup-sort-control{% if sort_is_active or per_page != 50 %} is-open{% endif %}">
+          <button type="button" class="app-collapsible__header" data-action="toggle-collapsible"
+                  aria-expanded="{% if sort_is_active or per_page != 50 %}true{% else %}false{% endif %}">
+            <span>ソート・表示件数</span>
+            <span class="app-collapsible__icon">{% if sort_is_active or per_page != 50 %}▾{% else %}▸{% endif %}</span>
+          </button>
+          <div class="app-collapsible-body">
+            <div style="padding-top:8px;">
+              {# 多段ソート（?sort=key,-key,...）。送信時に下の inline JS が hidden(name=sort) へ組み立てる。 #}
+              <input type="hidden" name="sort" class="js-dup-sort-value" value="{{ sort_value }}"{% if not sort_is_active %} disabled{% endif %}>
+              {% for row in sort_rows %}
+                <div class="js-dup-sort-row" style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:var(--app-space-sm);">
+                  <span class="app-form__label" style="min-width:5em; margin:0;">第{{ forloop.counter }}キー</span>
+                  <select class="app-input js-dup-sort-key" style="max-width:180px;">
+                    <option value="">指定なし</option>
+                    <option value="rank"{% if row.key == "rank" %} selected{% endif %}>確信度（rank）</option>
+                    <option value="detected"{% if row.key == "detected" %} selected{% endif %}>検出日時</option>
+                    <option value="pair_count"{% if row.key == "pair_count" %} selected{% endif %}>ペア件数</option>
+                  </select>
+                  <ul class="app-radio-toggle">
+                    <li><label><input type="radio" name="_dsortdir{{ forloop.counter }}" class="js-dup-sort-dir" value="asc" {% if row.dir != "desc" %}checked{% endif %}>昇順</label></li>
+                    <li><label><input type="radio" name="_dsortdir{{ forloop.counter }}" class="js-dup-sort-dir" value="desc" {% if row.dir == "desc" %}checked{% endif %}>降順</label></li>
+                  </ul>
+                </div>
+              {% endfor %}
+
+              <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+                <span class="app-form__label" style="min-width:5em; margin:0;">表示件数</span>
+                <select name="per_page" class="app-input" style="max-width:120px;">
+                  {% for n in per_page_choices %}
+                    <option value="{{ n }}"{% if n == per_page %} selected{% endif %}>{{ n }} 件</option>
+                  {% endfor %}
+                </select>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -63,6 +121,117 @@
       </div>
     </form>
   </section>
+
+  {# フィルタのトグルボタン↔隠しcheckbox 同期（card_list と同方式・テンプレ内インライン／新規JSファイルは作らない）。 #}
+  <script>
+    (function () {
+      function init() {
+        var form = document.querySelector('form.js-dup-filter');
+        if (!form) return;
+
+        function syncBtn(btn, cb) {
+          var on = !!(cb && cb.checked);
+          btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+          btn.classList.toggle('app-btn--primary', on);
+          btn.classList.toggle('app-btn--secondary', !on);
+        }
+        function wire(hiddenSel, btnSel, attr) {
+          var hidden = Array.prototype.slice.call(form.querySelectorAll(hiddenSel));
+          var btns = Array.prototype.slice.call(form.querySelectorAll(btnSel));
+          function cbByValue(v) {
+            for (var i = 0; i < hidden.length; i++) { if (hidden[i].value === v) return hidden[i]; }
+            return null;
+          }
+          btns.forEach(function (btn) {
+            var cb = cbByValue(btn.getAttribute(attr));
+            btn.addEventListener('click', function () {
+              if (cb) cb.checked = !cb.checked;
+              syncBtn(btn, cb);
+            });
+            syncBtn(btn, cb);
+          });
+          return {
+            hidden: hidden,
+            syncAll: function () {
+              btns.forEach(function (b) { syncBtn(b, cbByValue(b.getAttribute(attr))); });
+            }
+          };
+        }
+
+        var rank = wire('.js-rank-hidden input[type="checkbox"]', '.js-rank-toggle', 'data-rank-value');
+        wire('.js-progress-hidden input[type="checkbox"]', '.js-progress-toggle', 'data-progress-value');
+
+        var allBtn = form.querySelector('.js-rank-all');
+        if (allBtn) allBtn.addEventListener('click', function () {
+          rank.hidden.forEach(function (cb) { cb.checked = true; });
+          rank.syncAll();
+        });
+        var clearBtn = form.querySelector('.js-rank-clear');
+        if (clearBtn) clearBtn.addEventListener('click', function () {
+          rank.hidden.forEach(function (cb) { cb.checked = false; });
+          rank.syncAll();
+        });
+
+        // ユーザー：単一 ON/OFF トグル。
+        var userCb = form.querySelector('.js-user-hidden input[type="checkbox"]');
+        var userBtn = form.querySelector('.js-user-toggle');
+        if (userBtn && userCb) {
+          userBtn.addEventListener('click', function () {
+            userCb.checked = !userCb.checked;
+            syncBtn(userBtn, userCb);
+          });
+          syncBtn(userBtn, userCb);
+        }
+      }
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+      } else {
+        init();
+      }
+    })();
+  </script>
+
+  {# ソート組み立て（card_list / persons の _sort_control 同方式）。送信直前に各行を読んで #}
+  {# hidden(name=sort) へ「優先順つきカンマ区切り・降順は先頭 -」で組み立て、方向ラジオは送信から外す。 #}
+  <script>
+    (function () {
+      function init() {
+        var ctrl = document.querySelector('.js-dup-sort-control');
+        if (!ctrl) return;
+        var form = ctrl.closest('form');
+        if (!form) return;
+        var hidden = ctrl.querySelector('.js-dup-sort-value');
+        form.addEventListener('submit', function () {
+          var parts = [];
+          var seen = {};
+          Array.prototype.slice.call(ctrl.querySelectorAll('.js-dup-sort-row')).forEach(function (row) {
+            var sel = row.querySelector('.js-dup-sort-key');
+            var key = sel ? sel.value : '';
+            if (!key || seen[key]) return;
+            seen[key] = true;
+            var dirEl = row.querySelector('.js-dup-sort-dir:checked');
+            var dir = dirEl ? dirEl.value : 'asc';
+            parts.push((dir === 'desc' ? '-' : '') + key);
+          });
+          if (parts.length) {
+            hidden.value = parts.join(',');
+            hidden.disabled = false;
+          } else {
+            hidden.value = '';
+            hidden.disabled = true;
+          }
+          Array.prototype.slice.call(ctrl.querySelectorAll('.js-dup-sort-dir')).forEach(function (r) {
+            r.disabled = true;
+          });
+        });
+      }
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+      } else {
+        init();
+      }
+    })();
+  </script>
 
   <section class="app-card">
     <div class="app-table-wrapper">
@@ -78,15 +247,16 @@
         </thead>
         <tbody>
           {% for group in enriched_groups %}
-            {% url 'duplicates:duplicate_group_detail' group_id=group.group_id as detail_url %}
             <tr>
               <td class="app-table__col--action">
-                <!--
-                <a href="#" class="app-btn app-btn--secondary app-btn--sm is-disabled"
-                   aria-disabled="true" title="準備中">レビュー開始（準備中）</a>
-                -->
-                   <a href="{% append_back_url detail_url back %}"
-                   class="app-btn app-btn--secondary app-btn--sm">詳細</a>
+                {# 未レビュー残あり→「レビュー」（review・primary）、全件処理済み→「詳細」（detail・outline）。 #}
+                {% if group.pending_count > 0 %}
+                  {% url 'duplicates:duplicate_group_review' group_id=group.group_id as row_url %}
+                  <a href="{% append_back_url row_url back %}" class="app-btn app-btn--primary app-btn--sm">レビュー</a>
+                {% else %}
+                  {% url 'duplicates:duplicate_group_detail' group_id=group.group_id as row_url %}
+                  <a href="{% append_back_url row_url back %}" class="app-btn app-btn--outline-secondary app-btn--sm">詳細</a>
+                {% endif %}
               </td>
               <td>
                 {% if group.rank == "exact_match" %}
@@ -128,8 +298,12 @@
 
     <div class="app-card-list">
       {% for group in enriched_groups %}
-        {% url 'duplicates:duplicate_group_detail' group_id=group.group_id as detail_url %}
-        <a href="{% append_back_url detail_url back %}" class="app-list-card" style="display:block; text-decoration:none; color:inherit;">
+        {% if group.pending_count > 0 %}
+          {% url 'duplicates:duplicate_group_review' group_id=group.group_id as card_url %}
+        {% else %}
+          {% url 'duplicates:duplicate_group_detail' group_id=group.group_id as card_url %}
+        {% endif %}
+        <a href="{% append_back_url card_url back %}" class="app-list-card" style="display:block; text-decoration:none; color:inherit;">
           <div class="app-list-card__main">
             <strong>
               {% if group.rep_candidate %}
@@ -163,16 +337,8 @@
     </div>
 
     {% if is_paginated %}
-      <div class="app-pagination" style="margin-top:var(--app-space-md);">
-        {% if page_obj.has_previous %}
-          <a href="?{% for k, v in request.GET.items %}{% if k != 'page' %}{{ k }}={{ v }}&{% endif %}{% endfor %}page={{ page_obj.previous_page_number }}"
-             class="app-btn app-btn--secondary app-btn--sm">前へ</a>
-        {% endif %}
-        <span class="app-muted">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }} ページ</span>
-        {% if page_obj.has_next %}
-          <a href="?{% for k, v in request.GET.items %}{% if k != 'page' %}{{ k }}={{ v }}&{% endif %}{% endfor %}page={{ page_obj.next_page_number }}"
-             class="app-btn app-btn--secondary app-btn--sm">次へ</a>
-        {% endif %}
+      <div style="margin-top:var(--app-space-md);">
+        {% include "persons/_pagination.html" %}
       </div>
     {% endif %}
   </section>

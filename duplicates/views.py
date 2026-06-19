@@ -150,6 +150,64 @@ FIELD_GROUPS = (
 )
 
 
+# 重複候補グループ一覧の多段ソート（persons の検索フォーム内多段ソート方式に準拠、HIG §6.2）。
+# キー → グループ集計クエリの並び替え対象（annotate 済みフィールド）にマップする。
+DUP_SORT_FIELD_MAP = {
+    "rank": "rank_order",       # 昇順＝完全一致→高→中→低（rank_order=0..3）
+    "detected": "detected_at",  # 検出日時（候補作成日時の集約）
+    "pair_count": "pair_count", # グループ内ペア件数
+}
+DUP_SORT_MAX_KEYS = 3
+DUP_PER_PAGE_CHOICES = (50, 100, 200)
+DUP_DEFAULT_PER_PAGE = 50
+
+
+def _parse_dup_sort(params):
+    """?sort=key,-key,... を [(key, "asc"|"desc"), ...] に解釈する（純関数）。
+
+    不正キー・同一キー二重指定は捨てる。最大 DUP_SORT_MAX_KEYS 段まで。
+    """
+    raw = (params.get("sort") or "").strip()
+    tokens = []
+    seen = set()
+    if not raw:
+        return tokens
+    for part in raw.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        desc = part.startswith("-")
+        key = part[1:] if desc else part
+        if key not in DUP_SORT_FIELD_MAP or key in seen:
+            continue
+        seen.add(key)
+        tokens.append((key, "desc" if desc else "asc"))
+        if len(tokens) >= DUP_SORT_MAX_KEYS:
+            break
+    return tokens
+
+
+def _dup_sort_order_fields(tokens):
+    """[(key, dir)] を order_by 用フィールド名リストに変換する（純関数）。"""
+    return [
+        ("-" if d == "desc" else "") + DUP_SORT_FIELD_MAP[key]
+        for key, d in tokens
+    ]
+
+
+def _dup_sort_context(params):
+    """ソートUI（折りたたみ）描画用 context（純関数）。sort_rows / sort_is_active / sort_value。"""
+    tokens = _parse_dup_sort(params)
+    rows = [{"key": k, "dir": d} for (k, d) in tokens]
+    while len(rows) < DUP_SORT_MAX_KEYS:
+        rows.append({"key": "", "dir": "asc"})
+    return {
+        "sort_rows": rows,
+        "sort_is_active": bool(tokens),
+        "sort_value": ",".join(("-" + k if d == "desc" else k) for k, d in tokens),
+    }
+
+
 class DuplicateCandidateGroupListView(
     LoginRequiredMixin, PermissionRequiredMixin, ListView
 ):
@@ -176,7 +234,15 @@ class DuplicateCandidateGroupListView(
 
     template_name = "duplicates/duplicate_group_list.html"
     context_object_name = "groups"
-    paginate_by = 20
+    paginate_by = DUP_DEFAULT_PER_PAGE
+
+    def get_paginate_by(self, queryset):
+        """表示件数（per_page）。他一覧と揃え 50/100/200・既定 50。不正値は既定へ。"""
+        try:
+            n = int(self.request.GET.get("per_page", DUP_DEFAULT_PER_PAGE))
+        except (TypeError, ValueError):
+            return DUP_DEFAULT_PER_PAGE
+        return n if n in DUP_PER_PAGE_CHOICES else DUP_DEFAULT_PER_PAGE
 
     _VALID_RANKS = (
         DuplicateCandidate.Rank.EXACT_MATCH,
@@ -241,6 +307,7 @@ class DuplicateCandidateGroupListView(
                     review_status=DuplicateCandidate.ReviewStatus.PENDING
                 ),
             ),
+            detected_at=Min("created_at"),
         )
 
         # progress フィルタ：annotate 後の has_pending で絞り込み
@@ -257,15 +324,14 @@ class DuplicateCandidateGroupListView(
             default=Value(99),
             output_field=IntegerField(),
         )
-        pending_order = Case(
-            When(pending_count__gt=0, then=Value(0)),
-            default=Value(1),
-            output_field=IntegerField(),
-        )
-        return groups.annotate(
-            rank_order=rank_order,
-            pending_order=pending_order,
-        ).order_by("pending_order", "rank_order", "group_id")
+        groups = groups.annotate(rank_order=rank_order)
+
+        # 多段ソート（?sort=）。既定は rank 優先（完全一致が上）。group_id を安定タイブレークに付ける。
+        order = _dup_sort_order_fields(_parse_dup_sort(self.request.GET))
+        if not order:
+            order = ["rank_order"]
+        order.append("group_id")
+        return groups.order_by(*order)
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -296,7 +362,7 @@ class DuplicateCandidateGroupListView(
         back = BackNavigator(self.request)
         back.push_current(
             "",
-            ["rank", "progress", "user", "searched", "page"],
+            ["rank", "progress", "user", "searched", "sort", "per_page", "page"],
         )
         context["back"] = back
 
@@ -305,6 +371,11 @@ class DuplicateCandidateGroupListView(
         context["selected_progress"] = self._get_selected_progress()
         context["user_filter_on"] = self._is_user_filter_on()
         context["searched"] = self._is_searched()
+
+        # ソート・表示件数 UI 用 context（persons 多段ソート方式に準拠）。
+        context.update(_dup_sort_context(self.request.GET))
+        context["per_page"] = self.get_paginate_by(None)
+        context["per_page_choices"] = list(DUP_PER_PAGE_CHOICES)
 
         context["active_app"] = "duplicates"
         context["active_menu"] = "duplicates:duplicate_group_list"
