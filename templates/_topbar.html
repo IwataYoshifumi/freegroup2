@@ -3,7 +3,7 @@
   <div class="app-topbar__left">
     <button type="button" class="app-btn--icon app-topbar__menu-btn" data-action="toggle-drawer" aria-label="メニューを開く">≡</button>
     <div>
-      <div class="app-topbar__system-name">FreeGroup2</div>
+      <a href="{% url 'home' %}" class="app-topbar__system-name">FreeGroup2</a>
       <div class="app-topbar__current-app">{% block app_name %}{% endblock %}</div>
     </div>
   </div>
