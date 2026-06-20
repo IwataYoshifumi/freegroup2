@@ -16,8 +16,8 @@
 
     <div class="app-section__header">
       <h1>ユーザーと人物の紐付け確認</h1>
-      {% back_all_link back %}
-      {% back_link back %}
+      {# この画面は戻る系を「戻る」1系統に統一（back_all_link は出さない）。ラベルは固定。 #}
+      {% back_link back label="戻る" %}
     </div>
 
     {# 状況の確認文はタイトル直下にアラートで集約し、色で状態を即把握できるようにする。 #}
@@ -34,7 +34,7 @@
         <div class="app-alert app-alert--danger">この人物は通常状態（active）ではないため紐付けできません。</div>
       {% elif email_match %}
         {# 未紐付け・active・メール一致：これから紐付け（情報）→ info（青）。 #}
-        <div class="app-alert app-alert--info">この人物はまだユーザーに紐付けられていません。あなたのユーザーと紐付けますか？</div>
+        <div class="app-alert app-alert--info">あなたのユーザーはまだ人物に紐付けられていません。この人物と紐付けますか？</div>
       {% else %}
         {# 未紐付け・active だが メール不一致：紐付け不可 → danger（赤）。 #}
         <div class="app-alert app-alert--danger">メールアドレスが一致しないため紐づけできません。</div>
@@ -103,46 +103,38 @@
     {% with linked=person.linked_user %}
       {% if not linked %}
         {% if email_match and person_active %}
-          {# 未紐付け・active・メール一致：紐付けボタン #}
-          <section class="app-card" style="margin-top: var(--app-space-md);">
-            <form method="post" action="">
-              {% csrf_token %}
-              <input type="hidden" name="action" value="link">
-              <div class="app-action-area">
-                {% back_all_link back %}
-                {% back_link back %}
-                <button type="submit" class="app-btn app-btn--primary">紐付ける</button>
-              </div>
-            </form>
-          </section>
+          {# 未紐付け・active・メール一致：紐付けボタン（カード囲みなし・アクション帯のみ） #}
+          <form method="post" action="">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="link">
+            <div class="app-action-area" style="margin-top: var(--app-space-md);">
+              {% back_link back label="戻る" %}
+              <button type="submit" class="app-btn app-btn--primary">紐付ける</button>
+            </div>
+          </form>
         {% else %}
           {# 未紐付けだが 非active or メール不一致：理由はタイトル直下のアラートで表示。link ボタンは出さない（戻る導線のみ）。 #}
           <div class="app-action-area" style="margin-top: var(--app-space-md);">
-            {% back_all_link back %}
-            {% back_link back %}
+            {% back_link back label="戻る" %}
           </div>
         {% endif %}
 
       {% elif linked == user %}
-        {# 本人紐付け済み：解除ボタン（確認文はタイトル直下のアラートに集約済み）。 #}
-        <section class="app-card" style="margin-top: var(--app-space-md);">
-          <form method="post" action="">
-            {% csrf_token %}
-            <input type="hidden" name="action" value="unlink">
-            <div class="app-action-area">
-              {% back_all_link back %}
-              {% back_link back %}
-              {# 解除は復帰可能（再紐付け可）なので HIG に従い danger ではなく warning（黄）。 #}
-              <button type="submit" class="app-btn app-btn--warning">連携を解除する</button>
-            </div>
-          </form>
-        </section>
+        {# 本人紐付け済み：解除ボタン（カード囲みなし・アクション帯のみ。確認文はタイトル直下のアラートに集約済み）。 #}
+        <form method="post" action="">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="unlink">
+          <div class="app-action-area" style="margin-top: var(--app-space-md);">
+            {% back_link back label="戻る" %}
+            {# 解除は復帰可能（再紐付け可）なので HIG に従い danger ではなく warning（黄）。 #}
+            <button type="submit" class="app-btn app-btn--warning">連携を解除する</button>
+          </div>
+        </form>
 
       {% else %}
         {# 他 User に紐付け済み：操作不可（理由はタイトル直下のアラートで表示）。戻る導線のみ。 #}
         <div class="app-action-area" style="margin-top: var(--app-space-md);">
-          {% back_all_link back %}
-          {% back_link back %}
+          {% back_link back label="戻る" %}
         </div>
       {% endif %}
     {% endwith %}

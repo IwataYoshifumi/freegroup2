@@ -27,12 +27,14 @@ def back_all_url(back):
 
 
 @register.simple_tag
-def back_link(back):
+def back_link(back, label=None):
     """戻り先があれば「戻る」リンク（<a>）を返す。なければ空文字。
 
     HIG v1.2 §3.2 準拠：判定・URL・ラベル・出す出さないをすべてタグ内部に隠す。
     テンプレ側に {% if back.back_exist %} は書かない。
     ラベルは back.back_title（スタックに積まれた title。なければ "戻る"）。
+    label を渡すとそのラベルを優先して固定する（呼び出し側でラベルを固定したい画面向け。
+    href＝戻り先 URL は従来どおり）。省略時は従来挙動と完全に同一。
     クラスは戻る・離脱導線の共通表記 app-btn app-btn--secondary（HIG 3.6）。
     """
     if not back.back_exist:
@@ -40,7 +42,7 @@ def back_link(back):
     return format_html(
         '<a class="app-btn app-btn--secondary" href="{}">{}</a>',
         back.back_url,
-        back.back_title or "戻る",
+        label or back.back_title or "戻る",
     )
 
 

@@ -5,8 +5,11 @@ import base64
 import json
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.template import Context, Template
+from django.test import RequestFactory, TestCase
 from django.urls import reverse
+
+from back_navigator.back_navigator import BackNavigator
 
 from contacts.models import Contact
 from persons.models import Person
@@ -18,6 +21,41 @@ def _encode_back_stack(stack):
     """BackNavigator と同じ方式で back_stack を base64 エンコードする（テスト用）。"""
     raw = base64.urlsafe_b64encode(json.dumps(stack, ensure_ascii=False).encode()).decode()
     return raw.rstrip("=")
+
+
+class BackLinkLabelTagTests(TestCase):
+    """back_link タグの label 引数（後方互換）の検証。"""
+
+    def _back(self, title):
+        rf = RequestFactory()
+        stack = [{"url": "/home/", "title": title, "view_name": "home", "view_kwargs": {}}]
+        request = rf.get("/here/", {"back_stack": _encode_back_stack(stack)})
+        return BackNavigator(request)
+
+    def _render(self, tag_body, back):
+        tmpl = Template("{% load back_tags %}" + tag_body)
+        return tmpl.render(Context({"back": back}))
+
+    def test_label_omitted_uses_back_title(self):
+        # 引数省略時は従来どおり back.back_title（スタックの title）を使う。
+        out = self._render("{% back_link back %}", self._back("ホーム"))
+        self.assertEqual(
+            out, '<a class="app-btn app-btn--secondary" href="/home/">ホーム</a>'
+        )
+
+    def test_label_omitted_falls_back_to_modoru(self):
+        # title が空なら従来どおり "戻る"。
+        out = self._render("{% back_link back %}", self._back(""))
+        self.assertEqual(
+            out, '<a class="app-btn app-btn--secondary" href="/home/">戻る</a>'
+        )
+
+    def test_label_overrides_title(self):
+        # label を渡すと title より優先（href は変わらない）。
+        out = self._render('{% back_link back label="戻る" %}', self._back("人物詳細"))
+        self.assertEqual(
+            out, '<a class="app-btn app-btn--secondary" href="/home/">戻る</a>'
+        )
 
 
 class LinkConfirmLayoutRenderTests(TestCase):
@@ -46,7 +84,8 @@ class LinkConfirmLayoutRenderTests(TestCase):
         self.assertContains(resp, "紐付ける")
         # 確認文はタイトル直下に info（青）アラートで出る。
         self.assertContains(resp, "app-alert app-alert--info")
-        self.assertContains(resp, "あなたのユーザーと紐付けますか")
+        # 主従を「あなたのユーザー→人物」に修正した文言。
+        self.assertContains(resp, "あなたのユーザーはまだ人物に紐付けられていません。この人物と紐付けますか")
         # ユーザ管理サイドバーが組み込まれている。
         self.assertContains(resp, "ユーザ管理メニュー")
         self.assertContains(resp, "ユーザ一覧")
@@ -90,6 +129,29 @@ class LinkConfirmLayoutRenderTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         # back_link タグの出力（戻る先＝ホーム、ラベルはスタックの title）。
         self.assertContains(resp, '<a class="app-btn app-btn--secondary" href="/">')
+
+    def test_back_is_unified_to_label_modoru(self):
+        # この画面の戻る系は「戻る」1系統。2階層スタックでも「最初に戻る」は出さず、
+        # back_link のラベルは固定で「戻る」になる（href は戻り先のまま）。
+        user = User.objects.create_superuser(
+            username="u_unify", password="d", email="uni@example.com"
+        )
+        person = self._person_with_email("uni@example.com")
+        self.client.force_login(user)
+        stack = [
+            {"url": "/persons/", "title": "人物一覧", "view_name": "persons", "view_kwargs": {}},
+            {"url": "/c/x/", "title": "人物詳細", "view_name": "contacts:contact_detail", "view_kwargs": {}},
+        ]
+        url = reverse("accounts:link_user_person_confirm", kwargs={"person_id": person.id})
+        resp = self.client.get(url, {"back_stack": _encode_back_stack(stack)})
+        self.assertEqual(resp.status_code, 200)
+        # 「最初に戻る」（back_all_link）は出さない。
+        self.assertNotContains(resp, "最初に戻る")
+        # ラベルは「戻る」に固定。直前 title「人物詳細」がボタンに出ない。
+        self.assertNotContains(resp, ">人物詳細</a>")
+        self.assertContains(resp, ">戻る</a>")
+        # href は従来どおり直前ページ（人物詳細）のまま（back_stack クエリが付く）。
+        self.assertContains(resp, 'href="/c/x/?')
 
     def test_other_user_linked_warning_pattern(self):
         owner = User.objects.create_user(username="u_owner", password="d", email="o@example.com")
