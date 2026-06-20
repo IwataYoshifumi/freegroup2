@@ -927,8 +927,9 @@ a { color: inherit; text-decoration: none; }
   max-width: 360px;
 }
 
-/* duplicates 重複候補一覧：フィルタの各グループ（rank/進捗/ユーザー/ソート）の
-   上下の隙間を空ける。共通 .app-form__group は触らず duplicates のフォーム限定。 */
+/* duplicates のフィルタフォーム（重複候補一覧・マージログ一覧）：各グループ
+   （rank/進捗/ユーザー/ソート、状態/ユーザー 等）の上下の隙間を空ける。
+   共通 .app-form__group は触らず duplicates のフォーム限定。 */
 .app-dup-filter .app-form__group {
   margin-bottom: var(--app-space-md);
 }
