@@ -47,20 +47,23 @@
         {# 取り込み期間（元画像のアップロード日＝OriginalImage.created_at）。折りたたまず常時表示。 #}
         <div class="app-form__group app-form__group--full" style="grid-column: 1 / -1;">
           <label class="app-form__label">取り込み期間（元画像のアップロード日）</label>
-          <div class="js-date-range" style="display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
-            <input type="date" name="uploaded_after" value="{{ uploaded_after }}" class="app-input js-date-from" style="max-width:170px;">
-            <span class="app-muted">〜</span>
-            <input type="date" name="uploaded_before" value="{{ uploaded_before }}" class="app-input js-date-to" style="max-width:170px;">
-            <span style="width:1px; height:20px; background:var(--app-border); margin:0 4px;"></span>
-            <button type="button" class="app-btn app-btn--secondary app-btn--sm js-date-quick" data-range="today">今日</button>
-            <button type="button" class="app-btn app-btn--secondary app-btn--sm js-date-quick" data-range="week">今週</button>
-            <button type="button" class="app-btn app-btn--secondary app-btn--sm js-date-quick" data-range="lastweek">先週</button>
-            <button type="button" class="app-btn app-btn--secondary app-btn--sm js-date-quick" data-range="month">今月</button>
-            <button type="button" class="app-btn app-btn--secondary app-btn--sm js-date-quick" data-range="lastmonth">先月</button>
-            <button type="button" class="app-btn app-btn--secondary app-btn--sm js-date-quick" data-range="twomonths">2か月</button>
-            <button type="button" class="app-btn app-btn--secondary app-btn--sm js-date-quick" data-range="thisyear">今年</button>
-            <span style="width:1px; height:20px; background:var(--app-border); margin:0 4px;"></span>
-            <button type="button" class="app-btn app-btn--secondary app-btn--sm js-date-clear">クリア</button>
+          <div class="js-date-range" style="display:flex; flex-direction:column; gap:10px; align-items:flex-start;">
+            <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
+              <input type="date" name="uploaded_after" value="{{ uploaded_after }}" class="app-input js-date-from" style="max-width:170px;">
+              <span class="app-muted">〜</span>
+              <input type="date" name="uploaded_before" value="{{ uploaded_before }}" class="app-input js-date-to" style="max-width:170px;">
+            </div>
+            <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
+              <button type="button" class="app-btn app-btn--secondary app-btn--sm js-date-quick" data-range="today">今日</button>
+              <button type="button" class="app-btn app-btn--secondary app-btn--sm js-date-quick" data-range="week">今週</button>
+              <button type="button" class="app-btn app-btn--secondary app-btn--sm js-date-quick" data-range="lastweek">先週</button>
+              <button type="button" class="app-btn app-btn--secondary app-btn--sm js-date-quick" data-range="month">今月</button>
+              <button type="button" class="app-btn app-btn--secondary app-btn--sm js-date-quick" data-range="lastmonth">先月</button>
+              <button type="button" class="app-btn app-btn--secondary app-btn--sm js-date-quick" data-range="twomonths">2か月</button>
+              <button type="button" class="app-btn app-btn--secondary app-btn--sm js-date-quick" data-range="thisyear">今年</button>
+              <span style="width:1px; height:20px; background:var(--app-border); margin:0 4px;"></span>
+              <button type="button" class="app-btn app-btn--secondary app-btn--sm js-date-clear">クリア</button>
+            </div>
           </div>
         </div>
 
