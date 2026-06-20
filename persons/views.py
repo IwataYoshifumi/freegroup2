@@ -24,6 +24,7 @@ from django.urls import reverse
 from django.views.generic import DetailView, ListView
 from django.views.generic.edit import FormView
 
+from accounts.services import is_self_link_email_match
 from back_navigator.back_navigator import BackNavigator
 from contacts.forms import ContactAddAdditionalRoleForm, build_contact_sns_formset
 from contacts.models import Contact
@@ -250,6 +251,11 @@ class PersonDetailView(LoginRequiredMixin, PermissionRequiredMixin, DetailView):
         context["back"] = BackNavigator(self.request)
         context["active_app"] = "persons"
         context["active_menu"] = "persons:person_list"
+
+        # 本人紐付けボタン（orphan 画面の self-link 専用）の表示条件を出口ガードに揃える。
+        # 既存の本人同定基準 is_self_link_email_match を再利用（新規判定は作らない）。
+        context["email_match"] = is_self_link_email_match(self.request.user, person)
+        context["person_active"] = person.status == Person.Status.ACTIVE
 
         # v1.6 Phase 1b-β：タグ付与・解除 UI 用 context（仕様書 §5.2.3）。
         # 遅延 import で循環回避（tags は persons より後の INSTALLED_APPS）。

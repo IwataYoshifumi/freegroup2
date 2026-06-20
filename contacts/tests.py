@@ -1316,6 +1316,70 @@ class ContactDetailViewTests(TestCase):
         self.assertIn("merged-pp-inactive", resp.content.decode())
 
 
+class ContactDetailSelfLinkButtonTests(TestCase):
+    """contact_detail「このユーザーで紐付ける」ボタン（self-link 専用）の表示条件が
+    出口ガード（email_match＋person_active）に揃うことの検証。"""
+
+    LABEL = "このユーザーで紐付ける"
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="selflink_user", password="dummy", email="me@example.com"
+        )
+        _grant_contact_perms(self.user)
+        self.client = Client()
+        self.client.force_login(self.user)
+
+    def _make_primary(self, email, person_status=Person.Status.ACTIVE,
+                      full_name="対象", linked_user=None):
+        person = Person.objects.create(status=person_status)
+        c = Contact.objects.create(
+            person=person, status=Contact.Status.PRIMARY,
+            full_name=full_name, email=email,
+        )
+        person.primary_contact = c
+        person.save(update_fields=["primary_contact", "updated_at"])
+        if linked_user is not None:
+            linked_user.person = person
+            linked_user.save(update_fields=["person"])
+        return person, c
+
+    def _url(self, c):
+        return reverse("contacts:contact_detail", kwargs={"pk": c.pk})
+
+    def test_shown_when_email_match_and_active(self):
+        _, c = self._make_primary("me@example.com")
+        resp = self.client.get(self._url(c))
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.context["email_match"])
+        self.assertTrue(resp.context["person_active"])
+        self.assertContains(resp, self.LABEL)
+
+    def test_hidden_when_email_mismatch(self):
+        _, c = self._make_primary("other@example.com")
+        resp = self.client.get(self._url(c))
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(resp.context["email_match"])
+        self.assertNotContains(resp, self.LABEL)
+
+    def test_hidden_when_person_not_active(self):
+        # 非active（archived）Person の primary はメール一致でもボタンを出さない。
+        _, c = self._make_primary("me@example.com",
+                                  person_status=Person.Status.ARCHIVED)
+        resp = self.client.get(self._url(c))
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(resp.context["person_active"])
+        self.assertNotContains(resp, self.LABEL)
+
+    def test_linked_to_self_shows_unlink_not_selflink(self):
+        _, c = self._make_primary("me@example.com", linked_user=self.user)
+        resp = self.client.get(self._url(c))
+        self.assertEqual(resp.status_code, 200)
+        # 本人紐付け済み → 解除導線。self-link ボタンは出ない。
+        self.assertContains(resp, "紐付け済み（解除）")
+        self.assertNotContains(resp, self.LABEL)
+
+
 class ConfidenceTagTests(TestCase):
     """{% confidence %} カスタムタグの単体テスト（D-3b §8.2 C1〜C4）。"""
 

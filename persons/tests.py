@@ -567,6 +567,68 @@ class PersonDetailViewTests(TestCase):
         self.assertIn("inactive-name", body)
 
 
+class PersonDetailOrphanSelfLinkButtonTests(TestCase):
+    """person_detail_orphan「このユーザーで紐付ける」ボタン（self-link 専用）の表示条件が
+    出口ガード（email_match＋person_active）に揃うことの検証。"""
+
+    LABEL = "このユーザーで紐付ける"
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="orphan_selflink_user", password="dummy", email="me@example.com"
+        )
+        _grant_view_person(self.user)
+        self.client = Client()
+        self.client.force_login(self.user)
+
+    def _url(self, person):
+        return reverse("persons:person_detail", kwargs={"pk": person.pk})
+
+    def _orphan_with_primary_email(self, email):
+        # orphan（primary_contact NULL → orphan テンプレート）だが status=primary の
+        # Contact を持たせ、is_self_link_email_match の判定対象を作る。
+        person = Person.objects.create()  # active, primary_contact NULL
+        Contact.objects.create(
+            person=person, status=Contact.Status.PRIMARY,
+            full_name="孤児", email=email,
+        )
+        return person
+
+    def test_orphan_button_shown_when_email_match(self):
+        person = self._orphan_with_primary_email("me@example.com")
+        resp = self.client.get(self._url(person))
+        self.assertEqual(resp.status_code, 200)
+        self.assertTemplateUsed(resp, "persons/person_detail_orphan.html")
+        self.assertTrue(resp.context["email_match"])
+        self.assertTrue(resp.context["person_active"])
+        self.assertContains(resp, self.LABEL)
+
+    def test_orphan_button_hidden_when_email_mismatch(self):
+        person = self._orphan_with_primary_email("other@example.com")
+        resp = self.client.get(self._url(person))
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(resp.context["email_match"])
+        self.assertNotContains(resp, self.LABEL)
+
+    def test_orphan_button_hidden_when_no_primary_contact(self):
+        # 真の孤児（primary Contact なし）→ メール一致しようがなく非表示。
+        person = Person.objects.create()
+        resp = self.client.get(self._url(person))
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(resp.context["email_match"])
+        self.assertNotContains(resp, self.LABEL)
+
+    def test_orphan_linked_to_self_shows_unlink(self):
+        person = self._orphan_with_primary_email("me@example.com")
+        self.user.person = person
+        self.user.save(update_fields=["person"])
+        resp = self.client.get(self._url(person))
+        self.assertEqual(resp.status_code, 200)
+        # 本人紐付け済み → 解除導線。self-link ボタンは出ない。
+        self.assertContains(resp, "紐付けを解除")
+        self.assertNotContains(resp, self.LABEL)
+
+
 # ======================================================================
 # D-Form ステップ2：PersonAddAdditionalRoleView (9 番) のテスト
 # ======================================================================

@@ -32,6 +32,7 @@ from django.views import View
 from django.views.decorators.http import require_POST
 from django.views.generic import DetailView, ListView, UpdateView
 
+from accounts.services import is_self_link_email_match
 from back_navigator.back_navigator import BackNavigator
 from cards.models import BusinessCard
 from cards.tasks.ocr_pipeline import _update_original_image_status
@@ -325,6 +326,15 @@ class ContactDetailView(LoginRequiredMixin, PermissionRequiredMixin, DetailView)
         # 詳細画面ではスタック生成だけ行い、一覧画面側で push_current 済みのスタックを参照する）
         back = BackNavigator(self.request)
 
+        # 本人紐付けボタン（self-link 専用）の表示条件を出口ガード（confirm の email_match＋
+        # person_active／link_user_to_person の is_self_link_email_match）に揃える。
+        # 既存の本人同定基準 is_self_link_email_match を再利用（新規判定は作らない）。
+        person = contact.person
+        email_match = (
+            is_self_link_email_match(self.request.user, person) if person else False
+        )
+        person_active = bool(person and person.status == Person.Status.ACTIVE)
+
         context.update(
             {
                 "contact": contact,
@@ -340,6 +350,8 @@ class ContactDetailView(LoginRequiredMixin, PermissionRequiredMixin, DetailView)
                 "previous_person": previous_person,
                 "inactive_contacts": inactive_contacts,
                 "back": back,
+                "email_match": email_match,
+                "person_active": person_active,
                 "active_app": "cards",
                 "active_menu": "cards:card_list",
             }
