@@ -26,14 +26,16 @@ home.html の直書きから切り出し、profile からも同一部品・同�
   {% endfor %}
 
 {% elif person_link_status == 'multiple_candidates_need_merge' %}
-  <div class="app-alert app-alert--warning">
-    <p>あなたの可能性がある Person が複数見つかりました。</p>
-    <p>先に <a href="{% url 'duplicates:duplicate_group_list' %}">Person のマージ画面</a> で重複を整理してください。</p>
+  {# 複数候補：マージ強制ではなく「自分の Person を選んで紐付ける」既存フロー（StartLinkFlow＝ #}
+  {# 人物一覧へメールプリフィル）へ合流。誘導先URLは services の共通ヘルパーで組み立て済み。 #}
+  <div class="app-alert app-alert--info">
+    <p>あなたの可能性がある Person が複数見つかりました。下記から自分の Person を選んで紐付けてください。</p>
     <ul>
       {% for candidate in person_link_candidates %}
         <li>{{ candidate.full_name }} ({{ candidate.email }})</li>
       {% endfor %}
     </ul>
+    <a href="{{ person_link_select_url }}" class="app-btn app-btn--primary">自分の Person を選んで紐付ける</a>
   </div>
 
 {% elif show_no_candidate and person_link_status == 'no_candidate' %}

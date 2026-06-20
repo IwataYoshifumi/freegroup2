@@ -63,8 +63,11 @@ class ProfileLayoutRenderTests(TestCase):
         # 単一候補のときは 0 件（アップロード）導線は出さない。
         self.assertNotContains(resp, "名刺をアップロード")
 
-    def test_unlinked_multiple_candidates_shows_merge(self):
-        """未紐付け×候補複数：マージ整理へ導線（duplicates:duplicate_group_list）。"""
+    def test_unlinked_multiple_candidates_shows_person_list_prefill(self):
+        """未紐付け×候補複数：人物一覧メールプリフィル（StartLinkFlow相当）へ誘導。
+        マージ画面ではない。"""
+        from accounts.services import self_link_person_list_url
+
         user = User.objects.create_user(username="p_multi", password="d", email="m@example.com")
         self._person_with_contact("m@example.com", full_name="候補A")
         self._person_with_contact("m@example.com", full_name="候補B")
@@ -75,10 +78,20 @@ class ProfileLayoutRenderTests(TestCase):
             resp.context["person_link_status"], "multiple_candidates_need_merge"
         )
         self.assertContains(resp, "複数見つかりました")
-        self.assertContains(
+        # 誘導先は人物一覧メールプリフィルURL（共通ヘルパーと一致）。ヘルパー自体の組み立ても検証。
+        select_url = self_link_person_list_url(user)
+        self.assertIn(reverse("persons:person_list"), select_url)
+        self.assertIn("status=active", select_url)
+        self.assertIn("searched=1", select_url)
+        # レンダリングされた href（& は HTML エスケープされ &amp; になる）を部分一致で検証。
+        self.assertContains(resp, reverse("persons:person_list"))
+        self.assertContains(resp, "status=active")
+        self.assertContains(resp, "自分の Person を選んで紐付ける")
+        # マージ画面へは誘導しない。
+        self.assertNotContains(
             resp, 'href="%s"' % reverse("duplicates:duplicate_group_list")
         )
-        # 複数候補のときは単一の confirm 導線・0 件導線は前面に出さない。
+        # 複数候補のときは 0 件導線は前面に出さない。
         self.assertNotContains(resp, "名刺をアップロード")
 
     def test_linked_shows_two_cards_and_unlink(self):
@@ -106,3 +119,23 @@ class ProfileLayoutRenderTests(TestCase):
         # 紐づけ済みのときは候補アラートを出さない。
         self.assertNotContains(resp, "あなたの名刺データが見つかりました")
         self.assertNotContains(resp, "名刺をアップロード")
+
+
+class StartLinkFlowRedirectTests(TestCase):
+    """StartLinkFlow が共通ヘルパー（人物一覧メールプリフィル・status=active）へ
+    リダイレクトし、複数候補誘導と同一URLに着地することの検証。"""
+
+    def test_redirects_to_person_list_prefill_status_active(self):
+        from accounts.services import self_link_person_list_url
+
+        user = User.objects.create_user(
+            username="slf_user", password="d", email="slf@example.com"
+        )
+        self.client.force_login(user)
+        resp = self.client.get(reverse("accounts:start_link_flow"))
+        self.assertEqual(resp.status_code, 302)
+        # 着地URLは共通ヘルパーと完全一致（複数候補誘導と同一）。
+        self.assertEqual(resp.url, self_link_person_list_url(user))
+        self.assertIn(reverse("persons:person_list"), resp.url)
+        self.assertIn("status=active", resp.url)
+        self.assertIn("searched=1", resp.url)

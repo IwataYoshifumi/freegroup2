@@ -1,6 +1,9 @@
+from urllib.parse import urlencode
+
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models.functions import Lower, Trim
+from django.urls import reverse
 from django.utils.text import slugify
 
 from contacts.models import Contact
@@ -323,15 +326,36 @@ def self_link_candidate_contacts(user):
     )
 
 
+def self_link_person_list_url(user):
+    """本人紐付けフローの着地URL（人物一覧へメールプリフィル）を組み立てて返す。
+
+    [性質] 純関数（reverse + urlencode のみ・DB 操作なし・副作用なし）
+    [入力] user: CustomUser
+    [出力] str（persons:person_list ＋ email / searched=1 / status=active のクエリ付き URL）
+
+    StartLinkFlowView と profile/ホームの複数候補誘導が同一URLに着地するための共通化
+    （URL 組み立ての二重化を防ぐ）。status は active（Person の状態）。本人同定の
+    primary_contact メール一致は person_list の email 検索（primary_contact 経由）が
+    担保するため status=primary は使わない（person_list では無効値＝0件化する）。
+    """
+    params = urlencode([
+        ("email", user.email),
+        ("searched", "1"),
+        ("status", "active"),
+    ])
+    return f"{reverse('persons:person_list')}?{params}"
+
+
 def self_link_alert_context(user):
     """紐付け候補アラートの状態とコンテキストを返す（ホーム／プロフィール共通）。
 
     [性質] 準関数（DB 読み取りのみ・self_link_candidate_contacts を呼ぶだけ・副作用なし）
     [入力] user: CustomUser
     [出力] dict（person_link_status: PersonLinkStatus の値／
-            person_link_candidates: 候補 Contact のリスト）
+            person_link_candidates: 候補 Contact のリスト／
+            person_link_select_url: 複数候補時の誘導先＝人物一覧メールプリフィルURL）
 
-    distinct Person 件数で状態を決める：>1=複数候補（マージ整理）／==1=単一候補（紐付け）／
+    distinct Person 件数で状態を決める：>1=複数候補（本人を選んで紐付け）／==1=単一候補（紐付け）／
     0=候補なし（プロフィールで名刺アップロード誘導）。ホーム home/views.py と入口・基準を
     一本化し、判定の二重化を防ぐ（_link_candidate_alert.html partial がこの dict を描画）。
     """
@@ -346,6 +370,8 @@ def self_link_alert_context(user):
     return {
         "person_link_status": status,
         "person_link_candidates": candidates,
+        # 複数候補時の誘導先（StartLinkFlow と同一の人物一覧メールプリフィルURL）。
+        "person_link_select_url": self_link_person_list_url(user),
     }
 
 

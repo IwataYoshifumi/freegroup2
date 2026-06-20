@@ -1,5 +1,3 @@
-import urllib.parse
-
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin, PermissionRequiredMixin
 from django.contrib.auth.models import Group, Permission
@@ -26,6 +24,7 @@ from .services import (
     retire_user,
     role_holder_count,
     self_link_alert_context,
+    self_link_person_list_url,
     unlink_user_from_person,
     update_role,
 )
@@ -98,12 +97,8 @@ class StartLinkFlowView(LoginRequiredMixin, View):
             request,
             "紐付け対象の Person を表示しています。リストから自分の Person を選んでください。",
         )
-        params = urllib.parse.urlencode([
-            ("email", request.user.email),
-            ("searched", "1"),
-            ("status", "active"),
-        ])
-        return redirect(f"{reverse('persons:person_list')}?{params}")
+        # 着地URLは accounts.services の共通ヘルパーで組み立て（複数候補誘導と同一）。
+        return redirect(self_link_person_list_url(request.user))
 
 
 class LinkUserPersonView(LoginRequiredMixin, View):
