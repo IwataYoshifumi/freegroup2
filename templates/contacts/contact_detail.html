@@ -3,16 +3,12 @@
 {% load badge_tags %}
 {% load ui_tags %}
 
-{% block title %}コンタクト詳細 — FreeGroup2{% endblock %}
+{% block title %}人物詳細 — FreeGroup2{% endblock %}
 
 {% block content %}
   <div class="app-page-header" style="max-width:1100px;">
     <div>
-      <h1>{{ contact|default:"コンタクト詳細" }}</h1>
-    </div>
-    <div class="app-action-area">
-      {% back_all_link back %}
-      {% back_link back %}
+      <h1>人物詳細</h1>
     </div>
   </div>
 
@@ -26,218 +22,193 @@
   {% endif %}
 
   {# ============================================================ #}
-  {# 操作ボタンセクション                                         #}
+  {# タイトル直下アクション帯（HIG 7.3）。カード枠なしでじか置き。        #}
+  {# 左群＝この人物への操作（別肩書を追加・紐付け）、右端＝マージ（控えめ）／戻る。 #}
+  {# 将来「案件を見る」「報告書を作成」等が増える想定で flex-wrap＋右寄せ            #}
+  {# （margin-left:auto）の増設耐性を維持。                                    #}
   {# ============================================================ #}
-  <section class="app-card" style="max-width:1100px;">
-    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
-      {% if contact.person %}
-        {% url 'persons:person_detail' pk=contact.person.pk as person_detail_url %}
-        <a href="{% append_back_url person_detail_url back %}"
-           class="app-btn app-btn--primary">人物詳細</a>
-      {% endif %}
+  <div style="max-width:1100px; display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:var(--app-space-sm);">
+    {% if is_editable and is_primary %}
+      {% url 'persons:person_add_additional_role' contact.person_id as add_role_url %}
+      <a href="{% append_back_url add_role_url back %}"
+         class="app-btn app-btn--primary">別肩書を追加</a>
+    {% endif %}
 
-      {% if is_editable %}
-        {% if is_primary %}
-          {% url 'contacts:contact_update_primary' contact.id as update_primary_url %}
-          <a href="{% append_back_url update_primary_url back %}"
-             class="app-btn app-btn--success">プライマリーコンタクト修正</a>
-        {% elif is_active %}
-          {% url 'contacts:contact_update_active' contact.id as update_active_url %}
-          <a href="{% append_back_url update_active_url back %}"
-             class="app-btn app-btn--success">アクティブ修正</a>
+    {# 紐付け UI（氏名行から移動・§B）。confirm は self-link 専用。未紐付けは出口ガード #}
+    {# （email_match＋person_active）で押せる時だけ。ロジック・文言は不変、位置のみ移動。 #}
+    {% if contact.person %}
+      {% with linked=contact.person.linked_user %}
+        {% url 'accounts:link_user_person_confirm' person_id=contact.person.id as confirm_url %}
+        {# 紐付け／解除は既存 Person-User 関連を結ぶ／解く編集系（解除で戻せる）→ 緑（HIG 3.6）。状態問わず統一。 #}
+        {% if not linked %}
+          {% if email_match and person_active %}
+            <a href="{% append_back_url confirm_url back %}" class="app-btn app-btn--success">このユーザーで紐付ける</a>
+          {% endif %}
+        {% elif linked == user %}
+          <a href="{% append_back_url confirm_url back %}" class="app-btn app-btn--success">紐付け済み（解除）</a>
+        {% else %}
+          <span class="app-muted">ユーザー「{{ linked.username }}」と紐付け済み</span>
         {% endif %}
+      {% endwith %}
+    {% endif %}
 
-        {# 別肩書追加ボタン（9 番、primary のみ表示） #}
-        {% if is_primary %}
-          {% url 'persons:person_add_additional_role' contact.person_id as add_role_url %}
-          <a href="{% append_back_url add_role_url back %}"
-             class="app-btn app-btn--secondary">別肩書追加</a>
-        {% endif %}
-      {% endif %}
-
-      {# マージ画面ボタン（17 番、重複候補があれば表示、URL 未実装） #}
+    {# 右寄せ：マージ（pending時のみ・準備中で控えめ）＋戻る #}
+    <div style="margin-left:auto; display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
       {% if pending_duplicates %}
-        <a href="#" class="app-btn app-btn--secondary is-disabled" aria-disabled="true"
+        <a href="#" class="app-btn app-btn--secondary app-btn--sm is-disabled" aria-disabled="true"
            title="準備中">マージ画面へ（準備中）</a>
       {% endif %}
+      {% back_all_link back %}
+      {% back_link back %}
+    </div>
+  </div>
 
-      {% if not is_editable %}
-        <span class="app-muted">表示のみモード（編集不可）</span>
-      {% endif %}
-
-      {# ---- User-Person 紐付け UI ---- #}
-      {# このボタンの遷移先 confirm は self-link 専用（必ず request.user 自身を紐付ける）。 #}
-      {# よって未紐付けボタンは出口ガード（email_match＋person_active）に揃え、押せる時だけ出す。 #}
-      {# perms 分岐は self-link 固定では無意味なため除去（管理者ルートは別 View）。 #}
-      {% if contact.person %}
-        {% with linked=contact.person.linked_user %}
-          {% url 'accounts:link_user_person_confirm' person_id=contact.person.id as confirm_url %}
-          {% if not linked %}
-            {% if email_match and person_active %}
-              <a href="{% append_back_url confirm_url back %}" class="app-btn app-btn--secondary">このユーザーで紐付ける</a>
-            {% endif %}
-          {% elif linked == user %}
-            <a href="{% append_back_url confirm_url back %}" class="app-btn app-btn--secondary">紐付け済み（解除）</a>
-          {% else %}
-            <span class="app-muted">ユーザー「{{ linked.username }}」と紐付け済み</span>
+  {# ============================================================ #}
+  {# 情報（左 1fr）＋名刺画像（右 固定帯）の 2 カラム。画像なしは 1 カラム（§5）。 #}
+  {# 旧ヘッダーカードは廃止し氏名（識別）行に統合（§C）。氏名見出しは廃止（§D）。     #}
+  {# ============================================================ #}
+  <div style="display:grid; grid-template-columns:1fr{% if business_card and business_card.card_image %} minmax(320px,420px){% endif %}; gap:var(--app-space-md); max-width:1100px; margin-top:var(--app-space-md); align-items:start;">
+    <section class="app-card" style="margin:0;">
+      {# 氏名行（§C）：左端「氏名」＋右に値・主コンタクトバッジ・ⓘ（姓/名/敬称付き）・鉛筆。 #}
+      {# 紐付け UI・マージボタンはアクション帯へ移動済み（§B）。 #}
+      <div class="app-cd-section">
+        <div class="app-cd-section__name">氏名</div>
+        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+          <strong>{{ contact.full_name|default:"(氏名なし)" }}</strong>
+          {% status_badge contact %}
+          {% if contact.person.status != "active" %}{% status_badge contact.person %}{% endif %}
+          {% if pending_duplicates %}
+            <span class="app-status-badge app-status-badge--warning">マージ候補 {{ pending_duplicates|length }} 件</span>
           {% endif %}
-        {% endwith %}
+          {% if contact.last_name or contact.first_name or contact.salutation_name %}
+            {% with name_tip="姓："|add:contact.last_name|add:" ／ 名："|add:contact.first_name|add:" ／ 敬称付き："|add:contact.salutation_name %}
+              <span class="app-help-icon" data-tooltip="{{ name_tip }}" aria-label="氏名の内訳" role="img">i</span>
+            {% endwith %}
+          {% endif %}
+          <span style="margin-left:auto; display:inline-flex; align-items:center; gap:8px;">
+            {% if is_editable %}
+              {% if is_primary %}{% url 'contacts:contact_update_primary' contact.id as edit_url %}{% elif is_active %}{% url 'contacts:contact_update_active' contact.id as edit_url %}{% endif %}
+              {% if edit_url %}
+                <a href="{% append_back_url edit_url back %}"
+                   class="app-btn--icon"
+                   title="主コンタクトを修正" aria-label="主コンタクトを修正"
+                   style="color:inherit; border:none; background:none; text-decoration:none; line-height:1; font-size:1.2rem;"><i class="bi bi-pencil"></i></a>
+              {% endif %}
+            {% else %}
+              <span class="app-muted">表示のみモード（編集不可）</span>
+            {% endif %}
+          </span>
+        </div>
+      </div>
+
+      {# 所属：会社・支店店舗・部署（・役職・資格）の確定情報のみ（キャッチコピーは「その他」へ移設＝§D）。 #}
+      {% if contact.organization or contact.branch or contact.department or contact.title or contact.qualification %}
+        <div class="app-cd-section">
+          <div class="app-cd-section__name">所属</div>
+          <div class="app-detail-list app-contact-detail-fields">
+            {% if contact.organization %}
+              {% include "contacts/_contact_field.html" with field_name="organization" label="会社" value=contact.organization %}
+            {% endif %}
+            {% if contact.branch %}
+              {% include "contacts/_contact_field.html" with field_name="branch" label="支店・店舗" value=contact.branch %}
+            {% endif %}
+            {% if contact.department %}
+              {% include "contacts/_contact_field.html" with field_name="department" label="部署" value=contact.department %}
+            {% endif %}
+            {% if contact.title %}
+              {% include "contacts/_contact_field.html" with field_name="title" label="役職" value=contact.title %}
+            {% endif %}
+            {% if contact.qualification %}
+              {% include "contacts/_contact_field.html" with field_name="qualification" label="資格" value=contact.qualification %}
+            {% endif %}
+          </div>
+        </div>
       {% endif %}
-    </div>
-  </section>
 
-  {# ============================================================ #}
-  {# Contact ヘッダーセクション                                   #}
-  {# ============================================================ #}
-  <section class="app-card" style="max-width:1100px; margin-top:var(--app-space-md);">
-    <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
-      <h2 style="margin:0;">{{ contact.full_name|default:"(氏名なし)" }}</h2>
-
-      {# status バッジ #}
-      {% status_badge contact %}
-
-      {# Person.status バッジ（通常以外のときだけ出す） #}
-      {% if contact.person.status != "active" %}
-        {% status_badge contact.person %}
+      {# 連絡先 #}
+      {% if contact.email or contact.mobile_phone or contact.personal_phone or contact.personal_fax or contact.website %}
+        <div class="app-cd-section">
+          <div class="app-cd-section__name">連絡先</div>
+          <div class="app-detail-list app-contact-detail-fields">
+            {% if contact.email %}
+              {# メールは全幅 #}
+              {% include "contacts/_contact_field.html" with field_name="email" label="メール" value=contact.email full_width=True %}
+            {% endif %}
+            {% if contact.mobile_phone %}
+              {% include "contacts/_contact_field.html" with field_name="mobile_phone" label="携帯" value=contact.mobile_phone %}
+            {% endif %}
+            {% if contact.personal_phone %}
+              {% include "contacts/_contact_field.html" with field_name="personal_phone" label="電話" value=contact.personal_phone %}
+            {% endif %}
+            {% if contact.personal_fax %}
+              {% include "contacts/_contact_field.html" with field_name="personal_fax" label="FAX" value=contact.personal_fax %}
+            {% endif %}
+            {% if contact.website %}
+              {# ウェブサイトは全幅 #}
+              {% include "contacts/_contact_field.html" with field_name="website" label="ウェブサイト" value=contact.website full_width=True %}
+            {% endif %}
+          </div>
+        </div>
       {% endif %}
 
-      {# マージ候補バッジ #}
-      {% if pending_duplicates %}
-        <span class="app-status-badge app-status-badge--warning">
-          マージ候補 {{ pending_duplicates|length }} 件
-        </span>
+      {# 住所 #}
+      {% if contact.postal_code or contact.address %}
+        <div class="app-cd-section">
+          <div class="app-cd-section__name">住所</div>
+          <div class="app-detail-list app-contact-detail-fields">
+            {% if contact.postal_code %}
+              {% include "contacts/_contact_field.html" with field_name="postal_code" label="郵便番号" value=contact.postal_code %}
+            {% endif %}
+            {% if contact.address %}
+              {# Phase E：address は自動 compose の完成形。読み取り専用表示。全幅。 #}
+              {% include "contacts/_contact_field.html" with field_name="address" label="住所" value=contact.address is_editable=False full_width=True %}
+            {% endif %}
+          </div>
+        </div>
       {% endif %}
-    </div>
 
-    {# 名刺画像（あれば） #}
+      {# その他：補足情報（キャッチコピー・メモ・言語）（§D） #}
+      {% if contact.catchphrase or contact.notes or contact.lang %}
+        <div class="app-cd-section">
+          <div class="app-cd-section__name">その他</div>
+          <div class="app-detail-list app-contact-detail-fields">
+            {% if contact.catchphrase %}
+              {# キャッチコピー＝名刺の宣伝文句（補足情報）。所属から移設。全幅。 #}
+              {% include "contacts/_contact_field.html" with field_name="catchphrase" label="キャッチコピー" value=contact.catchphrase full_width=True %}
+            {% endif %}
+            {% if contact.notes %}
+              {% include "contacts/_contact_field.html" with field_name="notes" label="メモ" value=contact.notes full_width=True %}
+            {% endif %}
+            {% if contact.lang %}
+              {% include "contacts/_contact_field.html" with field_name="lang" label="言語" value=contact.lang %}
+            {% endif %}
+          </div>
+        </div>
+      {% endif %}
+
+      {# 名刺レコードへのリンク（開閉式・旧ヘッダーカードから移設） #}
+      {% if business_card %}
+        <details style="margin-top: var(--app-space-sm);">
+          <summary style="cursor:pointer;">紐付く名刺レコード</summary>
+          <div style="margin-top: var(--app-space-sm);">
+            {% url 'cards:card_detail' pk=business_card.id as bc_url %}
+            <a href="{% append_back_url bc_url back %}">名刺詳細画面へ</a>
+          </div>
+        </details>
+      {% endif %}
+    </section>
+
     {% if business_card and business_card.card_image %}
-      <div style="margin-top: var(--app-space-md);">
+      <section class="app-card" style="margin:0;">
+        <div class="app-section__header"><h2>名刺画像</h2></div>
         <img src="{{ business_card.card_image.url }}"
              alt="名刺画像"
-             style="max-width:300px; width:100%; cursor:pointer; border-radius:8px;"
+             style="max-width:100%; width:100%; cursor:pointer; border-radius:8px;"
              data-action="open-modal"
              data-target="contactCardImageModal">
-      </div>
+      </section>
     {% endif %}
-
-    {# 名刺レコードへのリンク（開閉式） #}
-    {% if business_card %}
-      <details style="margin-top: var(--app-space-md);">
-        <summary style="cursor:pointer;">紐付く名刺レコード</summary>
-        <div style="margin-top: var(--app-space-sm);">
-          {% url 'cards:card_detail' pk=business_card.id as bc_url %}
-          <a href="{% append_back_url bc_url back %}">名刺詳細画面へ</a>
-        </div>
-      </details>
-    {% endif %}
-  </section>
-
-  {# ============================================================ #}
-  {# 一括確定ボタンセクション（編集可能モードのみ）              #}
-  {# ============================================================ #}
-  {% if is_editable %}
-    <section class="app-card" style="max-width:1100px; margin-top:var(--app-space-md);">
-      <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
-        <div>
-          {% contact_confidence contact 'summary' %}
-        </div>
-        <button type="button"
-                class="app-btn app-btn--primary js-bulk-confirm-btn"
-                data-contact-id="{{ contact.id }}"
-                data-stage="1">
-          要確認箇所、変更なし一括確定
-        </button>
-      </div>
-    </section>
-  {% endif %}
-
-  {# ============================================================ #}
-  {# フィールド表示セクション                                     #}
-  {# ============================================================ #}
-  <section class="app-card" style="max-width:1100px; margin-top:var(--app-space-md);">
-    {# 氏名グループ #}
-    {% if contact.full_name or contact.salutation_name or contact.last_name or contact.first_name %}
-      <div class="app-section__header"><h2>氏名</h2></div>
-      {% if contact.full_name %}
-        {% include "contacts/_contact_field.html" with field_name="full_name" label="氏名" value=contact.full_name %}
-      {% endif %}
-      {% if contact.last_name %}
-        {% include "contacts/_contact_field.html" with field_name="last_name" label="姓" value=contact.last_name %}
-      {% endif %}
-      {% if contact.first_name %}
-        {% include "contacts/_contact_field.html" with field_name="first_name" label="名" value=contact.first_name %}
-      {% endif %}
-      {% if contact.salutation_name %}
-        {% include "contacts/_contact_field.html" with field_name="salutation_name" label="敬称付き氏名" value=contact.salutation_name %}
-      {% endif %}
-    {% endif %}
-
-    {# 所属グループ #}
-    {% if contact.organization or contact.branch or contact.department or contact.title or contact.qualification or contact.catchphrase %}
-      <div class="app-section__header" style="margin-top: var(--app-space-md);"><h2>所属</h2></div>
-      {% if contact.organization %}
-        {% include "contacts/_contact_field.html" with field_name="organization" label="会社" value=contact.organization %}
-      {% endif %}
-      {% if contact.branch %}
-        {% include "contacts/_contact_field.html" with field_name="branch" label="支店・店舗" value=contact.branch %}
-      {% endif %}
-      {% if contact.department %}
-        {% include "contacts/_contact_field.html" with field_name="department" label="部署" value=contact.department %}
-      {% endif %}
-      {% if contact.title %}
-        {% include "contacts/_contact_field.html" with field_name="title" label="役職" value=contact.title %}
-      {% endif %}
-      {% if contact.qualification %}
-        {% include "contacts/_contact_field.html" with field_name="qualification" label="資格" value=contact.qualification %}
-      {% endif %}
-      {% if contact.catchphrase %}
-        {% include "contacts/_contact_field.html" with field_name="catchphrase" label="キャッチコピー" value=contact.catchphrase %}
-      {% endif %}
-    {% endif %}
-
-    {# 連絡先グループ #}
-    {% if contact.email or contact.mobile_phone or contact.personal_phone or contact.personal_fax or contact.website %}
-      <div class="app-section__header" style="margin-top: var(--app-space-md);"><h2>連絡先</h2></div>
-      {% if contact.email %}
-        {% include "contacts/_contact_field.html" with field_name="email" label="メール" value=contact.email %}
-      {% endif %}
-      {% if contact.mobile_phone %}
-        {% include "contacts/_contact_field.html" with field_name="mobile_phone" label="携帯" value=contact.mobile_phone %}
-      {% endif %}
-      {% if contact.personal_phone %}
-        {% include "contacts/_contact_field.html" with field_name="personal_phone" label="電話" value=contact.personal_phone %}
-      {% endif %}
-      {% if contact.personal_fax %}
-        {% include "contacts/_contact_field.html" with field_name="personal_fax" label="FAX" value=contact.personal_fax %}
-      {% endif %}
-      {% if contact.website %}
-        {% include "contacts/_contact_field.html" with field_name="website" label="ウェブサイト" value=contact.website %}
-      {% endif %}
-    {% endif %}
-
-    {# 住所グループ #}
-    {% if contact.postal_code or contact.address %}
-      <div class="app-section__header" style="margin-top: var(--app-space-md);"><h2>住所</h2></div>
-      {% if contact.postal_code %}
-        {% include "contacts/_contact_field.html" with field_name="postal_code" label="郵便番号" value=contact.postal_code %}
-      {% endif %}
-      {% if contact.address %}
-        {# Phase E：address は自動 compose の完成形。詳細画面では読み取り専用表示（編集 UI なし）。 #}
-        {% include "contacts/_contact_field.html" with field_name="address" label="住所" value=contact.address is_editable=False %}
-      {% endif %}
-    {% endif %}
-
-    {# その他 #}
-    {% if contact.notes or contact.lang %}
-      <div class="app-section__header" style="margin-top: var(--app-space-md);"><h2>その他</h2></div>
-      {% if contact.notes %}
-        {% include "contacts/_contact_field.html" with field_name="notes" label="メモ" value=contact.notes %}
-      {% endif %}
-      {% if contact.lang %}
-        {% include "contacts/_contact_field.html" with field_name="lang" label="言語" value=contact.lang %}
-      {% endif %}
-    {% endif %}
-  </section>
+  </div>
 
   {# ============================================================ #}
   {# 他のアクティブコンタクトセクション                           #}
@@ -328,7 +299,7 @@
     {% back_link back %}
   </div>
 
-  {# 名刺画像モーダル #}
+  {# 名刺画像モーダル（既存機構を流用・新規モーダルは作らない） #}
   {% if business_card and business_card.card_image %}
     <div class="app-modal-backdrop" hidden></div>
     <div class="app-modal" id="contactCardImageModal" hidden>

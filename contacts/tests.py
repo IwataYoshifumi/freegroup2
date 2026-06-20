@@ -1074,12 +1074,22 @@ class ContactDetailViewTests(TestCase):
         self.assertEqual(resp.context["previous_person"], prev_person)
         self.assertIn("マージ前の人物", resp.content.decode())
 
-    def test_n10_no_cfc_records(self):
-        """N10: CFC レコードなし（全 high）→ contact_confidence が「確認すべきフィールドなし」表示。"""
-        # CFC を全削除
-        ContactFieldConfidence.objects.filter(contact=self.contact_a).delete()
+    def test_n10_unconfirmed_band_removed(self):
+        """N10: 要確認帯（未確認件数サマリー＋一括確定ボタン）は撤去済み。
+
+        未確認 CFC が 1 件以上あっても（setUp の cfc_organization=mid）、帯・一括ボタン・
+        件数サマリーは出さない。個別フィールドの確認 UI（確認OK/要修正）は別途残る。
+        """
         resp = self.client.get(self._url())
-        self.assertIn("確認すべきフィールドはありません", resp.content.decode())
+        body = resp.content.decode()
+        # 帯は常に無い：一括確定ボタン・件数サマリー文言・summary タグ出力のいずれも出ない。
+        self.assertNotIn("js-bulk-confirm-btn", body)
+        self.assertNotIn("一括確定", body)
+        self.assertNotIn("確認すべきフィールドはありません", body)
+        # context にも帯用キーは投入しない。
+        self.assertNotIn("unconfirmed_count", resp.context)
+        # 個別フィールドの確認 UI（app.js 配線済み）は残る。
+        self.assertIn("js-contact-field-action", body)
 
     # ---- 異常系 ----
 
@@ -1121,12 +1131,43 @@ class ContactDetailViewTests(TestCase):
         ):
             self.assertIn(key, resp.context, f"missing context key: {key}")
 
+    def test_r5_push_current_makes_detail_a_back_target(self):
+        """R5: 起点ハブ化（案A）。push_current で back_stack に「人物詳細」が積まれ、
+        子画面の戻り先になる。keys=["page"] は GET に無いので path-only で積まれる。"""
+        resp = self.client.get(self._url())
+        back = resp.context["back"]
+        titles = [e.get("title") for e in back.back_stack]
+        urls = [e.get("url") for e in back.back_stack]
+        self.assertIn("人物詳細", titles)
+        # path-only（クエリは付かない）。
+        self.assertIn(self._url(), urls)
+
+    def test_r6_push_current_no_double_push(self):
+        """R6: 二重 push 防止。back_stack の先頭が既に人物詳細（同一 view_name+kwargs）なら
+        重複チェックで再 push されない（リロード・子からの戻り想定）。"""
+        from back_navigator.back_navigator import BackNavigator
+
+        # 1 回目：人物詳細を積んだ状態の back_stack をエンコード。
+        resp1 = self.client.get(self._url())
+        back1 = resp1.context["back"]
+        encoded = back1._calc_encode_stack(back1.back_stack)
+
+        # 2 回目：その back_stack を付けて同じ人物詳細へ。重複チェックで二重に積まれない。
+        resp2 = self.client.get(
+            self._url(), {BackNavigator.PARAM_NAME: encoded}
+        )
+        back2 = resp2.context["back"]
+        self.assertEqual(
+            [e.get("title") for e in back2.back_stack].count("人物詳細"), 1
+        )
+
     def test_r2_template_rendered(self):
-        """R2: テンプレートが正しくレンダリング、Contact 名が含まれる。"""
+        """R2: テンプレートが正しくレンダリング、Contact 名とタイトル「人物詳細」が含まれる。"""
         resp = self.client.get(self._url())
         body = resp.content.decode()
         self.assertIn("A-name", body)
-        self.assertIn("コンタクト詳細", body)
+        # タイトルは集約設計に合わせ「人物詳細」（HIG 原則4）。
+        self.assertIn("人物詳細", body)
 
     def test_r3_edit_ui_in_editable_mode(self):
         """R3: 編集可能モードで修正 UI（ラジオ / 確定 / 修正フォーム）と data-confidence-state が出力。"""

@@ -927,6 +927,52 @@ a { color: inherit; text-decoration: none; }
   max-width: 360px;
 }
 
+/* 人物詳細（contact_detail）：セクション内フィールドを auto-fit 2 列グリッドに。
+   情報カラムが広い（名刺画像なし＝全幅）と 2 列、狭い（名刺ありで左 1fr）と自動で
+   1 列へ折り返す。名刺有無の条件分岐はテンプレに書かず CSS の auto-fit に委ねる。
+   各フィールド（.app-detail-list .app-detail-item の 140px/1fr）は維持。共通クラス本体は不変。
+   長い値は include 側 full_width=True → グリッド項目に grid-column:1/-1 を当てて全幅。 */
+.app-contact-detail-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 0 var(--app-space-md);
+  align-items: start;
+}
+
+/* 人物詳細：各セクションを「左端＝セクション名（固定幅列・行ヘッダー）／右＝フィールド群」の
+   行に。独立見出し行（app-section__header）を廃して縦を詰め、左端を縦に見ればグループが分かる。
+   セクション名は上揃え（align-items:start）。右が折り返してもセクション名は左上に留まる。
+   共通 .app-section__header / .app-detail-* 本体は不変。画面限定。 */
+.app-cd-section {
+  display: grid;
+  grid-template-columns: 100px 1fr;
+  gap: var(--app-space-sm);
+  align-items: start;
+  padding: var(--app-space-sm) 0;
+}
+.app-cd-section + .app-cd-section {
+  border-top: 1px solid var(--app-border);
+}
+.app-cd-section__name {
+  font-weight: 700;
+  padding-top: 2px;
+}
+
+/* 2 列に並ぶ短項目（full_width でない＝stacked）は「ラベル上・値下」の縦セットに。
+   1 組が縦に固まり、横に複数並んでも各組が独立して読める。左端は値と縦に揃う（block）。
+   共通 .app-detail-list .app-detail-item（140px/1fr 横並び）を、特異度を上げてこの画面限定で上書き。
+   full_width 項目（氏名・メール・住所等）はクラスが付かないため従来どおりラベル左・値右のまま。 */
+.app-contact-detail-fields .app-detail-item.app-cd-stacked {
+  display: block;
+}
+.app-contact-detail-fields .app-detail-item.app-cd-stacked .app-detail-label {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--app-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
 /* duplicates のフィルタフォーム（重複候補一覧・マージログ一覧）：各グループ
    （rank/進捗/ユーザー/ソート、状態/ユーザー 等）の上下の隙間を空ける。
    共通 .app-form__group は触らず duplicates のフォーム限定。 */

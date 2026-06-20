@@ -29,18 +29,20 @@ dict[field_name -> ContactFieldConfidence]）と is_editable（編集可能モ�
 
 {% if is_editable %}
   {% confidence_state field_confidences field_name as cfc_state %}
-  <div class="app-detail-item js-contact-field-row"
+  <div class="app-detail-item js-contact-field-row{% if not full_width %} app-cd-stacked{% endif %}"
        data-field-name="{{ field_name }}"
        data-contact-id="{{ contact.id }}"
-       data-confidence-state="{{ cfc_state }}">
+       data-confidence-state="{{ cfc_state }}"{% if full_width %} style="grid-column:1 / -1;"{% endif %}>
     <div class="app-detail-label">{{ label }}</div>
     <div class="app-detail-value">
       <span class="js-contact-field-value">{% if field_name == "postal_code" %}{{ field_display }}{% else %}{{ value }}{% endif %}</span>
       <span class="js-contact-field-badge-slot">{% confidence field_confidences field_name 'badge' %}</span>
+      {% if info_tooltip %}<span class="app-help-icon" data-tooltip="{{ info_tooltip }}" aria-label="{{ label }}の内訳" role="img">i</span>{% endif %}
     </div>
 
     {% if cfc_state == 'mid' or cfc_state == 'low' %}
-      <div class="app-contact-field-actions">
+      {# app-detail-list（140px/1fr グリッド）配下で潰れないよう全幅スパン。非グリッド時は無害。 #}
+      <div class="app-contact-field-actions" style="grid-column:1 / -1;">
         {% comment %}
         HIG v1.2 §4.1：確認 OK / 要修正 を app-radio-toggle のトグルボタンに。
         js-contact-field-action は app.js が拾う JS フックなので維持。
@@ -89,11 +91,12 @@ dict[field_name -> ContactFieldConfidence]）と is_editable（編集可能モ�
     {% endif %}
   </div>
 {% else %}
-  <div class="app-detail-item">
+  <div class="app-detail-item{% if not full_width %} app-cd-stacked{% endif %}"{% if full_width %} style="grid-column:1 / -1;"{% endif %}>
     <div class="app-detail-label">{{ label }}</div>
     <div class="app-detail-value">
       {% if field_name == "postal_code" %}{{ field_display }}{% else %}{{ value }}{% endif %}
       {% confidence field_confidences field_name 'badge' %}
+      {% if info_tooltip %}<span class="app-help-icon" data-tooltip="{{ info_tooltip }}" aria-label="{{ label }}の内訳" role="img">i</span>{% endif %}
     </div>
   </div>
 {% endif %}

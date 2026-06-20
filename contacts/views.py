@@ -321,10 +321,14 @@ class ContactDetailView(LoginRequiredMixin, PermissionRequiredMixin, DetailView)
             contact.person.get_inactive_contacts().exclude(pk=contact.pk)
         )
 
-        # BackNavigator（詳細画面なので push_current は呼ばない、既存 cards 慣例に揃える。
-        # BackNavigator.push_current は keys=[] を DEBUG 時に ValueError として弾くため、
-        # 詳細画面ではスタック生成だけ行い、一覧画面側で push_current 済みのスタックを参照する）
+        # BackNavigator：人物詳細を起点ハブ化し、子画面（別肩書追加・主コンタクト修正・名刺
+        # 詳細・将来の案件/報告書 等）の「戻る」が人物詳細へ戻るよう、自身を push_current で積む
+        # （ガイド §9：クエリ無し詳細でも push_current して戻り先にする正規の使い方）。
+        # 人物詳細は保存すべき GET クエリを持たないため、keys は path-only になる無害な非空キー
+        # 1 つ（"page"）を渡す（空 keys は §8 NG・DEBUG で ValueError）。view_name + view_kwargs
+        # の重複チェック（back_navigator.py）でリロード・子からの戻り時の二重 push は防止される。
         back = BackNavigator(self.request)
+        back.push_current("人物詳細", ["page"])
 
         # 本人紐付けボタン（self-link 専用）の表示条件を出口ガード（confirm の email_match＋
         # person_active／link_user_to_person の is_self_link_email_match）に揃える。
