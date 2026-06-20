@@ -17,7 +17,7 @@
   <section class="app-card app-card-search">
     {# HIG §4.1：素のチェックボックスをトグルボタンに統一（card_list の js-ocr-toggle 方式）。 #}
     {# 送信は隠し checkbox（name/value は現状維持＝rank/progress/user）。ボタンは checked を操作するだけ。 #}
-    <form method="get" class="app-form-grid-edit js-dup-filter">
+    <form method="get" class="app-form-grid-edit app-dup-filter js-dup-filter">
       <input type="hidden" name="searched" value="1">
 
       {# ---- rank（複数選択トグル・常時展開）。ラベルは業務語（テーブル表記に合わせる）。 ---- #}
@@ -76,7 +76,7 @@
 
       {# ---- ソート・表示件数（card_list と同方式：折りたたみ＋多段ソート＋per_page） ---- #}
       <div class="app-form__group" style="grid-column: 1 / -1;">
-        <div class="app-collapsible js-dup-sort-control{% if sort_is_active or per_page != 50 %} is-open{% endif %}">
+        <div class="app-collapsible app-dup-sort-collapsible js-dup-sort-control{% if sort_is_active or per_page != 50 %} is-open{% endif %}">
           <button type="button" class="app-collapsible__header" data-action="toggle-collapsible"
                   aria-expanded="{% if sort_is_active or per_page != 50 %}true{% else %}false{% endif %}">
             <span>ソート・表示件数</span>

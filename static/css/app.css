@@ -919,6 +919,20 @@ a { color: inherit; text-decoration: none; }
   padding: var(--app-space-md);
 }
 
+/* duplicates 重複候補一覧：ソート・表示件数の折りたたみヘッダーだけ半幅に絞る。
+   共通 .app-collapsible__header（width:100%）は7テンプレ共有のため触らず、
+   duplicates 専用ラッパー .app-dup-sort-collapsible 経由でスコープ上書きする
+   （persons の .app-person-filter-collapsible と同じ流儀）。開閉動作は変えない。 */
+.app-dup-sort-collapsible .app-collapsible__header {
+  max-width: 360px;
+}
+
+/* duplicates 重複候補一覧：フィルタの各グループ（rank/進捗/ユーザー/ソート）の
+   上下の隙間を空ける。共通 .app-form__group は触らず duplicates のフォーム限定。 */
+.app-dup-filter .app-form__group {
+  margin-bottom: var(--app-space-md);
+}
+
 /* 検索フォーム上段グリッド。元は _search_form.html のインライン grid-template-columns:repeat(4,1fr)。
    この partial は persons一覧／bulk_tagging／mailings で共有されるため、4カラム定義は
    partial 自身に付くクラス（.app-search-grid）へ移管し、全 consumer の従来の見え方（デスクトップ4列）を保つ。
