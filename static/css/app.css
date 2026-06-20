@@ -1300,6 +1300,13 @@ a { color: inherit; text-decoration: none; }
   border-color: #bbf7d0;
 }
 
+/* info 系の淡い青カード（要対応の注目ゾーン用）。塗りは信号機4色を避け、
+   既存 info トーン（app-alert--info と同値）の明度高めの淡い青で操作色と階層を分ける。 */
+.app-card--info {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+}
+
 .app-form-note--success {
   border-color: #bbf7d0;
   background: #f0fdf4;

@@ -23,7 +23,16 @@
     {# 紐づけ済み時は下段の左右 2 カード（ユーザ／人物詳細）に一本化するため、 #}
     {# 上段の縦並びプロフィールは未紐づけ時のみ表示（重複表示を解消）。 #}
     {% if not user.person %}
-      <section class="app-card">
+      {# ---- 遷移導線カード（HIG 7.3 ①・3.1）：未紐付け時の主要導線はタイトル直下・左寄せに置く ---- #}
+      {# 紐付けは前向きの主要操作なので色は app-btn--primary（青・HIG 3.6）を維持。 #}
+      {# 「未紐付けである旨の案内」と「紐付けへ進むボタン」を同カード内にまとめ視線範囲に収める。 #}
+      {# 背景は app-card--info（淡い青）で要対応の注目ゾーンを示す（HIG 原則2：既存 info トーン流用）。 #}
+      {# 中身はホームと共通の候補アラート partial。profile は 0 件状態も出すため show_no_candidate=True。 #}
+      <section class="app-card app-card--info">
+        {% include "accounts/_link_candidate_alert.html" with show_no_candidate=True %}
+      </section>
+
+      <section class="app-card" style="margin-top: var(--app-space-md);">
         {# ユーザ情報は 2 列グリッド（app-detail-grid）。メールは値が長いので 1 列ぶち抜き。 #}
         {# 表示は CustomUser の実在フィールドのみ（会社名・役職フィールドは無いので出さない）。 #}
         <div class="app-detail-grid">
@@ -132,16 +141,6 @@
             {% endwith %}
           </section>
         </div>
-    {% else %}
-      <section class="app-card" style="margin-top: var(--app-space-md);">
-        <div class="app-section__header">
-          <h2>Person との紐付け</h2>
-        </div>
-        <p class="app-muted">あなたはまだ Person に紐付けられていません。自分の Person を選んで紐付けてください。</p>
-        <div class="app-action-area">
-          <a href="{% url 'accounts:start_link_flow' %}" class="app-btn app-btn--primary">Person を探して紐付ける</a>
-        </div>
-      </section>
     {% endif %}
     </div>
   </main>

@@ -1,0 +1,45 @@
+{% load back_tags %}
+{% comment %}
+紐付け候補アラート（ホーム／プロフィール共通 partial）。
+home.html の直書きから切り出し、profile からも同一部品・同一分岐で再利用する。
+
+期待 context（include with ... で渡す）:
+  person_link_status   : 'single_candidate' | 'multiple_candidates_need_merge' | 'no_candidate'
+                         （accounts.services.self_link_alert_context が算出）
+  person_link_candidates: 候補 Contact のリスト
+  back                 : BackNavigator（append_back_url で遷移先へ back_stack 引き継ぎ）
+  show_no_candidate    : 0 件状態（名刺アップロード誘導）を出すか
+                         （profile=True／home=False。ホームは 0 件で非表示の現行挙動を維持）
+
+遷移導線はいずれも前向きの主要アクション＝遷移（実行ではない）。マージは「マージ画面へ行く」
+導線であって実行ではない点に注意（状態 2・3 の文言・遷移先はホーム現行を踏襲）。
+{% endcomment %}
+{% if person_link_status == 'single_candidate' %}
+  {% for candidate in person_link_candidates %}
+    <div class="app-alert app-alert--info">
+      <p>あなたの名刺データが見つかりました: <strong>{{ candidate.full_name }}</strong></p>
+      {# 紐づけは確認画面経由に統一（本人フロー前提のため person_id のみ）。 #}
+      {# 確認画面で「戻る」が呼び出し元に戻れるよう append_back_url で back_stack を付与。 #}
+      {% url 'accounts:link_user_person_confirm' person_id=candidate.person_id as confirm_url %}
+      <a href="{% append_back_url confirm_url back %}" class="app-btn app-btn--primary">紐付ける</a>
+    </div>
+  {% endfor %}
+
+{% elif person_link_status == 'multiple_candidates_need_merge' %}
+  <div class="app-alert app-alert--warning">
+    <p>あなたの可能性がある Person が複数見つかりました。</p>
+    <p>先に <a href="{% url 'duplicates:duplicate_group_list' %}">Person のマージ画面</a> で重複を整理してください。</p>
+    <ul>
+      {% for candidate in person_link_candidates %}
+        <li>{{ candidate.full_name }} ({{ candidate.email }})</li>
+      {% endfor %}
+    </ul>
+  </div>
+
+{% elif show_no_candidate and person_link_status == 'no_candidate' %}
+  {# プロフィール専用の追加状態：候補 0 件＝名刺未取り込み。アップロードへ誘導（前向き＝青）。 #}
+  <div class="app-alert app-alert--info">
+    <p>あなたの名刺がまだ取り込まれていません。名刺をアップロードすると紐付けできます。</p>
+    <a href="{% url 'cards:card_upload' %}" class="app-btn app-btn--primary">名刺をアップロード</a>
+  </div>
+{% endif %}

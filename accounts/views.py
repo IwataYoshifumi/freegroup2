@@ -25,6 +25,7 @@ from .services import (
     link_user_to_person,
     retire_user,
     role_holder_count,
+    self_link_alert_context,
     unlink_user_from_person,
     update_role,
 )
@@ -38,7 +39,12 @@ class ProfileView(LoginRequiredMixin, View):
     def get(self, request):
         # 確認画面リンクに back_stack を引き継げるよう BackNavigator を渡す（push_current は呼ばない＝
         # PersonDetailView 同型。プロフィールはルート画面でクエリ状態を持たないため push しない）。
-        return render(request, self.template_name, {"back": BackNavigator(request)})
+        ctx = {"back": BackNavigator(request)}
+        # 未紐付け時はホームと同一基準で候補状態を算出し、淡い青カード内の共通 partial で出し分ける。
+        # profile は 0 件状態（名刺アップロード誘導）も出すため show_no_candidate=True で include する。
+        if request.user.person is None:
+            ctx.update(self_link_alert_context(request.user))
+        return render(request, self.template_name, ctx)
 
 
 class LinkUserPersonConfirmView(LoginRequiredMixin, View):

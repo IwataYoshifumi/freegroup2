@@ -2,7 +2,7 @@ from django.contrib.auth.mixins import LoginRequiredMixin
 from django.views.generic import TemplateView
 
 from accounts.constants import PersonLinkStatus
-from accounts.services import self_link_candidate_contacts
+from accounts.services import self_link_alert_context
 from back_navigator.back_navigator import BackNavigator
 
 
@@ -26,17 +26,11 @@ class HomeView(LoginRequiredMixin, TemplateView):
         ctx["back"] = BackNavigator(self.request)
 
         if user.person is None:
-            # 入口・出口で同一基準（accounts.services の共通定義）を参照する。
-            candidates = list(self_link_candidate_contacts(user))
-
-            distinct_persons = {c.person_id for c in candidates}
-            if len(distinct_persons) > 1:
-                ctx["person_link_status"] = (
-                    PersonLinkStatus.MULTIPLE_CANDIDATES_NEED_MERGE
-                )
-                ctx["person_link_candidates"] = candidates
-            elif distinct_persons:
-                ctx["person_link_status"] = PersonLinkStatus.SINGLE_CANDIDATE
-                ctx["person_link_candidates"] = candidates
+            # 状態算出は accounts.services の共通ヘルパーに一本化（profile と同一基準）。
+            # ホームは 0 件状態を context に載せない現行契約を維持（candidate 有り時のみ更新）。
+            # partial にも show_no_candidate を渡さず 0 件アラートは描画しない。
+            alert_ctx = self_link_alert_context(user)
+            if alert_ctx["person_link_status"] != PersonLinkStatus.NO_CANDIDATE:
+                ctx.update(alert_ctx)
 
         return ctx

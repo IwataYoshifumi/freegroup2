@@ -6,28 +6,9 @@
 
 {% block app_content %}
   <main class="app-main">
-    {% if person_link_status == 'single_candidate' %}
-      {% for candidate in person_link_candidates %}
-        <div class="app-alert app-alert--info">
-          <p>あなたの名刺データが見つかりました: <strong>{{ candidate.full_name }}</strong></p>
-          {# 紐づけは確認画面経由に統一（本人フロー前提のため person_id のみ）。 #}
-          {# 確認画面で「戻る」がホームに戻れるよう append_back_url で back_stack を付与。 #}
-          {% url 'accounts:link_user_person_confirm' person_id=candidate.person_id as confirm_url %}
-          <a href="{% append_back_url confirm_url back %}" class="app-btn app-btn--primary">紐付ける</a>
-        </div>
-      {% endfor %}
-
-    {% elif person_link_status == 'multiple_candidates_need_merge' %}
-      <div class="app-alert app-alert--warning">
-        <p>あなたの可能性がある Person が複数見つかりました。</p>
-        <p>先に <a href="{% url 'duplicates:duplicate_group_list' %}">Person のマージ画面</a> で重複を整理してください。</p>
-        <ul>
-          {% for candidate in person_link_candidates %}
-            <li>{{ candidate.full_name }} ({{ candidate.email }})</li>
-          {% endfor %}
-        </ul>
-      </div>
-    {% endif %}
+    {# 紐付け候補アラートは共通 partial に切り出し（profile と同一部品・同一分岐）。 #}
+    {# ホームは 0 件状態を出さない現行挙動を維持するため show_no_candidate は渡さない（＝偽）。 #}
+    {% include "accounts/_link_candidate_alert.html" %}
 
     <section class="app-card">
       <h1>ようこそ FreeGroup2 へ</h1>

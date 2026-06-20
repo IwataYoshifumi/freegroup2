@@ -6,7 +6,7 @@ from django.utils.text import slugify
 from contacts.models import Contact
 from persons.models import Person
 
-from .constants import ActionLogAction, ADMIN_ROLE_CODE
+from .constants import ActionLogAction, ADMIN_ROLE_CODE, PersonLinkStatus
 
 
 def apply_role(user, role):
@@ -321,6 +321,32 @@ def self_link_candidate_contacts(user):
         .filter(_norm_email=normalized)
         .select_related("person")
     )
+
+
+def self_link_alert_context(user):
+    """紐付け候補アラートの状態とコンテキストを返す（ホーム／プロフィール共通）。
+
+    [性質] 準関数（DB 読み取りのみ・self_link_candidate_contacts を呼ぶだけ・副作用なし）
+    [入力] user: CustomUser
+    [出力] dict（person_link_status: PersonLinkStatus の値／
+            person_link_candidates: 候補 Contact のリスト）
+
+    distinct Person 件数で状態を決める：>1=複数候補（マージ整理）／==1=単一候補（紐付け）／
+    0=候補なし（プロフィールで名刺アップロード誘導）。ホーム home/views.py と入口・基準を
+    一本化し、判定の二重化を防ぐ（_link_candidate_alert.html partial がこの dict を描画）。
+    """
+    candidates = list(self_link_candidate_contacts(user))
+    distinct_persons = {c.person_id for c in candidates}
+    if len(distinct_persons) > 1:
+        status = PersonLinkStatus.MULTIPLE_CANDIDATES_NEED_MERGE
+    elif distinct_persons:
+        status = PersonLinkStatus.SINGLE_CANDIDATE
+    else:
+        status = PersonLinkStatus.NO_CANDIDATE
+    return {
+        "person_link_status": status,
+        "person_link_candidates": candidates,
+    }
 
 
 def is_self_link_email_match(user, person):

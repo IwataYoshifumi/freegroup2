@@ -31,7 +31,10 @@ ADMIN_ROLE_CODE = "admin"
 
 
 class PersonLinkStatus:
-    """ホーム画面アラートのステータス値（仕様書 §12.4）。"""
+    """ホーム／プロフィール紐付け候補アラートのステータス値（仕様書 §12.4）。"""
 
     SINGLE_CANDIDATE = "single_candidate"
     MULTIPLE_CANDIDATES_NEED_MERGE = "multiple_candidates_need_merge"
+    #: 候補 0 件（プロフィールで「名刺未取り込み→アップロード誘導」を出す状態）。
+    #: ホームは 0 件で非表示のため、partial 側を show_no_candidate フラグで抑止する。
+    NO_CANDIDATE = "no_candidate"
