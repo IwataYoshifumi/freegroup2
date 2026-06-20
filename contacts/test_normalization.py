@@ -709,7 +709,8 @@ class ContactSaveSalutationCfcTests(TestCase):
             contact=contact, field_name="salutation_name"
         ).count()
 
-    def test_computed_creates_low_cfc(self):
+    def test_ja_computed_creates_no_cfc(self):
+        # §1.8 改訂：lang=ja は補完で値は作るが、自明な日本語敬称のため low CFC は作らない。
         c = Contact.objects.create(
             person=self._make_person(),
             status=Contact.Status.PRIMARY,
@@ -719,7 +720,21 @@ class ContactSaveSalutationCfcTests(TestCase):
             salutation_name="",
             salutation_name_is_manual=False,
         )
-        self.assertEqual(c.salutation_name, "山田 様")
+        self.assertEqual(c.salutation_name, "山田 様")  # 値は作られる
+        self.assertEqual(self._salutation_cfc_count(c), 0)  # CFC は作らない
+
+    def test_non_ja_computed_creates_low_cfc(self):
+        # ja 以外（en）は従来どおり low（未確認）CFC を作る。
+        c = Contact.objects.create(
+            person=self._make_person(),
+            status=Contact.Status.PRIMARY,
+            full_name="John Smith",
+            last_name="Smith",
+            lang="en",
+            salutation_name="",
+            salutation_name_is_manual=False,
+        )
+        self.assertEqual(c.salutation_name, "Dear John Smith,")
         cfc = ContactFieldConfidence.objects.get(
             contact=c, field_name="salutation_name"
         )
@@ -751,20 +766,21 @@ class ContactSaveSalutationCfcTests(TestCase):
         self.assertEqual(self._salutation_cfc_count(c), 0)
 
     def test_recompute_does_not_duplicate_cfc(self):
-        # 補完済み（CFC あり）→ 姓修正で再計算 → CFC は重複作成されず 1 件のまま
+        # 非 ja（en・CFC あり）→ 氏名修正で再計算 → CFC は重複作成されず 1 件のまま。
+        # （ja は CFC を作らないため、重複検証は CFC が付く非 ja で行う。）
         c = Contact.objects.create(
             person=self._make_person(),
             status=Contact.Status.PRIMARY,
-            full_name="山田太郎",
-            last_name="山田",
-            lang="ja",
+            full_name="John Smith",
+            last_name="Smith",
+            lang="en",
             salutation_name="",
             salutation_name_is_manual=False,
         )
         self.assertEqual(self._salutation_cfc_count(c), 1)
-        c.last_name = "佐藤"
+        c.full_name = "John Brown"
         c.save()
-        self.assertEqual(c.salutation_name, "佐藤 様")
+        self.assertEqual(c.salutation_name, "Dear John Brown,")
         self.assertEqual(self._salutation_cfc_count(c), 1)
 
     def test_both_empty_no_change_no_cfc(self):
@@ -779,4 +795,17 @@ class ContactSaveSalutationCfcTests(TestCase):
             salutation_name_is_manual=False,
         )
         self.assertEqual(c.salutation_name, "")
+        self.assertEqual(self._salutation_cfc_count(c), 0)
+
+    def test_ja_jp_variant_no_cfc(self):
+        # ja-JP / 大文字等も日本語扱い（lower().startswith("ja")）で CFC を作らない（§1.8 改訂）。
+        c = Contact.objects.create(
+            person=self._make_person(),
+            status=Contact.Status.PRIMARY,
+            full_name="鈴木花子",
+            last_name="鈴木",
+            lang="ja-JP",
+            salutation_name="",
+            salutation_name_is_manual=False,
+        )
         self.assertEqual(self._salutation_cfc_count(c), 0)

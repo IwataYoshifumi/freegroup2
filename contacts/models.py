@@ -393,9 +393,13 @@ class Contact(models.Model):
         self._store_address_source_snapshot()
 
         # 補完が走ったときのみ salutation_name の CFC を low で記録（§1.8）。
-        # 再計算で既に CFC がある場合は再作成しない（UniqueConstraint 違反回避。
-        # 値が変わっても confidence メタは low のまま据え置きで業務上問題ない）。
-        if salutation_was_computed:
+        # ただし日本語（lang が ja 始まり）は「姓＋様」の自明な確定規則のため要確認に入れない
+        # （low CFC を付けない）。ja 以外は敬称の確度が落ちるため従来どおり low CFC を付ける。
+        # 自動生成（値を作ること）自体は言語問わず維持。ja 判定は compute_salutation_name と同じ
+        # 「小文字化して startswith('ja')」に揃える（"ja-JP" 等も日本語扱い）。
+        # 再計算で既に CFC がある場合は再作成しない（UniqueConstraint 違反回避）。
+        is_japanese = (self.lang or "").strip().lower().startswith("ja")
+        if salutation_was_computed and not is_japanese:
             already_recorded = ContactFieldConfidence.objects.filter(
                 contact=self, field_name="salutation_name"
             ).exists()
