@@ -1,0 +1,8 @@
+{# アプリ横断ナビ（名刺管理・メール配信・ユーザ管理）の共通項目。 #}
+{# トップバー（.app-app-switcher）とドロワー（.app-drawer）の両方から include して二重管理を防ぐ。 #}
+{# リンク先・active 判定・権限出し分け（perms）は従来の _topbar.html app_switcher と完全同一。 #}
+<a href="{% url 'persons:person_list' %}" class="{% if active_app == 'cards' %}is-active{% endif %}">名刺管理</a>
+<a href="{% url 'tags:tag_category_list' %}" class="{% if active_app == 'mailings' %}is-active{% endif %}">メール配信</a>
+{% if perms.accounts.retire_user %}
+  <a href="{% url 'accounts:user_list' %}" class="{% if active_app == 'user_mgmt' %}is-active{% endif %}">ユーザ管理</a>
+{% endif %}

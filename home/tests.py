@@ -103,3 +103,59 @@ class HomeNoCandidatePromptTests(TestCase):
         self.assertContains(resp, "複数見つかりました")
         self.assertNotContains(resp, "あなたの名刺がまだ取り込まれていません")
         self.assertNotContains(resp, 'href="%s"' % reverse("cards:card_upload"))
+
+
+class CrossAppNavDrawerTests(TestCase):
+    """≤900px で隠れる横断ナビ（名刺管理・メール配信・ユーザ管理）が、トップバーに加え
+    ドロワーにも出ること、権限出し分けが維持されることの検証。カウントは一意な
+    nav aria-label で構造的に確認する（トップバー＋ドロワーの2箇所）。"""
+
+    def test_home_topbar_and_drawer_show_cross_app_nav(self):
+        user = User.objects.create_user(
+            username="nav_user", password="d", email="n@example.com"
+        )
+        self.client.force_login(user)
+        resp = self.client.get(reverse("home"))
+        self.assertEqual(resp.status_code, 200)
+        # 横断ナビはトップバー（PC幅・従来どおり）とドロワー既定の2箇所に出る。
+        self.assertContains(resp, 'aria-label="アプリ切り替え"', count=2)
+        # 項目（リンク文言）も各2回（topbar＋drawer）。トップバー表示は従来と同一。
+        self.assertContains(resp, "名刺管理", count=2)
+        self.assertContains(resp, "メール配信", count=2)
+        # 権限の無いユーザにはユーザ管理は出ない（従来の出し分け維持）。
+        self.assertNotContains(resp, "ユーザ管理")
+
+    def test_home_cross_app_nav_shown_for_superuser(self):
+        admin = User.objects.create_superuser(
+            username="nav_admin", password="d", email="a@example.com"
+        )
+        self.client.force_login(admin)
+        resp = self.client.get(reverse("home"))
+        # 権限ありなら ユーザ管理 も topbar＋drawer の2回出る。
+        self.assertContains(resp, "ユーザ管理", count=2)
+
+    def test_app_page_drawer_has_cross_app_nav_and_sidebar(self):
+        admin = User.objects.create_superuser(
+            username="nav_admin2", password="d", email="a2@example.com"
+        )
+        self.client.force_login(admin)
+        resp = self.client.get(reverse("accounts:user_list"))
+        self.assertEqual(resp.status_code, 200)
+        # 横断ナビ：トップバー(1)＋ドロワー(1)。
+        self.assertContains(resp, 'aria-label="アプリ切り替え"', count=2)
+        # アプリ内サイドバー：app_content(1)＋ドロワー(1)。横断ナビとサイドバーが両方ドロワーに出る。
+        self.assertContains(resp, 'aria-label="ユーザ管理メニュー"', count=2)
+
+    def test_persons_page_drawer_has_cross_app_nav_and_sidebar(self):
+        # persons は専用 app_base を持たず cards/app_base を継承。ドロワーに横断ナビと
+        # cards サイドバー（名刺管理メニュー）が DOM として両方出ることを担保（CSS の表示是非は別）。
+        user = User.objects.create_superuser(
+            username="nav_persons", password="d", email="np@example.com"
+        )
+        self.client.force_login(user)
+        resp = self.client.get(reverse("persons:person_list"))
+        self.assertEqual(resp.status_code, 200)
+        # 横断ナビ：トップバー(1)＋ドロワー(1)。
+        self.assertContains(resp, 'aria-label="アプリ切り替え"', count=2)
+        # cards サイドバー：app_content(1)＋ドロワー(1)。
+        self.assertContains(resp, 'aria-label="名刺管理メニュー"', count=2)

@@ -23,7 +23,11 @@
         <strong>{% block drawer_title %}メニュー{% endblock %}</strong>
         <button type="button" class="app-btn--icon" data-action="close-drawer" aria-label="閉じる">×</button>
       </div>
-      {% block drawer_content %}{% endblock %}
+      {# 既定はアプリ横断ナビ（トップバーと同一 partial）。≤900px でトップバーが隠れるホーム等の導線を担保。 #}
+      {# app_base.html はこのブロックを上書きするため、上書き側でも横断ナビ partial を明示 include する。 #}
+      {% block drawer_content %}
+        <nav aria-label="アプリ切り替え">{% include "_app_switcher_nav.html" %}</nav>
+      {% endblock %}
     </aside>
     <div class="app-backdrop" data-action="close-drawer"></div>
   </div>

@@ -145,6 +145,8 @@
 {% endblock %}
 
 {% block drawer_content %}
+  {# base 既定を上書きするため、横断ナビ partial を明示 include（≤900px で横断ナビが消えない）。 #}
+  <nav aria-label="アプリ切り替え">{% include "_app_switcher_nav.html" %}</nav>
   <nav>
     <a href="{% url 'home' %}">ホーム</a>
     <a href="{% url 'accounts:profile' %}" class="is-active">プロフィール</a>

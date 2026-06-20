@@ -12,12 +12,15 @@
     if (!drawer || !backdrop) return;
     drawer.classList.add('is-open');
     backdrop.classList.add('is-open');
+    // is-open と aria-hidden を同期（開いている間は支援技術にも公開）。
+    drawer.setAttribute('aria-hidden', 'false');
   }
 
   function closeDrawer() {
     if (!drawer || !backdrop) return;
     drawer.classList.remove('is-open');
     backdrop.classList.remove('is-open');
+    drawer.setAttribute('aria-hidden', 'true');
   }
 
   function toggleUserMenu() {

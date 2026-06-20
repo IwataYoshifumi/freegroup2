@@ -25,5 +25,7 @@
 {% endblock %}
 
 {% block drawer_content %}
+  {# 横断ナビ（上）＋アプリ内サイドバー（下）。base 既定は上書きで消えるため横断ナビを明示 include。 #}
+  <nav aria-label="アプリ切り替え">{% include "_app_switcher_nav.html" %}</nav>
   {% include "mailings/_sidebar.html" %}
 {% endblock %}
