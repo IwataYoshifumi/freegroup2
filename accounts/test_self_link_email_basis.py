@@ -143,6 +143,8 @@ class SelfLinkEmailBasisTests(TestCase):
         self.assertEqual(resp.context["person_link_status"], PersonLinkStatus.SINGLE_CANDIDATE)
 
     # 入口の統合確認（反転）：副一致のみの人物はホーム候補として出ない。
+    # （v1.7 でホームは no_candidate も context に載せ未取り込み促しを出すようになったため、
+    #  「候補に入らない」＝status が no_candidate であることと、候補発見メッセージ非表示で担保する。）
     def test_home_alert_excludes_active_only_match(self):
         user = self._user("me@example.com")
         self._make_person(
@@ -152,7 +154,9 @@ class SelfLinkEmailBasisTests(TestCase):
         self.client.force_login(user)
         resp = self.client.get(reverse("home"))
         self.assertEqual(resp.status_code, 200)
-        self.assertIsNone(resp.context.get("person_link_status"))
+        # 副一致のみ＝候補 0 件（single/multiple にならない）。
+        self.assertEqual(resp.context.get("person_link_status"), PersonLinkStatus.NO_CANDIDATE)
+        self.assertNotContains(resp, "あなたの名刺データが見つかりました")
 
     # ===== 出口 person.status=active ガード =====
 

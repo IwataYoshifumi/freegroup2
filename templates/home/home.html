@@ -10,6 +10,14 @@
     {# ホームは 0 件状態を出さない現行挙動を維持するため show_no_candidate は渡さない（＝偽）。 #}
     {% include "accounts/_link_candidate_alert.html" %}
 
+    {# 本人の名刺が未取り込み（no_candidate）のときだけ、ようこそカードの上に促しを出す。 #}
+    {# profile と同一部品（_link_candidate_alert.html）を show_no_candidate=True で流用し info 枠1枚に統一。 #}
+    {# status ガードで no_candidate のみに限定し、single/multiple（上部 include）との二重表示を防ぐ。 #}
+    {# 間隔は app-alert 自身の margin-bottom で確保（ようこそカードとの分離）。 #}
+    {% if person_link_status == 'no_candidate' %}
+      {% include "accounts/_link_candidate_alert.html" with show_no_candidate=True %}
+    {% endif %}
+
     <section class="app-card">
       <h1>ようこそ FreeGroup2 へ</h1>
       <p class="app-muted">名刺をアップロードして OCR で取り込みましょう。</p>

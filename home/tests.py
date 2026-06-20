@@ -49,3 +49,57 @@ class HomeSingleCandidateLinkTests(TestCase):
         self.assertNotContains(resp, immediate_url)
         # アラート部に即実行 POST フォームが残っていない（action=即実行URL の form 無し）。
         self.assertNotContains(resp, 'action="%s"' % immediate_url)
+
+    def test_single_candidate_does_not_show_no_candidate_prompt(self):
+        # 上部に単一候補アラートが出るときは、下部の no_candidate 促しは出さない。
+        # （"名刺をアップロード" はようこそカード文にも含まれ汎用的なため、促し固有文言と
+        #  アップロード href の不在で判定する。）
+        self.client.force_login(self.user)
+        resp = self.client.get(reverse("home"))
+        self.assertEqual(resp.context["person_link_status"], "single_candidate")
+        self.assertNotContains(resp, "あなたの名刺がまだ取り込まれていません")
+        self.assertNotContains(resp, 'href="%s"' % reverse("cards:card_upload"))
+
+
+class HomeNoCandidatePromptTests(TestCase):
+    """ホームの本人向け名刺取り込み促し（no_candidate）の排他表示検証。"""
+
+    def test_no_candidate_shows_single_upload_prompt(self):
+        # 未取り込み（候補0件）：ようこそカード下部に促しカードが1つだけ出る。
+        user = User.objects.create_user(
+            username="home_nocand", password="d", email="nocand@example.com"
+        )
+        self.client.force_login(user)
+        resp = self.client.get(reverse("home"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.context["person_link_status"], "no_candidate")
+        # 促しカードは二重に出さず1つだけ（固有文言・アップロード href とも 1 回ずつ）。
+        # （"名刺をアップロード" 部分一致はようこそカード文とも重複するためカウント判定に使わない。）
+        self.assertContains(resp, "あなたの名刺がまだ取り込まれていません", count=1)
+        self.assertContains(resp, 'href="%s"' % reverse("cards:card_upload"), count=1)
+        # 候補ありの表示は出ない。
+        self.assertNotContains(resp, "あなたの名刺データが見つかりました")
+
+    def test_multiple_candidates_does_not_show_no_candidate_prompt(self):
+        # 複数候補：上部に複数候補誘導が出て、下部の no_candidate 促しは出さない。
+        user = User.objects.create_user(
+            username="home_multi", password="d", email="multi@example.com"
+        )
+        for name in ("候補A", "候補B"):
+            person = Person.objects.create(status=Person.Status.ACTIVE)
+            contact = Contact.objects.create(
+                person=person,
+                status=Contact.Status.PRIMARY,
+                email="multi@example.com",
+                full_name=name,
+            )
+            person.primary_contact = contact
+            person.save(update_fields=["primary_contact", "updated_at"])
+        self.client.force_login(user)
+        resp = self.client.get(reverse("home"))
+        self.assertEqual(
+            resp.context["person_link_status"], "multiple_candidates_need_merge"
+        )
+        self.assertContains(resp, "複数見つかりました")
+        self.assertNotContains(resp, "あなたの名刺がまだ取り込まれていません")
+        self.assertNotContains(resp, 'href="%s"' % reverse("cards:card_upload"))

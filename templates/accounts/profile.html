@@ -26,11 +26,9 @@
       {# ---- 遷移導線カード（HIG 7.3 ①・3.1）：未紐付け時の主要導線はタイトル直下・左寄せに置く ---- #}
       {# 紐付けは前向きの主要操作なので色は app-btn--primary（青・HIG 3.6）を維持。 #}
       {# 「未紐付けである旨の案内」と「紐付けへ進むボタン」を同カード内にまとめ視線範囲に収める。 #}
-      {# 背景は app-card--info（淡い青）で要対応の注目ゾーンを示す（HIG 原則2：既存 info トーン流用）。 #}
+      {# partial 自身が app-alert app-alert--info（淡い青）で1枚囲むため、外側カードは付けず info 枠1枚に統一（二重枠解消）。 #}
       {# 中身はホームと共通の候補アラート partial。profile は 0 件状態も出すため show_no_candidate=True。 #}
-      <section class="app-card app-card--info">
-        {% include "accounts/_link_candidate_alert.html" with show_no_candidate=True %}
-      </section>
+      {% include "accounts/_link_candidate_alert.html" with show_no_candidate=True %}
 
       <section class="app-card" style="margin-top: var(--app-space-md);">
         {# ユーザ情報は 2 列グリッド（app-detail-grid）。メールは値が長いので 1 列ぶち抜き。 #}

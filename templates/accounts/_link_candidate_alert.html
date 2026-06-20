@@ -39,9 +39,10 @@ home.html の直書きから切り出し、profile からも同一部品・同�
   </div>
 
 {% elif show_no_candidate and person_link_status == 'no_candidate' %}
-  {# プロフィール専用の追加状態：候補 0 件＝名刺未取り込み。アップロードへ誘導（前向き＝青）。 #}
-  <div class="app-alert app-alert--info">
-    <p>あなたの名刺がまだ取り込まれていません。名刺をアップロードすると紐付けできます。</p>
+  {# 候補 0 件＝名刺未取り込み。アップロードへ誘導（前向き＝青）。home／profile 共通で表示。 #}
+  {# テキストとボタンは横並び（flex）。狭幅・長文では flex-wrap でボタンが下に自然折り返し、はみ出さない。 #}
+  <div class="app-alert app-alert--info" style="display: flex; flex-wrap: wrap; align-items: center; gap: var(--app-space-md);">
+    <p style="margin: 0; flex: 1; min-width: 240px;">あなたの名刺がまだ取り込まれていません。名刺をアップロードすると紐付けできます。</p>
     <a href="{% url 'cards:card_upload' %}" class="app-btn app-btn--primary">名刺をアップロード</a>
   </div>
 {% endif %}

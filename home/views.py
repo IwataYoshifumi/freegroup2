@@ -1,7 +1,6 @@
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.views.generic import TemplateView
 
-from accounts.constants import PersonLinkStatus
 from accounts.services import self_link_alert_context
 from back_navigator.back_navigator import BackNavigator
 
@@ -27,10 +26,9 @@ class HomeView(LoginRequiredMixin, TemplateView):
 
         if user.person is None:
             # 状態算出は accounts.services の共通ヘルパーに一本化（profile と同一基準）。
-            # ホームは 0 件状態を context に載せない現行契約を維持（candidate 有り時のみ更新）。
-            # partial にも show_no_candidate を渡さず 0 件アラートは描画しない。
-            alert_ctx = self_link_alert_context(user)
-            if alert_ctx["person_link_status"] != PersonLinkStatus.NO_CANDIDATE:
-                ctx.update(alert_ctx)
+            # 0 件（no_candidate）も含め常に context に載せる。ようこそカード下部に本人向けの
+            # 名刺取り込み促しカードを出すため（上部 include は show_no_candidate 未指定のままなので
+            # 0 件アラートを描画せず、single/multiple の既存表示挙動は不変）。
+            ctx.update(self_link_alert_context(user))
 
         return ctx
