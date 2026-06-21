@@ -6,7 +6,6 @@
     <section class="app-card">
       <div class="app-section__header">
         <h1>パーミッション一覧</h1>
-        <span class="app-muted">閲覧専用（permission はコード定義・編集は Django 管理サイト）</span>
       </div>
 
       {% if messages %}
@@ -17,52 +16,81 @@
         {% endfor %}
       {% endif %}
 
-      <p class="app-muted">各 permission を「含むグループ」を逆引き表示します。フレームワーク app（admin/auth/contenttypes/sessions）由来は除外しています。</p>
+      {# 閲覧専用の補足は見出し行から出し、案内文の直前に独立行で置く（控えめ表示の app-muted は維持）。 #}
+      <p class="app-muted">閲覧専用（permission はコード定義・編集は Django 管理サイト）</p>
+      <p class="app-muted">各 permission を「含むグループ」を逆引き表示します。フレームワーク app（admin/auth/contenttypes/sessions）由来は初期表示では隠しています。「アプリ」の絞り込みから表示できます。</p>
 
-      <form method="get" class="app-form-grid" style="margin-bottom: var(--app-space-md);">
+      {# 上段：検索（codename・name 部分一致）。下段にアプリ▼・対象モデル▼を横並び。いずれも JS 即時フィルタ。 #}
+      <div class="app-form__group" style="margin-bottom: var(--app-space-md);">
+        <label class="app-form__label" for="id_perm_q">検索</label>
+        <input type="text" id="id_perm_q" class="app-input js-perm-filter-text"
+               placeholder="codename・name で絞り込み" autocomplete="off">
+      </div>
+      <div style="display: flex; gap: var(--app-space-md); flex-wrap: wrap; margin-bottom: var(--app-space-md);">
         <div class="app-form__group">
-          <label class="app-form__label" for="id_q">検索</label>
-          <input type="text" id="id_q" name="q" value="{{ q }}" class="app-input"
-                 placeholder="codename・name・app／モデル">
+          <label class="app-form__label">アプリ</label>
+          <div class="app-filter-menu" id="permAppMenu">
+            <button type="button" class="app-btn app-btn--secondary js-perm-app-toggle" aria-haspopup="true">
+              アプリ（<span class="js-perm-app-count">{{ app_initial_count }}</span>件選択中） ▼
+            </button>
+            <div class="app-filter-dropdown" role="group" aria-label="アプリの絞り込み">
+              {# フレームワーク app（framework_apps）は初期OFF＝業務appのみ初期表示。それ以外は初期ON。 #}
+              {% for app in app_labels %}
+                <label class="app-filter-dropdown__item">
+                  <input type="checkbox" class="js-perm-app-check" value="{{ app }}"{% if app not in framework_apps %} checked{% endif %}>
+                  <span>{{ app }}</span>
+                </label>
+              {% endfor %}
+            </div>
+          </div>
         </div>
-        <div class="app-action-area">
-          <button type="submit" class="app-btn app-btn--secondary app-btn--sm">検索</button>
-          {% if q %}
-            <a href="{% url 'accounts:permission_list' %}" class="app-btn app-btn--secondary app-btn--sm">クリア</a>
-          {% endif %}
+        <div class="app-form__group">
+          <label class="app-form__label">対象モデル</label>
+          <div class="app-filter-menu" id="permCtMenu">
+            <button type="button" class="app-btn app-btn--secondary js-perm-ct-toggle" aria-haspopup="true">
+              対象モデル（<span class="js-perm-ct-count">{{ content_types|length }}</span>件選択中） ▼
+            </button>
+            <div class="app-filter-dropdown" role="group" aria-label="対象モデルの絞り込み">
+              {% for ct in content_types %}
+                <label class="app-filter-dropdown__item">
+                  <input type="checkbox" class="js-perm-ct-check" value="{{ ct }}" checked>
+                  <span>{{ ct }}</span>
+                </label>
+              {% endfor %}
+            </div>
+          </div>
         </div>
-      </form>
+      </div>
     </section>
 
-    {% for section, perms in perm_sections.items %}
-      <section class="app-card" style="margin-top: var(--app-space-md);">
-        <h2>{{ section }}</h2>
-        <div class="app-table-wrapper">
-          <table class="app-table app-table--nowrap">
-            <thead>
-              <tr><th>codename</th><th>説明（name）</th><th>含むグループ</th></tr>
-            </thead>
-            <tbody>
-              {% for p in perms %}
-                <tr>
-                  <td>{{ p.codename }}</td>
-                  <td>{{ p.name }}</td>
-                  <td>
-                    {% for g in p.group_set.all %}
-                      <a href="{% url 'accounts:group_detail' pk=g.pk %}">{{ g.name }}</a>{% if not forloop.last %}, {% endif %}
-                    {% empty %}
-                      <span class="app-muted">（どのグループにも未付与）</span>
-                    {% endfor %}
-                  </td>
-                </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-      </section>
-    {% empty %}
-      <section class="app-card" style="margin-top: var(--app-space-md);">
-        <p>該当する permission はありません。</p>
-      </section>
-    {% endfor %}
+    <section class="app-card" style="margin-top: var(--app-space-md);">
+      {# content_type ごとの別表をやめ1表に統合。「app/モデル」列を追加し、行に data 属性を持たせて JS フィルタ対象にする。 #}
+      <div class="app-table-wrapper">
+        <table class="app-table app-table--nowrap" id="permTable">
+          <thead>
+            <tr><th>app/モデル</th><th>codename</th><th>説明（name）</th><th>含むグループ</th></tr>
+          </thead>
+          <tbody class="js-perm-tbody">
+            {% for row in perm_rows %}
+              <tr class="js-perm-row" data-app="{{ row.perm.content_type.app_label }}" data-ct="{{ row.section }}" data-search="{{ row.perm.codename|lower }} {{ row.perm.name|lower }}">
+                <td>{{ row.section }}</td>
+                <td>{{ row.perm.codename }}</td>
+                <td>{{ row.perm.name }}</td>
+                <td>
+                  {% for g in row.perm.group_set.all %}
+                    <a href="{% url 'accounts:group_detail' pk=g.pk %}">{{ g.name }}</a>{% if not forloop.last %}, {% endif %}
+                  {% empty %}
+                    <span class="app-muted">（どのグループにも未付与）</span>
+                  {% endfor %}
+                </td>
+              </tr>
+            {% empty %}
+              <tr><td colspan="4">該当する permission はありません。</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {# テキスト＋モデル絞り込みで該当0件のとき JS が表示（既定は隠す）。 #}
+      <p class="app-muted js-perm-empty" hidden>条件に一致する permission はありません。</p>
+    </section>
 {% endblock %}

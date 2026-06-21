@@ -598,28 +598,33 @@ class PermissionListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
     permission_required = "accounts.manage_role"
 
     def get_queryset(self):
-        qs = (
+        # 全 permission を app/モデル順→codename順で取得（フレームワーク app も含める＝除外しない。
+        # アプリ▼の初期OFFで隠す方式へ移行）。テキスト/モデル/アプリ絞り込みはクライアント側 JS
+        # 即時フィルタで行うためサーバサイド検索（q）は持たない。
+        return (
             Permission.objects.select_related("content_type")
-            .exclude(content_type__app_label__in=FRAMEWORK_APP_LABELS)
             .prefetch_related("group_set")
             .order_by("content_type__app_label", "content_type__model", "codename")
         )
-        q = self.request.GET.get("q", "").strip()
-        if q:
-            qs = qs.filter(
-                Q(codename__icontains=q)
-                | Q(name__icontains=q)
-                | Q(content_type__app_label__icontains=q)
-                | Q(content_type__model__icontains=q)
-            )
-        return qs
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        # ドメイン app に絞り済みなので hidden は捨てる。グルーピングは (C-2) と共通。
-        sections, _ = group_permissions_by_section(context["permissions"])
-        context["perm_sections"] = sections
-        context["q"] = self.request.GET.get("q", "")
+        # 各行に app/モデル見出しを持たせるため (content_type ラベル, permission) を1リストで渡す
+        # （グループ別表をやめ1表に統合）。並びは queryset の app/モデル順→codename順を踏襲。
+        rows = [
+            {"section": _permission_section_label(p.content_type), "perm": p}
+            for p in context["permissions"]
+        ]
+        context["perm_rows"] = rows
+        # ▼ドロップダウンのチェックボックス列挙用（出現順を保った distinct リスト）。
+        context["content_types"] = list(dict.fromkeys(r["section"] for r in rows))
+        context["app_labels"] = list(dict.fromkeys(r["perm"].content_type.app_label for r in rows))
+        # フレームワーク app はアプリ▼で初期OFF（業務appのみ初期表示）にするためテンプレへ渡す。
+        context["framework_apps"] = FRAMEWORK_APP_LABELS
+        # アプリ▼の初期選択件数（業務app数）。JS でも更新するが初期描画を正確にするため。
+        context["app_initial_count"] = sum(
+            1 for a in context["app_labels"] if a not in FRAMEWORK_APP_LABELS
+        )
         context["active_app"] = "user_mgmt"
         context["active_menu"] = "accounts:permission_list"
         return context

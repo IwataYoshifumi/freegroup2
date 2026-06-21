@@ -187,6 +187,74 @@
   });
 })();
 
+/* パーミッション一覧：アプリ▼・対象モデル▼（各複数選択）＋テキストの即時フィルタ。該当ページのみ動作。
+   表示は appOk && ctOk && textOk。▼開閉はユーザーメニュー同型（is-open トグル／外側・Escapeで閉じる／
+   内部チェック操作では閉じない）。開閉は .app-filter-menu 単位に一般化しアプリ▼・モデル▼で共用。 */
+(function () {
+  const table = document.getElementById('permTable');
+  if (!table) return;
+  const textInput = document.querySelector('.js-perm-filter-text');
+  const appChecks = Array.prototype.slice.call(document.querySelectorAll('.js-perm-app-check'));
+  const ctChecks = Array.prototype.slice.call(document.querySelectorAll('.js-perm-ct-check'));
+  const rows = Array.prototype.slice.call(table.querySelectorAll('.js-perm-row'));
+  const appCountEl = document.querySelector('.js-perm-app-count');
+  const ctCountEl = document.querySelector('.js-perm-ct-count');
+  const emptyEl = document.querySelector('.js-perm-empty');
+  const menus = Array.prototype.slice.call(document.querySelectorAll('.app-filter-menu'));
+
+  function checkedSet(checks, countEl) {
+    const set = {};
+    let n = 0;
+    checks.forEach(function (c) { if (c.checked) { set[c.value] = true; n++; } });
+    if (countEl) countEl.textContent = String(n);
+    return set;
+  }
+
+  function applyFilter() {
+    const text = (textInput ? textInput.value : '').trim().toLowerCase();
+    const checkedApps = checkedSet(appChecks, appCountEl);
+    const checkedCts = checkedSet(ctChecks, ctCountEl);
+    let visible = 0;
+    rows.forEach(function (row) {
+      const appOk = checkedApps[row.getAttribute('data-app')] === true;
+      const ctOk = checkedCts[row.getAttribute('data-ct')] === true;
+      const search = row.getAttribute('data-search') || '';
+      const textOk = !text || search.indexOf(text) !== -1;
+      const show = appOk && ctOk && textOk;
+      row.hidden = !show;
+      if (show) visible++;
+    });
+    if (emptyEl) emptyEl.hidden = visible !== 0;
+  }
+
+  function closeAllMenus(except) {
+    menus.forEach(function (m) { if (m !== except) m.classList.remove('is-open'); });
+  }
+  menus.forEach(function (menu) {
+    const toggle = menu.querySelector('button[aria-haspopup]');
+    if (!toggle) return;
+    toggle.addEventListener('click', function (event) {
+      // 外側クリッククローズに即座に拾われないよう伝播を止める。
+      event.stopPropagation();
+      const willOpen = !menu.classList.contains('is-open');
+      closeAllMenus(menu);
+      menu.classList.toggle('is-open', willOpen);
+    });
+  });
+  document.addEventListener('click', function (event) {
+    // ドロップダウン内（チェックボックス含む）クリックでは閉じない。
+    if (!event.target.closest('.app-filter-menu')) closeAllMenus(null);
+  });
+  document.addEventListener('keydown', function (event) {
+    if (event.key === 'Escape') closeAllMenus(null);
+  });
+
+  if (textInput) textInput.addEventListener('input', applyFilter);
+  appChecks.forEach(function (c) { c.addEventListener('change', applyFilter); });
+  ctChecks.forEach(function (c) { c.addEventListener('change', applyFilter); });
+  applyFilter();
+})();
+
 /* PC向けツールチップ。テーブルのoverflowに邪魔されないようbody直下に表示する。 */
 (function () {
   const canHover = window.matchMedia && window.matchMedia('(hover: hover)').matches;
