@@ -2,9 +2,14 @@
 <header class="app-topbar">
   <div class="app-topbar__left">
     <button type="button" class="app-btn--icon app-topbar__menu-btn" data-action="toggle-drawer" aria-label="メニューを開く">≡</button>
-    <div>
-      <a href="{% url 'home' %}" class="app-topbar__system-name">FreeGroup2</a>
+    {# ロゴ＝ホームリンクは維持。隣の▼トグルはスマホ幅のみ表示し横断ナビをロゴ直下に出す（PC は .app-app-switcher の横並び）。 #}
+    <div class="app-app-menu" id="appMenu">
+      <div class="app-app-menu__logo">
+        <a href="{% url 'home' %}" class="app-topbar__system-name">FreeGroup2</a>
+        <button type="button" class="app-btn--icon app-app-menu__toggle" data-action="toggle-app-menu" aria-haspopup="true" aria-label="アプリ切り替えを開く">▼</button>
+      </div>
       <div class="app-topbar__current-app">{% block app_name %}{% endblock %}</div>
+      <nav class="app-app-dropdown" aria-label="アプリ切り替え">{% include "_app_switcher_nav.html" %}</nav>
     </div>
   </div>
 

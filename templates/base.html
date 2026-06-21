@@ -12,7 +12,7 @@
   <link rel="icon" href="{% static 'images/app_favicon_192x192.png' %}" sizes="192x192" type="image/png">
   <script src="{% static 'js/app.js' %}" defer></script>
 </head>
-<body>
+<body class="{% block body_class %}{% endblock %}">
   <div class="app-shell">
     {% include "_topbar.html" %}
 
@@ -23,11 +23,9 @@
         <strong>{% block drawer_title %}メニュー{% endblock %}</strong>
         <button type="button" class="app-btn--icon" data-action="close-drawer" aria-label="閉じる">×</button>
       </div>
-      {# 既定はアプリ横断ナビ（トップバーと同一 partial）。≤900px でトップバーが隠れるホーム等の導線を担保。 #}
-      {# app_base.html はこのブロックを上書きするため、上書き側でも横断ナビ partial を明示 include する。 #}
-      {% block drawer_content %}
-        <nav aria-label="アプリ切り替え">{% include "_app_switcher_nav.html" %}</nav>
-      {% endblock %}
+      {# 既定は空。ドロワー（≡）はアプリ内サイドバーを持つページ（app_base 継承）でのみ使う。 #}
+      {# 横断ナビはトップバーの▼ドロップダウン（スマホ）／横並び（PC）側で担保し、ドロワーには入れない。 #}
+      {% block drawer_content %}{% endblock %}
     </aside>
     <div class="app-backdrop" data-action="close-drawer"></div>
   </div>

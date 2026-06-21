@@ -135,17 +135,24 @@ a { color: inherit; text-decoration: none; }
   cursor: pointer;
 }
 
-.app-user-dropdown {
+/* ドロップダウン共通の見た目（枠・影・背景・角丸・余白）。ユーザーメニューとアプリ切り替え▼で共有し、
+   影の rgba ハードコードを1箇所に集約（二重管理を解消）。位置・幅は各セレクタ側で個別指定する。 */
+.app-user-dropdown,
+.app-app-dropdown,
+.app-filter-dropdown {
   display: none;
   position: absolute;
-  right: 0;
   top: 42px;
-  width: 180px;
   background: var(--app-surface);
   border: 1px solid var(--app-border);
   border-radius: var(--app-radius);
   box-shadow: 0 12px 28px rgba(15, 23, 42, 0.12);
   padding: var(--app-space-sm);
+}
+
+.app-user-dropdown {
+  right: 0;
+  width: 180px;
 }
 
 .app-user-dropdown.is-open { display: block; }
@@ -158,6 +165,48 @@ a { color: inherit; text-decoration: none; }
 }
 
 .app-user-dropdown a:hover { background: #f1f5f9; }
+
+/* ロゴ横アプリ切り替えメニュー（▼）。スマホ幅で横断ナビをロゴ直下にドロップダウン表示する。
+   PC幅では .app-app-switcher の横並びを使い、▼トグル・ドロップダウンは出さない（下の @media で出し分け）。
+   実装はユーザーメニュー（.app-user-menu / .app-user-dropdown）と同型。 */
+.app-app-menu { position: relative; }
+.app-app-menu__logo { display: flex; align-items: center; gap: var(--app-space-xs); }
+.app-app-menu__toggle { display: none; min-height: 28px; padding: 2px 8px; }
+
+.app-app-dropdown {
+  left: 0;
+  width: 200px;
+}
+
+.app-app-menu.is-open .app-app-dropdown { display: block; }
+
+.app-app-dropdown a {
+  display: block;
+  padding: 10px;
+  border-radius: 8px;
+}
+
+.app-app-dropdown a:hover { background: #f1f5f9; }
+
+/* 対象モデル絞り込み▼（パーミッション一覧）。見た目は上のドロップダウン共通宣言を流用し、
+   多数のチェックボックスを縦スクロールで収める。位置・幅・最大高のみ個別指定。 */
+.app-filter-menu { position: relative; }
+.app-filter-dropdown {
+  left: 0;
+  width: 280px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.app-filter-menu.is-open .app-filter-dropdown { display: block; }
+.app-filter-dropdown__item {
+  display: flex;
+  align-items: center;
+  gap: var(--app-space-xs);
+  padding: 6px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.app-filter-dropdown__item:hover { background: #f1f5f9; }
 
 .app-main-area {
   display: flex;
@@ -500,7 +549,10 @@ a { color: inherit; text-decoration: none; }
 .app-backdrop.is-open { display: block; }
 
 @media (max-width: 900px) {
-  .app-topbar__menu-btn { display: inline-flex; align-items: center; justify-content: center; }
+  /* ≡ はアプリ内サイドバーを持つページ（body.has-sidebar）でのみ表示。home/profile では出さない。 */
+  body.has-sidebar .app-topbar__menu-btn { display: inline-flex; align-items: center; justify-content: center; }
+  /* ロゴ横の▼トグルはスマホ幅のみ表示（横断ナビを▼ドロップダウンへ集約）。 */
+  .app-app-menu__toggle { display: inline-flex; align-items: center; justify-content: center; }
   .app-app-switcher { display: none; }
   .app-sidebar { display: none; }
   /* ドロワー内に複製したサイドバーは隠さず表示を戻す（メインレイアウト側のみ非表示を維持）。

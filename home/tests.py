@@ -106,56 +106,74 @@ class HomeNoCandidatePromptTests(TestCase):
 
 
 class CrossAppNavDrawerTests(TestCase):
-    """≤900px で隠れる横断ナビ（名刺管理・メール配信・ユーザ管理）が、トップバーに加え
-    ドロワーにも出ること、権限出し分けが維持されることの検証。カウントは一意な
-    nav aria-label で構造的に確認する（トップバー＋ドロワーの2箇所）。"""
+    """横断ナビ（名刺管理・メール配信・ユーザ管理）はトップバー（PC横並び .app-app-switcher ＋
+    スマホ▼ .app-app-dropdown）に出し、ドロワー（≡）はアプリ内サイドバーのみ。≡ は
+    サイドバーありページ（body.has-sidebar）でのみ。カウントは一意な nav aria-label で確認。
 
-    def test_home_topbar_and_drawer_show_cross_app_nav(self):
+    横断ナビ aria-label="アプリ切り替え" は常に2（switcher＋dropdown、どちらもトップバー）。
+    3 になる場合はドロワーに横断ナビが残っている＝撤去漏れの検出になる。"""
+
+    def test_home_has_no_sidebar_flag_and_nav_only_in_topbar(self):
         user = User.objects.create_user(
             username="nav_user", password="d", email="n@example.com"
         )
         self.client.force_login(user)
         resp = self.client.get(reverse("home"))
         self.assertEqual(resp.status_code, 200)
-        # 横断ナビはトップバー（PC幅・従来どおり）とドロワー既定の2箇所に出る。
+        # home はサイドバー無し → body に has-sidebar が付かない（≡ を CSS で出さない条件）。
+        self.assertContains(resp, '<body class="">')
+        # 横断ナビは switcher＋▼dropdown の2箇所のみ（ドロワーには入れない）。
         self.assertContains(resp, 'aria-label="アプリ切り替え"', count=2)
-        # 項目（リンク文言）も各2回（topbar＋drawer）。トップバー表示は従来と同一。
+        self.assertContains(resp, 'class="app-app-dropdown"')
         self.assertContains(resp, "名刺管理", count=2)
         self.assertContains(resp, "メール配信", count=2)
-        # 権限の無いユーザにはユーザ管理は出ない（従来の出し分け維持）。
+        # 権限の無いユーザにはユーザ管理は出ない（出し分け維持）。
         self.assertNotContains(resp, "ユーザ管理")
 
-    def test_home_cross_app_nav_shown_for_superuser(self):
+    def test_home_user_mgmt_shown_for_superuser(self):
         admin = User.objects.create_superuser(
             username="nav_admin", password="d", email="a@example.com"
         )
         self.client.force_login(admin)
         resp = self.client.get(reverse("home"))
-        # 権限ありなら ユーザ管理 も topbar＋drawer の2回出る。
+        # 権限ありなら ユーザ管理 も switcher＋▼dropdown の2回出る。
         self.assertContains(resp, "ユーザ管理", count=2)
 
-    def test_app_page_drawer_has_cross_app_nav_and_sidebar(self):
+    def test_profile_has_no_sidebar_flag(self):
+        user = User.objects.create_user(
+            username="nav_profile", password="d", email="pf@example.com"
+        )
+        self.client.force_login(user)
+        resp = self.client.get(reverse("accounts:profile"))
+        self.assertEqual(resp.status_code, 200)
+        # profile はサイドバー無し → ≡ を出さない（has-sidebar 無し）。
+        self.assertContains(resp, '<body class="">')
+
+    def test_app_page_has_sidebar_flag_and_sidebar_in_drawer_without_nav(self):
         admin = User.objects.create_superuser(
             username="nav_admin2", password="d", email="a2@example.com"
         )
         self.client.force_login(admin)
         resp = self.client.get(reverse("accounts:user_list"))
         self.assertEqual(resp.status_code, 200)
-        # 横断ナビ：トップバー(1)＋ドロワー(1)。
-        self.assertContains(resp, 'aria-label="アプリ切り替え"', count=2)
-        # アプリ内サイドバー：app_content(1)＋ドロワー(1)。横断ナビとサイドバーが両方ドロワーに出る。
+        # サイドバーありページ → ≡ を出す（has-sidebar 付与）。
+        self.assertContains(resp, '<body class="has-sidebar">')
+        # アプリ内サイドバー：app_content(1)＋ドロワー(1)＝2。ドロワーにサイドバーが入る。
         self.assertContains(resp, 'aria-label="ユーザ管理メニュー"', count=2)
+        # 横断ナビは switcher＋▼dropdown の2のみ（=3 ならドロワー撤去漏れ）。
+        self.assertContains(resp, 'aria-label="アプリ切り替え"', count=2)
+        self.assertContains(resp, 'class="app-app-dropdown"')
 
-    def test_persons_page_drawer_has_cross_app_nav_and_sidebar(self):
-        # persons は専用 app_base を持たず cards/app_base を継承。ドロワーに横断ナビと
-        # cards サイドバー（名刺管理メニュー）が DOM として両方出ることを担保（CSS の表示是非は別）。
+    def test_persons_page_has_sidebar_flag_and_sidebar_in_drawer_without_nav(self):
+        # persons は専用 app_base を持たず cards/app_base を継承。
         user = User.objects.create_superuser(
             username="nav_persons", password="d", email="np@example.com"
         )
         self.client.force_login(user)
         resp = self.client.get(reverse("persons:person_list"))
         self.assertEqual(resp.status_code, 200)
-        # 横断ナビ：トップバー(1)＋ドロワー(1)。
-        self.assertContains(resp, 'aria-label="アプリ切り替え"', count=2)
-        # cards サイドバー：app_content(1)＋ドロワー(1)。
+        self.assertContains(resp, '<body class="has-sidebar">')
+        # cards サイドバー：app_content(1)＋ドロワー(1)＝2。
         self.assertContains(resp, 'aria-label="名刺管理メニュー"', count=2)
+        # 横断ナビは switcher＋▼dropdown の2のみ（ドロワーに横断ナビ無し）。
+        self.assertContains(resp, 'aria-label="アプリ切り替え"', count=2)

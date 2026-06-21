@@ -2,6 +2,7 @@
   const drawer = document.getElementById('drawer');
   const backdrop = document.querySelector('.app-backdrop');
   const userMenu = document.getElementById('userMenu');
+  const appMenu = document.getElementById('appMenu');
   const modalBackdrop = document.querySelector('.app-modal-backdrop');
   const toast = document.querySelector('.app-toast');
   const loadingOverlay = document.querySelector('.app-loading-overlay');
@@ -31,6 +32,17 @@
   function closeUserMenu() {
     if (!userMenu) return;
     userMenu.classList.remove('is-open');
+  }
+
+  // ロゴ横の▼（横断ナビ）ドロップダウン。ユーザーメニューと同型（is-open トグル）。
+  function toggleAppMenu() {
+    if (!appMenu) return;
+    appMenu.classList.toggle('is-open');
+  }
+
+  function closeAppMenu() {
+    if (!appMenu) return;
+    appMenu.classList.remove('is-open');
   }
 
   function toggleCollapsible(event, trigger) {
@@ -129,6 +141,7 @@
     'toggle-drawer': openDrawer,
     'close-drawer': closeDrawer,
     'toggle-user-menu': toggleUserMenu,
+    'toggle-app-menu': toggleAppMenu,
     'toggle-collapsible': toggleCollapsible,
     'toggle-drawer-section': toggleDrawerSection,
     'open-modal': openModal,
@@ -158,12 +171,17 @@
     if (!event.target.closest('.app-user-menu')) {
       closeUserMenu();
     }
+
+    if (!event.target.closest('.app-app-menu')) {
+      closeAppMenu();
+    }
   });
 
   document.addEventListener('keydown', function (event) {
     if (event.key === 'Escape') {
       closeDrawer();
       closeUserMenu();
+      closeAppMenu();
       closeModal();
     }
   });
