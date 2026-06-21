@@ -3,6 +3,8 @@
 {% block title %}{{ object.username }} — ユーザ詳細 — FreeGroup2{% endblock %}
 
 {% block content %}
+    {# 紐付け確認画面（link_user_person_confirm）と同じ収まり：最大幅 960px・左寄せ。 #}
+    <div style="max-width: 960px; margin-inline: 0;">
     {% if messages %}
       {% for message in messages %}
         <div class="app-alert app-alert--{% if message.tags == 'error' %}danger{% else %}info{% endif %}">
@@ -11,62 +13,106 @@
       {% endfor %}
     {% endif %}
 
-    <section class="app-card">
-      <div class="app-section__header">
+    {# 見出し行に見出し＋全ボタンを横並び（space-between）。左群＝見出し＋ロール変更、右群＝退職処理→戻る。 #}
+    {# 全ボタン app-btn--sm・align-items:center で見出しと同じ行に高さ・縦位置を揃える。 #}
+    <div class="app-section__header">
+      <div style="display: flex; align-items: center; gap: var(--app-space-sm); flex-wrap: wrap;">
         <h1>ユーザ詳細</h1>
-        <a href="{% url 'accounts:user_list' %}" class="app-btn app-btn--secondary app-btn--sm">戻る</a>
-      </div>
-
-      <div class="app-detail-item">
-        <div class="app-detail-label">ユーザ名</div>
-        <div class="app-detail-value">{{ object.username }}</div>
-      </div>
-      <div class="app-detail-item">
-        <div class="app-detail-label">氏名</div>
-        <div class="app-detail-value">{{ object.get_full_name|default:"-" }}</div>
-      </div>
-      <div class="app-detail-item">
-        <div class="app-detail-label">メール</div>
-        <div class="app-detail-value">{{ object.email|default:"-" }}</div>
-      </div>
-      <div class="app-detail-item">
-        <div class="app-detail-label">ロール</div>
-        <div class="app-detail-value">{{ object.role|default:"-" }}</div>
-      </div>
-      <div class="app-detail-item">
-        <div class="app-detail-label">部署</div>
-        <div class="app-detail-value">{{ object.department|default:"-" }}</div>
-      </div>
-      <div class="app-detail-item">
-        <div class="app-detail-label">認証ソース</div>
-        <div class="app-detail-value">{{ object.auth_source }}</div>
-      </div>
-      <div class="app-detail-item">
-        <div class="app-detail-label">状態</div>
-        <div class="app-detail-value">{% if object.is_active %}現職{% else %}退職済{% endif %}</div>
-      </div>
-      <div class="app-detail-item">
-        <div class="app-detail-label">紐付き Person</div>
-        <div class="app-detail-value">
-          {% if object.person %}
-            {{ object.person }}
-          {% else %}
-            -
-          {% endif %}
-        </div>
-      </div>
-    </section>
-
-    {% if object.is_active %}
-      <div class="app-action-area" style="margin-top: var(--app-space-md);">
-        <a href="{% url 'accounts:retire_user' user_id=object.id %}" class="app-btn app-btn--warning">退職処理</a>
-        {% if perms.accounts.assign_role_to_user and object.id != request.user.id and object.role.code != 'admin' %}
-          <a href="{% url 'accounts:assign_role' user_id=object.id %}" class="app-btn app-btn--primary">ロール変更</a>
+        {% if object.is_active and perms.accounts.assign_role_to_user and object.id != request.user.id and object.role.code != 'admin' %}
+          {# ロール変更は編集系＝緑（HIG 3.6）。 #}
+          <a href="{% url 'accounts:assign_role' user_id=object.id %}" class="app-btn app-btn--success app-btn--sm">ロール変更</a>
         {% endif %}
       </div>
-    {% else %}
-      <div class="app-action-area" style="margin-top: var(--app-space-md);">
+      <div style="display: flex; align-items: center; gap: var(--app-space-sm);">
+        {% if object.is_active %}
+          {# 退職処理は is_active を戻せば復帰でき不可逆ではないため warning（黄）。 #}
+          <a href="{% url 'accounts:retire_user' user_id=object.id %}" class="app-btn app-btn--warning app-btn--sm">退職処理</a>
+        {% endif %}
+        <a href="{% url 'accounts:user_list' %}" class="app-btn app-btn--secondary app-btn--sm">戻る</a>
+      </div>
+    </div>
+
+    {% if not object.is_active %}
+      {# 退職済み時の表示は現状維持。 #}
+      <div class="app-action-area" style="margin-bottom: var(--app-space-md);">
         <span class="app-muted">このユーザは退職済みです</span>
       </div>
     {% endif %}
+
+    {# ---- 左＝ユーザー情報／右＝紐付き人物（紐付け確認画面と同じインライン flex 2カラム） ---- #}
+    <div style="display: flex; gap: var(--app-space-md); flex-wrap: wrap; align-items: flex-start;">
+
+      {# ---- 左：ユーザー情報（現状の項目を維持） ---- #}
+      <section class="app-card" style="flex: 1; min-width: 260px;">
+        <div class="app-section__header">
+          <h2>ユーザー情報</h2>
+        </div>
+        <div class="app-detail-item">
+          <div class="app-detail-label">ユーザ名</div>
+          <div class="app-detail-value">{{ object.username }}</div>
+        </div>
+        <div class="app-detail-item">
+          <div class="app-detail-label">氏名</div>
+          <div class="app-detail-value">{{ object.get_full_name|default:"-" }}</div>
+        </div>
+        <div class="app-detail-item">
+          <div class="app-detail-label">メール</div>
+          <div class="app-detail-value">{{ object.email|default:"-" }}</div>
+        </div>
+        <div class="app-detail-item">
+          <div class="app-detail-label">ロール</div>
+          <div class="app-detail-value">{{ object.role|default:"-" }}</div>
+        </div>
+        <div class="app-detail-item">
+          <div class="app-detail-label">部署</div>
+          <div class="app-detail-value">{{ object.department|default:"-" }}</div>
+        </div>
+        <div class="app-detail-item">
+          <div class="app-detail-label">認証ソース</div>
+          <div class="app-detail-value">{{ object.auth_source }}</div>
+        </div>
+        <div class="app-detail-item">
+          <div class="app-detail-label">状態</div>
+          <div class="app-detail-value">{% if object.is_active %}現職{% else %}退職済{% endif %}</div>
+        </div>
+      </section>
+
+      {# ---- 右：紐付き人物（primary_contact 経由。紐付け確認画面の右カラムと同項目） ---- #}
+      <section class="app-card" style="flex: 1; min-width: 260px;">
+        <div class="app-section__header">
+          <h2>紐付き人物</h2>
+          {% if object.person %}
+            <a href="{% url 'persons:person_detail' pk=object.person.id %}" class="app-btn app-btn--secondary app-btn--sm">人物の詳細へ</a>
+          {% endif %}
+        </div>
+        {% if object.person %}
+          {% with c=object.person.primary_contact %}
+            {% if c %}
+              <div class="app-detail-item">
+                <div class="app-detail-label">氏名</div>
+                <div class="app-detail-value">{{ c.full_name|default:"-" }}</div>
+              </div>
+              <div class="app-detail-item">
+                <div class="app-detail-label">メールアドレス</div>
+                <div class="app-detail-value">{{ c.email|default:"-" }}</div>
+              </div>
+              <div class="app-detail-item">
+                {# 会社名・部署名・役職を名刺のように1行で（会社 → 部署 → 役職）。全て空なら "-"。 #}
+                <div class="app-detail-label">所属（会社・部署・役職）</div>
+                <div class="app-detail-value">{% if c.organization or c.department or c.title %}{{ c.organization }} {{ c.department }} {{ c.title }}{% else %}-{% endif %}</div>
+              </div>
+              <div class="app-detail-item">
+                <div class="app-detail-label">携帯番号</div>
+                <div class="app-detail-value">{{ c.mobile_phone|default:"-" }}</div>
+              </div>
+            {% else %}
+              <p class="app-muted">（主コンタクト未設定の人物です）</p>
+            {% endif %}
+          {% endwith %}
+        {% else %}
+          <p class="app-muted">（人物は紐付けられていません）</p>
+        {% endif %}
+      </section>
+    </div>
+    </div>
 {% endblock %}

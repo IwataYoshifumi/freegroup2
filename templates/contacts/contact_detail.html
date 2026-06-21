@@ -23,7 +23,7 @@
 
   {# ============================================================ #}
   {# タイトル直下アクション帯（HIG 7.3）。カード枠なしでじか置き。        #}
-  {# 左群＝この人物への操作（別肩書を追加・紐付け）、右端＝マージ（控えめ）／戻る。 #}
+  {# 左群＝この人物への操作（別肩書を追加）、右端＝マージ（控えめ）／戻る。紐付けはカード内セクションへ。 #}
   {# 将来「案件を見る」「報告書を作成」等が増える想定で flex-wrap＋右寄せ            #}
   {# （margin-left:auto）の増設耐性を維持。                                    #}
   {# ============================================================ #}
@@ -34,23 +34,7 @@
          class="app-btn app-btn--primary">別肩書を追加</a>
     {% endif %}
 
-    {# 紐付け UI（氏名行から移動・§B）。confirm は self-link 専用。未紐付けは出口ガード #}
-    {# （email_match＋person_active）で押せる時だけ。ロジック・文言は不変、位置のみ移動。 #}
-    {% if contact.person %}
-      {% with linked=contact.person.linked_user %}
-        {% url 'accounts:link_user_person_confirm' person_id=contact.person.id as confirm_url %}
-        {# 紐付け／解除は既存 Person-User 関連を結ぶ／解く編集系（解除で戻せる）→ 緑（HIG 3.6）。状態問わず統一。 #}
-        {% if not linked %}
-          {% if email_match and person_active %}
-            <a href="{% append_back_url confirm_url back %}" class="app-btn app-btn--success">このユーザーで紐付ける</a>
-          {% endif %}
-        {% elif linked == user %}
-          <a href="{% append_back_url confirm_url back %}" class="app-btn app-btn--success">紐付け済み（解除）</a>
-        {% else %}
-          <span class="app-muted">ユーザー「{{ linked.username }}」と紐付け済み</span>
-        {% endif %}
-      {% endwith %}
-    {% endif %}
+    {# 紐付けUIはカード内「紐付けユーザー」セクションへ集約（§B）。アクション帯からは撤去。 #}
 
     {# 右寄せ：マージ（pending時のみ・準備中で控えめ）＋戻る #}
     <div style="margin-left:auto; display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
@@ -184,6 +168,70 @@
             {% endif %}
           </div>
         </div>
+      {% endif %}
+
+      {# 紐付けユーザー（§B 集約）：状態・操作・紐付け先ユーザー情報を1セクションに集約。 #}
+      {# 判定（linked_user / email_match / person_active）は View のフラグをそのまま流用。 #}
+      {% if contact.person %}
+        {% with linked=contact.person.linked_user %}
+          {% url 'accounts:link_user_person_confirm' person_id=contact.person.id as confirm_url %}
+          <div class="app-cd-section">
+            <div class="app-cd-section__name">紐付けユーザー</div>
+            <div>
+              {% if linked == user %}
+                {# (a) 本人に紐付け済み：ユーザー情報＋「紐付け解除」（可逆・確認画面経由 → warning 黄）。 #}
+                <div class="app-detail-item">
+                  <div class="app-detail-label">ユーザー名</div>
+                  <div class="app-detail-value">{{ linked.username }}</div>
+                </div>
+                <div class="app-detail-item">
+                  <div class="app-detail-label">氏名</div>
+                  <div class="app-detail-value">{{ linked.get_full_name|default:"-" }}</div>
+                </div>
+                <div class="app-detail-item">
+                  <div class="app-detail-label">メール</div>
+                  <div class="app-detail-value">{{ linked.email|default:"-" }}</div>
+                </div>
+                {# 操作・遷移ボタンは左寄せで横並び。ユーザ詳細は user_detail 権限保持者のみ（出口で 403 にしない）。 #}
+                <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: var(--app-space-sm);">
+                  <a href="{% append_back_url confirm_url back %}" class="app-btn app-btn--warning">紐付け解除</a>
+                  {% if perms.accounts.retire_user %}
+                    <a href="{% url 'accounts:user_detail' user_id=linked.id %}" class="app-btn app-btn--secondary">ユーザ詳細</a>
+                  {% endif %}
+                </div>
+              {% elif linked %}
+                {# (c) 他 User に紐付け済み：状態テキスト＋ユーザー情報。操作不可（ボタンなし）。 #}
+                <p class="app-muted">ユーザー「{{ linked.username }}」と紐付け済み</p>
+                <div class="app-detail-item">
+                  <div class="app-detail-label">ユーザー名</div>
+                  <div class="app-detail-value">{{ linked.username }}</div>
+                </div>
+                <div class="app-detail-item">
+                  <div class="app-detail-label">氏名</div>
+                  <div class="app-detail-value">{{ linked.get_full_name|default:"-" }}</div>
+                </div>
+                <div class="app-detail-item">
+                  <div class="app-detail-label">メール</div>
+                  <div class="app-detail-value">{{ linked.email|default:"-" }}</div>
+                </div>
+                {# 操作はできないが、user_detail 権限保持者にはユーザ詳細への遷移を出す（左寄せ）。 #}
+                {% if perms.accounts.retire_user %}
+                  <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: var(--app-space-sm);">
+                    <a href="{% url 'accounts:user_detail' user_id=linked.id %}" class="app-btn app-btn--secondary">ユーザ詳細</a>
+                  </div>
+                {% endif %}
+              {% else %}
+                {# 未紐付け：状態文言。可能時のみ「このユーザーで紐付ける」（前向き主要操作 → primary 青）。 #}
+                <p class="app-muted">ユーザーに紐付けられていません。</p>
+                {% if email_match and person_active %}
+                  <div style="margin-top: var(--app-space-sm);">
+                    <a href="{% append_back_url confirm_url back %}" class="app-btn app-btn--primary">このユーザーで紐付ける</a>
+                  </div>
+                {% endif %}
+              {% endif %}
+            </div>
+          </div>
+        {% endwith %}
       {% endif %}
 
       {# 名刺レコードへのリンク（開閉式・旧ヘッダーカードから移設） #}

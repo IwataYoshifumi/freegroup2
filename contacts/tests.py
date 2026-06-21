@@ -1412,13 +1412,73 @@ class ContactDetailSelfLinkButtonTests(TestCase):
         self.assertFalse(resp.context["person_active"])
         self.assertNotContains(resp, self.LABEL)
 
-    def test_linked_to_self_shows_unlink_not_selflink(self):
+    def test_linked_to_self_shows_unlink_in_section(self):
+        # (a) 本人紐付け済み：カード内「紐付けユーザー」セクションに集約。
         _, c = self._make_primary("me@example.com", linked_user=self.user)
         resp = self.client.get(self._url(c))
         self.assertEqual(resp.status_code, 200)
-        # 本人紐付け済み → 解除導線。self-link ボタンは出ない。
-        self.assertContains(resp, "紐付け済み（解除）")
+        self.assertContains(resp, "紐付けユーザー")
+        # 紐付け先ユーザー情報（ユーザー名）。
+        self.assertContains(resp, "selflink_user")
+        # 解除は新ラベル「紐付け解除」＋ warning（黄）。旧ラベルは消える。
+        self.assertContains(resp, "紐付け解除")
+        self.assertContains(resp, "app-btn--warning")
+        self.assertNotContains(resp, "紐付け済み（解除）")
+        # self-link ボタンは出ない。
         self.assertNotContains(resp, self.LABEL)
+
+    def test_linked_to_other_user_shows_info_without_action(self):
+        # (c) 他 User 紐付け：状態テキスト＋ユーザー情報。操作ボタンは出さない。
+        other = User.objects.create_user(
+            username="other_owner", password="dummy", email="other@example.com"
+        )
+        _, c = self._make_primary("me@example.com", linked_user=other)
+        resp = self.client.get(self._url(c))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "紐付けユーザー")
+        self.assertContains(resp, "ユーザー「other_owner」と紐付け済み")
+        self.assertContains(resp, "other_owner")
+        # 操作系は一切出さない。
+        self.assertNotContains(resp, "紐付け解除")
+        self.assertNotContains(resp, self.LABEL)
+
+    def test_selflink_button_is_primary_in_section(self):
+        # (b) 未紐付け・可能：セクション内に「このユーザーで紐付ける」＝primary（青）。
+        _, c = self._make_primary("me@example.com")
+        resp = self.client.get(self._url(c))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "紐付けユーザー")
+        self.assertContains(resp, self.LABEL)
+        self.assertContains(resp, "app-btn--primary")
+        # 未紐付けでは解除ボタンは出ない。
+        self.assertNotContains(resp, "紐付け解除")
+
+    def test_user_detail_button_hidden_without_user_admin_perm(self):
+        # retire_user 権限が無ければ「ユーザ詳細」ボタンは出さない（user_detail で 403 にしないため）。
+        _, c = self._make_primary("me@example.com", linked_user=self.user)
+        resp = self.client.get(self._url(c))
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, "ユーザ詳細")
+
+    def test_user_detail_button_shown_with_user_admin_perm(self):
+        # retire_user 権限があれば、紐付き先ユーザーの「ユーザ詳細」へのボタンが出る。
+        from django.contrib.auth.models import Permission
+
+        self.user.user_permissions.add(
+            Permission.objects.get(
+                codename="retire_user", content_type__app_label="accounts"
+            )
+        )
+        self.user = User.objects.get(pk=self.user.pk)
+        self.client.force_login(self.user)
+        _, c = self._make_primary("me@example.com", linked_user=self.user)
+        resp = self.client.get(self._url(c))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "ユーザ詳細")
+        self.assertContains(
+            resp,
+            'href="%s"' % reverse("accounts:user_detail", kwargs={"user_id": self.user.id}),
+        )
 
 
 class ConfidenceTagTests(TestCase):

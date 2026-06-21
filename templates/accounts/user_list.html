@@ -1,39 +1,24 @@
 {% extends "accounts/app_base.html" %}
 
-{% block title %}ユーザ管理一覧 — FreeGroup2{% endblock %}
+{% block title %}ユーザ一覧 — FreeGroup2{% endblock %}
 
 {% block content %}
-    <section class="app-card">
-      <div class="app-section__header">
-        <h1>ユーザ管理一覧</h1>
-        {% comment %}
-        HIG v1.3 §3.6・§4.1：ON/OFF を視覚的に区別する隠し input+label トグル。
-        mailings/mailing_list_list の同型 UI と同じパターン（ON=primary/OFF=secondary）。
-        検索キーワード（q）は hidden で引き継ぎ、トグル切替で検索条件を失わない。
-        {% endcomment %}
-        <form method="get" style="margin:0;">
-          {% if q %}<input type="hidden" name="q" value="{{ q }}">{% endif %}
-          <label for="id_show_retired"
-                 class="app-btn app-btn--sm {% if request.GET.show_retired == '1' %}app-btn--primary{% else %}app-btn--secondary{% endif %}"
-                 style="cursor:pointer;">
-            {% if request.GET.show_retired == '1' %}✓ {% endif %}退職者も表示
-          </label>
-          <input type="checkbox" id="id_show_retired" name="show_retired" value="1"
-                 style="position:absolute; opacity:0; pointer-events:none;"
-                 onchange="this.form.submit();"
-                 {% if request.GET.show_retired == '1' %}checked{% endif %}>
-        </form>
-      </div>
+    {# タイトルはカードの外に出す。 #}
+    <div class="app-section__header">
+      <h1>ユーザ一覧</h1>
+    </div>
 
-      {% comment %}検索フォーム：show_retired は hidden で引き継ぐ。{% endcomment %}
-      <form method="get" class="app-form-grid" style="margin-bottom: var(--app-space-md);">
+    {# 検索フォームのカード（一覧表示カードとは分ける）。 #}
+    <section class="app-card">
+      {% comment %}検索フォーム：show_retired は hidden で引き継ぐ。アクションボタンは左寄せ。{% endcomment %}
+      <form method="get" class="app-form-grid" style="margin-bottom: var(--app-space-sm);">
         {% if request.GET.show_retired == '1' %}<input type="hidden" name="show_retired" value="1">{% endif %}
         <div class="app-form__group">
           <label class="app-form__label" for="id_q">検索</label>
           <input type="text" id="id_q" name="q" value="{{ q }}" class="app-input"
                  placeholder="ユーザ名・氏名・メール・Person 名">
         </div>
-        <div class="app-action-area">
+        <div style="display: flex; gap: var(--app-space-sm); align-items: flex-end;">
           <button type="submit" class="app-btn app-btn--secondary app-btn--sm">検索</button>
           {% if q %}
             <a href="{% url 'accounts:user_list' %}{% if request.GET.show_retired == '1' %}?show_retired=1{% endif %}"
@@ -42,14 +27,34 @@
         </div>
       </form>
 
-      {% if messages %}
-        {% for message in messages %}
-          <div class="app-alert app-alert--{% if message.tags == 'error' %}danger{% else %}info{% endif %}">
-            {{ message }}
-          </div>
-        {% endfor %}
-      {% endif %}
+      {% comment %}
+      「退職者も表示」トグルは検索インプットの下に配置（HIG v1.3 §3.6・§4.1：ON/OFF を視覚区別する
+      隠し input+label トグル。ON=primary/OFF=secondary）。検索キーワード（q）は hidden で引き継ぐ。
+      {% endcomment %}
+      <form method="get" style="margin:0;">
+        {% if q %}<input type="hidden" name="q" value="{{ q }}">{% endif %}
+        <label for="id_show_retired"
+               class="app-btn app-btn--sm {% if request.GET.show_retired == '1' %}app-btn--primary{% else %}app-btn--secondary{% endif %}"
+               style="cursor:pointer;">
+          {% if request.GET.show_retired == '1' %}✓ {% endif %}退職者も表示
+        </label>
+        <input type="checkbox" id="id_show_retired" name="show_retired" value="1"
+               style="position:absolute; opacity:0; pointer-events:none;"
+               onchange="this.form.submit();"
+               {% if request.GET.show_retired == '1' %}checked{% endif %}>
+      </form>
+    </section>
 
+    {% if messages %}
+      {% for message in messages %}
+        <div class="app-alert app-alert--{% if message.tags == 'error' %}danger{% else %}info{% endif %}">
+          {{ message }}
+        </div>
+      {% endfor %}
+    {% endif %}
+
+    {# 一覧表示のカード（検索カードと分離）。 #}
+    <section class="app-card" style="margin-top: var(--app-space-md);">
       <div class="app-table-wrapper">
         <table class="app-table app-table--nowrap">
           <thead>
@@ -76,8 +81,9 @@
                 <td>{% if user.is_active %}現職{% else %}退職済{% endif %}</td>
                 <td>
                   {% if user.is_active and perms.accounts.assign_role_to_user and user.id != request.user.id and user.role.code != 'admin' %}
+                    {# ロール変更は編集系＝緑（HIG 3.6）。ユーザ詳細画面の同ボタンと色を統一。 #}
                     <a href="{% url 'accounts:assign_role' user_id=user.id %}?next={{ request.get_full_path|urlencode }}"
-                       class="app-btn app-btn--primary app-btn--sm">ロール変更</a>
+                       class="app-btn app-btn--success app-btn--sm">ロール変更</a>
                   {% else %}
                     -
                   {% endif %}
