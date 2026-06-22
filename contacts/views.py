@@ -32,12 +32,11 @@ from django.views import View
 from django.views.decorators.http import require_POST
 from django.views.generic import DetailView, ListView, UpdateView
 
-from accounts.services import is_self_link_email_match
 from back_navigator.back_navigator import BackNavigator
 from cards.models import BusinessCard
 from cards.tasks.ocr_pipeline import _update_original_image_status
 from config.constants import PersonChangeReason
-from duplicates.models import DuplicateCandidate, PersonMergeLog
+from duplicates.models import DuplicateCandidate
 from duplicates.services.duplicate_detection import find_duplicate_contacts
 from persons.models import Person
 
@@ -48,6 +47,7 @@ from .forms import (
     build_contact_sns_formset,
 )
 from .models import Contact, ContactFieldConfidence, ContactSns
+from .services.detail_context import build_contact_detail_context
 from .services.permissions import can_edit_contact
 
 
@@ -283,79 +283,23 @@ class ContactDetailView(LoginRequiredMixin, PermissionRequiredMixin, DetailView)
         context = super().get_context_data(**kwargs)
         contact = self.object
 
-        # モード判定（D-3b §3.2）
-        is_primary = contact.status == Contact.Status.PRIMARY
-        is_active = contact.status == Contact.Status.ACTIVE
-        is_inactive = contact.status == Contact.Status.INACTIVE
-        is_editable = (
-            contact.status in (Contact.Status.PRIMARY, Contact.Status.ACTIVE)
-            and contact.person.status == "active"
-        )
+        # 主役 Contact 1 枚分の表示 context は共通部品に集約（active 人物詳細と共有）。
+        context.update(build_contact_detail_context(contact, self.request.user))
 
-        # 他のアクティブコンタクト（D-3b 論点 4）
-        if is_primary:
-            other_active_contacts = contact.person.contact_set.filter(
-                status=Contact.Status.ACTIVE
-            )
-        elif is_active:
-            other_active_contacts = (
-                contact.person.contact_set.filter(
-                    status__in=[
-                        Contact.Status.PRIMARY,
-                        Contact.Status.ACTIVE,
-                    ]
-                )
-                .exclude(pk=contact.pk)
-            )
-        else:
-            other_active_contacts = Contact.objects.none()
-
-        # 重複候補・マージログ・previous_person
-        pending_duplicates = DuplicateCandidate.get_pending(contact)
-        merge_logs = PersonMergeLog.get_for_person(contact.person)
-        previous_person = contact.previous_person
-
-        # 同一 Person 配下の inactive Contact 履歴（自分自身は除外）。
-        # active / primary のときは exclude は no-op、自分が inactive なら自身を弾く。
-        inactive_contacts = (
-            contact.person.get_inactive_contacts().exclude(pk=contact.pk)
-        )
-
-        # BackNavigator：人物詳細を起点ハブ化し、子画面（別肩書追加・主コンタクト修正・名刺
-        # 詳細・将来の案件/報告書 等）の「戻る」が人物詳細へ戻るよう、自身を push_current で積む
+        # BackNavigator：コンタクト詳細を起点ハブ化し、子画面（別肩書追加・主コンタクト修正・名刺
+        # 詳細・将来の案件/報告書 等）の「戻る」がここへ戻るよう、自身を push_current で積む
         # （ガイド §9：クエリ無し詳細でも push_current して戻り先にする正規の使い方）。
-        # 人物詳細は保存すべき GET クエリを持たないため、keys は path-only になる無害な非空キー
+        # 保存すべき GET クエリを持たないため、keys は path-only になる無害な非空キー
         # 1 つ（"page"）を渡す（空 keys は §8 NG・DEBUG で ValueError）。view_name + view_kwargs
         # の重複チェック（back_navigator.py）でリロード・子からの戻り時の二重 push は防止される。
         back = BackNavigator(self.request)
         back.push_current("コンタクト詳細", ["page"])
 
-        # 本人紐付けボタン（self-link 専用）の表示条件を出口ガード（confirm の email_match＋
-        # person_active／link_user_to_person の is_self_link_email_match）に揃える。
-        # 既存の本人同定基準 is_self_link_email_match を再利用（新規判定は作らない）。
-        person = contact.person
-        email_match = (
-            is_self_link_email_match(self.request.user, person) if person else False
-        )
-        person_active = bool(person and person.status == Person.Status.ACTIVE)
-
+        # 画面メタ（共通部品には含めない＝各 View の責務）。
         context.update(
             {
-                "contact": contact,
-                "field_confidences": contact.get_field_confidences(),
-                "is_editable": is_editable,
-                "is_primary": is_primary,
-                "is_active": is_active,
-                "is_inactive": is_inactive,
-                "business_card": contact.business_card,
-                "other_active_contacts": other_active_contacts,
-                "pending_duplicates": pending_duplicates,
-                "merge_logs": merge_logs,
-                "previous_person": previous_person,
-                "inactive_contacts": inactive_contacts,
                 "back": back,
-                "email_match": email_match,
-                "person_active": person_active,
+                "page_title": "コンタクト詳細",
                 "active_app": "cards",
                 "active_menu": "cards:card_list",
             }

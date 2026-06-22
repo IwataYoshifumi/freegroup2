@@ -28,6 +28,7 @@ from accounts.services import is_self_link_email_match
 from back_navigator.back_navigator import BackNavigator
 from contacts.forms import ContactAddAdditionalRoleForm, build_contact_sns_formset
 from contacts.models import Contact
+from contacts.services.detail_context import build_contact_detail_context
 from contacts.views import _create_sns_from_formset
 from duplicates.models import PersonMergeLog
 
@@ -222,12 +223,9 @@ class PersonDetailView(LoginRequiredMixin, PermissionRequiredMixin, DetailView):
 
         if person.status == Person.Status.ACTIVE:
             if person.primary_contact_id is not None:
-                back = BackNavigator(self.request)
-                target = reverse(
-                    "contacts:contact_detail",
-                    kwargs={"pk": person.primary_contact_id},
-                )
-                return HttpResponseRedirect(back.append_url(target))
+                # active + primary_contact あり → 独立した人物詳細画面を render する
+                # （旧：ContactDetailView へ 302 リダイレクト。v1.7 でリダイレクト廃止）。
+                return self._render_active_person_detail(request, person)
             template_name = "persons/person_detail_orphan.html"
         elif person.status == Person.Status.MERGED:
             template_name = "persons/person_detail_merged.html"
@@ -236,6 +234,36 @@ class PersonDetailView(LoginRequiredMixin, PermissionRequiredMixin, DetailView):
 
         context = self.get_context_data(**kwargs)
         return render(request, template_name, context)
+
+    def _render_active_person_detail(self, request, person):
+        """active かつ primary_contact ありの人物詳細を render する（リダイレクト廃止）。
+
+        主役 Contact は primary_contact に固定し、コンタクト詳細と同じ共通部品
+        （build_contact_detail_context）で context を組み立てて contact_detail.html を流用する。
+        画面メタ（back / active_app / active_menu / page_title）は人物詳細として設定する
+        （別肩書リスト等のパーソン単位データは次段スコープのため、ここでは積まない）。
+        """
+        # ContactDetailView.get_queryset と同じ select_related で主役 Contact を取得。
+        contact = (
+            Contact.objects.select_related(
+                "person", "business_card", "previous_person"
+            ).get(pk=person.primary_contact_id)
+        )
+        context = build_contact_detail_context(contact, request.user)
+
+        # BackNavigator：人物詳細画面として自身を push_current（コンタクト詳細と同じ起点ハブ運用）。
+        back = BackNavigator(request)
+        back.push_current("人物詳細", ["page"])
+
+        context.update(
+            {
+                "back": back,
+                "page_title": "人物詳細",
+                "active_app": "persons",
+                "active_menu": "persons:person_list",
+            }
+        )
+        return render(request, "contacts/contact_detail.html", context)
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)

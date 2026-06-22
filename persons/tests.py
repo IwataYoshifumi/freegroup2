@@ -488,16 +488,20 @@ class PersonDetailViewTests(TestCase):
         person.save(update_fields=["primary_contact", "updated_at"])
         return person, contact
 
-    def test_active_person_redirects_to_primary_contact_detail(self):
-        """active + primary_contact あり → 302 リダイレクト → ContactDetailView。"""
+    def test_active_person_renders_person_detail(self):
+        """active + primary_contact あり → リダイレクトせず人物詳細を render（v1.7）。
+
+        主役 Contact（primary_contact）の情報で contact_detail.html を流用し、
+        タイトルは「人物詳細」。旧挙動（302 → ContactDetailView）は廃止。
+        """
         person, contact = self._make_active_with_primary()
         resp = self.client.get(self._url(person))
-        self.assertEqual(resp.status_code, 302)
-        expected = reverse(
-            "contacts:contact_detail", kwargs={"pk": contact.pk}
-        )
-        # back_stack を渡していないので URL に付かず素のまま
-        self.assertEqual(resp.url, expected)
+        self.assertEqual(resp.status_code, 200)
+        self.assertTemplateUsed(resp, "contacts/contact_detail.html")
+        body = resp.content.decode()
+        # タイトル（h1・タブ）が「人物詳細」、主コンタクトの氏名が出る。
+        self.assertIn("人物詳細", body)
+        self.assertIn(contact.full_name, body)
 
     def test_active_person_with_null_primary_renders_orphan_page(self):
         """active + primary_contact NULL → orphan テンプレート + Admin リンク。"""
