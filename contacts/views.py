@@ -328,7 +328,7 @@ class ContactDetailView(LoginRequiredMixin, PermissionRequiredMixin, DetailView)
         # 1 つ（"page"）を渡す（空 keys は §8 NG・DEBUG で ValueError）。view_name + view_kwargs
         # の重複チェック（back_navigator.py）でリロード・子からの戻り時の二重 push は防止される。
         back = BackNavigator(self.request)
-        back.push_current("人物詳細", ["page"])
+        back.push_current("コンタクト詳細", ["page"])
 
         # 本人紐付けボタン（self-link 専用）の表示条件を出口ガード（confirm の email_match＋
         # person_active／link_user_to_person の is_self_link_email_match）に揃える。

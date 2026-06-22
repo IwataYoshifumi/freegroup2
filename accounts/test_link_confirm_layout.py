@@ -140,17 +140,17 @@ class LinkConfirmLayoutRenderTests(TestCase):
         self.client.force_login(user)
         stack = [
             {"url": "/persons/", "title": "人物一覧", "view_name": "persons", "view_kwargs": {}},
-            {"url": "/c/x/", "title": "人物詳細", "view_name": "contacts:contact_detail", "view_kwargs": {}},
+            {"url": "/c/x/", "title": "コンタクト詳細", "view_name": "contacts:contact_detail", "view_kwargs": {}},
         ]
         url = reverse("accounts:link_user_person_confirm", kwargs={"person_id": person.id})
         resp = self.client.get(url, {"back_stack": _encode_back_stack(stack)})
         self.assertEqual(resp.status_code, 200)
         # 「最初に戻る」（back_all_link）は出さない。
         self.assertNotContains(resp, "最初に戻る")
-        # ラベルは「戻る」に固定。直前 title「人物詳細」がボタンに出ない。
-        self.assertNotContains(resp, ">人物詳細</a>")
+        # ラベルは「戻る」に固定。直前 title「コンタクト詳細」がボタンに出ない。
+        self.assertNotContains(resp, ">コンタクト詳細</a>")
         self.assertContains(resp, ">戻る</a>")
-        # href は従来どおり直前ページ（人物詳細）のまま（back_stack クエリが付く）。
+        # href は従来どおり直前ページ（コンタクト詳細）のまま（back_stack クエリが付く）。
         self.assertContains(resp, 'href="/c/x/?')
 
     def test_other_user_linked_warning_pattern(self):
