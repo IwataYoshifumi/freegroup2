@@ -18,6 +18,7 @@ D-3c で追加した AJAX 2 エンドポイント、および D-3b で追加し�
 """
 
 import json
+import uuid
 
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin, PermissionRequiredMixin
@@ -190,6 +191,17 @@ class ContactListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
             status__in=selected, person__status="active"
         ).select_related("person", "business_card")
 
+        # Person 絞り込み（人物詳細「コンタクト一覧」導線用、?person=<uuid>）。
+        # person__status="active" は base 側で固定済み。不正 UUID・非 active Person は
+        # 0 件に倒して安全側（現状挙動を踏襲＝該当なしと同じ）。
+        person_id = self.request.GET.get("person", "").strip()
+        if person_id:
+            try:
+                uuid.UUID(person_id)
+            except ValueError:
+                return Contact.objects.none()
+            qs = qs.filter(person_id=person_id)
+
         p = self.request.GET
         if p.get("name", "").strip():
             qs = qs.filter(full_name__icontains=p["name"].strip())
@@ -231,6 +243,8 @@ class ContactListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
                 "address",
                 "status",
                 "searched",
+                # 人物詳細「コンタクト一覧」導線の Person 絞り込みを戻るで復元するため追加。
+                "person",
                 # HIG §6.1：並び替え・ページ状態を戻るで復元するため sort を追加（単一パラメータ）。
                 "sort",
                 "page",
@@ -243,6 +257,8 @@ class ContactListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
         for key in self._SEARCH_PARAMS:
             context[key] = self.request.GET.get(key, "")
         context["selected_statuses"] = self._get_selected_statuses()
+        # 検索フォーム・ソート・ページ送りで Person 絞りが外れないよう hidden 保持用に渡す。
+        context["person_filter"] = self.request.GET.get("person", "")
         context["searched"] = self.request.GET.get("searched") == "1"
         # 検索フォーム内ソートコントロール用（sort_rows / sort_is_active / sort_value）。
         context.update(_contact_sort_context(self.request.GET))
@@ -301,7 +317,8 @@ class ContactDetailView(LoginRequiredMixin, PermissionRequiredMixin, DetailView)
                 "back": back,
                 "page_title": "コンタクト詳細",
                 "active_app": "cards",
-                "active_menu": "cards:card_list",
+                # サイドバーは「コンタクト一覧」をアクティブに（兄弟の Contact 系 View と整合）。
+                "active_menu": "contacts:contact_list",
             }
         )
         return context

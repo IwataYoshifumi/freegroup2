@@ -554,6 +554,69 @@ class PersonDetailViewTests(TestCase):
         # created_at 昇順（role1 が role2 より前に出る）。
         self.assertLess(body.index("別肩書カンパニーA"), body.index("別肩書カンパニーB"))
 
+    def test_active_person_action_band_has_add_role_and_contact_list(self):
+        """人物詳細のアクション帯に「別肩書を追加」と「コンタクト一覧」（person 絞り込み）が出る。"""
+        person, _ = self._make_active_with_primary()
+        resp = self.client.get(self._url(person))
+        self.assertEqual(resp.status_code, 200)
+        body = resp.content.decode()
+        self.assertIn("別肩書を追加", body)
+        self.assertIn("コンタクト一覧", body)
+        # コンタクト一覧は当該 Person の active 全件（primary 含む）の絞り込みクエリを持つ。
+        # primary 含む active 全件 = status=primary かつ status=active の 2 値。
+        self.assertIn("person=%s" % person.id, body)
+        self.assertIn("status=primary", body)
+        self.assertIn("status=active", body)
+
+    SELF_LINK_LABEL = "この人物をログインアカウントに紐付ける"
+
+    def test_active_person_band_shows_self_link_when_email_match_unlinked(self):
+        """v1.7：人物詳細 band で email 一致 ∧ active ∧ 未紐付けのとき、
+        黄（warning）の「この人物をログインアカウントに紐付ける」を出す。"""
+        self.user.email = "selflink-person@example.com"
+        self.user.save(update_fields=["email"])
+        person = Person.objects.create()
+        contact = Contact.objects.create(
+            person=person,
+            status=Contact.Status.PRIMARY,
+            full_name="A",
+            email="selflink-person@example.com",
+        )
+        person.primary_contact = contact
+        person.save(update_fields=["primary_contact", "updated_at"])
+        resp = self.client.get(self._url(person))
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.context["can_self_link"])
+        body = resp.content.decode()
+        self.assertIn(self.SELF_LINK_LABEL, body)
+        self.assertIn('app-btn--warning">' + self.SELF_LINK_LABEL, body)
+
+    def test_active_person_band_hides_self_link_when_mismatch_or_linked(self):
+        """email 不一致／既に紐付け済みのときは人物詳細 band に紐付けボタンを出さない。"""
+        # (1) email 不一致（primary の email 空 → 一致しない）。
+        self.user.email = "me@example.com"
+        self.user.save(update_fields=["email"])
+        person, _ = self._make_active_with_primary()
+        resp = self.client.get(self._url(person))
+        self.assertFalse(resp.context["can_self_link"])
+        self.assertNotIn(self.SELF_LINK_LABEL, resp.content.decode())
+
+        # (2) email 一致でも既に紐付け済み（linked_user あり）なら出さない。
+        person2 = Person.objects.create()
+        c2 = Contact.objects.create(
+            person=person2,
+            status=Contact.Status.PRIMARY,
+            full_name="B",
+            email="me@example.com",
+        )
+        person2.primary_contact = c2
+        person2.save(update_fields=["primary_contact", "updated_at"])
+        self.user.person = person2
+        self.user.save(update_fields=["person"])
+        resp2 = self.client.get(self._url(person2))
+        self.assertFalse(resp2.context["can_self_link"])
+        self.assertNotIn(self.SELF_LINK_LABEL, resp2.content.decode())
+
     def test_active_person_with_null_primary_renders_orphan_page(self):
         """active + primary_contact NULL → orphan テンプレート + Admin リンク。"""
         person = Person.objects.create()

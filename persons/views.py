@@ -261,9 +261,29 @@ class PersonDetailView(LoginRequiredMixin, PermissionRequiredMixin, DetailView):
         )
         context["additional_roles_mode"] = True
 
+        # 本人紐付けボタン（アクション帯・黄）の表示可否：email 一致 ∧ active Person ∧ 未紐付け。
+        # 紐付けは Person↔User の操作なので人物詳細にのみ出す（コンタクト詳細には出さない）。
+        # email_match / person_active は build_contact_detail_context 由来（primary_contact の email 基準
+        # ＝コンタクト詳細と同一判定）。共有ヘルパーには入れない＝コンタクト詳細へ伝播させない。
+        context["can_self_link"] = (
+            context["email_match"]
+            and context["person_active"]
+            and person.linked_user is None
+        )
+
         # BackNavigator：人物詳細画面として自身を push_current（コンタクト詳細と同じ起点ハブ運用）。
         back = BackNavigator(request)
         back.push_current("人物詳細", ["page"])
+
+        # アクション帯「コンタクト一覧」導線：この Person の active コンタクトを primary 含め全件表示する。
+        # ContactListView の status は Contact.status 値そのもの（active=副コンタクト＝primary 除外）なので、
+        # primary を含む active 全件には status=primary と status=active の 2 値が必要。
+        # BackNavigator.append_url は多値クエリを先頭 1 個に潰すため、back を適用した後に status 2 値を付与する
+        # （テンプレ側はこの URL をそのまま href に出す＝append_back_url で二重適用しない）。
+        list_base = f"{reverse('contacts:contact_list')}?person={person.id}&searched=1"
+        context["contact_list_url"] = (
+            f"{back.append_url(list_base)}&status=primary&status=active"
+        )
 
         context.update(
             {

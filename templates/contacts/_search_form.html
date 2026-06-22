@@ -15,6 +15,8 @@ contact_list.html からインライン直書きを切り出したもの。検�
 {% endcomment %}
 <form method="get" class="app-form-grid-edit">
   <input type="hidden" name="searched" value="1">
+  {# 人物詳細「コンタクト一覧」導線の Person 絞り込みを、再検索・ソート時も保持する。 #}
+  {% if person_filter %}<input type="hidden" name="person" value="{{ person_filter }}">{% endif %}
   <div class="app-form-grid app-search-grid">
     <div class="app-form__group">
       <label class="app-form__label" for="id_name">氏名</label>

@@ -948,6 +948,28 @@ class ContactDetailViewTests(TestCase):
         self.assertFalse(ctx["is_inactive"])
         self.assertEqual(ctx["contact"].pk, self.contact_a.pk)
 
+    def test_sidebar_active_menu_is_contact_list(self):
+        """コンタクト詳細のサイドバー選択は「コンタクト一覧」（contacts:contact_list）。
+
+        v1.7：旧 active_menu="cards:card_list"（名刺一覧が点灯）を是正。"""
+        resp = self.client.get(self._url())
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.context["active_menu"], "contacts:contact_list")
+
+    def test_contact_detail_has_no_add_role_button(self):
+        """コンタクト詳細（primary）には「別肩書を追加」導線を出さない（人物詳細へ集約）。
+
+        v1.7：別肩書追加ボタンはコンタクト詳細から撤去し、人物詳細のアクション帯へ移した。
+        additional_roles_mode を渡さないコンタクト詳細では出ない。"""
+        resp = self.client.get(self._url())
+        self.assertEqual(resp.status_code, 200)
+        body = resp.content.decode()
+        self.assertNotIn("別肩書を追加", body)
+        add_role_url = reverse(
+            "persons:person_add_additional_role", kwargs={"pk": self.person_a.pk}
+        )
+        self.assertNotIn(add_role_url, body)
+
     def test_n2_active_contact(self):
         """N2: active Contact → 200、編集可能モード、別肩書追加ボタン非表示。"""
         active = Contact.objects.create(
@@ -1358,8 +1380,11 @@ class ContactDetailViewTests(TestCase):
 
 
 class ContactDetailSelfLinkButtonTests(TestCase):
-    """contact_detail「このユーザーで紐付ける」ボタン（self-link 専用）の表示条件が
-    出口ガード（email_match＋person_active）に揃うことの検証。"""
+    """contact_detail 紐付けユーザーセクションの表示検証。
+
+    v1.7：未紐付け表示（「このユーザーで紐付ける」ボタン・「紐付けられていません」テキスト）は
+    撤去し、紐付け済み（本人(a)／他User(c)）のときだけセクションを出す。本人紐付けの入口は
+    ホーム/プロフィールの候補アラートに一本化。(a)(c) の表示内容は従来どおり。"""
 
     LABEL = "このユーザーで紐付ける"
 
@@ -1388,13 +1413,22 @@ class ContactDetailSelfLinkButtonTests(TestCase):
     def _url(self, c):
         return reverse("contacts:contact_detail", kwargs={"pk": c.pk})
 
-    def test_shown_when_email_match_and_active(self):
+    def test_no_self_link_button_on_contact_detail(self):
+        """v1.7：紐付けは人物詳細へ一本化。コンタクト詳細では email 一致でも紐付けボタンを出さない。
+
+        ContactDetailView は can_self_link を渡さないため band に黄ボタンは出ない。
+        カード内未紐付けセクションも従来どおり非表示（撤去維持）。"""
         _, c = self._make_primary("me@example.com")
         resp = self.client.get(self._url(c))
         self.assertEqual(resp.status_code, 200)
+        # email_match は helper 由来で True だが、コンタクト詳細では can_self_link を渡さない。
         self.assertTrue(resp.context["email_match"])
-        self.assertTrue(resp.context["person_active"])
-        self.assertContains(resp, self.LABEL)
+        self.assertNotIn("can_self_link", resp.context)
+        self.assertNotContains(resp, self.LABEL)
+        self.assertNotContains(resp, "この人物をログインアカウントに紐付ける")
+        # カード内「紐付けユーザー」セクション・常時テキストも非表示のまま。
+        self.assertNotContains(resp, "紐付けユーザー")
+        self.assertNotContains(resp, "ユーザーに紐付けられていません")
 
     def test_hidden_when_email_mismatch(self):
         _, c = self._make_primary("other@example.com")
@@ -1442,15 +1476,14 @@ class ContactDetailSelfLinkButtonTests(TestCase):
         self.assertNotContains(resp, "紐付け解除")
         self.assertNotContains(resp, self.LABEL)
 
-    def test_selflink_button_is_primary_in_section(self):
-        # (b) 未紐付け・可能：セクション内に「このユーザーで紐付ける」＝primary（青）。
+    def test_unlinked_card_section_hidden(self):
+        """v1.7：未紐付けではカード内「紐付けユーザー」セクション（見出し・常時テキスト・解除）は出ない。
+        （band の黄ボタンは test_self_link_button_in_band_when_email_match_and_unlinked で検証）"""
         _, c = self._make_primary("me@example.com")
         resp = self.client.get(self._url(c))
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "紐付けユーザー")
-        self.assertContains(resp, self.LABEL)
-        self.assertContains(resp, "app-btn--primary")
-        # 未紐付けでは解除ボタンは出ない。
+        self.assertNotContains(resp, "紐付けユーザー")
+        self.assertNotContains(resp, "ユーザーに紐付けられていません")
         self.assertNotContains(resp, "紐付け解除")
 
     def test_user_detail_button_hidden_without_user_admin_perm(self):
@@ -1681,6 +1714,54 @@ class ContactListViewTests(TestCase):
         self.assertNotIn(inactive.id, ids)
         self.assertEqual(resp.context["selected_statuses"], ["primary"])
         self.assertFalse(resp.context["searched"])
+
+    def test_person_filter_shows_person_active_including_primary(self):
+        """?person=<uuid>&searched=1&status=primary&status=active →
+        指定 Person の active 全件（primary 含む）。別肩書も primary も出て、他 Person は除外。"""
+        a_active = Contact.objects.create(
+            person=self.person_a,
+            status=Contact.Status.ACTIVE,
+            full_name="A-active",
+            organization="Acme Corp",
+        )
+        # 別 Person の active コンタクト（person 絞り込みで除外されるべき）。
+        other_person = Person.objects.create()
+        other_active = Contact.objects.create(
+            person=other_person,
+            status=Contact.Status.ACTIVE,
+            full_name="Other-active",
+        )
+        resp = self.client.get(
+            self.url,
+            {
+                "person": str(self.person_a.id),
+                "searched": "1",
+                "status": ["primary", "active"],
+            },
+        )
+        self.assertEqual(resp.status_code, 200)
+        ids = [c.id for c in resp.context["contacts"]]
+        # primary（主コンタクト）と active（別肩書）の両方が出る。
+        self.assertIn(self.contact_a.id, ids)
+        self.assertIn(a_active.id, ids)
+        # 別 Person のコンタクトは person 絞り込みで除外。
+        self.assertNotIn(other_active.id, ids)
+        # 再検索・ソートで保持するための hidden 値が context に乗る。
+        self.assertEqual(resp.context["person_filter"], str(self.person_a.id))
+
+    def test_person_filter_invalid_uuid_returns_empty(self):
+        """不正な person UUID は 0 件に倒す（500 を出さない・安全側＝現状挙動踏襲）。"""
+        Contact.objects.create(
+            person=self.person_a,
+            status=Contact.Status.ACTIVE,
+            full_name="A-active",
+        )
+        resp = self.client.get(
+            self.url,
+            {"person": "not-a-uuid", "searched": "1", "status": "active"},
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(list(resp.context["contacts"]), [])
 
     def test_status_filter_primary_active(self):
         """searched=1 + status=[primary, active] → primary + active 表示、inactive 非表示。"""
