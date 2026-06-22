@@ -14,6 +14,8 @@ dev_create_dup_test_data / dev_create_test_contact_data は会社ドメインの
 - primary Contact は status=primary、email=--email の値、full_name=「{prefix}{連番}」
 - ContactFieldConfidence は作成しない（紐付け判定にスコアは不要、重複検出を兼ねない）
 - DuplicateCandidate / OriginalImage / BusinessCard / PersonMergeLog は生成しない
+- --additional-roles N で各 Person に別肩書（status=active・会社/部署/役職入り）を N 件付与し、
+  人物詳細の「別肩書」セクションの実機確認用データを兼ねる（既定 0＝従来挙動）
 - --reset で「同一 user 由来 かつ full_name が prefix で始まる」テストデータを削除してから生成
 
 専用ユーザー：
@@ -39,6 +41,15 @@ DEFAULT_USER = "test_data_user"
 DEFAULT_EMAIL = "iwata@network-tokai.jp"
 DEFAULT_COUNT = 2
 DEFAULT_PREFIX = "紐付けテスト"
+DEFAULT_ADDITIONAL_ROLES = 0
+
+# 別肩書（同一 Person 配下の active コンタクト）用の会社・部署・役職サンプル。
+# 人物詳細の「別肩書」セクション（会社・部署・役職を表示）の実機確認用。N 件指定時に循環使用する。
+_ROLE_SAMPLES = [
+    ("株式会社サンプル商事", "営業部", "課長"),
+    ("サンプル製作所", "技術部", "主任"),
+    ("サンプルホールディングス", "経営企画室", "室長"),
+]
 
 
 # ----------------------------------------------------------------------
@@ -46,15 +57,50 @@ DEFAULT_PREFIX = "紐付けテスト"
 # ----------------------------------------------------------------------
 
 
-def _create_link_persons(email: str, count: int, prefix: str, user) -> list[Person]:
+def _create_additional_roles(person, count: int, label: str, user) -> list[Contact]:
+    """[性質] 副作用あり（DB 書込）。person 配下に別肩書（status=active）の Contact を count 件作成する。
+
+    [入力] person: 紐付け先 Person / count: 別肩書件数 / label: 氏名（reset 用に prefix 始まりを維持）/
+           user: created_by・updated_by に使う User
+    [出力] list[Contact]（生成した別肩書 Contact。created_at 昇順＝生成順）
+
+    別肩書セクションは会社・部署・役職を表示するため、_ROLE_SAMPLES から循環で値を入れる。
+    email は空（primary の email を使う紐付け候補判定に影響させない）。primary_contact は変更しない。
+    full_name は label（prefix 始まり）にして --reset の削除キーに乗せる。
+    """
+    roles: list[Contact] = []
+    for j in range(count):
+        organization, department, title = _ROLE_SAMPLES[j % len(_ROLE_SAMPLES)]
+        roles.append(
+            Contact.objects.create(
+                business_card=None,
+                person=person,
+                status=Contact.Status.ACTIVE,
+                created_by=user,
+                updated_by=user,
+                full_name=label,
+                organization=organization,
+                department=department,
+                title=title,
+                email="",
+            )
+        )
+    return roles
+
+
+def _create_link_persons(
+    email: str, count: int, prefix: str, user, additional_roles: int = 0
+) -> list[Person]:
     """[性質] 副作用あり（DB 書込）。紐付け候補用の Person + primary Contact を count 件作成する。
 
     [入力] email: primary Contact のメール / count: 生成件数 / prefix: 氏名プレフィックス /
-           user: created_by・updated_by に使う User
+           user: created_by・updated_by に使う User /
+           additional_roles: 各 Person に付ける別肩書（active）件数（既定 0＝従来挙動）
     [出力] list[Person]（生成した Person）
 
     1 件ずつ Person(status=ACTIVE) → Contact(status=primary, email=email) →
     Person.primary_contact 同期、の順で作成する。User.person は一切触らない（未紐付けを保つ）。
+    additional_roles > 0 のときは primary に加えて別肩書（status=active）を付与する。
     ContactFieldConfidence は作成しない。
     """
     created: list[Person] = []
@@ -74,6 +120,8 @@ def _create_link_persons(email: str, count: int, prefix: str, user) -> list[Pers
         )
         person.primary_contact = contact
         person.save(update_fields=["primary_contact", "updated_at"])
+        if additional_roles > 0:
+            _create_additional_roles(person, additional_roles, label, user)
         created.append(person)
     return created
 
@@ -145,6 +193,16 @@ class Command(BaseCommand):
             ),
         )
         parser.add_argument(
+            "--additional-roles",
+            type=int,
+            default=DEFAULT_ADDITIONAL_ROLES,
+            help=(
+                f"各 Person に付ける別肩書（status=active）の件数（既定 {DEFAULT_ADDITIONAL_ROLES}）。"
+                "1 以上で primary に加えて会社・部署・役職入りの active コンタクトを付与し、"
+                "人物詳細の『別肩書』セクションを確認できる。"
+            ),
+        )
+        parser.add_argument(
             "--reset",
             action="store_true",
             help="既存テストデータ（同一 user 由来・prefix 始まり）を削除してから生成する",
@@ -164,25 +222,32 @@ class Command(BaseCommand):
         email = opts["email"]
         count = opts["count"]
         prefix = opts["prefix"]
+        additional_roles = opts["additional_roles"]
         if count < 0:
             raise CommandError("--count は 0 以上で指定してください。")
+        if additional_roles < 0:
+            raise CommandError("--additional-roles は 0 以上で指定してください。")
 
         with transaction.atomic():
             if opts["reset"]:
                 _reset_test_data(prefix, user, self.stdout)
-            created = _create_link_persons(email, count, prefix, user)
+            created = _create_link_persons(
+                email, count, prefix, user, additional_roles
+            )
 
         self.stdout.write(
             self.style.SUCCESS(
                 f"生成完了：Person {len(created)} 件 "
-                f"(email={email} / status=active / User 未紐付け / prefix='{prefix}')"
+                f"(email={email} / status=active / User 未紐付け / prefix='{prefix}' / "
+                f"別肩書={additional_roles} 件/人)"
             )
         )
         for person in created:
             c = person.primary_contact
+            roles = person.get_active_contacts().count()
             self.stdout.write(
                 f"  Person id={person.id} status={person.status} "
-                f"primary='{c.full_name}' email={c.email}"
+                f"primary='{c.full_name}' email={c.email} 別肩書={roles}"
             )
         self.stdout.write(
             self.style.NOTICE(

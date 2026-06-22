@@ -259,11 +259,15 @@
   </div>
 
   {# ============================================================ #}
-  {# 他のアクティブコンタクトセクション                           #}
+  {# 他のアクティブコンタクト／別肩書セクション                    #}
+  {# additional_roles_mode（人物詳細から渡る）で見出し・表示項目を出し分け：    #}
+  {#   - 人物詳細：見出し「別肩書」、各行は会社・部署・役職（氏名は出さない）。  #}
+  {#   - コンタクト詳細：従来どおり「同じ人物の他のコンタクト」、氏名・会社。    #}
+  {# 行全体クリックで該当コンタクト詳細へ遷移する挙動は両モード共通で維持。      #}
   {# ============================================================ #}
   {% if other_active_contacts %}
     <section class="app-card" style="max-width:1100px; margin-top:var(--app-space-md);">
-      <div class="app-section__header"><h2>同じ人物の他のコンタクト</h2></div>
+      <div class="app-section__header"><h2>{% if additional_roles_mode %}別肩書{% else %}同じ人物の他のコンタクト{% endif %}</h2></div>
       <div class="app-card-list" style="display:block;">
         {% for other in other_active_contacts %}
           {% url 'contacts:contact_detail' pk=other.id as other_url %}
@@ -271,9 +275,17 @@
              class="app-list-card"
              style="display:flex; align-items:center; gap:var(--app-space-sm); text-decoration:none; color:inherit;">
             <div class="app-list-card__main" style="margin:0; flex:1 1 auto;">
-              <strong>{{ other.full_name|default:"(氏名なし)" }}</strong>
-              {% status_badge other %}
-              {% if other.organization %}<div class="app-muted">{{ other.organization }}</div>{% endif %}
+              {% if additional_roles_mode %}
+                {# 別肩書：会社・部署・役職のみ（氏名は同一人物なので出さない）。空フィールドは省略。 #}
+                {% if other.organization %}<strong>{{ other.organization }}</strong>{% endif %}
+                {% status_badge other %}
+                {% if other.department %}<div class="app-muted">{{ other.department }}</div>{% endif %}
+                {% if other.title %}<div class="app-muted">{{ other.title }}</div>{% endif %}
+              {% else %}
+                <strong>{{ other.full_name|default:"(氏名なし)" }}</strong>
+                {% status_badge other %}
+                {% if other.organization %}<div class="app-muted">{{ other.organization }}</div>{% endif %}
+              {% endif %}
             </div>
           </a>
         {% endfor %}

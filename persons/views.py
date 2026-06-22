@@ -251,6 +251,16 @@ class PersonDetailView(LoginRequiredMixin, PermissionRequiredMixin, DetailView):
         )
         context = build_contact_detail_context(contact, request.user)
 
+        # 別肩書セクション（パーソン単位データ＝共通部品には入れず人物詳細 View 側で組み立てる）。
+        # primary を除く active コンタクト（get_active_contacts は status='active' のみ＝primary を含まない）を
+        # created_at 昇順（追加順）で並べ、テンプレの「同じ人物の他のコンタクト」セクションを
+        # additional_roles_mode フラグで「別肩書」表示に切り替える。0 件なら既存の {% if %} で非表示。
+        # ※ コンタクト詳細側の other_active_contacts（共通部品の生成）は触らない＝挙動不変。
+        context["other_active_contacts"] = (
+            person.get_active_contacts().order_by("created_at")
+        )
+        context["additional_roles_mode"] = True
+
         # BackNavigator：人物詳細画面として自身を push_current（コンタクト詳細と同じ起点ハブ運用）。
         back = BackNavigator(request)
         back.push_current("人物詳細", ["page"])

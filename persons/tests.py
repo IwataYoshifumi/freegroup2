@@ -503,6 +503,57 @@ class PersonDetailViewTests(TestCase):
         self.assertIn("人物詳細", body)
         self.assertIn(contact.full_name, body)
 
+    def test_active_person_without_additional_roles_hides_section(self):
+        """別肩書（primary 以外の active）が無い人物詳細では「別肩書」セクション非表示。
+
+        ※ アクション帯の「別肩書を追加」ボタンは別物（スコープ外・存在し続ける）ので、
+          セクション見出し <h2>別肩書</h2> の有無で判定する。"""
+        person, _ = self._make_active_with_primary()
+        resp = self.client.get(self._url(person))
+        self.assertEqual(resp.status_code, 200)
+        body = resp.content.decode()
+        self.assertNotIn("<h2>別肩書</h2>", body)
+
+    def test_active_person_with_additional_roles_shows_section(self):
+        """別肩書を持つ人物詳細では「別肩書」セクションに会社・部署・役職が出て、
+        各行から該当コンタクト詳細へ飛べる（created_at 昇順）。氏名は別肩書行に出さない。"""
+        person, primary = self._make_active_with_primary()
+        role1 = Contact.objects.create(
+            person=person,
+            status=Contact.Status.ACTIVE,
+            full_name="役職テスト氏名1",
+            organization="別肩書カンパニーA",
+            department="営業部",
+            title="課長",
+        )
+        role2 = Contact.objects.create(
+            person=person,
+            status=Contact.Status.ACTIVE,
+            full_name="役職テスト氏名2",
+            organization="別肩書カンパニーB",
+            department="技術部",
+            title="主任",
+        )
+        resp = self.client.get(self._url(person))
+        self.assertEqual(resp.status_code, 200)
+        body = resp.content.decode()
+        # 見出し「別肩書」（セクション h2）と会社・部署・役職が出る。
+        self.assertIn("<h2>別肩書</h2>", body)
+        for value in ("別肩書カンパニーA", "営業部", "課長",
+                      "別肩書カンパニーB", "技術部", "主任"):
+            self.assertIn(value, body)
+        # 各別肩書行は該当コンタクト詳細へのリンクを持つ。
+        self.assertIn(
+            reverse("contacts:contact_detail", kwargs={"pk": role1.id}), body
+        )
+        self.assertIn(
+            reverse("contacts:contact_detail", kwargs={"pk": role2.id}), body
+        )
+        # 別肩書行に氏名は出さない（仕様）。
+        self.assertNotIn("役職テスト氏名1", body)
+        # created_at 昇順（role1 が role2 より前に出る）。
+        self.assertLess(body.index("別肩書カンパニーA"), body.index("別肩書カンパニーB"))
+
     def test_active_person_with_null_primary_renders_orphan_page(self):
         """active + primary_contact NULL → orphan テンプレート + Admin リンク。"""
         person = Person.objects.create()
