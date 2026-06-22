@@ -213,7 +213,7 @@
                 </div>
                 {# 操作・遷移ボタンは左寄せで横並び。ユーザ詳細は user_detail 権限保持者のみ（出口で 403 にしない）。 #}
                 <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: var(--app-space-sm);">
-                  <a href="{% append_back_url confirm_url back %}" class="app-btn app-btn--warning">紐付け解除</a>
+                  <a href="{% append_back_url confirm_url back %}" class="app-btn app-btn--warning">紐付けを解除</a>
                   {% if perms.accounts.retire_user %}
                     <a href="{% url 'accounts:user_detail' user_id=linked.id %}" class="app-btn app-btn--secondary">ユーザ詳細</a>
                   {% endif %}

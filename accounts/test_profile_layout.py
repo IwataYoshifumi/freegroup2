@@ -114,8 +114,8 @@ class ProfileLayoutRenderTests(TestCase):
         self.assertContains(resp, "テスト株式会社")
         self.assertContains(resp, "部長")
         self.assertContains(resp, "090-0000-0000")
-        # 解除リンク（連携を解除するツールチップ／aria-label）。
-        self.assertContains(resp, "連携を解除する")
+        # 解除リンク（「紐付けを解除」ツールチップ／aria-label）。
+        self.assertContains(resp, "紐付けを解除")
         # 紐づけ済みのときは候補アラートを出さない。
         self.assertNotContains(resp, "あなたの名刺データが見つかりました")
         self.assertNotContains(resp, "名刺をアップロード")

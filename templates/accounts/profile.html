@@ -110,8 +110,8 @@
               {% url 'accounts:link_user_person_confirm' person_id=user.person.id as unlink_confirm_url %}
               <a href="{% append_back_url unlink_confirm_url back %}"
                  class="app-btn--icon"
-                 title="連携を解除する"
-                 aria-label="連携を解除する"
+                 title="紐付けを解除"
+                 aria-label="紐付けを解除"
                  style="color: inherit; border: none; background: none; line-height: 1; text-decoration: none; font-size: 1.25rem;"><i class="bi bi-link-45deg"></i></a>
             </div>
             {% with c=user.person.primary_contact %}

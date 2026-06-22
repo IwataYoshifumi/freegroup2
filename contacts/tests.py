@@ -1454,8 +1454,8 @@ class ContactDetailSelfLinkButtonTests(TestCase):
         self.assertContains(resp, "紐付けユーザー")
         # 紐付け先ユーザー情報（ユーザー名）。
         self.assertContains(resp, "selflink_user")
-        # 解除は新ラベル「紐付け解除」＋ warning（黄）。旧ラベルは消える。
-        self.assertContains(resp, "紐付け解除")
+        # 解除は体言止めラベル「紐付けを解除」＋ warning（黄）。旧ラベルは消える。
+        self.assertContains(resp, "紐付けを解除")
         self.assertContains(resp, "app-btn--warning")
         self.assertNotContains(resp, "紐付け済み（解除）")
         # self-link ボタンは出ない。
@@ -1473,7 +1473,7 @@ class ContactDetailSelfLinkButtonTests(TestCase):
         self.assertContains(resp, "ユーザー「other_owner」と紐付け済み")
         self.assertContains(resp, "other_owner")
         # 操作系は一切出さない。
-        self.assertNotContains(resp, "紐付け解除")
+        self.assertNotContains(resp, "紐付けを解除")
         self.assertNotContains(resp, self.LABEL)
 
     def test_unlinked_card_section_hidden(self):
@@ -1484,7 +1484,7 @@ class ContactDetailSelfLinkButtonTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertNotContains(resp, "紐付けユーザー")
         self.assertNotContains(resp, "ユーザーに紐付けられていません")
-        self.assertNotContains(resp, "紐付け解除")
+        self.assertNotContains(resp, "紐付けを解除")
 
     def test_user_detail_button_hidden_without_user_admin_perm(self):
         # retire_user 権限が無ければ「ユーザ詳細」ボタンは出さない（user_detail で 403 にしないため）。

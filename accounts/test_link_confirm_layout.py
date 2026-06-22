@@ -111,7 +111,7 @@ class LinkConfirmLayoutRenderTests(TestCase):
         resp = self._get(user, person)
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "max-width: 960px")
-        self.assertContains(resp, "解除する")
+        self.assertContains(resp, "紐付けを解除")
         # 解除（可逆）はタイトル直下に warning（黄）アラートで出る。
         self.assertContains(resp, "app-alert app-alert--warning")
         self.assertContains(resp, "紐付けを解除しますか")
@@ -167,4 +167,4 @@ class LinkConfirmLayoutRenderTests(TestCase):
         self.assertContains(resp, "別のユーザー")
         # 操作不可ケースは下部に紐付け／解除ボタンを出さない（既存挙動の維持）。
         self.assertNotContains(resp, "紐付ける")
-        self.assertNotContains(resp, "解除する")
+        self.assertNotContains(resp, "紐付けを解除")
