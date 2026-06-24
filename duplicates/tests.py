@@ -466,6 +466,315 @@ class DuplicateCandidateGroupDetailViewTests(_DuplicatesTestBase):
         self.assertEqual(resp.context["pending_count"], 0)
         self.assertFalse(resp.context["has_pending"])
 
+    # ------------------------------------------------------------------
+    # v1.7 UI 改善（レビュー開始ボタン条件表示 / レビュー済み統合表 /
+    # レビュー結果日本語化 / group_id DEBUG 限定）
+    # ------------------------------------------------------------------
+
+    def _make_reviewed(
+        self, person_a, person_b, *, status, review_result,
+        group_id=None, **kw
+    ):
+        """レビュー済み DC（reviewed_at / review_result セット済み）を作る。"""
+        candidate = self._make_candidate(
+            person_a, person_b, group_id=group_id or self.group_id,
+            review_status=status, **kw,
+        )
+        candidate.review_result = review_result
+        candidate.reviewed_at = timezone.now()
+        candidate.save(update_fields=["review_result", "reviewed_at"])
+        return candidate
+
+    def _make_merged_scenario(
+        self, *, log_status, group_id=None, absorbed_name="吸収太郎",
+        recover_name=True,
+    ):
+        """マージ相当のデータ一式を作る（merged DC + PersonMergeLog + 吸収側の痕跡）。
+
+        recover_name=True：吸収側の元 primary Contact を survivor 配下へ移し
+          previous_person=吸収側 / previous_status='primary' を残す（氏名復元可）。
+        recover_name=False：previous_person を別人で上書き済みにし、吸収側の
+          氏名が辿れない状態（連鎖マージ相当、(氏名なし) フォールバック）を作る。
+        """
+        gid = group_id or self.group_id
+        surviving, _ = self._make_person_with_primary("生存花子")
+        merged, merged_primary = self._make_person_with_primary(absorbed_name)
+
+        merged_primary.person = surviving
+        merged_primary.previous_person = (
+            merged if recover_name else surviving
+        )
+        merged_primary.previous_status = Contact.Status.PRIMARY
+        merged_primary.status = Contact.Status.INACTIVE
+        merged_primary.save(update_fields=[
+            "person", "previous_person", "previous_status",
+            "status", "updated_at",
+        ])
+
+        merged.primary_contact = None
+        merged.status = Person.Status.MERGED
+        merged.merged_into = surviving
+        merged.save(update_fields=[
+            "primary_contact", "status", "merged_into", "updated_at",
+        ])
+
+        candidate = self._make_reviewed(
+            surviving, merged, group_id=gid,
+            status=DuplicateCandidate.ReviewStatus.MERGED,
+            review_result=["same_card"],
+        )
+        log = PersonMergeLog.objects.create(
+            surviving_person=surviving,
+            merged_person=merged,
+            duplicate_candidate=candidate,
+            status=log_status,
+            executed_at=timezone.now(),
+        )
+        return candidate, surviving, merged, log
+
+    def test_review_button_shown_when_pending(self):
+        """pending > 0 のとき「レビューを開始」ボタンを表示する。"""
+        self._make_candidate(
+            self.person_a, self.person_b, group_id=self.group_id,
+            review_status=DuplicateCandidate.ReviewStatus.PENDING,
+        )
+        resp = self.client.get(self._url())
+        review_url = reverse(
+            "duplicates:duplicate_group_review",
+            kwargs={"group_id": self.group_id},
+        )
+        self.assertContains(resp, "レビューを開始")
+        self.assertContains(resp, review_url)
+
+    def test_review_button_hidden_when_no_pending(self):
+        """pending 0（完了済み）のとき「レビューを開始」ボタンを表示しない。"""
+        self._make_reviewed(
+            self.person_a, self.person_b,
+            status=DuplicateCandidate.ReviewStatus.MERGED,
+            review_result=["same_card"],
+        )
+        resp = self.client.get(self._url())
+        self.assertNotContains(resp, "レビューを開始")
+
+    def test_reviewed_table_contains_both_statuses(self):
+        """統合表 reviewed_candidates に merged と different_person の両方が入る。"""
+        c_merged = self._make_reviewed(
+            self.person_a, self.person_b,
+            status=DuplicateCandidate.ReviewStatus.MERGED,
+            review_result=["same_card"],
+        )
+        c_diff = self._make_reviewed(
+            self.person_a, self.person_c,
+            status=DuplicateCandidate.ReviewStatus.DIFFERENT_PERSON,
+            review_result=["same_name"],
+        )
+        resp = self.client.get(self._url())
+        ids = {c.id for c in resp.context["reviewed_candidates"]}
+        self.assertIn(c_merged.id, ids)
+        self.assertIn(c_diff.id, ids)
+
+    def test_reviewed_table_excludes_pending_and_invalidated(self):
+        """統合表に pending / invalidated は含めない。"""
+        c_pending = self._make_candidate(
+            self.person_a, self.person_b, group_id=self.group_id,
+            review_status=DuplicateCandidate.ReviewStatus.PENDING,
+        )
+        c_inval = self._make_reviewed(
+            self.person_a, self.person_c,
+            status=DuplicateCandidate.ReviewStatus.INVALIDATED,
+            review_result=[],
+        )
+        c_merged = self._make_reviewed(
+            self.person_b, self.person_c,
+            status=DuplicateCandidate.ReviewStatus.MERGED,
+            review_result=["same_card"],
+        )
+        resp = self.client.get(self._url())
+        ids = {c.id for c in resp.context["reviewed_candidates"]}
+        self.assertEqual(ids, {c_merged.id})
+        self.assertNotIn(c_pending.id, ids)
+        self.assertNotIn(c_inval.id, ids)
+
+    def test_reviewed_table_shows_status_score_rank(self):
+        """統合表にレビューステータス（日本語）・score・rank バッジが出る。"""
+        self._make_reviewed(
+            self.person_a, self.person_b,
+            status=DuplicateCandidate.ReviewStatus.MERGED,
+            review_result=["same_card"],
+            score=137,
+            rank=DuplicateCandidate.Rank.EXACT_MATCH,
+        )
+        resp = self.client.get(self._url())
+        self.assertContains(resp, "マージ済み")       # get_review_status_display
+        self.assertContains(resp, "137")               # score
+        self.assertContains(resp, "完全一致")          # rank バッジ
+        self.assertContains(resp, "レビューステータス")  # 列見出し
+
+    def test_review_result_rendered_in_japanese(self):
+        """レビュー結果が日本語ラベルで出る（英字 value が生で出ない）。"""
+        self._make_reviewed(
+            self.person_a, self.person_b,
+            status=DuplicateCandidate.ReviewStatus.MERGED,
+            review_result=["same_card"],
+        )
+        self._make_reviewed(
+            self.person_a, self.person_c,
+            status=DuplicateCandidate.ReviewStatus.DIFFERENT_PERSON,
+            review_result=["same_name"],
+        )
+        resp = self.client.get(self._url())
+        self.assertContains(resp, "同一名刺")      # same_card のラベル
+        self.assertContains(resp, "同姓同名の別人")  # same_name のラベル
+        self.assertNotContains(resp, "same_card")
+        self.assertNotContains(resp, "same_name")
+
+    def test_group_id_hidden_when_not_debug(self):
+        """通常レンダリング（DEBUG=False）では group_id 生 UUID を表示しない。"""
+        self._make_reviewed(
+            self.person_a, self.person_b,
+            status=DuplicateCandidate.ReviewStatus.MERGED,
+            review_result=["same_card"],
+        )
+        with self.settings(DEBUG=False):
+            resp = self.client.get(self._url())
+        self.assertNotContains(resp, str(self.group_id))
+        self.assertNotContains(resp, "bi-bug-fill")
+        self.assertNotContains(resp, "デバッグ表示")
+
+    def test_group_id_shown_when_debug(self):
+        """DEBUG=True かつ INTERNAL_IPS 一致時は group_id 生 UUID を表示する。"""
+        self._make_reviewed(
+            self.person_a, self.person_b,
+            status=DuplicateCandidate.ReviewStatus.MERGED,
+            review_result=["same_card"],
+        )
+        with self.settings(DEBUG=True, INTERNAL_IPS=["127.0.0.1"]):
+            resp = self.client.get(self._url(), REMOTE_ADDR="127.0.0.1")
+        self.assertContains(resp, str(self.group_id))
+        self.assertContains(resp, "bi-bug-fill")
+        self.assertContains(resp, "デバッグ表示")
+
+    def test_summary_heading_removed(self):
+        """集計セクションの「集計」見出しは撤去され、1 行要約は残る。"""
+        self._make_reviewed(
+            self.person_a, self.person_b,
+            status=DuplicateCandidate.ReviewStatus.MERGED,
+            review_result=["same_card"],
+        )
+        resp = self.client.get(self._url())
+        self.assertNotContains(resp, "集計")
+        self.assertContains(resp, "レビュー済み")
+
+    # ------------------------------------------------------------------
+    # ① 集計 1 行要約 / ② Person 氏名復元 / ③ 復元可否列
+    # ------------------------------------------------------------------
+
+    def test_summary_one_line_counts(self):
+        """集計が全件・未レビュー・レビュー済み内訳を 1 行で持つ。"""
+        self._make_candidate(
+            self.person_a, self.person_b, group_id=self.group_id,
+            review_status=DuplicateCandidate.ReviewStatus.PENDING,
+        )
+        self._make_reviewed(
+            self.person_a, self.person_c,
+            status=DuplicateCandidate.ReviewStatus.MERGED,
+            review_result=["same_card"],
+        )
+        resp = self.client.get(self._url())
+        self.assertEqual(resp.context["total_count"], 2)
+        self.assertEqual(resp.context["reviewed_count"], 1)
+        self.assertEqual(resp.context["pending_count"], 1)
+        self.assertContains(resp, "全")
+        self.assertContains(resp, "レビュー済み")
+        self.assertContains(resp, "マージ")
+        self.assertContains(resp, "別人")
+
+    def test_person_name_recovered_for_merged_side(self):
+        """merged 行で吸収側の氏名が previous_person 経由で復元表示される。"""
+        self._make_merged_scenario(
+            log_status=PersonMergeLog.Status.UNDOABLE,
+            absorbed_name="復元できる太郎",
+            recover_name=True,
+        )
+        resp = self.client.get(self._url())
+        self.assertContains(resp, "復元できる太郎")
+        self.assertNotContains(resp, "(氏名なし)")
+
+    def test_person_name_falls_back_when_not_recoverable(self):
+        """previous_person が辿れない（連鎖マージ相当）なら (氏名なし)。"""
+        self._make_merged_scenario(
+            log_status=PersonMergeLog.Status.LOCKED,
+            absorbed_name="辿れない次郎",
+            recover_name=False,
+        )
+        resp = self.client.get(self._url())
+        self.assertNotContains(resp, "辿れない次郎")
+        self.assertContains(resp, "(氏名なし)")
+
+    def test_restore_status_badges(self):
+        """復元可否列が PersonMergeLog.status に応じたバッジで出る。"""
+        cases = [
+            (PersonMergeLog.Status.UNDOABLE, "復元可能"),
+            (PersonMergeLog.Status.UNDONE, "復元済み"),
+            (PersonMergeLog.Status.LOCKED, "復元不可"),
+        ]
+        for log_status, label in cases:
+            with self.subTest(log_status=log_status):
+                gid = uuid.uuid4()
+                self._make_merged_scenario(log_status=log_status, group_id=gid)
+                resp = self.client.get(self._url(group_id=gid))
+                self.assertContains(resp, label)
+
+    def test_restore_status_dash_for_different_person(self):
+        """別人確定の行は MergeLog が無く復元可否が「—」。"""
+        self._make_reviewed(
+            self.person_a, self.person_b,
+            status=DuplicateCandidate.ReviewStatus.DIFFERENT_PERSON,
+            review_result=["same_name"],
+        )
+        resp = self.client.get(self._url())
+        self.assertContains(resp, "—")
+        self.assertNotContains(resp, "復元可能")
+        self.assertNotContains(resp, "復元済み")
+        self.assertNotContains(resp, "復元不可")
+
+    def test_restore_status_dash_when_no_merge_log(self):
+        """merged だが MergeLog が無い行も復元可否は「—」。"""
+        self._make_reviewed(
+            self.person_a, self.person_b,
+            status=DuplicateCandidate.ReviewStatus.MERGED,
+            review_result=["same_card"],
+        )
+        resp = self.client.get(self._url())
+        self.assertContains(resp, "—")
+
+    def test_no_n_plus_one_on_reviewed_rows(self):
+        """レビュー済み行数を増やしてもクエリ本数が増えない（N+1 回避）。"""
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        gid1 = uuid.uuid4()
+        self._make_merged_scenario(
+            log_status=PersonMergeLog.Status.UNDOABLE, group_id=gid1
+        )
+        # ウォームアップ（ContentType / 権限などプロセスキャッシュを温める）。
+        self.client.get(self._url(group_id=gid1))
+        with CaptureQueriesContext(connection) as ctx1:
+            self.client.get(self._url(group_id=gid1))
+
+        gid3 = uuid.uuid4()
+        for _ in range(3):
+            self._make_merged_scenario(
+                log_status=PersonMergeLog.Status.UNDOABLE, group_id=gid3
+            )
+        with CaptureQueriesContext(connection) as ctx3:
+            self.client.get(self._url(group_id=gid3))
+
+        self.assertEqual(
+            len(ctx1.captured_queries), len(ctx3.captured_queries),
+            "レビュー済み行数の増加でクエリ本数が増えている（N+1 の疑い）",
+        )
+
 
 class _MergeFormTestBase(_DuplicatesTestBase):
     """MergeForm 系テスト共通：surviving / merged の Person + Contact + DC を 1 セット用意。"""

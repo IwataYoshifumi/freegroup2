@@ -33,7 +33,7 @@ from django.views.generic import ListView, View
 
 from back_navigator.back_navigator import BackNavigator
 from config.constants import DifferentPersonReason, DuplicateMergeReason
-from contacts.models import ContactSns
+from contacts.models import Contact, ContactSns
 from contacts.services.normalization import format_postal_by_country
 
 from .forms import MergeForm, MergeUndoForm
@@ -405,23 +405,35 @@ class DuplicateCandidateGroupDetailView(
     def get(self, request, group_id):
         candidates = DuplicateCandidate.objects.filter(
             group_id=group_id
-        ).select_related("person_a", "person_b")
+        ).select_related(
+            "person_a__primary_contact",
+            "person_b__primary_contact",
+        )
         if not candidates.exists():
             raise Http404("Duplicate candidate group not found.")
 
         pending_candidates = candidates.filter(
             review_status=DuplicateCandidate.ReviewStatus.PENDING
         )
-        merged_candidates = candidates.filter(
-            review_status=DuplicateCandidate.ReviewStatus.MERGED
+        # レビュー済み（merged + different_person）を 1 表に統合表示（v1.7 UI 改善）。
+        # invalidated は従来どおり集計・表示の対象外。並びは直近レビュー順。
+        reviewed_candidates = list(
+            candidates.filter(
+                review_status__in=[
+                    DuplicateCandidate.ReviewStatus.MERGED,
+                    DuplicateCandidate.ReviewStatus.DIFFERENT_PERSON,
+                ]
+            ).order_by("-reviewed_at")
         )
-        different_person_candidates = candidates.filter(
-            review_status=DuplicateCandidate.ReviewStatus.DIFFERENT_PERSON
-        )
+        self._enrich_reviewed_candidates(reviewed_candidates)
 
         pending_count = pending_candidates.count()
-        merged_count = merged_candidates.count()
-        different_person_count = different_person_candidates.count()
+        merged_count = candidates.filter(
+            review_status=DuplicateCandidate.ReviewStatus.MERGED
+        ).count()
+        different_person_count = candidates.filter(
+            review_status=DuplicateCandidate.ReviewStatus.DIFFERENT_PERSON
+        ).count()
 
         back = BackNavigator(request)
         context = {
@@ -429,15 +441,80 @@ class DuplicateCandidateGroupDetailView(
             "pending_count": pending_count,
             "merged_count": merged_count,
             "different_person_count": different_person_count,
+            "reviewed_count": merged_count + different_person_count,
+            "total_count": (
+                pending_count + merged_count + different_person_count
+            ),
             "has_pending": pending_count > 0,
             "pending_candidates": pending_candidates,
-            "merged_candidates": merged_candidates,
-            "different_person_candidates": different_person_candidates,
+            "reviewed_candidates": reviewed_candidates,
             "back": back,
             "active_app": "duplicates",
             "active_menu": "duplicates:duplicate_group_list",
         }
         return render(request, self.template_name, context)
+
+    @staticmethod
+    def _resolve_display_name(person, name_by_prev_person):
+        """Person の表示氏名を解決する（吸収側は previous_person 経由で復元）。
+
+        [性質] 純関数（引数の dict / 既ロード FK を読むだけ、DB 操作なし）
+        [入力] person: Person / name_by_prev_person: dict[person_id -> full_name]
+        [出力] str（primary_contact があればその full_name、無ければ復元辞書の値、
+               いずれも無ければ空文字 → テンプレ側で「(氏名なし)」にフォールバック）
+        """
+        primary = person.primary_contact
+        if primary is not None:
+            return primary.full_name
+        return name_by_prev_person.get(person.id, "")
+
+    def _enrich_reviewed_candidates(self, reviewed_candidates):
+        """レビュー済み候補に復元可否・表示氏名を付与する（②③、N+1 回避）。
+
+        [性質] 副作用あり（DB 読み取り 2 本 + 各 candidate へ属性付与）
+        [入力] reviewed_candidates: list[DuplicateCandidate]
+        [出力] None（各 candidate に restore_status / person_a_display_name /
+               person_b_display_name 属性を付与する）
+
+        行数に依らず追加クエリは 2 本に固定する：
+          a. duplicate_candidate で PersonMergeLog をまとめ引き（③ status / ② 吸収側）
+          b. 吸収側 Person の元 primary Contact をまとめ引き（② マージ前氏名）
+        """
+        if not reviewed_candidates:
+            return
+
+        candidate_ids = [c.id for c in reviewed_candidates]
+
+        # a. candidate -> PersonMergeLog（1 candidate につき 1 件想定、先勝ち）。
+        merge_log_by_candidate = {}
+        for ml in PersonMergeLog.objects.filter(
+            duplicate_candidate_id__in=candidate_ids
+        ).select_related("merged_person"):
+            merge_log_by_candidate.setdefault(ml.duplicate_candidate_id, ml)
+
+        # b. 吸収側 Person の元 primary Contact の full_name をまとめ引き。
+        merged_person_ids = [
+            ml.merged_person_id for ml in merge_log_by_candidate.values()
+        ]
+        name_by_prev_person = {}
+        if merged_person_ids:
+            for c in Contact.objects.filter(
+                previous_person_id__in=merged_person_ids,
+                previous_status=Contact.Status.PRIMARY,
+            ):
+                name_by_prev_person.setdefault(
+                    c.previous_person_id, c.full_name
+                )
+
+        for candidate in reviewed_candidates:
+            ml = merge_log_by_candidate.get(candidate.id)
+            candidate.restore_status = ml.status if ml is not None else ""
+            candidate.person_a_display_name = self._resolve_display_name(
+                candidate.person_a, name_by_prev_person
+            )
+            candidate.person_b_display_name = self._resolve_display_name(
+                candidate.person_b, name_by_prev_person
+            )
 
 
 class DuplicateCandidateGroupUpdateView(
