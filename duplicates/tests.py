@@ -20,6 +20,10 @@ from contacts.models import Contact, ContactFieldConfidence, ContactSns
 from actionlogs.models import ActionLog
 from duplicates.forms import MergeForm, MergeUndoForm
 from duplicates.models import DuplicateCandidate, PersonMergeLog
+from duplicates.services.duplicate_score import (
+    build_high_fields_map,
+    get_matched_fields,
+)
 from persons.models import Person
 
 
@@ -372,6 +376,185 @@ class DuplicateCandidateGroupListViewTests(_DuplicatesTestBase):
         detail_url = reverse("duplicates:duplicate_group_detail", kwargs={"group_id": g_done})
         self.assertContains(resp, review_url)
         self.assertContains(resp, detail_url)
+
+    # ------------------------------------------------------------------
+    # v1.7：代表ペア列 → 主役 Person 名 + rank + 一致フィールドバッジ
+    # ------------------------------------------------------------------
+
+    _ALL_RANKS_QUERY = {
+        "searched": "1",
+        "rank": ["exact_match", "possible_high", "possible_mid", "possible_low"],
+    }
+
+    def test_lead_name_active_side_pending(self):
+        """pending（両 active）で主役名が出て、ペア表記「↔」と「(氏名なし)」が消える。"""
+        p1, _ = self._make_person_with_primary("一致太郎")
+        p2, _ = self._make_person_with_primary("一致太郎")
+        gid = uuid.uuid4()
+        self._make_candidate(
+            p1, p2, group_id=gid,
+            review_status=DuplicateCandidate.ReviewStatus.PENDING,
+        )
+        resp = self.client.get(self.url)  # 既定 = pending のみ
+        self.assertContains(resp, "一致太郎")
+        self.assertNotContains(resp, "(氏名なし)")
+        self.assertNotContains(resp, "↔")
+
+    def test_lead_name_surviving_side_when_completed(self):
+        """完了（merged）で active=surviving 側の名前が出て「(氏名なし)」が出ない。"""
+        surviving, _ = self._make_person_with_primary("生存花子")
+        merged, merged_pc = self._make_person_with_primary("吸収次郎")
+        merged_pc.person = surviving
+        merged_pc.previous_person = merged
+        merged_pc.previous_status = Contact.Status.PRIMARY
+        merged_pc.status = Contact.Status.INACTIVE
+        merged_pc.save(update_fields=[
+            "person", "previous_person", "previous_status",
+            "status", "updated_at",
+        ])
+        merged.primary_contact = None
+        merged.status = Person.Status.MERGED
+        merged.merged_into = surviving
+        merged.save(update_fields=[
+            "primary_contact", "status", "merged_into", "updated_at",
+        ])
+        gid = uuid.uuid4()
+        self._make_candidate(
+            surviving, merged, group_id=gid,
+            review_status=DuplicateCandidate.ReviewStatus.MERGED,
+        )
+        resp = self.client.get(
+            self.url, {**self._ALL_RANKS_QUERY, "progress": ["completed"]}
+        )
+        self.assertContains(resp, "生存花子")
+        self.assertNotContains(resp, "(氏名なし)")
+
+    def test_matched_field_badges_japanese(self):
+        """一致フィールドが日本語バッジ（氏名・会社・部署）で出る。"""
+        p1, c1 = self._make_person_with_primary("同名")
+        p2, c2 = self._make_person_with_primary("同名")
+        for c in (c1, c2):
+            c.organization = "テスト商事"
+            c.department = "営業部"
+            c.save(update_fields=["organization", "department", "updated_at"])
+        gid = uuid.uuid4()
+        self._make_candidate(
+            p1, p2, group_id=gid,
+            review_status=DuplicateCandidate.ReviewStatus.PENDING,
+        )
+        resp = self.client.get(self.url)
+        self.assertContains(resp, "氏名")
+        self.assertContains(resp, "会社")
+        self.assertContains(resp, "部署")
+
+    def test_rank_uses_rep_candidate_rank(self):
+        """rank 列は group 集計値ではなく rep_candidate.rank で表示される。"""
+        p1, _ = self._make_person_with_primary("r1")
+        p2, _ = self._make_person_with_primary("r2")
+        gid = uuid.uuid4()
+        self._make_candidate(
+            p1, p2, group_id=gid,
+            rank=DuplicateCandidate.Rank.POSSIBLE_LOW,
+            review_status=DuplicateCandidate.ReviewStatus.PENDING,
+        )
+        resp = self.client.get(self.url)
+        g = resp.context["enriched_groups"][0]
+        self.assertEqual(g["rep_rank"], g["rep_candidate"].rank)
+        self.assertEqual(g["rep_rank"], DuplicateCandidate.Rank.POSSIBLE_LOW)
+        self.assertContains(resp, "低確信度")
+
+    def test_no_n_plus_one_on_group_rows(self):
+        """グループ行数を増やしてもクエリ本数が増えない（N+1 回避）。"""
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        def make_pending_group():
+            a, _ = self._make_person_with_primary("同名候補")
+            b, _ = self._make_person_with_primary("同名候補")
+            self._make_candidate(
+                a, b, group_id=uuid.uuid4(),
+                review_status=DuplicateCandidate.ReviewStatus.PENDING,
+            )
+
+        make_pending_group()
+        self.client.get(self.url)  # ウォームアップ
+        with CaptureQueriesContext(connection) as ctx1:
+            self.client.get(self.url)
+
+        for _ in range(3):
+            make_pending_group()
+        with CaptureQueriesContext(connection) as ctx2:
+            self.client.get(self.url)
+
+        self.assertEqual(
+            len(ctx1.captured_queries), len(ctx2.captured_queries),
+            "グループ行数の増加でクエリ本数が増えている（N+1 の疑い）",
+        )
+
+
+class GetMatchedFieldsTests(_DuplicatesTestBase):
+    """get_matched_fields / build_high_fields_map の単体テスト（v1.7）。"""
+
+    def _make_contact(self, **fields):
+        person = Person.objects.create()
+        contact = Contact.objects.create(
+            person=person, status=Contact.Status.PRIMARY, **fields
+        )
+        person.primary_contact = contact
+        person.save(update_fields=["primary_contact", "updated_at"])
+        return contact
+
+    def test_matched_fields_pseudo_high(self):
+        """confidence レコード無し（疑似 high）の一致フィールドを返す。空値は除外。"""
+        ca = self._make_contact(full_name="山田太郎", organization="ABC社")
+        cb = self._make_contact(full_name="山田太郎", organization="ABC社")
+        hi = build_high_fields_map([ca.id, cb.id])
+        matched = get_matched_fields(ca, cb, hi[ca.id], hi[cb.id])
+        self.assertIn("full_name", matched)
+        self.assertIn("organization", matched)
+        self.assertNotIn("email", matched)  # 両側空 → 不一致扱い
+
+    def test_branch_match_included_even_with_zero_score(self):
+        """配点 0 の branch も、実際に一致していればリストに含む。"""
+        ca = self._make_contact(full_name="A", branch="名古屋支店")
+        cb = self._make_contact(full_name="B", branch="名古屋支店")
+        hi = build_high_fields_map([ca.id, cb.id])
+        matched = get_matched_fields(ca, cb, hi[ca.id], hi[cb.id])
+        self.assertIn("branch", matched)
+        self.assertNotIn("full_name", matched)  # 値が違う
+
+    def test_non_high_field_excluded(self):
+        """未確認 low（high でない）フィールドは一致していても含めない。"""
+        ca = self._make_contact(full_name="同名", organization="同社")
+        cb = self._make_contact(full_name="同名", organization="同社")
+        ContactFieldConfidence.objects.create(
+            contact=ca, field_name="organization", confidence="low"
+        )
+        hi = build_high_fields_map([ca.id, cb.id])
+        matched = get_matched_fields(ca, cb, hi[ca.id], hi[cb.id])
+        self.assertIn("full_name", matched)
+        self.assertNotIn("organization", matched)
+
+    def test_build_high_fields_map_rules(self):
+        """high 判定：未確認 low=除外 / 確認済み=high / レコード無し=疑似 high。"""
+        c = self._make_contact(full_name="x", title="部長", department="営業")
+        ContactFieldConfidence.objects.create(
+            contact=c, field_name="title", confidence="low"
+        )
+        cfc = ContactFieldConfidence.objects.create(
+            contact=c, field_name="department", confidence="low"
+        )
+        cfc.confirmed_at = timezone.now()
+        cfc.save(update_fields=["confirmed_at"])
+        high = build_high_fields_map([c.id])[c.id]
+        self.assertNotIn("title", high)      # 未確認 low
+        self.assertIn("department", high)    # 確認済み
+        self.assertIn("full_name", high)     # レコード無し=疑似 high
+        self.assertIn("address", high)       # レコード無し=疑似 high
+
+    def test_build_high_fields_map_empty(self):
+        """空入力では空 dict（クエリも発行されないことは別 N+1 テストで担保）。"""
+        self.assertEqual(build_high_fields_map([]), {})
 
 
 class DuplicateCandidateGroupDetailViewTests(_DuplicatesTestBase):

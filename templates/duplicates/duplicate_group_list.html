@@ -240,7 +240,7 @@
           <tr>
             <th class="app-table__col--action">操作</th>
             <th>rank</th>
-            <th>代表 Person ペア</th>
+            <th>主役 Person / 一致フィールド</th>
             <th>ペア件数</th>
             <th>進捗</th>
           </tr>
@@ -259,23 +259,29 @@
                 {% endif %}
               </td>
               <td>
-                {% if group.rank == "exact_match" %}
+                {% if group.rep_rank == "exact_match" %}
                   <span class="app-status-badge app-status-badge--error">完全一致</span>
-                {% elif group.rank == "possible_high" %}
+                {% elif group.rep_rank == "possible_high" %}
                   <span class="app-status-badge app-status-badge--warning">高確信度</span>
-                {% elif group.rank == "possible_mid" %}
+                {% elif group.rep_rank == "possible_mid" %}
                   <span class="app-status-badge app-status-badge--info">中確信度</span>
-                {% elif group.rank == "possible_low" %}
+                {% elif group.rep_rank == "possible_low" %}
                   <span class="app-status-badge app-status-badge--muted">低確信度</span>
                 {% else %}
-                  {{ group.rank }}
+                  {{ group.rep_rank }}
                 {% endif %}
               </td>
               <td>
                 {% if group.rep_candidate %}
-                  {{ group.rep_candidate.person_a.primary_contact.full_name|default:"(氏名なし)" }}
-                  ↔
-                  {{ group.rep_candidate.person_b.primary_contact.full_name|default:"(氏名なし)" }}
+                  {% url 'persons:person_detail' pk=group.lead_person_id as lead_url %}
+                  <a href="{% append_back_url lead_url back %}">{{ group.lead_name|default:"(氏名なし)" }}</a>
+                  {% if group.matched_field_labels %}
+                    <div style="margin-top:4px; display:flex; flex-wrap:wrap; gap:4px;">
+                      {% for label in group.matched_field_labels %}
+                        <span class="app-status-badge app-status-badge--muted">{{ label }}</span>
+                      {% endfor %}
+                    </div>
+                  {% endif %}
                 {% else %}
                   -
                 {% endif %}
@@ -307,23 +313,28 @@
           <div class="app-list-card__main">
             <strong>
               {% if group.rep_candidate %}
-                {{ group.rep_candidate.person_a.primary_contact.full_name|default:"(氏名なし)" }}
-                ↔
-                {{ group.rep_candidate.person_b.primary_contact.full_name|default:"(氏名なし)" }}
+                {{ group.lead_name|default:"(氏名なし)" }}
               {% else %}
                 (group {{ group.group_id }})
               {% endif %}
             </strong>
-            {% if group.rank == "exact_match" %}
+            {% if group.rep_rank == "exact_match" %}
               <span class="app-status-badge app-status-badge--error">完全一致</span>
-            {% elif group.rank == "possible_high" %}
+            {% elif group.rep_rank == "possible_high" %}
               <span class="app-status-badge app-status-badge--warning">高確信度</span>
-            {% elif group.rank == "possible_mid" %}
+            {% elif group.rep_rank == "possible_mid" %}
               <span class="app-status-badge app-status-badge--info">中確信度</span>
-            {% elif group.rank == "possible_low" %}
+            {% elif group.rep_rank == "possible_low" %}
               <span class="app-status-badge app-status-badge--muted">低確信度</span>
             {% endif %}
           </div>
+          {% if group.matched_field_labels %}
+            <div style="margin-top:4px; display:flex; flex-wrap:wrap; gap:4px;">
+              {% for label in group.matched_field_labels %}
+                <span class="app-status-badge app-status-badge--muted">{{ label }}</span>
+              {% endfor %}
+            </div>
+          {% endif %}
           <div class="app-list-card__sub">
             <span>ペア件数 {{ group.pair_count }}</span>
             <span>

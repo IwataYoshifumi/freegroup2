@@ -36,13 +36,32 @@ from config.constants import DifferentPersonReason, DuplicateMergeReason
 from contacts.models import Contact, ContactSns
 from contacts.services.normalization import format_postal_by_country
 
+from persons.models import Person
+
 from .forms import MergeForm, MergeUndoForm
 from .models import DuplicateCandidate, PersonMergeLog
+from .services.duplicate_score import build_high_fields_map, get_matched_fields
 from .services.merge_executor import (
     Execute_Merge_Only,
     Execute_Merge_Undo,
     Mark_as_Different_Person,
 )
+
+
+# 重複候補グループ一覧の「一致フィールド」バッジ用 日本語ラベル
+# （DUPLICATE_CHECK_FIELDS の 9 フィールド。詳細画面の FIELD_LABEL_JA とは別系統で、
+# branch は「支店」/ address は「住所」と一覧バッジ向けの簡潔表記にする）。
+MATCHED_FIELD_LABEL_JA = {
+    "full_name": "氏名",
+    "organization": "会社",
+    "department": "部署",
+    "title": "役職",
+    "branch": "支店",
+    "email": "メール",
+    "personal_phone": "電話",
+    "mobile_phone": "携帯",
+    "address": "住所",
+}
 
 
 # 17 番マージレビュー画面の Contact フィールド表示用ラベル（仕様書 §11.5.5、D-4d）。
@@ -333,6 +352,24 @@ class DuplicateCandidateGroupListView(
         order.append("group_id")
         return groups.order_by(*order)
 
+    @staticmethod
+    def _select_lead_person(rep):
+        """代表 candidate から主役 Person（名前を出す側）を選ぶ。
+
+        [性質] 純関数（rep の person_a / person_b の status を読むだけ）
+        [入力] rep: DuplicateCandidate（person_a / person_b を select_related 済み）
+        [出力] Person
+
+        status='active' の側を主役にする（吸収された merged 側は primary_contact が
+        None で「(氏名なし)」になるため、active 側を出して回避する）。両方 active なら
+        person_a。どちらも active でない（稀）場合も person_a にフォールバック。
+        """
+        if rep.person_a.status == Person.Status.ACTIVE:
+            return rep.person_a
+        if rep.person_b.status == Person.Status.ACTIVE:
+            return rep.person_b
+        return rep.person_a
+
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
 
@@ -353,10 +390,48 @@ class DuplicateCandidateGroupListView(
             if c.group_id not in rep_by_group:
                 rep_by_group[c.group_id] = c
 
+        # 代表ペアの主コンタクトの confidence をバルク取得（N+1 回避・行数非依存の 1 クエリ）。
+        primary_ids = set()
+        for rep in rep_by_group.values():
+            for person in (rep.person_a, rep.person_b):
+                pc = person.primary_contact
+                if pc is not None:
+                    primary_ids.add(pc.id)
+        high_map = build_high_fields_map(primary_ids)
+
         enriched = []
         for g in object_list:
             rep = rep_by_group.get(g["group_id"])
-            enriched.append({**dict(g), "rep_candidate": rep})
+            lead_name = ""
+            lead_person_id = None
+            matched_field_labels = []
+            rep_rank = None
+            if rep is not None:
+                rep_rank = rep.rank
+                lead = self._select_lead_person(rep)
+                lead_person_id = lead.id
+                lead_pc = lead.primary_contact
+                lead_name = lead_pc.full_name if lead_pc is not None else ""
+
+                pc_a = rep.person_a.primary_contact
+                pc_b = rep.person_b.primary_contact
+                if pc_a is not None and pc_b is not None:
+                    matched = get_matched_fields(
+                        pc_a, pc_b,
+                        high_map.get(pc_a.id, set()),
+                        high_map.get(pc_b.id, set()),
+                    )
+                    matched_field_labels = [
+                        MATCHED_FIELD_LABEL_JA[f] for f in matched
+                    ]
+            enriched.append({
+                **dict(g),
+                "rep_candidate": rep,
+                "lead_name": lead_name,
+                "lead_person_id": lead_person_id,
+                "matched_field_labels": matched_field_labels,
+                "rep_rank": rep_rank,
+            })
         context["enriched_groups"] = enriched
 
         back = BackNavigator(self.request)
