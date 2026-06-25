@@ -1060,6 +1060,47 @@ class ContactDetailViewTests(TestCase):
         self.assertIn(self.contact_a, ctx_others)  # primary が含まれる
         self.assertNotIn(active, ctx_others)  # 自分は含まれない
 
+    def test_other_contacts_table_detail_button_no_row_link(self):
+        """v1.7：他コンタクトは表形式。行全体クリックは無く「詳細」ボタン経由のみ。
+
+        thead は（操作｜状態｜氏名｜会社｜メール｜携帯）。詳細ボタン
+        （app-btn--outline-secondary）が出て遷移先が /contacts/<uuid>/（back 付き）。
+        カード全体を包む <a class="app-list-card"> は無い。氏名・会社・メール・携帯が出る。
+        内容自動調整（app-table--nowrap・状態列固定幅は無し）。
+        """
+        other = Contact.objects.create(
+            person=self.person_a,
+            status=Contact.Status.ACTIVE,
+            full_name="他コンタクト氏名",
+            organization="他コンタクト会社",
+            email="other-c@example.com",
+            mobile_phone="080-3333-4444",
+        )
+        resp = self.client.get(self._url())
+        body = resp.content.decode()
+        # テーブル化（app-table）され、行全体クリック <a class="app-list-card"> は無い。
+        self.assertIn("app-table", body)
+        self.assertNotRegex(body, r'<a[^>]*class="app-list-card"')
+        # thead は（操作｜状態｜氏名｜会社｜メール｜携帯）。
+        for col in ("操作", "状態", "氏名", "会社", "メール", "携帯"):
+            self.assertIn(col, body)
+        # 内容自動調整：当テーブルは素の app-table（nowrap なし）、状態列固定幅も無し。
+        self.assertIn('<table class="app-table">', body)
+        self.assertNotIn("width:48px", body)
+        # 詳細ボタン（outline-secondary）が出る。
+        self.assertRegex(
+            body,
+            r'class="app-btn app-btn--outline-secondary app-btn--sm"[^>]*>\s*詳細\s*</a>',
+        )
+        # 遷移先は該当コンタクト詳細（back 付きクエリ）。
+        self.assertIn(
+            reverse("contacts:contact_detail", kwargs={"pk": other.id}), body
+        )
+        # 他コンタクトモードの項目（氏名・会社・メール・携帯）が出る。
+        for value in ("他コンタクト氏名", "他コンタクト会社",
+                      "other-c@example.com", "080-3333-4444"):
+            self.assertIn(value, body)
+
     def test_n8_pending_duplicates(self):
         """N8: 重複候補がある → pending_duplicates に含まれる。"""
         person_b = Person.objects.create()

@@ -32,15 +32,8 @@
   {# ============================================================ #}
   <div style="max-width:1100px; display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:var(--app-space-sm);">
     {% if additional_roles_mode %}
-      {% url 'persons:person_add_additional_role' contact.person_id as add_role_url %}
-      <a href="{% append_back_url add_role_url back %}"
-         class="app-btn app-btn--primary">別肩書を追加</a>
-      {% if contact_list_url %}
-        {# contact_list_url は View 側で back 適用済み＋status 多値付与済み。append_back_url で #}
-        {# 二重適用すると多値 status が先頭1個に潰れるため、ここではそのまま href に出す。 #}
-        <a href="{{ contact_list_url }}"
-           class="app-btn app-btn--secondary">コンタクト一覧</a>
-      {% endif %}
+      {# 「別肩書を追加」「コンタクト一覧」導線は別肩書セクションの見出し横へ移設 #}
+      {# （別肩書セクションの内容＝この人物のコンタクト群と文脈が近いため）。 #}
       {# 本人紐付け（self-link）：email 一致 ∧ active ∧ 未紐付けのときだけ黄（可逆な注意操作・HIG 3.6）。 #}
       {# 紐付けは Person↔User の操作なので人物詳細 band にのみ出す（コンタクト詳細には出さない）。 #}
       {# 未紐付けカード内セクションの常時テキスト＋旧ボタンは撤去のまま（復活させない）。 #}
@@ -277,31 +270,78 @@
   {#   - コンタクト詳細：従来どおり「同じ人物の他のコンタクト」、氏名・会社。    #}
   {# 行全体クリックで該当コンタクト詳細へ遷移する挙動は両モード共通で維持。      #}
   {# ============================================================ #}
-  {% if other_active_contacts %}
+  {# 人物詳細（additional_roles_mode）では別肩書セクションを常に表示し、見出し横に #}
+  {# 「別肩書を追加」「コンタクト一覧」導線を集約する（別肩書 0 件でも追加導線を残すため）。 #}
+  {# コンタクト詳細（他コンタクト）は従来どおり 0 件で非表示。 #}
+  {% if additional_roles_mode or other_active_contacts %}
     <section class="app-card" style="max-width:1100px; margin-top:var(--app-space-md);">
-      <div class="app-section__header"><h2>{% if additional_roles_mode %}別肩書{% else %}同じ人物の他のコンタクト{% endif %}</h2></div>
-      <div class="app-card-list" style="display:block;">
-        {% for other in other_active_contacts %}
-          {% url 'contacts:contact_detail' pk=other.id as other_url %}
-          <a href="{% append_back_url other_url back %}"
-             class="app-list-card"
-             style="display:flex; align-items:center; gap:var(--app-space-sm); text-decoration:none; color:inherit;">
-            <div class="app-list-card__main" style="margin:0; flex:1 1 auto;">
-              {% if additional_roles_mode %}
-                {# 別肩書：会社・部署・役職のみ（氏名は同一人物なので出さない）。空フィールドは省略。 #}
-                {% if other.organization %}<strong>{{ other.organization }}</strong>{% endif %}
-                {% status_badge other %}
-                {% if other.department %}<div class="app-muted">{{ other.department }}</div>{% endif %}
-                {% if other.title %}<div class="app-muted">{{ other.title }}</div>{% endif %}
-              {% else %}
-                <strong>{{ other.full_name|default:"(氏名なし)" }}</strong>
-                {% status_badge other %}
-                {% if other.organization %}<div class="app-muted">{{ other.organization }}</div>{% endif %}
-              {% endif %}
-            </div>
-          </a>
-        {% endfor %}
+      <div class="app-section__header" style="display:flex; align-items:center; gap:var(--app-space-sm); flex-wrap:wrap;">
+        <h2 style="margin:0;">{% if additional_roles_mode %}別肩書{% else %}同じ人物の他のコンタクト{% endif %}</h2>
+        {% if additional_roles_mode %}
+          {# アクション帯から移設した遷移導線（別肩書を追加＝前向き操作の青、コンタクト一覧＝中立グレー）。 #}
+          {% url 'persons:person_add_additional_role' contact.person_id as add_role_url %}
+          <a href="{% append_back_url add_role_url back %}" class="app-btn app-btn--primary app-btn--sm">別肩書を追加</a>
+          {% if contact_list_url %}
+            {# contact_list_url は View 側で back 適用済み＋status 多値付与済み。append_back_url で #}
+            {# 二重適用すると多値 status が先頭1個に潰れるため、そのまま href に出す。 #}
+            <a href="{{ contact_list_url }}" class="app-btn app-btn--secondary app-btn--sm">コンタクト一覧</a>
+          {% endif %}
+        {% endif %}
       </div>
+      {% if not other_active_contacts %}
+        <p class="app-muted">別肩書はまだありません。</p>
+      {% else %}
+      {# 表形式（同ページの _inactive_contacts.html と同じ作法）。HIG 3.1：操作を左先頭・ #}
+      {# 状態をその次・情報列はその後ろ。行全体クリックは付けず詳細ボタン経由のみ。 #}
+      {# nowrap は付けず素の app-table（table-layout:auto・内容自動調整）。状態列も固定幅にしない。 #}
+      <div class="app-table-wrapper">
+        <table class="app-table">
+          <thead>
+            <tr>
+              <th class="app-table__col--action">操作</th>
+              <th>状態</th>
+              {% if additional_roles_mode %}
+                <th>会社</th>
+                <th>部署</th>
+                <th>役職</th>
+              {% else %}
+                <th>氏名</th>
+                <th>会社</th>
+              {% endif %}
+              <th>メール</th>
+              <th>携帯</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for other in other_active_contacts %}
+              {% url 'contacts:contact_detail' pk=other.id as other_url %}
+              <tr>
+                <td class="app-table__col--action">
+                  <a href="{% append_back_url other_url back %}" class="app-btn app-btn--outline-secondary app-btn--sm">詳細</a>
+                </td>
+                <td>{% status_badge other %}</td>
+                {% if additional_roles_mode %}
+                  {# 別肩書：会社・部署・役職を個別列に（氏名は同一人物なので出さない）。 #}
+                  <td>{{ other.organization|default:"-" }}</td>
+                  <td>{{ other.department|default:"-" }}</td>
+                  <td>{{ other.title|default:"-" }}</td>
+                {% else %}
+                  <td>{{ other.full_name|default:"(氏名なし)" }}</td>
+                  <td>{{ other.organization|default:"-" }}</td>
+                {% endif %}
+                {# メールは長くなりがち＝truncatechars＋ツールチップで1行省略（contact_list の会社列に倣う）。 #}
+                <td>
+                  {% if other.email %}
+                    <span class="app-ellipsis" data-tooltip="{{ other.email }}">{{ other.email|truncatechars:24 }}</span>
+                  {% else %}-{% endif %}
+                </td>
+                <td>{{ other.mobile_phone|default:"-" }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% endif %}
     </section>
   {% endif %}
 

@@ -503,16 +503,25 @@ class PersonDetailViewTests(TestCase):
         self.assertIn("人物詳細", body)
         self.assertIn(contact.full_name, body)
 
-    def test_active_person_without_additional_roles_hides_section(self):
-        """別肩書（primary 以外の active）が無い人物詳細では「別肩書」セクション非表示。
+    def test_active_person_without_additional_roles_shows_empty_section(self):
+        """v1.7：別肩書 0 件でも人物詳細では別肩書セクションを表示する。
 
-        ※ アクション帯の「別肩書を追加」ボタンは別物（スコープ外・存在し続ける）ので、
-          セクション見出し <h2>別肩書</h2> の有無で判定する。"""
+        「別肩書を追加」「コンタクト一覧」導線を見出し横に常時残すため、0 件でも
+        セクション見出し＋空状態メッセージを出す（追加導線の孤児化を防ぐ）。テーブル
+        行（詳細ボタン）は出ない。"""
         person, _ = self._make_active_with_primary()
         resp = self.client.get(self._url(person))
         self.assertEqual(resp.status_code, 200)
         body = resp.content.decode()
-        self.assertNotIn("<h2>別肩書</h2>", body)
+        # 見出しと追加導線は 0 件でも出る。
+        self.assertIn(">別肩書</h2>", body)
+        self.assertIn("別肩書を追加", body)
+        # 空状態メッセージが出て、テーブル行（詳細ボタン）は無い。
+        self.assertIn("別肩書はまだありません", body)
+        self.assertNotRegex(
+            body,
+            r'class="app-btn app-btn--outline-secondary app-btn--sm"[^>]*>\s*詳細\s*</a>',
+        )
 
     def test_active_person_with_additional_roles_shows_section(self):
         """別肩書を持つ人物詳細では「別肩書」セクションに会社・部署・役職が出て、
@@ -538,7 +547,7 @@ class PersonDetailViewTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         body = resp.content.decode()
         # 見出し「別肩書」（セクション h2）と会社・部署・役職が出る。
-        self.assertIn("<h2>別肩書</h2>", body)
+        self.assertIn(">別肩書</h2>", body)
         for value in ("別肩書カンパニーA", "営業部", "課長",
                       "別肩書カンパニーB", "技術部", "主任"):
             self.assertIn(value, body)
@@ -554,16 +563,80 @@ class PersonDetailViewTests(TestCase):
         # created_at 昇順（role1 が role2 より前に出る）。
         self.assertLess(body.index("別肩書カンパニーA"), body.index("別肩書カンパニーB"))
 
-    def test_active_person_action_band_has_add_role_and_contact_list(self):
-        """人物詳細のアクション帯に「別肩書を追加」と「コンタクト一覧」（person 絞り込み）が出る。"""
+    def test_additional_roles_table_detail_button_no_row_link(self):
+        """v1.7：別肩書は表形式。行全体クリックは無く「詳細」ボタン経由のみ。
+
+        thead は（操作｜状態｜会社｜部署｜役職｜メール｜携帯）。詳細ボタン
+        （app-btn--outline-secondary）が該当コンタクト詳細へ。カード全体を包む
+        <a class="app-list-card"> は無い。会社・部署・役職・メール・携帯が個別列に出て、
+        氏名は出ない。内容自動調整（app-table--nowrap・状態列固定幅は無し）。
+        """
         person, _ = self._make_active_with_primary()
+        role = Contact.objects.create(
+            person=person,
+            status=Contact.Status.ACTIVE,
+            full_name="別肩書氏名X",
+            organization="サンプル商事",
+            department="営業部",
+            title="課長",
+            email="role-x@example.com",
+            mobile_phone="090-1111-2222",
+        )
+        resp = self.client.get(self._url(person))
+        body = resp.content.decode()
+        # テーブル化（app-table）され、行全体クリック <a class="app-list-card"> は無い。
+        self.assertIn("app-table", body)
+        self.assertNotRegex(body, r'<a[^>]*class="app-list-card"')
+        # thead は（操作｜状態｜会社｜部署｜役職｜メール｜携帯）。
+        for col in ("操作", "状態", "会社", "部署", "役職", "メール", "携帯"):
+            self.assertIn(col, body)
+        # 内容自動調整：当テーブルは素の app-table（nowrap なし）、状態列固定幅も無し。
+        self.assertIn('<table class="app-table">', body)
+        self.assertNotIn("width:48px", body)
+        # 詳細ボタン（outline-secondary）が該当コンタクト詳細へ。
+        self.assertRegex(
+            body,
+            r'class="app-btn app-btn--outline-secondary app-btn--sm"[^>]*>\s*詳細\s*</a>',
+        )
+        self.assertIn(
+            reverse("contacts:contact_detail", kwargs={"pk": role.id}), body
+        )
+        # 会社・部署・役職・メール・携帯が個別列に出る。
+        for value in ("サンプル商事", "営業部", "課長",
+                      "role-x@example.com", "090-1111-2222"):
+            self.assertIn(value, body)
+        # 別肩書行に氏名は出さない。
+        self.assertNotIn("別肩書氏名X", body)
+
+    def test_role_buttons_moved_to_section_heading(self):
+        """v1.7：別肩書を追加・コンタクト一覧ボタンはアクション帯から別肩書セクション
+        見出し横へ移設。
+
+        移設後はいずれも app-btn--sm（見出し横の小ボタン）。アクション帯の旧ボタン
+        （--sm 無し：別肩書を追加＝primary／コンタクト一覧＝secondary）は出ない。
+        コンタクト一覧の絞り込みクエリは維持。
+        """
+        person, _ = self._make_active_with_primary()
+        Contact.objects.create(
+            person=person,
+            status=Contact.Status.ACTIVE,
+            full_name="別肩書ロール",
+            organization="別肩書社",
+        )
         resp = self.client.get(self._url(person))
         self.assertEqual(resp.status_code, 200)
         body = resp.content.decode()
-        self.assertIn("別肩書を追加", body)
-        self.assertIn("コンタクト一覧", body)
-        # コンタクト一覧は当該 Person の active 全件（primary 含む）の絞り込みクエリを持つ。
-        # primary 含む active 全件 = status=primary かつ status=active の 2 値。
+        # 別肩書を追加・コンタクト一覧は見出し横の小ボタン（--sm）として存在。
+        self.assertIn(
+            'app-btn--primary app-btn--sm">別肩書を追加</a>', body
+        )
+        self.assertIn(
+            'app-btn--secondary app-btn--sm">コンタクト一覧</a>', body
+        )
+        # アクション帯の旧ボタン（--sm 無し）は無くなる。
+        self.assertNotIn('app-btn--primary">別肩書を追加', body)
+        self.assertNotIn('app-btn--secondary">コンタクト一覧', body)
+        # 絞り込みクエリ（person 全 active = status=primary かつ active）は維持。
         self.assertIn("person=%s" % person.id, body)
         self.assertIn("status=primary", body)
         self.assertIn("status=active", body)

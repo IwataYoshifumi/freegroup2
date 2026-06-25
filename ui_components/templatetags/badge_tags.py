@@ -64,6 +64,19 @@ _STATUS_BADGE_VARIANTS = {
 }
 
 
+# バッジ表示専用のラベル短縮（HIG 対照表は別途是正。バッジは幅が狭いセル＝状態列に
+# 収めるため短縮形を使う。get_FIELD_display（フォームの絞り込み選択肢・ドロップダウン等）
+# には波及させず、本タグの描画ラベルだけ差し替える）。
+#   - Contact.status の primary/active のみ「主」「副」へ短縮。inactive は据え置き。
+#   - Person.status / Campaign.status 等は対象外（get_FIELD_display のまま）。
+_STATUS_BADGE_LABEL_OVERRIDES = {
+    ("Contact", "status"): {
+        "primary": "主",
+        "active": "副",
+    },
+}
+
+
 def _render_badge(variant, label):
     """app-status-badge の span を組み立てる内部ヘルパー。
 
@@ -106,6 +119,12 @@ def status_badge(instance, field="status"):
     # 表示テキストは必ずモデルラベル（get_FIELD_display）から。無ければ最終手段で値。
     display_getter = getattr(instance, f"get_{field}_display", None)
     label = display_getter() if callable(display_getter) else value
+
+    # バッジ専用のラベル短縮（Contact.status の primary/active のみ）。未登録は据え置き。
+    label_override = _STATUS_BADGE_LABEL_OVERRIDES.get(
+        (type(instance).__name__, field), {}
+    )
+    label = label_override.get(value, label)
 
     variant_map = _STATUS_BADGE_VARIANTS.get((type(instance).__name__, field), {})
     variant = variant_map.get(value, _FALLBACK_VARIANT)

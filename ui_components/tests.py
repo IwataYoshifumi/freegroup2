@@ -19,11 +19,21 @@ def _render(template_str, context):
 
 
 class StatusBadgeTests(SimpleTestCase):
-    def test_display_text_comes_from_model_label(self):
-        """テキストは get_FIELD_display()（モデルラベル）から引く・英字値は出さない。"""
+    def test_contact_status_label_shortened_in_badge(self):
+        """バッジ限定の短縮：Contact.status primary→「主」（フル「主コンタクト」は出さない）。"""
         html = status_badge(Contact(status="primary"))
-        self.assertIn("主コンタクト", html)
+        self.assertIn("主", html)
+        self.assertNotIn("主コンタクト", html)
         self.assertNotIn("primary", html)
+
+    def test_model_get_status_display_unchanged(self):
+        """短縮はバッジ限定。モデルの get_status_display は従来どおり（フォーム等へ波及しない）。"""
+        self.assertEqual(
+            Contact(status="primary").get_status_display(), "主コンタクト"
+        )
+        self.assertEqual(
+            Contact(status="active").get_status_display(), "副コンタクト"
+        )
 
     def test_variant_from_color_map(self):
         """色（variant）は色マップから引く（Contact.primary → success）。"""
@@ -39,9 +49,12 @@ class StatusBadgeTests(SimpleTestCase):
         contact_html = status_badge(Contact(status="active"))
         person_html = status_badge(Person(status="active"))
 
-        self.assertIn("副コンタクト", contact_html)
+        # Contact.active はバッジ短縮で「副」（フル「副コンタクト」は出さない）。
+        self.assertIn("副", contact_html)
+        self.assertNotIn("副コンタクト", contact_html)
         self.assertIn("app-status-badge--warning", contact_html)
 
+        # Person.active は短縮対象外＝従来どおり「通常」。
         self.assertIn("通常", person_html)
         self.assertIn("app-status-badge--success", person_html)
 
