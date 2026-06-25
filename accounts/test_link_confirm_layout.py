@@ -36,22 +36,22 @@ class BackLinkLabelTagTests(TestCase):
         tmpl = Template("{% load back_tags %}" + tag_body)
         return tmpl.render(Context({"back": back}))
 
-    def test_label_omitted_uses_back_title(self):
-        # 引数省略時は従来どおり back.back_title（スタックの title）を使う。
+    def test_label_omitted_is_fixed_modoru(self):
+        # HIG 戻る統一：引数省略時は back.back_title（戻り先画面名）を使わず固定「戻る」。
         out = self._render("{% back_link back %}", self._back("ホーム"))
-        self.assertEqual(
-            out, '<a class="app-btn app-btn--secondary" href="/home/">ホーム</a>'
-        )
-
-    def test_label_omitted_falls_back_to_modoru(self):
-        # title が空なら従来どおり "戻る"。
-        out = self._render("{% back_link back %}", self._back(""))
         self.assertEqual(
             out, '<a class="app-btn app-btn--secondary" href="/home/">戻る</a>'
         )
 
-    def test_label_overrides_title(self):
-        # label を渡すと title より優先（href は変わらない）。
+    def test_label_omitted_modoru_even_with_screen_title(self):
+        # title が別画面名（コンタクト詳細）でもラベルは固定「戻る」。href は戻り先のまま。
+        out = self._render("{% back_link back %}", self._back("コンタクト詳細"))
+        self.assertEqual(
+            out, '<a class="app-btn app-btn--secondary" href="/home/">戻る</a>'
+        )
+
+    def test_label_overrides_to_modoru(self):
+        # label を渡すと優先（href は変わらない）。link_confirm 等の明示指定の後方互換。
         out = self._render('{% back_link back label="戻る" %}', self._back("人物詳細"))
         self.assertEqual(
             out, '<a class="app-btn app-btn--secondary" href="/home/">戻る</a>'
