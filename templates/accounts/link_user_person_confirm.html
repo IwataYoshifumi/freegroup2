@@ -1,7 +1,7 @@
 {% extends "accounts/app_base.html" %}
 {% load back_tags %}
 
-{% block title %}ユーザーと人物の紐付け確認 — FreeGroup2{% endblock %}
+{% block title %}ユーザーとパーソンの紐付け確認 — FreeGroup2{% endblock %}
 
 {% block content %}
     {# 全体を最大幅 960px・左寄せに絞る（他画面の検索カードと同じ収まり：max-width 960px ＋ margin-inline:0）。 #}
@@ -15,7 +15,7 @@
     {% endif %}
 
     <div class="app-section__header">
-      <h1>ユーザーと人物の紐付け確認</h1>
+      <h1>ユーザーとパーソンの紐付け確認</h1>
       {# この画面は戻る系を「戻る」1系統に統一（back_all_link は出さない）。ラベルは固定。 #}
       {% back_link back label="戻る" %}
     </div>
@@ -25,16 +25,16 @@
     {% with linked=person.linked_user %}
       {% if linked == user %}
         {# 本人紐付け済み：解除（可逆操作）→ warning（黄）。非active でも解除は可能なので status は見ない。 #}
-        <div class="app-alert app-alert--warning">この人物はあなた（{{ user.username }}）に紐付けられています。紐付けを解除しますか？</div>
+        <div class="app-alert app-alert--warning">このパーソンはあなた（{{ user.username }}）に紐付けられています。紐付けを解除しますか？</div>
       {% elif linked %}
         {# 他 User に紐付け済み：操作不可 → warning（黄）。 #}
-        <div class="app-alert app-alert--warning">この人物は別のユーザー（{{ linked.username }} さん）に紐付けられています。操作できません。</div>
+        <div class="app-alert app-alert--warning">このパーソンは別のユーザー（{{ linked.username }} さん）に紐付けられています。操作できません。</div>
       {% elif not person_active %}
         {# 未紐付け だが 非active（MERGED/ARCHIVED 等）：紐付け不可 → danger（赤）。 #}
-        <div class="app-alert app-alert--danger">この人物は通常状態（active）ではないため紐付けできません。</div>
+        <div class="app-alert app-alert--danger">このパーソンは通常状態（active）ではないため紐付けできません。</div>
       {% elif email_match %}
         {# 未紐付け・active・メール一致：これから紐付け（情報）→ info（青）。 #}
-        <div class="app-alert app-alert--info">あなたのユーザーはまだ人物に紐付けられていません。この人物と紐付けますか？</div>
+        <div class="app-alert app-alert--info">あなたのユーザーはまだパーソンに紐付けられていません。このパーソンと紐付けますか？</div>
       {% else %}
         {# 未紐付け・active だが メール不一致：紐付け不可 → danger（赤）。 #}
         <div class="app-alert app-alert--danger">メールアドレスが一致しないため紐づけできません。</div>
@@ -71,7 +71,7 @@
       {# ---- 対象 Person 情報 ---- #}
       <section class="app-card" style="flex: 1; min-width: 260px;">
         <div class="app-section__header">
-          <h2>対象人物</h2>
+          <h2>対象パーソン</h2>
         </div>
         {% with c=person.primary_contact %}
           {% if c %}
@@ -93,7 +93,7 @@
               <div class="app-detail-value">{{ c.mobile_phone|default:"-" }}</div>
             </div>
           {% else %}
-            <p class="app-muted">（主コンタクト未設定の人物です）</p>
+            <p class="app-muted">（主コンタクト未設定のパーソンです）</p>
           {% endif %}
         {% endwith %}
       </section>

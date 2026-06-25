@@ -20,7 +20,7 @@
       <h1>プロフィール</h1>
     </div>
 
-    {# 紐づけ済み時は下段の左右 2 カード（ユーザ／人物詳細）に一本化するため、 #}
+    {# 紐づけ済み時は下段の左右 2 カード（ユーザ／パーソン詳細）に一本化するため、 #}
     {# 上段の縦並びプロフィールは未紐づけ時のみ表示（重複表示を解消）。 #}
     {% if not user.person %}
       {# ---- 遷移導線カード（HIG 7.3 ①・3.1）：未紐付け時の主要導線はタイトル直下・左寄せに置く ---- #}
@@ -64,8 +64,8 @@
 
     {# ---- Person との紐付けセクション（user.person の有無で出し分け） ---- #}
     {% if user.person %}
-      {# 紐づけ済み：左右 2 カード（ユーザ／人物詳細）等幅で横並び。見出し（h2）は 2 カードで自明なため置かない。 #}
-      <p class="app-muted" style="margin-top: var(--app-space-md);">あなたは下記の人物に紐付けられています。</p>
+      {# 紐づけ済み：左右 2 カード（ユーザ／パーソン詳細）等幅で横並び。見出し（h2）は 2 カードで自明なため置かない。 #}
+      <p class="app-muted" style="margin-top: var(--app-space-md);">あなたは下記のパーソンに紐付けられています。</p>
 
       <div style="display: flex; gap: var(--app-space-md); flex-wrap: wrap; align-items: flex-start; margin-top: var(--app-space-sm);">
 
@@ -100,10 +100,10 @@
             </div>
           </section>
 
-          {# ---- 人物詳細：primary_contact から（確認画面の右カードと同項目） ---- #}
+          {# ---- パーソン詳細：primary_contact から（確認画面の右カードと同項目） ---- #}
           <section class="app-card" style="flex: 1; min-width: 260px;">
             <div class="app-section__header">
-              <h2>人物詳細</h2>
+              <h2>パーソン詳細</h2>
               {# 紐付け解除はカード右上にアイコンボタンで配置（Bootstrap Icons の link-45deg）。 #}
               {# tooltip はネイティブ title 属性。実行は確認画面経由（直接解除しない）。 #}
               {# 確認画面で「戻る」がプロフィールに戻れるよう append_back_url で back_stack を付与。 #}
@@ -134,7 +134,7 @@
                   <div class="app-detail-value">{{ c.mobile_phone|default:"-" }}</div>
                 </div>
               {% else %}
-                <p class="app-muted">（主コンタクト未設定の人物です）</p>
+                <p class="app-muted">（主コンタクト未設定のパーソンです）</p>
               {% endif %}
             {% endwith %}
           </section>

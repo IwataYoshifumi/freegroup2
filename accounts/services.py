@@ -437,7 +437,7 @@ def link_user_to_person(operator, user, person):
     # 非active（MERGED/ARCHIVED 等）Person への person_id 直叩き紐付けを防ぐ。
     if person.status != Person.Status.ACTIVE:
         raise ValidationError(
-            "この人物は通常状態（active）ではないため紐付けできません。"
+            "このパーソンは通常状態（active）ではないため紐付けできません。"
         )
 
     if operator == user and not is_self_link_email_match(user, person):

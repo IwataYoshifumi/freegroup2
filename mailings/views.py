@@ -2910,7 +2910,7 @@ class PersonUnsubscribeByAdminView(LoginRequiredMixin, View):
         except ValueError as exc:
             messages.error(request, f"配信停止できません: {exc}")
         else:
-            messages.success(request, "配信停止を受け付けました（同一人物ユニット全員）。")
+            messages.success(request, "配信停止を受け付けました（同一パーソンユニット全員）。")
         return redirect("persons:person_detail", pk=pk)
 
 
@@ -2942,7 +2942,7 @@ class PersonCancelUnsubscribeView(LoginRequiredMixin, View):
         note = request.POST.get("note", "").strip()
         cancel_unsubscribe(target_person=person, user=request.user, note=note)
         record_cancel_unsubscribe_action(user=request.user, person=person, note=note)
-        messages.success(request, "配信停止を解除しました（同一人物ユニット全員）。")
+        messages.success(request, "配信停止を解除しました（同一パーソンユニット全員）。")
         return redirect("persons:person_detail", pk=pk)
 
 

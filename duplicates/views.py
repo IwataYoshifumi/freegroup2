@@ -769,8 +769,8 @@ class DuplicateCandidateGroupUpdateView(
             ),
             "merged_confidences": merged_primary.get_field_confidences(),
             "decision_choices": [
-                ("merged", "同一人物"),
-                ("additional_role", "同一人物（別肩書追加）"),
+                ("merged", "同一パーソン"),
+                ("additional_role", "同一パーソン（別肩書追加）"),
                 ("different", "別人"),
             ],
             "merged_reason_choices": [

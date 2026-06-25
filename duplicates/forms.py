@@ -43,8 +43,8 @@ class MergeForm(ContactBaseForm):
 
     review_decision = forms.ChoiceField(
         choices=[
-            ("merged", "同一人物"),
-            ("additional_role", "同一人物（別肩書追加）"),
+            ("merged", "同一パーソン"),
+            ("additional_role", "同一パーソン（別肩書追加）"),
             ("different", "別人"),
         ],
         required=True,
@@ -189,12 +189,12 @@ class MergeForm(ContactBaseForm):
             if not result_set:
                 self.add_error(
                     "review_result",
-                    "「同一人物」を選択した場合は判定理由を 1 つ以上選択してください",
+                    "「同一パーソン」を選択した場合は判定理由を 1 つ以上選択してください",
                 )
             elif not result_set.issubset(merged_ui_values):
                 self.add_error(
                     "review_result",
-                    "「同一人物」を選択した場合はマージ系の判定理由のみを選択してください",
+                    "「同一パーソン」を選択した場合はマージ系の判定理由のみを選択してください",
                 )
         elif review_decision == "additional_role":
             # additional_role は判定理由 UI を出さないため、cleaned 上で固定値に整形。
@@ -202,7 +202,7 @@ class MergeForm(ContactBaseForm):
             if result_set and not result_set.issubset(all_merged_values):
                 self.add_error(
                     "review_result",
-                    "「同一人物（別肩書追加）」では別人系の判定理由は選択できません",
+                    "「同一パーソン（別肩書追加）」では別人系の判定理由は選択できません",
                 )
             cleaned["review_result"] = [
                 DuplicateMergeReason.ADDITIONAL_ROLE.value

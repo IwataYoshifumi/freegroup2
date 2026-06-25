@@ -1557,8 +1557,8 @@ class DuplicateCandidateGroupUpdateViewGetTests(
         resp = self.client.get(self._url())
         self.assertEqual(resp.status_code, 200)
         # 業務語が出る
-        self.assertContains(resp, "人物（左）")
-        self.assertContains(resp, "人物（右）")
+        self.assertContains(resp, "パーソン（左）")
+        self.assertContains(resp, "パーソン（右）")
         self.assertContains(resp, "これをサバイブ側にする")
         # 英字内部語は出ない
         self.assertNotContains(resp, "Person A")

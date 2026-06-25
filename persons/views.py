@@ -273,7 +273,7 @@ class PersonDetailView(LoginRequiredMixin, PermissionRequiredMixin, DetailView):
 
         # BackNavigator：人物詳細画面として自身を push_current（コンタクト詳細と同じ起点ハブ運用）。
         back = BackNavigator(request)
-        back.push_current("人物詳細", ["page"])
+        back.push_current("パーソン詳細", ["page"])
 
         # アクション帯「コンタクト一覧」導線：この Person の active コンタクトを primary 含め全件表示する。
         # ContactListView の status は Contact.status 値そのもの（active=副コンタクト＝primary 除外）なので、
@@ -288,7 +288,7 @@ class PersonDetailView(LoginRequiredMixin, PermissionRequiredMixin, DetailView):
         context.update(
             {
                 "back": back,
-                "page_title": "人物詳細",
+                "page_title": "パーソン詳細",
                 "active_app": "persons",
                 "active_menu": "persons:person_list",
             }

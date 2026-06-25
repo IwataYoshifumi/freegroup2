@@ -1,5 +1,5 @@
 {% comment %}
-人物検索フォーム partial（v1.6 Phase 1b 論点 B-1、仕様書 §11.4 / §11.4.2.1）。
+パーソン検索フォーム partial（v1.6 Phase 1b 論点 B-1、仕様書 §11.4 / §11.4.2.1）。
 
 person_list.html・bulk_tagging.html 等で {% include %} で再利用する。
 v1.4.2 既存 7 項目（name/organization/department/title/email/tel/address）+ status 3。
@@ -9,7 +9,7 @@ v1.4.2 既存 7 項目（name/organization/department/title/email/tel/address）
   selected_statuses: list[str]
   reset_url: str（リセットボタンの遷移先。include 側で {% url %} 等で渡す）
   submit_label: str（任意。既定 "検索"）
-  show_sort_control: bool（任意。True のとき人物一覧の多段ソートコントロールを出す。
+  show_sort_control: bool（任意。True のときパーソン一覧の多段ソートコントロールを出す。
                           person_list.html からのみ True で渡す。他画面では出さない）
 {% endcomment %}
 <form method="get" class="app-form-grid-edit">

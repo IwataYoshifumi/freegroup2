@@ -40,9 +40,9 @@ class LinkUserPersonConfirmTermsTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         body = resp.content.decode("utf-8")
         # 業務語が出る
-        self.assertIn("ユーザーと人物の紐付け確認", body)
-        self.assertIn("対象人物", body)
-        self.assertIn("主コンタクト未設定の人物です", body)
+        self.assertIn("ユーザーとパーソンの紐付け確認", body)
+        self.assertIn("対象パーソン", body)
+        self.assertIn("主コンタクト未設定のパーソンです", body)
         # メール空 Person は本人フローで不一致 → 不一致メッセージが業務語で出る
         self.assertIn("メールアドレスが一致しないため紐づけできません。", body)
         # 内部語（英字モデル名・リレーション名）は出ない
@@ -78,7 +78,7 @@ class RetireUserTermsTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         body = resp.content.decode("utf-8")
         # 業務語が出る（「取り消せません」は維持）
-        self.assertIn("人物・連絡先は後継者に引き継がれます", body)
+        self.assertIn("パーソン・連絡先は後継者に引き継がれます", body)
         self.assertIn("この操作は取り消せません。", body)
         # 内部語（英字モデル名）は出ない
         self.assertNotIn("Person・Contact", body)

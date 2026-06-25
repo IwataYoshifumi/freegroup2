@@ -1135,7 +1135,7 @@ class ContactDetailViewTests(TestCase):
         )
         resp = self.client.get(self._url())
         self.assertEqual(resp.context["previous_person"], prev_person)
-        self.assertIn("マージ前の人物", resp.content.decode())
+        self.assertIn("マージ前のパーソン", resp.content.decode())
 
     def test_n10_unconfirmed_band_removed(self):
         """N10: 要確認帯（未確認件数サマリー＋一括確定ボタン）は撤去済み。
@@ -1466,7 +1466,7 @@ class ContactDetailSelfLinkButtonTests(TestCase):
         self.assertTrue(resp.context["email_match"])
         self.assertNotIn("can_self_link", resp.context)
         self.assertNotContains(resp, self.LABEL)
-        self.assertNotContains(resp, "この人物をログインアカウントに紐付ける")
+        self.assertNotContains(resp, "このパーソンをログインアカウントに紐付ける")
         # カード内「紐付けユーザー」セクション・常時テキストも非表示のまま。
         self.assertNotContains(resp, "紐付けユーザー")
         self.assertNotContains(resp, "ユーザーに紐付けられていません")

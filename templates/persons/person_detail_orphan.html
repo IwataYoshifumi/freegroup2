@@ -1,13 +1,13 @@
 {% extends "cards/app_base.html" %}
 {% load back_tags %}
 
-{% block title %}人物詳細（primary_contact 未設定） — FreeGroup2{% endblock %}
+{% block title %}パーソン詳細（primary_contact 未設定） — FreeGroup2{% endblock %}
 
 {% block content %}
   <div class="app-page-header" style="max-width:1100px;">
     <div>
       <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
-        <h1>人物詳細</h1>
+        <h1>パーソン詳細</h1>
         <span class="app-status-badge app-status-badge--warning">primary_contact 未設定</span>
       </div>
     </div>
@@ -25,7 +25,7 @@
 
   <section class="app-card" style="max-width:1100px;">
     <p>
-      この人物には主コンタクト（<code>primary_contact</code>）が設定されていません。
+      このパーソンには主コンタクト（<code>primary_contact</code>）が設定されていません。
       Django Admin で <code>primary_contact</code> を設定してください。
     </p>
     <p>

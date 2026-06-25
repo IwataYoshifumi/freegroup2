@@ -85,7 +85,7 @@ class LinkConfirmLayoutRenderTests(TestCase):
         # 確認文はタイトル直下に info（青）アラートで出る。
         self.assertContains(resp, "app-alert app-alert--info")
         # 主従を「あなたのユーザー→人物」に修正した文言。
-        self.assertContains(resp, "あなたのユーザーはまだ人物に紐付けられていません。この人物と紐付けますか")
+        self.assertContains(resp, "あなたのユーザーはまだパーソンに紐付けられていません。このパーソンと紐付けますか")
         # ユーザ管理サイドバーが組み込まれている。
         self.assertContains(resp, "ユーザ管理メニュー")
         self.assertContains(resp, "ユーザ一覧")

@@ -39,7 +39,7 @@
     <div class="app-section__header"><h2>名刺画像比較</h2></div>
     <div class="app-form-grid">
       <div class="app-form__group">
-        <h3>人物（左）</h3>
+        <h3>パーソン（左）</h3>
         {% if surviving_card_image_url %}
           <div class="app-review-thumb">
             <button type="button" data-action="open-modal" data-target="review-img-modal-surviving" aria-label="名刺画像を拡大表示">
@@ -51,7 +51,7 @@
         {% endif %}
       </div>
       <div class="app-form__group">
-        <h3>人物（右）</h3>
+        <h3>パーソン（右）</h3>
         {% if merged_card_image_url %}
           <div class="app-review-thumb">
             <button type="button" data-action="open-modal" data-target="review-img-modal-merged" aria-label="名刺画像を拡大表示">
@@ -79,7 +79,7 @@
     </div>
     <div class="app-form-grid">
       <div class="app-form__group">
-        <h3>人物（左）</h3>
+        <h3>パーソン（左）</h3>
         {% for group in surviving_field_groups %}
           <div class="app-review-field-group__title">{{ group.group_name }}</div>
           <dl class="app-detail-list">
@@ -99,7 +99,7 @@
         </label>
       </div>
       <div class="app-form__group">
-        <h3>人物（右）</h3>
+        <h3>パーソン（右）</h3>
         {% for group in merged_field_groups %}
           <div class="app-review-field-group__title">{{ group.group_name }}</div>
           <dl class="app-detail-list">
@@ -124,7 +124,7 @@
     <div class="app-section__header" style="margin-top:var(--app-space-md);"><h2>SNS 比較</h2></div>
     <div class="app-form-grid">
       <div class="app-form__group">
-        <h3>人物（左）</h3>
+        <h3>パーソン（左）</h3>
         {% for group in surviving_sns_groups %}
           <div class="app-review-field-group__title">{{ group.sns_type_label }}</div>
           <ul class="app-sns-compare__list">
@@ -139,7 +139,7 @@
         {% endfor %}
       </div>
       <div class="app-form__group">
-        <h3>人物（右）</h3>
+        <h3>パーソン（右）</h3>
         {% for group in merged_sns_groups %}
           <div class="app-review-field-group__title">{{ group.sns_type_label }}</div>
           <ul class="app-sns-compare__list">

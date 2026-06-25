@@ -499,8 +499,8 @@ class PersonDetailViewTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertTemplateUsed(resp, "contacts/contact_detail.html")
         body = resp.content.decode()
-        # タイトル（h1・タブ）が「人物詳細」、主コンタクトの氏名が出る。
-        self.assertIn("人物詳細", body)
+        # タイトル（h1・タブ）が「パーソン詳細」、主コンタクトの氏名が出る。
+        self.assertIn("パーソン詳細", body)
         self.assertIn(contact.full_name, body)
 
     def test_active_person_without_additional_roles_shows_empty_section(self):
@@ -641,11 +641,11 @@ class PersonDetailViewTests(TestCase):
         self.assertIn("status=primary", body)
         self.assertIn("status=active", body)
 
-    SELF_LINK_LABEL = "この人物をログインアカウントに紐付ける"
+    SELF_LINK_LABEL = "このパーソンをログインアカウントに紐付ける"
 
     def test_active_person_band_shows_self_link_when_email_match_unlinked(self):
-        """v1.7：人物詳細 band で email 一致 ∧ active ∧ 未紐付けのとき、
-        黄（warning）の「この人物をログインアカウントに紐付ける」を出す。"""
+        """v1.7：パーソン詳細 band で email 一致 ∧ active ∧ 未紐付けのとき、
+        黄（warning）の「このパーソンをログインアカウントに紐付ける」を出す。"""
         self.user.email = "selflink-person@example.com"
         self.user.save(update_fields=["email"])
         person = Person.objects.create()

@@ -23,9 +23,9 @@
 
   {# ============================================================ #}
   {# タイトル直下アクション帯（HIG 7.3）。カード枠なしでじか置き。        #}
-  {# 左群＝この人物への操作。「別肩書を追加」（青・前向き操作）と「コンタクト一覧」     #}
-  {# （グレー・ニュートラル遷移）は人物詳細（additional_roles_mode）のときだけ出す。   #}
-  {# コンタクト詳細では出さない（別肩書追加の導線は人物詳細へ集約＝詳細側からは撤去）。 #}
+  {# 左群＝このパーソンへの操作。「別肩書を追加」（青・前向き操作）と「コンタクト一覧」     #}
+  {# （グレー・ニュートラル遷移）はパーソン詳細（additional_roles_mode）のときだけ出す。   #}
+  {# コンタクト詳細では出さない（別肩書追加の導線はパーソン詳細へ集約＝詳細側からは撤去）。 #}
   {# 右端＝マージ（控えめ）／戻る。紐付けはカード内セクションへ。                     #}
   {# 将来「案件を見る」「報告書を作成」等が増える想定で flex-wrap＋右寄せ            #}
   {# （margin-left:auto）の増設耐性を維持。                                    #}
@@ -33,14 +33,14 @@
   <div style="max-width:1100px; display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:var(--app-space-sm);">
     {% if additional_roles_mode %}
       {# 「別肩書を追加」「コンタクト一覧」導線は別肩書セクションの見出し横へ移設 #}
-      {# （別肩書セクションの内容＝この人物のコンタクト群と文脈が近いため）。 #}
+      {# （別肩書セクションの内容＝このパーソンのコンタクト群と文脈が近いため）。 #}
       {# 本人紐付け（self-link）：email 一致 ∧ active ∧ 未紐付けのときだけ黄（可逆な注意操作・HIG 3.6）。 #}
-      {# 紐付けは Person↔User の操作なので人物詳細 band にのみ出す（コンタクト詳細には出さない）。 #}
+      {# 紐付けは Person↔User の操作なのでパーソン詳細 band にのみ出す（コンタクト詳細には出さない）。 #}
       {# 未紐付けカード内セクションの常時テキスト＋旧ボタンは撤去のまま（復活させない）。 #}
       {% if can_self_link %}
         {% url 'accounts:link_user_person_confirm' person_id=contact.person.id as self_link_url %}
         <a href="{% append_back_url self_link_url back %}"
-           class="app-btn app-btn--warning">この人物をログインアカウントに紐付ける</a>
+           class="app-btn app-btn--warning">このパーソンをログインアカウントに紐付ける</a>
       {% endif %}
     {% endif %}
 
@@ -265,18 +265,18 @@
 
   {# ============================================================ #}
   {# 他のアクティブコンタクト／別肩書セクション                    #}
-  {# additional_roles_mode（人物詳細から渡る）で見出し・表示項目を出し分け：    #}
-  {#   - 人物詳細：見出し「別肩書」、各行は会社・部署・役職（氏名は出さない）。  #}
-  {#   - コンタクト詳細：従来どおり「同じ人物の他のコンタクト」、氏名・会社。    #}
+  {# additional_roles_mode（パーソン詳細から渡る）で見出し・表示項目を出し分け：    #}
+  {#   - パーソン詳細：見出し「別肩書」、各行は会社・部署・役職（氏名は出さない）。  #}
+  {#   - コンタクト詳細：従来どおり「同じパーソンの他のコンタクト」、氏名・会社。    #}
   {# 行全体クリックで該当コンタクト詳細へ遷移する挙動は両モード共通で維持。      #}
   {# ============================================================ #}
-  {# 人物詳細（additional_roles_mode）では別肩書セクションを常に表示し、見出し横に #}
+  {# パーソン詳細（additional_roles_mode）では別肩書セクションを常に表示し、見出し横に #}
   {# 「別肩書を追加」「コンタクト一覧」導線を集約する（別肩書 0 件でも追加導線を残すため）。 #}
   {# コンタクト詳細（他コンタクト）は従来どおり 0 件で非表示。 #}
   {% if additional_roles_mode or other_active_contacts %}
     <section class="app-card" style="max-width:1100px; margin-top:var(--app-space-md);">
       <div class="app-section__header" style="display:flex; align-items:center; gap:var(--app-space-sm); flex-wrap:wrap;">
-        <h2 style="margin:0;">{% if additional_roles_mode %}別肩書{% else %}同じ人物の他のコンタクト{% endif %}</h2>
+        <h2 style="margin:0;">{% if additional_roles_mode %}別肩書{% else %}同じパーソンの他のコンタクト{% endif %}</h2>
         {% if additional_roles_mode %}
           {# アクション帯から移設した遷移導線（別肩書を追加＝前向き操作の青、コンタクト一覧＝中立グレー）。 #}
           {% url 'persons:person_add_additional_role' contact.person_id as add_role_url %}
@@ -321,7 +321,7 @@
                 </td>
                 <td>{% status_badge other %}</td>
                 {% if additional_roles_mode %}
-                  {# 別肩書：会社・部署・役職を個別列に（氏名は同一人物なので出さない）。 #}
+                  {# 別肩書：会社・部署・役職を個別列に（氏名は同一パーソンなので出さない）。 #}
                   <td>{{ other.organization|default:"-" }}</td>
                   <td>{{ other.department|default:"-" }}</td>
                   <td>{{ other.title|default:"-" }}</td>
@@ -391,11 +391,11 @@
 
       {# previous_person #}
       {% if previous_person %}
-        <div class="app-section__header" style="margin-top:var(--app-space-md);"><h3>マージ前の人物</h3></div>
+        <div class="app-section__header" style="margin-top:var(--app-space-md);"><h3>マージ前のパーソン</h3></div>
         {% url 'persons:person_detail' pk=previous_person.id as prev_person_url %}
         <p>
           {{ previous_person }}
-          <a href="{% append_back_url prev_person_url back %}" class="app-btn app-btn--secondary app-btn--sm">人物詳細</a>
+          <a href="{% append_back_url prev_person_url back %}" class="app-btn app-btn--secondary app-btn--sm">パーソン詳細</a>
         </p>
       {% endif %}
 

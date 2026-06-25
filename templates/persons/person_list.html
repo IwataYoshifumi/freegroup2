@@ -2,12 +2,12 @@
 {% load back_tags %}
 {% load badge_tags %}
 
-{% block title %}人物一覧 — FreeGroup2{% endblock %}
+{% block title %}パーソン一覧 — FreeGroup2{% endblock %}
 
 {% block content %}
   <div class="app-page-header">
     <div>
-      <h1>人物一覧</h1>
+      <h1>パーソン一覧</h1>
     </div>
   </div>
 
@@ -101,7 +101,7 @@
             </tr>
           {% empty %}
             <tr><td colspan="12" class="app-muted">
-              該当する人物がいません。新しい名刺を取り込めば人物が自動で作られます。
+              該当するパーソンがいません。新しい名刺を取り込めばパーソンが自動で作られます。
               <a href="{% url 'cards:card_upload' %}">名刺を取り込む →</a>
             </td></tr>
           {% endfor %}
@@ -128,7 +128,7 @@
         </a>
       {% empty %}
         <p class="app-muted">
-          該当する人物がいません。新しい名刺を取り込めば人物が自動で作られます。
+          該当するパーソンがいません。新しい名刺を取り込めばパーソンが自動で作られます。
           <a href="{% url 'cards:card_upload' %}">名刺を取り込む →</a>
         </p>
       {% endfor %}

@@ -105,7 +105,7 @@ class ProfileLayoutRenderTests(TestCase):
         self.assertContains(resp, "max-width: 960px")
         # 左右 2 カードの見出し。
         self.assertContains(resp, "<h2>ユーザ</h2>")
-        self.assertContains(resp, "人物詳細")
+        self.assertContains(resp, "パーソン詳細")
         # 左「あなた」カードに上段プロフィール相当の User 情報が漏れなく入る（ロール・認証ソース含む）。
         self.assertContains(resp, "ロール")
         self.assertContains(resp, "認証ソース")

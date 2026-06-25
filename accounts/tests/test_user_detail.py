@@ -66,24 +66,24 @@ class UserDetailTwoColumnTests(TestCase):
         target = self._make_user("ud_linked", person=person)
         resp = self.client.get(reverse("accounts:user_detail", kwargs={"user_id": target.id}))
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "紐付き人物")
+        self.assertContains(resp, "紐付きパーソン")
         # primary_contact 由来の項目。
         self.assertContains(resp, "紐付き太郎")
         self.assertContains(resp, "linked@example.com")
         self.assertContains(resp, "テスト株式会社")
         self.assertContains(resp, "090-1111-2222")
-        # 「人物の詳細へ」リンク（persons:person_detail）。
+        # 「パーソンの詳細へ」リンク（persons:person_detail）。
         detail_url = reverse("persons:person_detail", kwargs={"pk": person.id})
         self.assertContains(resp, 'href="%s"' % detail_url)
-        self.assertContains(resp, "人物の詳細へ")
+        self.assertContains(resp, "パーソンの詳細へ")
 
     def test_unlinked_person_message(self):
         target = self._make_user("ud_unlinked")
         resp = self.client.get(reverse("accounts:user_detail", kwargs={"user_id": target.id}))
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "（人物は紐付けられていません）")
-        # 未紐付けなので人物詳細リンクは出ない。
-        self.assertNotContains(resp, "人物の詳細へ")
+        self.assertContains(resp, "（パーソンは紐付けられていません）")
+        # 未紐付けなのでパーソン詳細リンクは出ない。
+        self.assertNotContains(resp, "パーソンの詳細へ")
 
     def test_retire_button_shown_for_active(self):
         target = self._make_user("ud_active")

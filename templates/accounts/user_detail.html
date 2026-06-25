@@ -39,7 +39,7 @@
       </div>
     {% endif %}
 
-    {# ---- 左＝ユーザー情報／右＝紐付き人物（紐付け確認画面と同じインライン flex 2カラム） ---- #}
+    {# ---- 左＝ユーザー情報／右＝紐付きパーソン（紐付け確認画面と同じインライン flex 2カラム） ---- #}
     <div style="display: flex; gap: var(--app-space-md); flex-wrap: wrap; align-items: flex-start;">
 
       {# ---- 左：ユーザー情報（現状の項目を維持） ---- #}
@@ -77,12 +77,12 @@
         </div>
       </section>
 
-      {# ---- 右：紐付き人物（primary_contact 経由。紐付け確認画面の右カラムと同項目） ---- #}
+      {# ---- 右：紐付きパーソン（primary_contact 経由。紐付け確認画面の右カラムと同項目） ---- #}
       <section class="app-card" style="flex: 1; min-width: 260px;">
         <div class="app-section__header">
-          <h2>紐付き人物</h2>
+          <h2>紐付きパーソン</h2>
           {% if object.person %}
-            <a href="{% url 'persons:person_detail' pk=object.person.id %}" class="app-btn app-btn--secondary app-btn--sm">人物の詳細へ</a>
+            <a href="{% url 'persons:person_detail' pk=object.person.id %}" class="app-btn app-btn--secondary app-btn--sm">パーソンの詳細へ</a>
           {% endif %}
         </div>
         {% if object.person %}
@@ -106,11 +106,11 @@
                 <div class="app-detail-value">{{ c.mobile_phone|default:"-" }}</div>
               </div>
             {% else %}
-              <p class="app-muted">（主コンタクト未設定の人物です）</p>
+              <p class="app-muted">（主コンタクト未設定のパーソンです）</p>
             {% endif %}
           {% endwith %}
         {% else %}
-          <p class="app-muted">（人物は紐付けられていません）</p>
+          <p class="app-muted">（パーソンは紐付けられていません）</p>
         {% endif %}
       </section>
     </div>
