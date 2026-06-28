@@ -109,13 +109,20 @@ class ProfileLayoutRenderTests(TestCase):
         # 左「あなた」カードに上段プロフィール相当の User 情報が漏れなく入る（ロール・認証ソース含む）。
         self.assertContains(resp, "ロール")
         self.assertContains(resp, "認証ソース")
-        # 紐づく人物カード：会社名・部署名・役職は「所属」1行にまとめる。
-        self.assertContains(resp, "所属（会社・部署・役職）")
+        # 紐づく人物カード：会社名・部署名・役職は「所属」1行にまとめる
+        # （ラベルは横並び 140px 枠に収めるため「所属」に短縮済み）。
+        self.assertContains(resp, "所属")
         self.assertContains(resp, "テスト株式会社")
         self.assertContains(resp, "部長")
         self.assertContains(resp, "090-0000-0000")
-        # 解除リンク（「紐付けを解除」ツールチップ／aria-label）。
-        self.assertContains(resp, "紐付けを解除")
+        # 解除導線：右上アイコンから折りたたみ（summary「紐付けの管理」）内の warning ボタンへ移動。
+        # 解除リンクの URL（link_user_person_confirm）は不変＝検証意図を保持。
+        self.assertContains(resp, "紐付けの管理")
+        self.assertContains(resp, "ユーザとパーソンの紐づけを解除する")
+        self.assertContains(
+            resp,
+            reverse("accounts:link_user_person_confirm", kwargs={"person_id": person.id}),
+        )
         # 紐づけ済みのときは候補アラートを出さない。
         self.assertNotContains(resp, "あなたの名刺データが見つかりました")
         self.assertNotContains(resp, "名刺をアップロード")

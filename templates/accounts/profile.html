@@ -74,6 +74,8 @@
           <div class="app-section__header">
             <h2>ユーザ</h2>
           </div>
+          {# 項目は app-detail-list（ラベル140px左・値右）でラベル左・値右の行形式に（縦スペース削減）。 #}
+          <div class="app-detail-list">
             <div class="app-detail-item">
               <div class="app-detail-label">ユーザ名</div>
               <div class="app-detail-value">{{ user.username }}</div>
@@ -98,45 +100,54 @@
               <div class="app-detail-label">認証ソース</div>
               <div class="app-detail-value">{{ user.auth_source }}</div>
             </div>
+          </div>
           </section>
 
           {# ---- パーソン詳細：primary_contact から（確認画面の右カードと同項目） ---- #}
           <section class="app-card" style="flex: 1; min-width: 260px;">
             <div class="app-section__header">
               <h2>パーソン詳細</h2>
-              {# 紐付け解除はカード右上にアイコンボタンで配置（Bootstrap Icons の link-45deg）。 #}
-              {# tooltip はネイティブ title 属性。実行は確認画面経由（直接解除しない）。 #}
-              {# 確認画面で「戻る」がプロフィールに戻れるよう append_back_url で back_stack を付与。 #}
-              {% url 'accounts:link_user_person_confirm' person_id=user.person.id as unlink_confirm_url %}
-              <a href="{% append_back_url unlink_confirm_url back %}"
-                 class="app-btn--icon"
-                 title="紐付けを解除"
-                 aria-label="紐付けを解除"
-                 style="color: inherit; border: none; background: none; line-height: 1; text-decoration: none; font-size: 1.25rem;"><i class="bi bi-link-45deg"></i></a>
+              {# パーソン詳細への遷移（閲覧系＝グレー枠 secondary）はタイトル行の右端へ（space-between）。 #}
+              {# 確認画面と同様 append_back_url で back_stack を付与。 #}
+              {% url 'persons:person_detail' pk=user.person.id as person_detail_url %}
+              <a href="{% append_back_url person_detail_url back %}" class="app-btn app-btn--secondary app-btn--sm">パーソン詳細を見る</a>
             </div>
             {% with c=user.person.primary_contact %}
               {% if c %}
-                <div class="app-detail-item">
-                  <div class="app-detail-label">氏名</div>
-                  <div class="app-detail-value">{{ c.full_name|default:"-" }}</div>
-                </div>
-                <div class="app-detail-item">
-                  <div class="app-detail-label">メールアドレス</div>
-                  <div class="app-detail-value">{{ c.email|default:"-" }}</div>
-                </div>
-                <div class="app-detail-item">
-                  {# 会社名・部署名・役職は名刺のように1行で（会社 → 部署 → 役職）。全て空なら "-"。 #}
-                  <div class="app-detail-label">所属（会社・部署・役職）</div>
-                  <div class="app-detail-value">{% if c.organization or c.department or c.title %}{{ c.organization }} {{ c.department }} {{ c.title }}{% else %}-{% endif %}</div>
-                </div>
-                <div class="app-detail-item">
-                  <div class="app-detail-label">携帯番号</div>
-                  <div class="app-detail-value">{{ c.mobile_phone|default:"-" }}</div>
+                {# 項目は app-detail-list（ラベル140px左・値右）で横並びに（縦スペース削減）。 #}
+                <div class="app-detail-list">
+                  <div class="app-detail-item">
+                    <div class="app-detail-label">氏名</div>
+                    <div class="app-detail-value">{{ c.full_name|default:"-" }}</div>
+                  </div>
+                  <div class="app-detail-item">
+                    <div class="app-detail-label">メールアドレス</div>
+                    <div class="app-detail-value">{{ c.email|default:"-" }}</div>
+                  </div>
+                  <div class="app-detail-item">
+                    {# 会社名・部署名・役職は名刺のように1行で（会社 → 部署 → 役職）。全て空なら "-"。 #}
+                    {# ラベルは 140px 枠に収めるため「所属」に短縮（値の中身は会社・部署・役職のまま）。 #}
+                    <div class="app-detail-label">所属</div>
+                    <div class="app-detail-value">{% if c.organization or c.department or c.title %}{{ c.organization }} {{ c.department }} {{ c.title }}{% else %}-{% endif %}</div>
+                  </div>
+                  <div class="app-detail-item">
+                    <div class="app-detail-label">携帯番号</div>
+                    <div class="app-detail-value">{{ c.mobile_phone|default:"-" }}</div>
+                  </div>
                 </div>
               {% else %}
                 <p class="app-muted">（主コンタクト未設定のパーソンです）</p>
               {% endif %}
             {% endwith %}
+            {# 紐付け解除（破壊系）は折りたたみ（初期閉）の中に warning ボタンで隔離（誤操作防止）。 #}
+            {# 実行は確認画面経由（直接解除しない）。append_back_url で back_stack を付与（旧アイコン作法を移植）。 #}
+            {% url 'accounts:link_user_person_confirm' person_id=user.person.id as unlink_confirm_url %}
+            <details style="margin-top: var(--app-space-sm);">
+              <summary style="cursor:pointer;">紐付けの管理</summary>
+              <div style="margin-top: var(--app-space-sm);">
+                <a href="{% append_back_url unlink_confirm_url back %}" class="app-btn app-btn--warning app-btn--sm">ユーザとパーソンの紐づけを解除する</a>
+              </div>
+            </details>
           </section>
         </div>
     {% endif %}
