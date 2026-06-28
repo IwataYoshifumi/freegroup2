@@ -261,7 +261,10 @@ class PersonDetailView(LoginRequiredMixin, PermissionRequiredMixin, DetailView):
         )
         context["additional_roles_mode"] = True
 
-        # 本人紐付けボタン（アクション帯・黄）の表示可否：email 一致 ∧ active Person ∧ 未紐付け。
+        # 本人紐付けボタン（アクション帯・黄）の表示可否：email 一致 ∧ active Person ∧ 対象未紐付け
+        # ∧ ログインユーザ自身が未紐付け（既に別 Person に紐付け済みなら出さない／ホーム・プロフィール
+        # accounts/views.py:44 の self_link_alert と同じ整合。OneToOne なので二重紐付けは
+        # services.link_user_to_person:423-427 でも弾かれるが、死にボタンを出さない＝表示側でも揃える）。
         # 紐付けは Person↔User の操作なので人物詳細にのみ出す（コンタクト詳細には出さない）。
         # email_match / person_active は build_contact_detail_context 由来（primary_contact の email 基準
         # ＝コンタクト詳細と同一判定）。共有ヘルパーには入れない＝コンタクト詳細へ伝播させない。
@@ -269,6 +272,8 @@ class PersonDetailView(LoginRequiredMixin, PermissionRequiredMixin, DetailView):
             context["email_match"]
             and context["person_active"]
             and person.linked_user is None
+            and request.user.is_authenticated
+            and request.user.person is None
         )
 
         # BackNavigator：人物詳細画面として自身を push_current（コンタクト詳細と同じ起点ハブ運用）。

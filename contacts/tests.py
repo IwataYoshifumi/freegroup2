@@ -1430,10 +1430,19 @@ class ContactDetailSelfLinkButtonTests(TestCase):
     LABEL = "このユーザーで紐付ける"
 
     def setUp(self):
+        from django.contrib.auth.models import Permission
+
         self.user = User.objects.create_user(
             username="selflink_user", password="dummy", email="me@example.com"
         )
         _grant_contact_perms(self.user)
+        # 紐付けユーザーセクションは人物詳細（PersonDetailView, additional_roles_mode）に集約された。
+        # PersonDetailView は persons.view_person を要求するため、人物詳細を開くテスト用に付与する。
+        self.user.user_permissions.add(
+            Permission.objects.get(
+                codename="view_person", content_type__app_label="persons"
+            )
+        )
         self.client = Client()
         self.client.force_login(self.user)
 
@@ -1453,6 +1462,11 @@ class ContactDetailSelfLinkButtonTests(TestCase):
 
     def _url(self, c):
         return reverse("contacts:contact_detail", kwargs={"pk": c.pk})
+
+    def _person_url(self, person):
+        # 紐付けユーザーセクションは人物詳細に集約（PersonDetailView が primary contact 経路で
+        # contact_detail.html を additional_roles_mode=True で描画）。
+        return reverse("persons:person_detail", kwargs={"pk": person.pk})
 
     def test_no_self_link_button_on_contact_detail(self):
         """v1.7：紐付けは人物詳細へ一本化。コンタクト詳細では email 一致でも紐付けボタンを出さない。
@@ -1488,9 +1502,9 @@ class ContactDetailSelfLinkButtonTests(TestCase):
         self.assertNotContains(resp, self.LABEL)
 
     def test_linked_to_self_shows_unlink_in_section(self):
-        # (a) 本人紐付け済み：カード内「紐付けユーザー」セクションに集約。
-        _, c = self._make_primary("me@example.com", linked_user=self.user)
-        resp = self.client.get(self._url(c))
+        # (a) 本人紐付け済み：人物詳細の「紐付けユーザー」折りたたみに集約。解除ボタンが出る。
+        person, _ = self._make_primary("me@example.com", linked_user=self.user)
+        resp = self.client.get(self._person_url(person))
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "紐付けユーザー")
         # 紐付け先ユーザー情報（ユーザー名）。
@@ -1503,17 +1517,17 @@ class ContactDetailSelfLinkButtonTests(TestCase):
         self.assertNotContains(resp, self.LABEL)
 
     def test_linked_to_other_user_shows_info_without_action(self):
-        # (c) 他 User 紐付け：状態テキスト＋ユーザー情報。操作ボタンは出さない。
+        # (c) 他 User 紐付け：人物詳細でユーザー情報は出るが、解除など操作系は出さない。
         other = User.objects.create_user(
             username="other_owner", password="dummy", email="other@example.com"
         )
-        _, c = self._make_primary("me@example.com", linked_user=other)
-        resp = self.client.get(self._url(c))
+        person, _ = self._make_primary("me@example.com", linked_user=other)
+        resp = self.client.get(self._person_url(person))
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "紐付けユーザー")
-        self.assertContains(resp, "ユーザー「other_owner」と紐付け済み")
+        # 紐付け先ユーザー名は表示される（状態テキスト「〜と紐付け済み」は v1.7 で撤去済み）。
         self.assertContains(resp, "other_owner")
-        # 操作系は一切出さない。
+        # 操作系（紐付けを解除）は一切出さない。
         self.assertNotContains(resp, "紐付けを解除")
         self.assertNotContains(resp, self.LABEL)
 
@@ -1545,13 +1559,15 @@ class ContactDetailSelfLinkButtonTests(TestCase):
         )
         self.user = User.objects.get(pk=self.user.pk)
         self.client.force_login(self.user)
-        _, c = self._make_primary("me@example.com", linked_user=self.user)
-        resp = self.client.get(self._url(c))
+        person, _ = self._make_primary("me@example.com", linked_user=self.user)
+        resp = self.client.get(self._person_url(person))
         self.assertEqual(resp.status_code, 200)
+        # 「ユーザ詳細」は虫眼鏡アイコン化（aria-label/title="ユーザ詳細"）＋ user_detail への href。
+        # href は append_back_url で back_stack が付くため、完全一致ではなく reverse URL を含むかで検証。
         self.assertContains(resp, "ユーザ詳細")
         self.assertContains(
             resp,
-            'href="%s"' % reverse("accounts:user_detail", kwargs={"user_id": self.user.id}),
+            reverse("accounts:user_detail", kwargs={"user_id": self.user.id}),
         )
 
 

@@ -180,7 +180,9 @@
 
       {# 紐付けユーザー（§B 集約）：状態・操作・紐付け先ユーザー情報を1セクションに集約。 #}
       {# 判定（linked_user / email_match / person_active）は View のフラグをそのまま流用。 #}
-      {% if contact.person %}
+      {# 紐付けは Person↔User の操作なのでパーソン詳細（additional_roles_mode）にだけ出す。 #}
+      {# コンタクト詳細（副/旧の表示のみモード）には出さない（(α) アクション帯ボタンと同じ作法）。 #}
+      {% if additional_roles_mode and contact.person %}
         {% with linked=contact.person.linked_user %}
           {% url 'accounts:link_user_person_confirm' person_id=contact.person.id as confirm_url %}
           {# 紐付け済み（本人(a)／他 User(c)）のときだけセクションを表示する。 #}
@@ -188,52 +190,72 @@
           {# （本人紐付けの入口はホーム/プロフィールの候補アラートに一本化）。 #}
           {% if linked %}
           <div class="app-cd-section">
-            <div class="app-cd-section__name">紐付けユーザー</div>
-            <div>
+            {# 折りたたみ（デフォルト閉）。app-cd-section は 100px|1fr の grid なので、details を #}
+            {# grid-column:1/-1 で全幅に張り、中身がラベル列幅(100px)に潰れるのを防ぐ（既存 1/-1 パターン）。 #}
+            <details style="grid-column: 1 / -1;">
+              <summary class="app-cd-section__name" style="cursor:pointer;">紐付けユーザー</summary>
+              <div style="margin-top: var(--app-space-sm);">
               {% if linked == user %}
                 {# (a) 本人に紐付け済み：ユーザー情報＋「紐付け解除」（可逆・確認画面経由 → warning 黄）。 #}
-                <div class="app-detail-item">
-                  <div class="app-detail-label">ユーザー名</div>
-                  <div class="app-detail-value">{{ linked.username }}</div>
+                {# 項目は app-detail-list（140px/1fr）でラベル左・値右の行形式に（縦積みの冗長さを詰める）。 #}
+                {# ユーザ詳細への遷移は虫眼鏡アイコン（先例 :85 編集✎と同じ app-btn--icon 作法）でユーザー名行の右端に。 #}
+                <div class="app-detail-list">
+                  <div class="app-detail-item">
+                    <div class="app-detail-label">ユーザー名</div>
+                    <div class="app-detail-value" style="display:flex; align-items:center; gap:8px;">
+                      <span>{{ linked.username }}</span>
+                      {% if perms.accounts.retire_user %}
+                        {% url 'accounts:user_detail' user_id=linked.id as user_detail_url %}
+                        <a href="{% append_back_url user_detail_url back %}"
+                           class="app-btn--icon"
+                           title="ユーザ詳細" aria-label="ユーザ詳細"
+                           style="color:inherit; border:none; background:none; text-decoration:none; line-height:1; font-size:1.1rem;"><i class="bi bi-search"></i></a>
+                      {% endif %}
+                    </div>
+                  </div>
+                  <div class="app-detail-item">
+                    <div class="app-detail-label">氏名</div>
+                    <div class="app-detail-value">{{ linked.get_full_name|default:"-" }}</div>
+                  </div>
+                  <div class="app-detail-item">
+                    <div class="app-detail-label">メール</div>
+                    <div class="app-detail-value">{{ linked.email|default:"-" }}</div>
+                  </div>
                 </div>
-                <div class="app-detail-item">
-                  <div class="app-detail-label">氏名</div>
-                  <div class="app-detail-value">{{ linked.get_full_name|default:"-" }}</div>
-                </div>
-                <div class="app-detail-item">
-                  <div class="app-detail-label">メール</div>
-                  <div class="app-detail-value">{{ linked.email|default:"-" }}</div>
-                </div>
-                {# 操作・遷移ボタンは左寄せで横並び。ユーザ詳細は user_detail 権限保持者のみ（出口で 403 にしない）。 #}
+                {# 操作系（誤操作防止でラベル付きボタン維持）：紐付けを解除のみ独立ボタンで残す。 #}
                 <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: var(--app-space-sm);">
-                  <a href="{% append_back_url confirm_url back %}" class="app-btn app-btn--warning">紐付けを解除</a>
-                  {% if perms.accounts.retire_user %}
-                    <a href="{% url 'accounts:user_detail' user_id=linked.id %}" class="app-btn app-btn--secondary">ユーザ詳細</a>
-                  {% endif %}
+                  <a href="{% append_back_url confirm_url back %}" class="app-btn app-btn--warning app-btn--sm">紐付けを解除</a>
                 </div>
               {% else %}
-                {# (c) 他 User に紐付け済み：状態テキスト＋ユーザー情報。操作不可（ボタンなし）。 #}
-                <p class="app-muted">ユーザー「{{ linked.username }}」と紐付け済み</p>
-                <div class="app-detail-item">
-                  <div class="app-detail-label">ユーザー名</div>
-                  <div class="app-detail-value">{{ linked.username }}</div>
-                </div>
-                <div class="app-detail-item">
-                  <div class="app-detail-label">氏名</div>
-                  <div class="app-detail-value">{{ linked.get_full_name|default:"-" }}</div>
-                </div>
-                <div class="app-detail-item">
-                  <div class="app-detail-label">メール</div>
-                  <div class="app-detail-value">{{ linked.email|default:"-" }}</div>
-                </div>
-                {# 操作はできないが、user_detail 権限保持者にはユーザ詳細への遷移を出す（左寄せ）。 #}
-                {% if perms.accounts.retire_user %}
-                  <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: var(--app-space-sm);">
-                    <a href="{% url 'accounts:user_detail' user_id=linked.id %}" class="app-btn app-btn--secondary">ユーザ詳細</a>
+                {# (c) 他 User に紐付け済み：ユーザー情報のみ表示（操作不可・ボタンなし）。 #}
+                {# 項目は app-detail-list（140px/1fr）でラベル左・値右の行形式に（縦積みの冗長さを詰める）。 #}
+                {# ユーザ詳細への遷移は虫眼鏡アイコン（app-btn--icon）でユーザー名行の右端に（権限保持者のみ）。 #}
+                <div class="app-detail-list">
+                  <div class="app-detail-item">
+                    <div class="app-detail-label">ユーザー名</div>
+                    <div class="app-detail-value" style="display:flex; align-items:center; gap:8px;">
+                      <span>{{ linked.username }}</span>
+                      {% if perms.accounts.retire_user %}
+                        {% url 'accounts:user_detail' user_id=linked.id as user_detail_url %}
+                        <a href="{% append_back_url user_detail_url back %}"
+                           class="app-btn--icon"
+                           title="ユーザ詳細" aria-label="ユーザ詳細"
+                           style="color:inherit; border:none; background:none; text-decoration:none; line-height:1; font-size:1.1rem;"><i class="bi bi-search"></i></a>
+                      {% endif %}
+                    </div>
                   </div>
-                {% endif %}
+                  <div class="app-detail-item">
+                    <div class="app-detail-label">氏名</div>
+                    <div class="app-detail-value">{{ linked.get_full_name|default:"-" }}</div>
+                  </div>
+                  <div class="app-detail-item">
+                    <div class="app-detail-label">メール</div>
+                    <div class="app-detail-value">{{ linked.email|default:"-" }}</div>
+                  </div>
+                </div>
               {% endif %}
-            </div>
+              </div>
+            </details>
           </div>
           {% endif %}
         {% endwith %}
@@ -279,13 +301,16 @@
         <h2 style="margin:0;">{% if additional_roles_mode %}別肩書{% else %}同じパーソンの他のコンタクト{% endif %}</h2>
         {% if additional_roles_mode %}
           {# アクション帯から移設した遷移導線（別肩書を追加＝前向き操作の青、コンタクト一覧＝中立グレー）。 #}
-          {% url 'persons:person_add_additional_role' contact.person_id as add_role_url %}
-          <a href="{% append_back_url add_role_url back %}" class="app-btn app-btn--primary app-btn--sm">別肩書を追加</a>
-          {% if contact_list_url %}
-            {# contact_list_url は View 側で back 適用済み＋status 多値付与済み。append_back_url で #}
-            {# 二重適用すると多値 status が先頭1個に潰れるため、そのまま href に出す。 #}
-            <a href="{{ contact_list_url }}" class="app-btn app-btn--secondary app-btn--sm">コンタクト一覧</a>
-          {% endif %}
+          {# ボタン群は margin-left:auto で見出し行の右端に寄せる（同ファイル :48 の作法に揃える）。 #}
+          <div style="margin-left:auto; display:flex; gap:8px; align-items:center;">
+            {% url 'persons:person_add_additional_role' contact.person_id as add_role_url %}
+            <a href="{% append_back_url add_role_url back %}" class="app-btn app-btn--primary app-btn--sm">別肩書を追加</a>
+            {% if contact_list_url %}
+              {# contact_list_url は View 側で back 適用済み＋status 多値付与済み。append_back_url で #}
+              {# 二重適用すると多値 status が先頭1個に潰れるため、そのまま href に出す。 #}
+              <a href="{{ contact_list_url }}" class="app-btn app-btn--secondary app-btn--sm">コンタクト一覧</a>
+            {% endif %}
+          </div>
         {% endif %}
       </div>
       {% if not other_active_contacts %}
