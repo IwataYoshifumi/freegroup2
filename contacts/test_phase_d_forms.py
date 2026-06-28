@@ -387,8 +387,11 @@ class UpdatePreservesRenderedFieldsTests(TestCase):
         self.assertEqual(self.contact.country, "JP")
         self.assertEqual(self.contact.org_phone, "0565000000")
         self.assertEqual(self.contact.org_fax, "0565000001")
-        # 案①で追加した 5 フィールドも空化されない（潜在バグ完全解消）
-        self.assertEqual(self.contact.display_name, "保持(営業)")
+        # 案①で追加した 5 フィールドも空化されない（潜在バグ完全解消）。
+        # v1.7：display_name は display_name_is_manual=False のとき full_name に自動追従する
+        # （本ケースは display_name を手動編集していない＝changed_data に無いため非 manual のまま）。
+        # 「空化しない」意図は維持され、値は full_name（保持太郎）になる。
+        self.assertEqual(self.contact.display_name, "保持太郎")
         self.assertEqual(self.contact.phonetic_name, "ホジタロウ")
         self.assertEqual(self.contact.alias_name, "旧姓田中")
         self.assertEqual(self.contact.legal_entity_type, "株式会社")

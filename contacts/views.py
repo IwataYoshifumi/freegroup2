@@ -563,7 +563,7 @@ class UpdatePrimaryContactView(LoginRequiredMixin, PermissionRequiredMixin, Upda
         with transaction.atomic():
             change_reason = form.cleaned_data["change_reason"]
             if change_reason == PersonChangeReason.FIX:
-                _fix_with_salutation_flag(self.object, form, self.request.user)
+                _fix_with_derived_manual_flags(self.object, form, self.request.user)
                 # fix は既存 Contact のインプレース編集なので formset.save() で
                 # 追加・更新・削除を反映する（instance は self.object）。
                 sns_formset.save()
@@ -657,7 +657,7 @@ class UpdateActiveContactView(LoginRequiredMixin, PermissionRequiredMixin, Updat
 
     def form_valid(self, form, sns_formset):
         with transaction.atomic():
-            _fix_with_salutation_flag(self.object, form, self.request.user)
+            _fix_with_derived_manual_flags(self.object, form, self.request.user)
             # active 修正は fix 相当のインプレース編集（instance は self.object）。
             sns_formset.save()
         back = BackNavigator(self.request)
@@ -693,17 +693,34 @@ _RANK_PRIORITY = {
 }
 
 
-def _salutation_name_edited(form):
-    """フォーム経路で salutation_name が編集されたか判定する（Phase D §3.6・View 層）。
+# 派生フィールド → 手動入力フラグ属性（v1.7、Phase D §3.6 を全派生に拡張）。
+# フォームで当該フィールドが編集されたら、対応する *_is_manual を True にして Contact.save()
+# の自動再計算をスキップさせる。full_name / display_name は v1.7 で salutation と同型化。
+_DERIVED_MANUAL_FLAGS = {
+    "full_name": "full_name_is_manual",
+    "display_name": "display_name_is_manual",
+    "salutation_name": "salutation_name_is_manual",
+}
 
-    [性質] 純関数（form.changed_data を読むだけ・DB 操作なし）
-    [入力] form: ContactBaseForm 系（changed_data を持つバリデーション済みフォーム）
-    [出力] bool（salutation_name が changed_data に含まれれば True）
 
-    OCR 経路（json_parser）は本判定を通さず salutation_name_is_manual=False のまま。
-    手動 Form 経路でのみ、ユーザーが宛名を書き換えたかを Django 標準の changed_data で判定する。
+def _apply_derived_manual_flags(contact, form):
+    """フォームで派生フィールド（full_name / display_name / salutation_name）が編集されていれば、
+    対応する *_is_manual を True にする（Phase D §3.6 を全派生に拡張・View 層）。
+
+    [性質] 副作用あり（contact のフラグ属性をメモリ上で更新。DB 保存は呼び出し側の責務）
+    [入力] contact: Contact、form: changed_data を持つバリデーション済みフォーム
+    [出力] list[str]（True を立てたフラグ field 名。限定 save の update_fields に使う）
+
+    OCR 経路（json_parser）は本判定を通さずフラグ False のまま。手動 Form 経路でのみ、
+    ユーザーが当該フィールドを書き換えたかを Django 標準の changed_data で判定する。
+    編集がなければ既存値を維持する（False への戻しはしない、§3.6）。
     """
-    return "salutation_name" in form.changed_data
+    changed = []
+    for field_name, flag_attr in _DERIVED_MANUAL_FLAGS.items():
+        if field_name in form.changed_data:
+            setattr(contact, flag_attr, True)
+            changed.append(flag_attr)
+    return changed
 
 
 def _create_sns_from_formset(contact, sns_formset):
@@ -732,25 +749,23 @@ def _create_sns_from_formset(contact, sns_formset):
         )
 
 
-def _fix_with_salutation_flag(contact, form, user):
-    """Contact.fix() を呼びつつ salutation_name_is_manual を設定・永続化する（§3.6・View 層）。
+def _fix_with_derived_manual_flags(contact, form, user):
+    """Contact.fix() を呼びつつ派生フィールドの手動フラグを設定・永続化する（§3.6・View 層）。
 
     [性質] 副作用あり（DB 書込：Contact.fix() + 手動フラグ立て時の限定 save）
     [入力] contact: Contact（保存済み primary/active）、form: バリデーション済みフォーム、user: 操作者
     [出力] None
 
-    salutation_name がフォームで編集された場合のみ手動フラグを True にする。Contact.save()
-    の自動再計算（姓系フィールド変更時の宛名上書き）より前にフラグを立てる必要があるため、
-    fix() 呼び出し前にメモリ上のフラグを立て、fix() 後に当該フィールドだけ限定 save で
-    永続化する（salutation_name_is_manual は UPDATABLE_FIELDS 外で fix() の差分 save には
-    載らないため）。編集がなければ既存値を維持する（False への戻しはしない、§3.6）。
+    full_name / display_name / salutation_name がフォームで編集された場合のみ、対応する手動
+    フラグを True にする。Contact.save() の自動再計算（原本変更時の上書き）より前にフラグを
+    立てる必要があるため、fix() 呼び出し前にメモリ上のフラグを立て、fix() 後にそのフラグ
+    field だけ限定 save で永続化する（*_is_manual は UPDATABLE_FIELDS 外で fix() の差分 save
+    には載らないため）。編集がなければ既存値を維持する（False への戻しはしない、§3.6）。
     """
-    edited = _salutation_name_edited(form)
-    if edited:
-        contact.salutation_name_is_manual = True
+    flags = _apply_derived_manual_flags(contact, form)
     contact.fix(form, user)
-    if edited:
-        contact.save(update_fields=["salutation_name_is_manual"])
+    if flags:
+        contact.save(update_fields=flags)
 
 
 @transaction.atomic
@@ -780,9 +795,9 @@ def _create_person_and_contact(form, user, business_card=None):
     # 名刺詳細からの手動作成経路は save 前に BC を OneToOne 紐づけする（指示書 §3-1）。
     if business_card is not None:
         contact.business_card = business_card
-    # §3.6：宛名がフォームで編集されていれば手動扱い（save 前に立てて自動再計算を抑止）。
-    if _salutation_name_edited(form):
-        contact.salutation_name_is_manual = True
+    # §3.6：派生フィールド（氏名/表示名/宛名）がフォームで編集されていれば手動扱い
+    # （save 前に立てて自動再計算を抑止）。新規 Contact の full save で永続化される。
+    _apply_derived_manual_flags(contact, form)
     contact.save()
     person.set_primary_contact(contact)
     return contact
@@ -829,9 +844,9 @@ def _promote_new_contact_as_primary(form, target_contact, user):
     new_contact.status = Contact.Status.ACTIVE
     new_contact.created_by = user
     new_contact.updated_by = user
-    # §3.6：宛名がフォームで編集されていれば手動扱い（save 前に立てて自動再計算を抑止）。
-    if _salutation_name_edited(form):
-        new_contact.salutation_name_is_manual = True
+    # §3.6：派生フィールド（氏名/表示名/宛名）がフォームで編集されていれば手動扱い
+    # （save 前に立てて自動再計算を抑止）。新規 Contact の full save で永続化される。
+    _apply_derived_manual_flags(new_contact, form)
     new_contact.save()
     target_contact.person.set_primary_contact(
         new_contact, old_primary_new_status="inactive"

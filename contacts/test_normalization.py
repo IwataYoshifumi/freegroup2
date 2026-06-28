@@ -11,6 +11,7 @@ from contacts.models import Contact, ContactFieldConfidence
 from contacts.services.normalization import (
     check_name_consistency,
     compose_full_address,
+    compute_full_name,
     compute_salutation_name,
     derive_org_core_name,
     derive_org_domain_name,
@@ -696,6 +697,169 @@ class ContactSaveSalutationTests(TestCase):
         reloaded.save()
         reloaded.refresh_from_db()
         self.assertEqual(reloaded.salutation_name, "佐藤 様")
+
+
+class ComputeFullNameTests(SimpleTestCase):
+    """compute_full_name の純関数テスト（js-name-full と同じ並び）。"""
+
+    def test_last_first_excludes_middle(self):
+        # last_first は [姓, 名]（ミドルは含めない、JS と同じ）
+        self.assertEqual(
+            compute_full_name("山田", "太郎", "ミドル", "last_first"), "山田 太郎"
+        )
+
+    def test_first_last_includes_middle(self):
+        # first_last は [名, ミドル, 姓]
+        self.assertEqual(
+            compute_full_name("Yamada", "Taro", "M", "first_last"), "Taro M Yamada"
+        )
+
+    def test_single_uses_last_or_first(self):
+        self.assertEqual(compute_full_name("山田", "", "", "single"), "山田")
+        self.assertEqual(compute_full_name("", "太郎", "", "single"), "太郎")
+
+    def test_other_or_blank_returns_none(self):
+        # other / 未選択は自動組み立てしない（None＝呼び出し側は full_name 据え置き）
+        self.assertIsNone(compute_full_name("山田", "太郎", "", "other"))
+        self.assertIsNone(compute_full_name("山田", "太郎", "", ""))
+
+    def test_empty_parts_are_filtered(self):
+        # 空要素はスペース結合から除外（filter(Boolean) 相当）
+        self.assertEqual(compute_full_name("山田", "", "", "last_first"), "山田")
+
+
+class ContactSaveFullNameTests(TestCase):
+    """Contact.save() の full_name 自動組み立て（salutation_name_is_manual と同型）。"""
+
+    def _make_person(self):
+        return Person.objects.create()
+
+    def test_is_manual_true_does_nothing(self):
+        # full_name_is_manual=True なら原本変更でも再計算しない（手入力尊重）
+        c = Contact.objects.create(
+            person=self._make_person(),
+            status=Contact.Status.PRIMARY,
+            full_name="手動氏名",
+            last_name="山田",
+            first_name="太郎",
+            name_order="last_first",
+            lang="ja",
+            full_name_is_manual=True,
+        )
+        self.assertEqual(c.full_name, "手動氏名")
+        c.last_name = "佐藤"
+        c.save()
+        c.refresh_from_db()
+        self.assertEqual(c.full_name, "手動氏名")
+
+    def test_is_manual_false_empty_is_filled(self):
+        # full_name 空 → 原本から補完
+        c = Contact.objects.create(
+            person=self._make_person(),
+            status=Contact.Status.PRIMARY,
+            full_name="",
+            last_name="山田",
+            first_name="太郎",
+            name_order="last_first",
+            lang="ja",
+            full_name_is_manual=False,
+        )
+        self.assertEqual(c.full_name, "山田 太郎")
+
+    def test_is_manual_false_source_change_recomputes(self):
+        c = Contact.objects.create(
+            person=self._make_person(),
+            status=Contact.Status.PRIMARY,
+            full_name="",
+            last_name="山田",
+            first_name="太郎",
+            name_order="last_first",
+            lang="ja",
+            full_name_is_manual=False,
+        )
+        self.assertEqual(c.full_name, "山田 太郎")
+        c.last_name = "佐藤"
+        c.save()
+        c.refresh_from_db()
+        self.assertEqual(c.full_name, "佐藤 太郎")
+
+    def test_reload_from_db_then_recompute(self):
+        c = Contact.objects.create(
+            person=self._make_person(),
+            status=Contact.Status.PRIMARY,
+            full_name="",
+            last_name="山田",
+            first_name="太郎",
+            name_order="last_first",
+            lang="ja",
+            full_name_is_manual=False,
+        )
+        reloaded = Contact.objects.get(pk=c.pk)
+        self.assertEqual(reloaded.full_name, "山田 太郎")
+        reloaded.first_name = "次郎"
+        reloaded.save()
+        reloaded.refresh_from_db()
+        self.assertEqual(reloaded.full_name, "山田 次郎")
+
+
+class ContactSaveDisplayNameTests(TestCase):
+    """Contact.save() の display_name 自動追従（display_name_is_manual と同型）。"""
+
+    def _make_person(self):
+        return Person.objects.create()
+
+    def test_auto_follows_full_name(self):
+        # display_name_is_manual=False → full_name に追従
+        c = Contact.objects.create(
+            person=self._make_person(),
+            status=Contact.Status.PRIMARY,
+            full_name="山田太郎",
+            last_name="山田",
+            name_order="other",  # full_name 自動組み立て対象外＝full_name 据え置き
+            lang="ja",
+            display_name="",
+            display_name_is_manual=False,
+        )
+        self.assertEqual(c.display_name, "山田太郎")
+
+    def test_is_manual_true_keeps_value(self):
+        # display_name_is_manual=True → full_name と異なっても上書きしない
+        c = Contact.objects.create(
+            person=self._make_person(),
+            status=Contact.Status.PRIMARY,
+            full_name="山田太郎",
+            last_name="山田",
+            name_order="other",
+            lang="ja",
+            display_name="営業の山田",
+            display_name_is_manual=True,
+        )
+        self.assertEqual(c.display_name, "営業の山田")
+        c.title = "部長"
+        c.save()
+        c.refresh_from_db()
+        self.assertEqual(c.display_name, "営業の山田")
+
+    def test_follows_full_name_recompute(self):
+        # 原本変更 → full_name 再計算 → display_name も追従（依存順の確認）
+        c = Contact.objects.create(
+            person=self._make_person(),
+            status=Contact.Status.PRIMARY,
+            full_name="",
+            last_name="山田",
+            first_name="太郎",
+            name_order="last_first",
+            lang="ja",
+            full_name_is_manual=False,
+            display_name_is_manual=False,
+        )
+        self.assertEqual(c.full_name, "山田 太郎")
+        self.assertEqual(c.display_name, "山田 太郎")
+        c.last_name = "佐藤"
+        c.save()
+        c.refresh_from_db()
+        self.assertEqual(c.full_name, "佐藤 太郎")
+        self.assertEqual(c.display_name, "佐藤 太郎")
 
 
 class ContactSaveSalutationCfcTests(TestCase):
