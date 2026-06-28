@@ -180,6 +180,11 @@ class UserListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
         context["q"] = self.request.GET.get("q", "")
         context["active_app"] = "user_mgmt"
         context["active_menu"] = "accounts:user_list"
+        # BackNavigator：ユーザ管理一覧を起点画面として push_current で積む。子画面（ユーザ詳細）の
+        # 「戻る」がここへ戻る。keys は一覧の状態を成すクエリ（検索 q・退職表示 show_retired）。
+        back = BackNavigator(self.request)
+        back.push_current("ユーザ管理", ["q", "show_retired"])
+        context["back"] = back
         return context
 
 
@@ -195,6 +200,11 @@ class UserDetailView(LoginRequiredMixin, PermissionRequiredMixin, DetailView):
         context = super().get_context_data(**kwargs)
         context["active_app"] = "user_mgmt"
         context["active_menu"] = "accounts:user_list"
+        # 戻るボタン用 BackNavigator。遷移元（人物詳細・ユーザ管理一覧の「ユーザ詳細」リンク）が
+        # append_back で積んだ back_stack を読み、戻る先を直前画面にする。スタックが無ければ
+        # back_link が自動で非表示（HIG 3.2：表示判定はテンプレに書かない）。push_current は
+        # しない＝本画面は戻り先ハブにしない。
+        context["back"] = BackNavigator(self.request)
         return context
 
 

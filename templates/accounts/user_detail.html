@@ -1,4 +1,5 @@
 {% extends "accounts/app_base.html" %}
+{% load back_tags %}
 
 {% block title %}{{ object.username }} — ユーザ詳細 — FreeGroup2{% endblock %}
 
@@ -28,7 +29,6 @@
           {# 退職処理は is_active を戻せば復帰でき不可逆ではないため warning（黄）。 #}
           <a href="{% url 'accounts:retire_user' user_id=object.id %}" class="app-btn app-btn--warning app-btn--sm">退職処理</a>
         {% endif %}
-        <a href="{% url 'accounts:user_list' %}" class="app-btn app-btn--secondary app-btn--sm">戻る</a>
       </div>
     </div>
 
@@ -113,6 +113,13 @@
           <p class="app-muted">（パーソンは紐付けられていません）</p>
         {% endif %}
       </section>
+    </div>
+
+    {# 下部アクション（HIG 3.2 / 先例 card_detail）：左から「最初に戻る」「戻る」。 #}
+    {# 表示判定・URL・ラベルは BackNavigator 任せ（back_link/back_all_link）。戻り先が無ければ自動で非表示。 #}
+    <div class="app-action-area" style="margin-top: var(--app-space-md);">
+      {% back_all_link back %}
+      {% back_link back %}
     </div>
     </div>
 {% endblock %}
