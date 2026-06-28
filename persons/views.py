@@ -427,9 +427,11 @@ class PersonAddAdditionalRoleView(LoginRequiredMixin, PermissionRequiredMixin, F
             new_contact = form.get_update_contact()
             new_contact.person = self.person
             new_contact.status = Contact.Status.ACTIVE
-            # §3.6：宛名がフォームで編集されていれば手動扱い（save 前に立てて自動再計算を抑止）。
-            if "salutation_name" in form.changed_data:
-                new_contact.salutation_name_is_manual = True
+            # v1.7：派生フィールド（氏名/表示名/宛名）の手動フラグを hidden から明示反映
+            # （save 前に立てて自動再計算を抑止）。新規 Contact の full save で永続化される。
+            for flag_attr in form._MANUAL_FLAG_FIELDS:
+                if flag_attr in form.cleaned_data:
+                    setattr(new_contact, flag_attr, bool(form.cleaned_data[flag_attr]))
             new_contact.save()
             # submit された SNS 行を新規 Contact 配下に作成（§11.6.7）。
             _create_sns_from_formset(new_contact, sns_formset)

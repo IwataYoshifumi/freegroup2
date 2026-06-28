@@ -7,6 +7,7 @@ salutation_name_is_manual の View 層自動セット（§3.6）を検証する�
 §4.1〜§4.3 のテストは既存（test_normalization.py / tests.py）にあるため本ファイルでは扱わない。
 """
 
+from django import forms
 from django.contrib.auth import get_user_model
 from django.test import Client, TestCase
 from django.urls import reverse
@@ -202,10 +203,15 @@ class SalutationIsManualViewTests(TestCase):
         self.client.force_login(self.user)
 
     def test_create_with_explicit_salutation_sets_manual_true(self):
-        """新規作成で宛名を明示入力 → salutation_name_is_manual=True、値が保持される。"""
+        """新規作成で宛名を手動化（hidden フラグ=true 送信）→ is_manual=True、値が保持される。
+
+        v1.7 コミット3/3：手動/自動は changed_data ではなく hidden フラグ
+        （salutation_name_is_manual）で明示送信する（鉛筆 UI が立てる）。
+        """
         data = {f: "" for f in Contact.UPDATABLE_FIELDS}
         data["full_name"] = "手動太郎"
         data["salutation_name"] = "手動 会長"  # 自動生成（手動太郎 様）と異なる明示値
+        data["salutation_name_is_manual"] = "true"  # 鉛筆 UI 相当（手動化フラグ）
         data.update(_empty_sns_management_form())
         resp = self.client.post(reverse("contacts:contact_create"), data=data)
         self.assertEqual(resp.status_code, 302)
@@ -214,7 +220,7 @@ class SalutationIsManualViewTests(TestCase):
         self.assertEqual(contact.salutation_name, "手動 会長")
 
     def test_update_active_edit_salutation_sets_manual_true(self):
-        """active Contact 修正で宛名を書き換え → is_manual=True、値が保持される。"""
+        """active Contact 修正で宛名を手動化（hidden フラグ=true）→ is_manual=True、値が保持される。"""
         person = Person.objects.create(status=Person.Status.ACTIVE)
         contact = Contact.objects.create(
             person=person,
@@ -227,6 +233,7 @@ class SalutationIsManualViewTests(TestCase):
         data = {f: getattr(contact, f) or "" for f in Contact.UPDATABLE_FIELDS}
         data["note"] = ""
         data["salutation_name"] = "渡辺 社長"  # 明示変更
+        data["salutation_name_is_manual"] = "true"  # 鉛筆 UI 相当（手動化フラグ）
         data.update(_empty_sns_management_form())
         url = reverse("contacts:contact_update_active", kwargs={"pk": contact.pk})
         resp = self.client.post(url, data=data)
@@ -483,3 +490,140 @@ class PostalDisplayContactDetailTests(TestCase):
         # DB は raw のまま（整形は表示専用）
         contact.refresh_from_db()
         self.assertEqual(contact.postal_code, "4710001")
+
+
+class EffectiveLangAndNameOrderTests(TestCase):
+    """v1.7 コミット3/3 要素1・2：effective_lang の算出と name_order の hidden 確定値。"""
+
+    def _contact(self, lang):
+        p = Person.objects.create(status=Person.Status.ACTIVE)
+        return Contact.objects.create(
+            person=p,
+            status=Contact.Status.PRIMARY,
+            full_name="山田太郎",
+            last_name="山田",
+            first_name="太郎",
+            lang=lang,
+        )
+
+    def test_effective_lang_ja(self):
+        f = ContactUpdateForm(target_contact=self._contact("ja"))
+        self.assertEqual(f.effective_lang, "ja")
+
+    def test_effective_lang_en(self):
+        f = ContactUpdateForm(target_contact=self._contact("en"))
+        self.assertEqual(f.effective_lang, "en")
+
+    def test_effective_lang_empty_falls_back_to_settings_ja(self):
+        # 空 lang → settings.LANGUAGE_CODE（"ja"）にフォールバック
+        f = ContactUpdateForm(target_contact=self._contact(""))
+        self.assertEqual(f.effective_lang, "ja")
+
+    def test_effective_lang_zh_rounds_to_ja(self):
+        # zh / und 等は ja に丸める（zh 専用 UI は作らない）
+        f = ContactUpdateForm(target_contact=self._contact("zh"))
+        self.assertEqual(f.effective_lang, "ja")
+
+    def test_name_order_is_hidden(self):
+        f = ContactUpdateForm(target_contact=self._contact("ja"))
+        self.assertIsInstance(f.fields["name_order"].widget, forms.HiddenInput)
+
+    def test_name_order_forced_last_first_for_ja(self):
+        c = self._contact("ja")
+        data = {fn: getattr(c, fn) or "" for fn in Contact.UPDATABLE_FIELDS}
+        data["change_reason"] = "fix"
+        data["name_order"] = "first_last"  # 改ざんしても effective_lang で上書きされる
+        f = ContactUpdateForm(data=data, target_contact=c)
+        self.assertTrue(f.is_valid(), f.errors)
+        self.assertEqual(f.cleaned_data["name_order"], "last_first")
+
+    def test_name_order_forced_first_last_for_en(self):
+        c = self._contact("en")
+        data = {fn: getattr(c, fn) or "" for fn in Contact.UPDATABLE_FIELDS}
+        data["change_reason"] = "fix"
+        data["name_order"] = "last_first"
+        f = ContactUpdateForm(data=data, target_contact=c)
+        self.assertTrue(f.is_valid(), f.errors)
+        self.assertEqual(f.cleaned_data["name_order"], "first_last")
+
+
+class ManualFlagToggleViewTests(TestCase):
+    """v1.7 コミット3/3 要素3：hidden フラグによる手動/自動/自動戻しの送信反映。"""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="manual_flag_user", password="dummy"
+        )
+        _grant_contact_perms(self.user)
+        self.client = Client()
+        self.client.force_login(self.user)
+
+    def _active_contact(self, **kw):
+        person = Person.objects.create(status=Person.Status.ACTIVE)
+        defaults = dict(
+            status=Contact.Status.ACTIVE,
+            last_name="山田",
+            first_name="太郎",
+            name_order="last_first",
+            lang="ja",
+        )
+        defaults.update(kw)
+        return Contact.objects.create(person=person, **defaults)
+
+    def _post_active(self, contact, overrides):
+        data = {fn: getattr(contact, fn) or "" for fn in Contact.UPDATABLE_FIELDS}
+        data["note"] = ""
+        data.update(overrides)
+        data.update(_empty_sns_management_form())
+        url = reverse("contacts:contact_update_active", kwargs={"pk": contact.pk})
+        return self.client.post(url, data=data)
+
+    def test_full_name_manual_flag_true_keeps_value(self):
+        # hidden フラグ true → full_name 手動値を保持（原本変更でも上書きしない）
+        c = self._active_contact(full_name="カスタム氏名", full_name_is_manual=True)
+        resp = self._post_active(
+            c,
+            {
+                "full_name": "カスタム氏名",
+                "full_name_is_manual": "true",
+                "last_name": "佐藤",  # 原本変更
+            },
+        )
+        self.assertEqual(resp.status_code, 302)
+        c.refresh_from_db()
+        self.assertTrue(c.full_name_is_manual)
+        self.assertEqual(c.full_name, "カスタム氏名")
+
+    def test_full_name_revert_to_auto_recomputes(self):
+        # 「自動に戻す」（hidden=false）→ 手動値破棄・原本から自動再計算（source 不変でも revert で再計算）
+        c = self._active_contact(full_name="カスタム氏名", full_name_is_manual=True)
+        resp = self._post_active(
+            c,
+            {
+                "full_name": "カスタム氏名",  # 値は据え置きで送るが revert で破棄される
+                "full_name_is_manual": "",  # 自動に戻す
+            },
+        )
+        self.assertEqual(resp.status_code, 302)
+        c.refresh_from_db()
+        self.assertFalse(c.full_name_is_manual)
+        self.assertEqual(c.full_name, "山田 太郎")
+
+    def test_salutation_revert_to_auto_recomputes(self):
+        # 宛名を「自動に戻す」→ 手動値破棄・lang から自動再計算（ja＝姓＋様）
+        c = self._active_contact(
+            full_name="山田太郎",
+            salutation_name="特別な宛名",
+            salutation_name_is_manual=True,
+        )
+        resp = self._post_active(
+            c,
+            {
+                "salutation_name": "特別な宛名",
+                "salutation_name_is_manual": "",  # 自動に戻す
+            },
+        )
+        self.assertEqual(resp.status_code, 302)
+        c.refresh_from_db()
+        self.assertFalse(c.salutation_name_is_manual)
+        self.assertEqual(c.salutation_name, "山田 様")

@@ -612,16 +612,36 @@
     }
   });
 
-  // ----- full_name 補助組み立て（Phase D §3.7、仕様書 §6.5 / §11.9.5）-----
-  // last_name / first_name / other_name_parts / name_order の変更に追従して full_name を
-  // 補助組み立てする。ユーザーが full_name を直接編集したら以後の自動組み立てを停止する
-  // （手入力尊重）。ブラウザストレージは使わずメモリ内フラグのみで管理する。
-  let nameComposeManual = false;
+  // ----- full_name 補助組み立て＋派生フィールドの自動/手動トグル（v1.7 コミット3/3）-----
+  // 原本（last/first/other/name_order）の変更に追従して、自動状態（is_manual=false）の派生
+  // フィールド（氏名 full_name・表示名 display_name）の表示と入力値をリアルタイム更新する
+  // （正本はサーバ save。本JSは入力中の補助）。salutation の自動値は save 時に確定する。
+
+  function derivedField(name) {
+    return document.querySelector('.js-derived-field[data-derived="' + name + '"]');
+  }
+
+  function isDerivedAuto(name) {
+    // 派生フィールドが自動状態か（hidden フラグが 'true' でない＝自動）。
+    const field = derivedField(name);
+    if (!field) return false;
+    const flag = field.querySelector('input[type="hidden"][name$="_is_manual"]');
+    return flag ? flag.value !== 'true' : false;
+  }
+
+  function setDerivedDisplay(name, value) {
+    // 自動表示モードの淡色 span を更新する（見た目の追従）。
+    const field = derivedField(name);
+    if (!field) return;
+    const disp = field.querySelector('.js-derived-display');
+    if (disp) disp.textContent = value;
+  }
 
   function composeFullNameField() {
-    if (nameComposeManual) return;
     const full = document.querySelector('.js-name-full');
     if (!full) return;
+    // 氏名が手動状態なら自動組み立てしない（手入力尊重）。
+    if (!isDerivedAuto('full_name')) return;
     const valueOf = function (selector) {
       const el = document.querySelector(selector);
       return el ? el.value.trim() : '';
@@ -642,15 +662,52 @@
       return; // other / 未選択 は自動組み立てしない（手入力のみ、仕様書 §6.5）
     }
     full.value = result;
+    setDerivedDisplay('full_name', result);
+    // 表示名が自動なら full_name に追従（入力値＋淡色表示）。
+    if (isDerivedAuto('display_name')) {
+      const disp = document.querySelector('#id_display_name');
+      if (disp) disp.value = result;
+      setDerivedDisplay('display_name', result);
+    }
   }
+
+  function setManualMode(field, manual) {
+    // 派生フィールドの自動/手動表示を切り替え、hidden フラグを true/false にセットする。
+    const auto = field.querySelector('.js-derived-auto');
+    const man = field.querySelector('.js-derived-manual');
+    const flag = field.querySelector('input[type="hidden"][name$="_is_manual"]');
+    if (auto) auto.hidden = manual;
+    if (man) man.hidden = !manual;
+    if (flag) flag.value = manual ? 'true' : 'false';
+  }
+
+  document.addEventListener('click', function (event) {
+    const editBtn = event.target.closest('.js-derived-edit');
+    if (editBtn) {
+      const field = editBtn.closest('.js-derived-field');
+      if (field) {
+        setManualMode(field, true);
+        const input = field.querySelector(
+          '.js-derived-manual input, .js-derived-manual textarea'
+        );
+        if (input) input.focus();
+      }
+      return;
+    }
+    const revertBtn = event.target.closest('.js-derived-revert');
+    if (revertBtn) {
+      const field = revertBtn.closest('.js-derived-field');
+      if (field) {
+        setManualMode(field, false);
+        // 自動に戻したら原本から再組み立てして表示を即追従（保存時にサーバも再計算）。
+        composeFullNameField();
+      }
+    }
+  });
 
   document.addEventListener('input', function (event) {
     const target = event.target;
     if (!target || !target.classList) return;
-    if (target.classList.contains('js-name-full')) {
-      nameComposeManual = true; // ユーザーが直接編集 → 以後は補助しない
-      return;
-    }
     if (
       target.classList.contains('js-name-last') ||
       target.classList.contains('js-name-first') ||

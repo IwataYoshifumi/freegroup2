@@ -16,6 +16,7 @@ ModelForm 基底クラス。UI 構造を持たず、子 Form から継承して�
 """
 
 from django import forms
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.forms.utils import ErrorList
 
@@ -100,6 +101,18 @@ class ContactBaseForm(forms.ModelForm):
         "name_order": "js-name-order",
     }
 
+    # 派生フィールド → 手動入力フラグ（v1.7 コミット3/3）。鉛筆/自動トグル UI から hidden で
+    # 明示送信し、View 側で contact.*_is_manual に True/False を反映する。UPDATABLE_FIELDS には
+    # 入れない（一般フィールド経由の書き換えを塞ぐ）。salutation は 2/3 既存・full/display は 2/3 新設。
+    _MANUAL_FLAG_FIELDS = (
+        "full_name_is_manual",
+        "display_name_is_manual",
+        "salutation_name_is_manual",
+    )
+
+    # effective_lang から確定する name_order（要素2）。ja=姓+名 / en=名+姓。
+    _NAME_ORDER_BY_LANG = {"ja": "last_first", "en": "first_last"}
+
     class Meta:
         model = Contact
         fields = list(Contact.UPDATABLE_FIELDS)
@@ -110,6 +123,78 @@ class ContactBaseForm(forms.ModelForm):
         # Phase E：address は UPDATABLE_FIELDS から除外され Form フィールドではなくなった。
         # 住所組み立ては Contact.save() が住所構成要素から自動で行う（§11.9.4 / Phase E §2）。
         self._tag_name_compose_widgets()
+        # v1.7 コミット3/3：言語出し分け（effective_lang）・name_order の hidden 確定値化・
+        # 派生フィールドの手動フラグ hidden を用意する（4 画面共通＝基底で行う）。
+        self._setup_effective_lang()
+        self._setup_name_order_hidden()
+        self._add_manual_flag_fields()
+
+    def _source_contact(self):
+        """effective_lang / 手動フラグ初期値の参照元 Contact を返す（無ければ None）。
+
+        [性質] 準関数（DB は触らない。属性参照のみ）
+
+        ContactUpdateForm 系は instance を新規にして target_contact を別持ちするため
+        （§11.6.2 の設計）、target_contact を優先して参照する。Create/AddRole は新規のため None。
+        """
+        target = getattr(self, "target_contact", None)
+        if target is not None:
+            return target
+        if self.instance is not None and self.instance.pk:
+            return self.instance
+        return None
+
+    def _setup_effective_lang(self):
+        """表示出し分け用の実効言語を算出して self.effective_lang に持つ（要素1）。
+
+        [性質] 副作用あり（self.effective_lang を設定）。DB 操作なし
+
+        参照元 Contact.lang → settings.LANGUAGE_CODE → "ja" の順でフォールバックし、
+        en で始まれば "en"、それ以外（ja/ko/zh/und/空）はすべて "ja" に丸める
+        （zh/und 専用 UI は作らない、ja フォールバック）。算出層の "ja" 判定（lang.startswith）
+        には手を入れない＝フォールバックは表示層（本属性）に閉じる（2/3 据え置き方針）。
+        """
+        src = self._source_contact()
+        raw = (getattr(src, "lang", "") if src else "") or settings.LANGUAGE_CODE or "ja"
+        self.effective_lang = "en" if raw.strip().lower().startswith("en") else "ja"
+
+    def _setup_name_order_hidden(self):
+        """name_order を hidden 化し effective_lang から確定値を初期表示にする（要素2）。
+
+        [性質] 副作用あり（name_order の widget / initial を変更）。DB 操作なし
+
+        値は clean() で effective_lang から強制確定する（POST 改ざん耐性）。ここでは GET 表示の
+        initial と hidden 化のみ。check_name_consistency は OCR 経路でのみ走るため衝突しない。
+        """
+        if "name_order" in self.fields:
+            # hidden 化しても js-name-order クラスは維持する（app.js の full_name 自動組み立てが
+            # `.js-name-order` で語順値を読むため。クラスが無いと compose が語順を取得できない）。
+            self.fields["name_order"].widget = forms.HiddenInput(
+                attrs={"class": "js-name-order"}
+            )
+            derived = self._NAME_ORDER_BY_LANG[self.effective_lang]
+            self.fields["name_order"].initial = derived
+            # 子フォーム（ContactUpdateForm）は initial dict を target_contact から埋めるため、
+            # hidden の表示値（＝JS が読む語順）も effective_lang の確定値で上書きする
+            # （未バインド GET 表示用。POST/save 時の確定は clean() が担保）。
+            if not self.is_bound:
+                self.initial["name_order"] = derived
+
+    def _add_manual_flag_fields(self):
+        """派生フィールドの手動フラグ hidden BooleanField を追加する（要素3・送信機構）。
+
+        [性質] 副作用あり（self.fields に hidden フィールドを追加）。DB 操作なし
+
+        初期値は参照元 Contact の現在フラグ（無ければ False）。テンプレ/JS はこの hidden を
+        0/1 でトグルし、View が cleaned_data から contact.*_is_manual へ明示反映する。
+        """
+        src = self._source_contact()
+        for flag in self._MANUAL_FLAG_FIELDS:
+            self.fields[flag] = forms.BooleanField(
+                required=False,
+                initial=bool(getattr(src, flag, False)) if src else False,
+                widget=forms.HiddenInput(),
+            )
 
     def _tag_name_compose_widgets(self):
         """氏名系 widget に full_name 補助 JS 用の js- フッククラスを付与する（Phase D §3.7）。
@@ -184,6 +269,9 @@ class ContactBaseForm(forms.ModelForm):
         cleaned = super().clean()
         self._normalize_cleaned_fields(cleaned)
         self._normalize_address_by_country(cleaned)
+        # 要素2：name_order は effective_lang から確定（hidden の POST 値は信用せず強制上書き）。
+        if "name_order" in self.fields:
+            cleaned["name_order"] = self._NAME_ORDER_BY_LANG[self.effective_lang]
         # address の組み立ては Contact.save() が住所構成要素から自動で行う（Phase E §3）。
         return cleaned
 

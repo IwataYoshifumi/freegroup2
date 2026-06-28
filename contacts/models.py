@@ -281,11 +281,36 @@ class Contact(models.Model):
         "lang",
     )
 
+    # 派生フィールドの手動フラグ（v1.7）。「自動に戻す」（True→False）を save() で検知して
+    # source 変更が無くても強制再計算（手動値を破棄して自動値へ）するため、スナップショットを持つ。
+    _MANUAL_FLAG_FIELDS = (
+        "full_name_is_manual",
+        "display_name_is_manual",
+        "salutation_name_is_manual",
+    )
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._store_salutation_source_snapshot()
         self._store_address_source_snapshot()
         self._store_full_name_source_snapshot()
+        self._store_manual_flag_snapshot()
+
+    def _store_manual_flag_snapshot(self):
+        """[性質] 副作用あり（_manual_flag_snapshot を更新）。
+
+        手動フラグの現在値を保持する。__init__ 直後と save() 完了後に呼び、次回 save() で
+        「自動に戻す」（True→False）の遷移検知に使う。self.__dict__ 直読みで deferred ロード
+        を誘発しない。
+        """
+        self._manual_flag_snapshot = {
+            f: self.__dict__.get(f) for f in self._MANUAL_FLAG_FIELDS
+        }
+
+    def _manual_flag_reverted(self, flag_field):
+        """[性質] 準関数（属性比較のみ）。当該フラグが前回 True → 今回 False に戻ったか。"""
+        snapshot = getattr(self, "_manual_flag_snapshot", {})
+        return bool(snapshot.get(flag_field)) and not getattr(self, flag_field, False)
 
     def _store_full_name_source_snapshot(self):
         """[性質] 副作用あり（インスタンス属性 _full_name_source_snapshot を更新）。
@@ -396,11 +421,15 @@ class Contact(models.Model):
         )
 
         # full_name の自動組み立て（v1.7）。full_name_is_manual=False のとき、原本（姓/名/
-        # ミドル/語順）の変更時または full_name が空のときに compute_full_name で再計算する。
-        # name_order が自動対象外（other/未選択）なら compute_full_name は None を返すので据え置く。
-        # salutation は full_name を source に持つため、salutation 再計算より前に行う（依存順）。
+        # ミドル/語順）の変更時・full_name が空・または「自動に戻す」（手動→自動の遷移）のときに
+        # compute_full_name で再計算する。name_order が自動対象外（other/未選択）なら None を返すので
+        # 据え置く。salutation は full_name を source に持つため、salutation 再計算より前に行う（依存順）。
         if not self.full_name_is_manual:
-            if not self.full_name or self._full_name_source_changed():
+            if (
+                not self.full_name
+                or self._full_name_source_changed()
+                or self._manual_flag_reverted("full_name_is_manual")
+            ):
                 computed_full = compute_full_name(
                     self.last_name,
                     self.first_name,
@@ -428,7 +457,12 @@ class Contact(models.Model):
 
         salutation_was_computed = False
         if not self.salutation_name_is_manual:
-            if not self.salutation_name or self._salutation_source_changed():
+            # 空・姓系変更・「自動に戻す」（手動→自動の遷移）のいずれかで再計算（v1.7 で revert 追加）。
+            if (
+                not self.salutation_name
+                or self._salutation_source_changed()
+                or self._manual_flag_reverted("salutation_name_is_manual")
+            ):
                 new_value = compute_salutation_name(self)
                 if new_value != self.salutation_name:
                     self.salutation_name = new_value
@@ -463,6 +497,7 @@ class Contact(models.Model):
         self._store_salutation_source_snapshot()
         self._store_address_source_snapshot()
         self._store_full_name_source_snapshot()
+        self._store_manual_flag_snapshot()
 
         # 補完が走ったときのみ salutation_name の CFC を low で記録（§1.8）。
         # ただし日本語（lang が ja 始まり）は「姓＋様」の自明な確定規則のため要確認に入れない

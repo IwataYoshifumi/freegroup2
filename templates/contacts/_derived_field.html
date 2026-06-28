@@ -1,0 +1,25 @@
+{# 派生フィールド（full_name / display_name / salutation_name）の自動/手動 UI（v1.7 コミット3/3）。 #}
+{# 自動（is_manual=False）：淡色の読み取り表示＋鉛筆（黒・HIG3.5/3.7）。原本変更で JS がリアルタイム追従（正本は save）。 #}
+{# 手動（is_manual=True）：通常の入力欄＋「自動に戻す」。手動/自動の状態は hidden BooleanField（flag）で送信。 #}
+{# params: field（派生フィールドの BoundField）/ label / flag（*_is_manual の BoundField）/ name（data 用）/ required #}
+<div class="app-form__group js-derived-field" data-derived="{{ name }}">
+  <label class="app-form__label" for="{{ field.id_for_label }}">{{ label }}{% if required %} <span class="app-required">必須</span>{% endif %}</label>
+
+  {# 自動表示モード #}
+  <div class="js-derived-auto"{% if flag.value %} hidden{% endif %}>
+    <span class="app-derived-display js-derived-display">{{ field.value|default:"" }}</span>
+    <button type="button" class="app-btn--icon js-derived-edit" title="手動で編集" aria-label="手動で編集"
+            style="color:inherit; border:none; background:none; line-height:1; font-size:1.1rem;"><i class="bi bi-pencil"></i></button>
+  </div>
+
+  {# 手動入力モード #}
+  <div class="js-derived-manual"{% if not flag.value %} hidden{% endif %}>
+    {{ field }}
+    <button type="button" class="app-btn--icon js-derived-revert" title="自動に戻す" aria-label="自動に戻す"
+            style="color:inherit; border:none; background:none; line-height:1; font-size:1.1rem;"><i class="bi bi-arrow-counterclockwise"></i></button>
+  </div>
+
+  {{ field.errors }}
+  {# 手動/自動フラグ（hidden）。JS が鉛筆/自動に戻すで true/false をセットする。 #}
+  {{ flag }}
+</div>

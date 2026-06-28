@@ -3,13 +3,12 @@
 {# 4 画面で重複していた {% block contact_fields %} の中身を抽出（純粋なリファクタ、出力 HTML 不変）。 #}
 {# 親テンプレートの context（form / sns_formset）をそのまま受け取る（include で全 context を継承）。 #}
 {# ==================== 氏名グループ ==================== #}
+{# v1.7：原本（姓/名/ミドル/別名/フリガナ）は通常入力。派生（氏名/表示名/敬称付き氏名）は #}
+{# 自動/手動トグル（_derived_field.html）。語順は effective_lang から確定し hidden で保持。 #}
+{# フリガナは ja のみ表示（en は非表示）。 #}
 <div class="app-section__header"><h2>氏名</h2></div>
 <div class="app-form-grid">
-  <div class="app-form__group">
-    <label class="app-form__label" for="{{ form.full_name.id_for_label }}">氏名</label>
-    {{ form.full_name }}
-    {{ form.full_name.errors }}
-  </div>
+  {% include "contacts/_derived_field.html" with field=form.full_name label="氏名" flag=form.full_name_is_manual name="full_name" %}
   <div class="app-form__group">
     <label class="app-form__label" for="{{ form.last_name.id_for_label }}">姓</label>
     {{ form.last_name }}
@@ -20,16 +19,14 @@
     {{ form.first_name }}
     {{ form.first_name.errors }}
   </div>
-  <div class="app-form__group">
-    <label class="app-form__label" for="{{ form.display_name.id_for_label }}">表示名</label>
-    {{ form.display_name }}
-    {{ form.display_name.errors }}
-  </div>
+  {% include "contacts/_derived_field.html" with field=form.display_name label="表示名" flag=form.display_name_is_manual name="display_name" %}
+  {% if form.effective_lang == "ja" %}
   <div class="app-form__group">
     <label class="app-form__label" for="{{ form.phonetic_name.id_for_label }}">フリガナ</label>
     {{ form.phonetic_name }}
     {{ form.phonetic_name.errors }}
   </div>
+  {% endif %}
   <div class="app-form__group">
     <label class="app-form__label" for="{{ form.other_name_parts.id_for_label }}">ミドルネーム等</label>
     {{ form.other_name_parts }}
@@ -40,17 +37,10 @@
     {{ form.alias_name }}
     {{ form.alias_name.errors }}
   </div>
-  <div class="app-form__group">
-    <label class="app-form__label" for="{{ form.name_order.id_for_label }}">氏名の順序</label>
-    {{ form.name_order }}
-    {{ form.name_order.errors }}
-  </div>
-  <div class="app-form__group">
-    <label class="app-form__label" for="{{ form.salutation_name.id_for_label }}">敬称付き氏名 <span class="app-required">必須</span></label>
-    {{ form.salutation_name }}
-    {{ form.salutation_name.errors }}
-  </div>
+  {% include "contacts/_derived_field.html" with field=form.salutation_name label="敬称付き氏名" flag=form.salutation_name_is_manual name="salutation_name" required=True %}
 </div>
+{# 語順（name_order）は effective_lang から確定（ja=姓+名 / en=名+姓）。hidden で保持＝画面に出さない。 #}
+{{ form.name_order }}
 
 {# ==================== 所属グループ ==================== #}
 <div class="app-section__header" style="margin-top:var(--app-space-md);"><h2>所属</h2></div>
@@ -65,11 +55,13 @@
     {{ form.legal_entity_type }}
     {{ form.legal_entity_type.errors }}
   </div>
+  {% if form.effective_lang == "ja" %}
   <div class="app-form__group">
     <label class="app-form__label" for="{{ form.legal_entity_type_position.id_for_label }}">法人格の位置</label>
     {{ form.legal_entity_type_position }}
     {{ form.legal_entity_type_position.errors }}
   </div>
+  {% endif %}
   <div class="app-form__group">
     <label class="app-form__label" for="{{ form.branch.id_for_label }}">支店・店舗</label>
     {{ form.branch }}

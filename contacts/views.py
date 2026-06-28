@@ -703,24 +703,25 @@ _DERIVED_MANUAL_FLAGS = {
 }
 
 
-def _apply_derived_manual_flags(contact, form):
-    """フォームで派生フィールド（full_name / display_name / salutation_name）が編集されていれば、
-    対応する *_is_manual を True にする（Phase D §3.6 を全派生に拡張・View 層）。
+def _apply_manual_flags_from_form(contact, form):
+    """フォームの hidden フラグ（*_is_manual）を contact に明示反映する（v1.7 コミット3/3・View 層）。
 
     [性質] 副作用あり（contact のフラグ属性をメモリ上で更新。DB 保存は呼び出し側の責務）
-    [入力] contact: Contact、form: changed_data を持つバリデーション済みフォーム
-    [出力] list[str]（True を立てたフラグ field 名。限定 save の update_fields に使う）
+    [入力] contact: Contact、form: バリデーション済みフォーム（ContactBaseForm 系）
+    [出力] list[str]（反映したフラグ field 名。限定 save の update_fields に使う）
 
-    OCR 経路（json_parser）は本判定を通さずフラグ False のまま。手動 Form 経路でのみ、
-    ユーザーが当該フィールドを書き換えたかを Django 標準の changed_data で判定する。
-    編集がなければ既存値を維持する（False への戻しはしない、§3.6）。
+    鉛筆/自動トグル UI が hidden BooleanField を 0/1 でセットして送る。changed_data の
+    ヒューリスティック（2/3）と異なり、True も False も明示反映する：
+      - 手動化（同値でも True が立つ）／自動に戻す（False に戻り save() で再計算 → 自動値へ復帰）。
+    フラグは UPDATABLE_FIELDS 外＝get_update_contact() には載らないため、ここで個別に反映する。
+    OCR 経路（json_parser）はフォームを通らないため本関数を呼ばずフラグ False のまま。
     """
-    changed = []
-    for field_name, flag_attr in _DERIVED_MANUAL_FLAGS.items():
-        if field_name in form.changed_data:
-            setattr(contact, flag_attr, True)
-            changed.append(flag_attr)
-    return changed
+    applied = []
+    for flag_attr in _DERIVED_MANUAL_FLAGS.values():
+        if flag_attr in form.cleaned_data:
+            setattr(contact, flag_attr, bool(form.cleaned_data[flag_attr]))
+            applied.append(flag_attr)
+    return applied
 
 
 def _create_sns_from_formset(contact, sns_formset):
@@ -762,7 +763,7 @@ def _fix_with_derived_manual_flags(contact, form, user):
     field だけ限定 save で永続化する（*_is_manual は UPDATABLE_FIELDS 外で fix() の差分 save
     には載らないため）。編集がなければ既存値を維持する（False への戻しはしない、§3.6）。
     """
-    flags = _apply_derived_manual_flags(contact, form)
+    flags = _apply_manual_flags_from_form(contact, form)
     contact.fix(form, user)
     if flags:
         contact.save(update_fields=flags)
@@ -795,9 +796,9 @@ def _create_person_and_contact(form, user, business_card=None):
     # 名刺詳細からの手動作成経路は save 前に BC を OneToOne 紐づけする（指示書 §3-1）。
     if business_card is not None:
         contact.business_card = business_card
-    # §3.6：派生フィールド（氏名/表示名/宛名）がフォームで編集されていれば手動扱い
-    # （save 前に立てて自動再計算を抑止）。新規 Contact の full save で永続化される。
-    _apply_derived_manual_flags(contact, form)
+    # 派生フィールド（氏名/表示名/宛名）の手動フラグを hidden から明示反映（save 前に立てて
+    # 自動再計算を抑止）。新規 Contact の full save で永続化される。
+    _apply_manual_flags_from_form(contact, form)
     contact.save()
     person.set_primary_contact(contact)
     return contact
@@ -844,9 +845,9 @@ def _promote_new_contact_as_primary(form, target_contact, user):
     new_contact.status = Contact.Status.ACTIVE
     new_contact.created_by = user
     new_contact.updated_by = user
-    # §3.6：派生フィールド（氏名/表示名/宛名）がフォームで編集されていれば手動扱い
-    # （save 前に立てて自動再計算を抑止）。新規 Contact の full save で永続化される。
-    _apply_derived_manual_flags(new_contact, form)
+    # 派生フィールド（氏名/表示名/宛名）の手動フラグを hidden から明示反映（save 前に立てて
+    # 自動再計算を抑止）。新規 Contact の full save で永続化される。
+    _apply_manual_flags_from_form(new_contact, form)
     new_contact.save()
     target_contact.person.set_primary_contact(
         new_contact, old_primary_new_status="inactive"
