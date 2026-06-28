@@ -47,7 +47,7 @@ _STATUS_BADGE_VARIANTS = {
     ("Contact", "status"): {
         "primary": "success",   # 主コンタクト
         "active": "warning",    # 副コンタクト
-        "inactive": "muted",    # 非アクティブ
+        "inactive": "muted",    # 旧コンタクト
     },
     ("Person", "status"): {
         "active": "success",    # 通常
@@ -67,12 +67,13 @@ _STATUS_BADGE_VARIANTS = {
 # バッジ表示専用のラベル短縮（HIG 対照表は別途是正。バッジは幅が狭いセル＝状態列に
 # 収めるため短縮形を使う。get_FIELD_display（フォームの絞り込み選択肢・ドロップダウン等）
 # には波及させず、本タグの描画ラベルだけ差し替える）。
-#   - Contact.status の primary/active のみ「主」「副」へ短縮。inactive は据え置き。
+#   - Contact.status の primary/active/inactive を「主」「副」「旧」へ短縮。
 #   - Person.status / Campaign.status 等は対象外（get_FIELD_display のまま）。
 _STATUS_BADGE_LABEL_OVERRIDES = {
     ("Contact", "status"): {
         "primary": "主",
         "active": "副",
+        "inactive": "旧",
     },
 }
 

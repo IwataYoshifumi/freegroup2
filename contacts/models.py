@@ -20,7 +20,7 @@ class Contact(models.Model):
 
         PRIMARY = "primary", _("主コンタクト")
         ACTIVE = "active", _("副コンタクト")
-        INACTIVE = "inactive", _("非アクティブ")
+        INACTIVE = "inactive", _("旧コンタクト")
 
     class NameOrder(models.TextChoices):
         """氏名の構成順序（仕様書 v1.6.0 別表 A.5 / OCR プロンプト §2 name ブロック）。"""

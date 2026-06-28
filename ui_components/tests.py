@@ -87,7 +87,7 @@ class StatusBadgeTests(SimpleTestCase):
             "{% load badge_tags %}{% status_badge c %}",
             {"c": Contact(status="inactive")},
         )
-        self.assertIn("非アクティブ", html)
+        self.assertIn("旧", html)
         self.assertIn("app-status-badge--muted", html)
 
 
