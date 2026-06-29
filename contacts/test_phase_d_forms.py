@@ -9,6 +9,7 @@ salutation_name_is_manual の View 層自動セット（§3.6）を検証する�
 
 from django import forms
 from django.contrib.auth import get_user_model
+from django.template.loader import render_to_string
 from django.test import Client, TestCase
 from django.urls import reverse
 
@@ -17,6 +18,7 @@ from contacts.forms import (
     ContactCreateForm,
     ContactUpdateActiveForm,
     ContactUpdateForm,
+    build_contact_sns_formset,
 )
 from contacts.models import Contact
 from persons.models import Person
@@ -545,6 +547,59 @@ class EffectiveLangAndNameOrderTests(TestCase):
         f = ContactUpdateForm(data=data, target_contact=c)
         self.assertTrue(f.is_valid(), f.errors)
         self.assertEqual(f.cleaned_data["name_order"], "first_last")
+
+
+class NamePartOrderRenderTests(TestCase):
+    """v1.7：氏名原本（姓 last_name / 名 first_name）入力欄の表示順を effective_lang で
+    出し分ける（ja=姓→名 / en=名→姓）。表示順のみで役割・ラベルは不変。
+
+    _contact_fields.html を実コンテキストで描画し、姓欄(id_last_name)と名欄(id_first_name)の
+    出現順を検証する。派生（full_name 等）の js- 追従フックは順序非依存のため、ここでは
+    並び順のみを担保する（追従ロジックは既存テストが担保）。
+    """
+
+    def _contact(self, lang):
+        p = Person.objects.create(status=Person.Status.ACTIVE)
+        return Contact.objects.create(
+            person=p,
+            status=Contact.Status.PRIMARY,
+            full_name="山田太郎",
+            last_name="山田",
+            first_name="太郎",
+            lang=lang,
+        )
+
+    def _render(self, lang):
+        c = self._contact(lang)
+        form = ContactUpdateForm(target_contact=c)
+        sns_formset = build_contact_sns_formset(instance=c)
+        html = render_to_string(
+            "contacts/_contact_fields.html",
+            {"form": form, "sns_formset": sns_formset},
+        )
+        return html, html.index('id="id_last_name"'), html.index('id="id_first_name"')
+
+    def test_ja_renders_last_name_before_first_name(self):
+        """ja（既定）：姓 → 名 の順で出る。"""
+        html, last_pos, first_pos = self._render("ja")
+        self.assertIn('id="id_last_name"', html)
+        self.assertIn('id="id_first_name"', html)
+        self.assertLess(last_pos, first_pos, "ja は姓→名の順で描画されるべき")
+
+    def test_en_renders_first_name_before_last_name(self):
+        """en：名 → 姓 の順で出る（表示順のみ。役割・ラベルは不変）。"""
+        html, last_pos, first_pos = self._render("en")
+        self.assertIn('id="id_last_name"', html)
+        self.assertIn('id="id_first_name"', html)
+        self.assertLess(first_pos, last_pos, "en は名→姓の順で描画されるべき")
+
+    def test_js_name_hooks_preserved_in_both_orders(self):
+        """並べ替え後も原本→派生のライブ追従フック（js-name-last/js-name-first）が
+        姓/名 widget に残る（追従の前提が壊れていない）。"""
+        for lang in ("ja", "en"):
+            html, _, _ = self._render(lang)
+            self.assertIn("js-name-last", html)
+            self.assertIn("js-name-first", html)
 
 
 class ManualFlagToggleViewTests(TestCase):

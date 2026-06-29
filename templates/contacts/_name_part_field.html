@@ -1,0 +1,13 @@
+{# 氏名原本（姓 last_name / 名 first_name）1 欄分の app-form__group（単一定義）。 #}
+{# 表示順の lang 出し分け用：本 partial で 1 欄分のマークアップを 1 回だけ定義し、 #}
+{# 呼び出し側（_contact_fields.html）が effective_lang で姓/名の include 順を入れ替える。 #}
+{# ラベル文言・フィールドの役割（last_name/first_name の対応）は呼び出し側が引数で渡す #}
+{# ＝順序のみの出し分けで、i18n には踏み込まない。 #}
+{# widget の js-name-last / js-name-first クラスは forms.py の _tag_name_compose_widgets が #}
+{# 付与済みのため {{ field }} 描画で保持される（原本→派生のライブ追従は順序非依存）。 #}
+{# params: field（姓 or 名の BoundField）/ label（表示ラベル文言） #}
+<div class="app-form__group">
+  <label class="app-form__label" for="{{ field.id_for_label }}">{{ label }}</label>
+  {{ field }}
+  {{ field.errors }}
+</div>

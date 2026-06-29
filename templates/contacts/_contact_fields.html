@@ -9,16 +9,17 @@
 <div class="app-section__header"><h2>氏名</h2></div>
 <div class="app-form-grid">
   {% include "contacts/_derived_field.html" with field=form.full_name label="氏名" flag=form.full_name_is_manual name="full_name" %}
-  <div class="app-form__group">
-    <label class="app-form__label" for="{{ form.last_name.id_for_label }}">姓</label>
-    {{ form.last_name }}
-    {{ form.last_name.errors }}
-  </div>
-  <div class="app-form__group">
-    <label class="app-form__label" for="{{ form.first_name.id_for_label }}">名</label>
-    {{ form.first_name }}
-    {{ form.first_name.errors }}
-  </div>
+  {# 姓/名の原本入力欄は表示順だけを effective_lang で出し分ける（ja=姓→名 / en=名→姓）。 #}
+  {# ブロックは _name_part_field.html に単一定義し、ここでは include 順だけ入れ替える #}
+  {# （:23 フリガナ / :58 法人格の位置と同じ effective_lang 参照方式）。 #}
+  {# 役割（last_name/first_name の対応）・ラベル文言・i18n は変えない＝順序のみ。 #}
+  {% if form.effective_lang == "en" %}
+    {% include "contacts/_name_part_field.html" with field=form.first_name label="名" %}
+    {% include "contacts/_name_part_field.html" with field=form.last_name label="姓" %}
+  {% else %}
+    {% include "contacts/_name_part_field.html" with field=form.last_name label="姓" %}
+    {% include "contacts/_name_part_field.html" with field=form.first_name label="名" %}
+  {% endif %}
   {% include "contacts/_derived_field.html" with field=form.display_name label="表示名" flag=form.display_name_is_manual name="display_name" %}
   {% if form.effective_lang == "ja" %}
   <div class="app-form__group">
