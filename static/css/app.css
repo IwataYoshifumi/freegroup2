@@ -873,7 +873,7 @@ a { color: inherit; text-decoration: none; }
 /* ========== 一覧操作・ツールチップ・レスポンシブ列制御 ========== */
 .app-table--nowrap {
   table-layout: fixed;
-  min-width: 860px;
+  min-width: 900px;
 }
 
 .app-table--nowrap th,
@@ -931,13 +931,17 @@ a { color: inherit; text-decoration: none; }
 .app-icon--search::before { content: "⌕"; font-size: 17px; }
 .app-icon--back::before { content: "‹"; font-size: 22px; font-weight: 800; }
 
-.app-table__col--action { width: 200px; text-align: center; white-space: nowrap; }
-.app-table__col--name { width: 120px; }
+.app-table__col--action { width: 88px; text-align: center; white-space: nowrap; }
+.app-table__col--name { width: 232px; }
 .app-table__col--organization { width: 220px; }
 .app-table__col--dept { width: 190px; }
 .app-table__col--personal_phone { width: 130px; }
 .app-table__col--email { width: 230px; }
-.app-table__col--status { width: 62px; text-align: center; }
+.app-table__col--status { width: 100px; text-align: center; }
+/* 状態列のバッジ（マージ済み／アーカイブ）は丸ピルを1行で全文表示する。
+   nowrap テーブルの td 既定 overflow:hidden で右端がクリップされないよう、
+   状態セルだけはみ出しを許可し中央寄せする（列幅 100px に収まる想定）。 */
+.app-table--nowrap td[data-col-key="status"] { overflow: visible; text-align: center; }
 .app-table__col--date { width: 128px; }
 
 /* ========== 人物一覧：検索フォーム横長是正・フィルタ折りたたみ・列見出しソート ==========

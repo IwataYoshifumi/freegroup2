@@ -52,7 +52,7 @@
                 <a href="{% append_back_url detail_url back %}" class="app-btn app-btn--secondary app-btn--sm">詳細</a>
               </td>
               <td data-col-key="name" data-sort-key="{{ person.primary_contact.phonetic_name }}">
-                {{ person.primary_contact.full_name|default:"(氏名なし)" }}
+                <span class="app-ellipsis" data-tooltip="{{ person.primary_contact.full_name|default:'(氏名なし)' }}">{{ person.primary_contact.full_name|default:"(氏名なし)" }}</span>
               </td>
               <td data-col-key="status">
                 {% if person.status != "active" %}{% status_badge person %}{% endif %}
