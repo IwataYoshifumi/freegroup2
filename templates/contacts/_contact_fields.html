@@ -51,11 +51,20 @@
     {{ form.organization }}
     {{ form.organization.errors }}
   </div>
+  {# 法人格は補助の「法人格の位置」と概念ペア。位置が en 非表示なので法人格も en では画面から消す。 #}
+  {# ただしフリガナ・法人格の位置（en で実質空）と違い、法人格は en でも値を持ちうる（Inc./Ltd. 等）。 #}
+  {# 丸ごと省略すると未送信→clean で "" になり保存経路（fix/get_update_contact）で既存値を消すため、 #}
+  {# en では hidden で値を POST に保持し（old==new で上書きを防ぐ）、画面表示だけ抑える。 #}
+  {# ＝法人格のみ「hidden 保持」、フリガナ・法人格の位置は現状の丸ごと省略のまま（方式差は意図的）。 #}
+  {% if form.effective_lang == "ja" %}
   <div class="app-form__group">
     <label class="app-form__label" for="{{ form.legal_entity_type.id_for_label }}">法人格</label>
     {{ form.legal_entity_type }}
     {{ form.legal_entity_type.errors }}
   </div>
+  {% else %}
+  {{ form.legal_entity_type.as_hidden }}
+  {% endif %}
   {% if form.effective_lang == "ja" %}
   <div class="app-form__group">
     <label class="app-form__label" for="{{ form.legal_entity_type_position.id_for_label }}">法人格の位置</label>

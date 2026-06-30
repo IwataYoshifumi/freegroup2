@@ -602,6 +602,68 @@ class NamePartOrderRenderTests(TestCase):
             self.assertIn("js-name-first", html)
 
 
+class LegalEntityTypeEnHiddenTests(TestCase):
+    """v1.7：法人格(legal_entity_type)は en で画面非表示だが hidden で値を保持し、
+    en 保存時に既存値が消えないことを担保する。
+
+    フリガナ・法人格の位置（en で実質空）は現状の「丸ごと省略」のままで、本手当ては
+    legal_entity_type のみ（en でも Inc./Ltd. 等の値を持ちうるため）。
+    """
+
+    def _contact(self, lang, legal="Inc."):
+        p = Person.objects.create(status=Person.Status.ACTIVE)
+        return Contact.objects.create(
+            person=p,
+            status=Contact.Status.PRIMARY,
+            full_name="John Smith",
+            last_name="Smith",
+            first_name="John",
+            salutation_name="Mr. John Smith",
+            organization="Acme",
+            legal_entity_type=legal,
+            lang=lang,
+        )
+
+    def _render(self, lang):
+        c = self._contact(lang)
+        form = ContactUpdateForm(target_contact=c)
+        sns_formset = build_contact_sns_formset(instance=c)
+        return render_to_string(
+            "contacts/_contact_fields.html",
+            {"form": form, "sns_formset": sns_formset},
+        )
+
+    def test_ja_renders_visible_legal_entity_type_field(self):
+        """ja：法人格は従来どおり通常入力欄（ラベル可視・hidden ではない）。"""
+        html = self._render("ja")
+        self.assertIn(">法人格<", html)
+        self.assertNotIn('type="hidden" name="legal_entity_type"', html)
+
+    def test_en_renders_legal_entity_type_as_hidden(self):
+        """en：法人格は画面ラベルを出さず、値を hidden で POST に保持する。"""
+        html = self._render("en")
+        self.assertNotIn(">法人格<", html)  # 画面ラベルは出ない
+        self.assertIn('type="hidden" name="legal_entity_type"', html)
+        self.assertIn('value="Inc."', html)  # 既存値が hidden に乗る（POST 保持の根拠）
+
+    def test_en_save_preserves_legal_entity_type(self):
+        """en 保存で legal_entity_type の既存値が維持される（hidden が POST に乗るため
+        cleaned 実値→get_update_contact→fix で old==new となり上書きされない）。
+        派生 legal_entity_type_code も type 値が保たれる結果、不正に空/再導出されない。"""
+        c = self._contact("en", legal="Ltd.")
+        code_before = c.legal_entity_type_code
+        user = User.objects.create_user(username="le_en_user", password="x")
+        # en ページは hidden で legal_entity_type を送る＝POST に値が乗る状況を再現。
+        data = {fn: getattr(c, fn) or "" for fn in Contact.UPDATABLE_FIELDS}
+        form = ContactUpdateActiveForm(data=data, target_contact=c)
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data["legal_entity_type"], "Ltd.")
+        c.fix(form, user)
+        c.refresh_from_db()
+        self.assertEqual(c.legal_entity_type, "Ltd.")
+        self.assertEqual(c.legal_entity_type_code, code_before)
+
+
 class ManualFlagToggleViewTests(TestCase):
     """v1.7 コミット3/3 要素3：hidden フラグによる手動/自動/自動戻しの送信反映。"""
 
