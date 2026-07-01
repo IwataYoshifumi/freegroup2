@@ -6,7 +6,42 @@
 {# v1.7：原本（姓/名/ミドル/別名/フリガナ）は通常入力。派生（氏名/表示名/敬称付き氏名）は #}
 {# 自動/手動トグル（_derived_field.html）。語順は effective_lang から確定し hidden で保持。 #}
 {# フリガナは ja のみ表示（en は非表示）。 #}
+{# v1.7：ja のときだけ「入力欄バンド → 自動生成欄バンド」の上下2段に再配置する（見た目のゾーン分け）。 #}
+{# 2つの .app-form-grid に分割し、各バンド先頭に全幅の小見出し（.app-subsection-title + --full）を置く。 #}
+{# 欄の中身・include・派生トグル/hidden POST/↻・フリガナ ja 制御・name_order hidden は現行のまま移設。 #}
+{# en は分岐せず現行の単一フローを維持する（下の {% else %} は従来マークアップそのまま）。 #}
 <div class="app-section__header"><h2>氏名</h2></div>
+{% if form.effective_lang == "ja" %}
+  {# 上バンド＝入力欄（姓 / 名 / ミドルネーム等 / フリガナ / 別名）。ja 固定なので姓→名の順で include。 #}
+  <div class="app-form-grid">
+    <div class="app-subsection-title app-form__group--full">入力</div>
+    {% include "contacts/_name_part_field.html" with field=form.last_name label="姓" %}
+    {% include "contacts/_name_part_field.html" with field=form.first_name label="名" %}
+    <div class="app-form__group">
+      <label class="app-form__label" for="{{ form.other_name_parts.id_for_label }}">ミドルネーム等</label>
+      {{ form.other_name_parts }}
+      {{ form.other_name_parts.errors }}
+    </div>
+    {# フリガナは ja のみ表示。この上バンド自体が ja 分岐内なので条件は不要（＝ja のみ出力を維持）。 #}
+    <div class="app-form__group">
+      <label class="app-form__label" for="{{ form.phonetic_name.id_for_label }}">フリガナ</label>
+      {{ form.phonetic_name }}
+      {{ form.phonetic_name.errors }}
+    </div>
+    <div class="app-form__group">
+      <label class="app-form__label" for="{{ form.alias_name.id_for_label }}">別名（旧姓など）</label>
+      {{ form.alias_name }}
+      {{ form.alias_name.errors }}
+    </div>
+  </div>
+  {# 下バンド＝自動生成欄（氏名 / 表示名 / 敬称付き氏名）。派生トグル・hidden POST・↻ は include のまま。 #}
+  <div class="app-form-grid" style="margin-top:var(--app-space-md);">
+    <div class="app-subsection-title app-form__group--full">自動生成（必要なら手修正）</div>
+    {% include "contacts/_derived_field.html" with field=form.full_name label="氏名" flag=form.full_name_is_manual name="full_name" %}
+    {% include "contacts/_derived_field.html" with field=form.display_name label="表示名" flag=form.display_name_is_manual name="display_name" %}
+    {% include "contacts/_derived_field.html" with field=form.salutation_name label="敬称付き氏名" flag=form.salutation_name_is_manual name="salutation_name" required=True %}
+  </div>
+{% else %}
 <div class="app-form-grid">
   {% include "contacts/_derived_field.html" with field=form.full_name label="氏名" flag=form.full_name_is_manual name="full_name" %}
   {# 姓/名の原本入力欄は表示順だけを effective_lang で出し分ける（ja=姓→名 / en=名→姓）。 #}
@@ -40,6 +75,7 @@
   </div>
   {% include "contacts/_derived_field.html" with field=form.salutation_name label="敬称付き氏名" flag=form.salutation_name_is_manual name="salutation_name" required=True %}
 </div>
+{% endif %}
 {# 語順（name_order）は effective_lang から確定（ja=姓+名 / en=名+姓）。hidden で保持＝画面に出さない。 #}
 {{ form.name_order }}
 
