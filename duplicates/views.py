@@ -76,7 +76,7 @@ FIELD_LABEL_JA = {
     "full_name": "氏名",
     "last_name": "姓",
     "first_name": "名",
-    "salutation_name": "敬称付き氏名",
+    "salutation_name": "敬称付き氏名（メール宛名）",
     "other_name_parts": "他の名前部分",
     "name_order": "氏名の順序",
     "display_name": "表示名",

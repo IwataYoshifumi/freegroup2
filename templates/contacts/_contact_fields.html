@@ -39,7 +39,7 @@
     <div class="app-subsection-title app-form__group--full">自動生成（必要なら手修正）</div>
     {% include "contacts/_derived_field.html" with field=form.full_name label="氏名" flag=form.full_name_is_manual name="full_name" %}
     {% include "contacts/_derived_field.html" with field=form.display_name label="表示名" flag=form.display_name_is_manual name="display_name" %}
-    {% include "contacts/_derived_field.html" with field=form.salutation_name label="敬称付き氏名" flag=form.salutation_name_is_manual name="salutation_name" required=True %}
+    {% include "contacts/_derived_field.html" with field=form.salutation_name label="敬称付き氏名（メール宛名）" flag=form.salutation_name_is_manual name="salutation_name" required=True %}
   </div>
 {% else %}
 <div class="app-form-grid">
@@ -73,7 +73,7 @@
     {{ form.alias_name }}
     {{ form.alias_name.errors }}
   </div>
-  {% include "contacts/_derived_field.html" with field=form.salutation_name label="敬称付き氏名" flag=form.salutation_name_is_manual name="salutation_name" required=True %}
+  {% include "contacts/_derived_field.html" with field=form.salutation_name label="敬称付き氏名（メール宛名）" flag=form.salutation_name_is_manual name="salutation_name" required=True %}
 </div>
 {% endif %}
 {# 語順（name_order）は effective_lang から確定（ja=姓+名 / en=名+姓）。hidden で保持＝画面に出さない。 #}

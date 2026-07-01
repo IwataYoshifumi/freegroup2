@@ -73,7 +73,7 @@
             <span class="app-status-badge app-status-badge--warning">マージ候補 {{ pending_duplicates|length }} 件</span>
           {% endif %}
           {% if contact.last_name or contact.first_name or contact.salutation_name %}
-            {% with name_tip="姓："|add:contact.last_name|add:" ／ 名："|add:contact.first_name|add:" ／ 敬称付き："|add:contact.salutation_name %}
+            {% with name_tip="姓："|add:contact.last_name|add:" ／ 名："|add:contact.first_name|add:" ／ 敬称付き氏名（メール宛名）："|add:contact.salutation_name %}
               <span class="app-help-icon" data-tooltip="{{ name_tip }}" aria-label="氏名の内訳" role="img">i</span>
             {% endwith %}
           {% endif %}

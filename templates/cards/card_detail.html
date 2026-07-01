@@ -125,7 +125,7 @@
               {% include "contacts/_contact_field.html" with field_name="first_name" label="名" value=contact.first_name %}
             {% endif %}
             {% if contact.salutation_name %}
-              {% include "contacts/_contact_field.html" with field_name="salutation_name" label="敬称付き氏名" value=contact.salutation_name %}
+              {% include "contacts/_contact_field.html" with field_name="salutation_name" label="敬称付き氏名（メール宛名）" value=contact.salutation_name %}
             {% endif %}
           {% endif %}
 

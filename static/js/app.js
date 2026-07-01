@@ -671,6 +671,33 @@
     }
   }
 
+  function composeSalutationField() {
+    // 敬称付き氏名（salutation_name）を ja のときだけライブ追従する（v1.7）。
+    // lang 判定は毎回 #id_lang を読み startsWith('ja')。effective_lang / name_order は
+    // ko/zh/und を ja に丸めるため使わない（サーバ normalization.compute_salutation_name の
+    // ja 判定＝lang.startswith('ja') と一致させる）。ja 以外（en/ko/zh/und/空）は敬称に
+    // 一切触れない（既存値維持＝サーバ確定のまま）。
+    const langEl = document.querySelector('#id_lang');
+    const lang = langEl ? langEl.value.trim().toLowerCase() : '';
+    if (!lang.startsWith('ja')) return;
+    // 敬称が手動状態なら書き換えない。full_name の手動状態からは独立（salutation 自身の
+    // is_manual だけでゲート＝composeFullNameField の early-return には相乗りしない）。
+    if (!isDerivedAuto('salutation_name')) return;
+    const valueOf = function (selector) {
+      const el = document.querySelector(selector);
+      return el ? el.value.trim() : '';
+    };
+    // ja ルール：base = last_name（空なら full_name）→「{base} 様」。区切りは半角スペース固定
+    // （全角にするとサーバ保存値とズレる）。
+    const base = valueOf('.js-name-last') || valueOf('.js-name-full');
+    const result = base ? base + ' 様' : '';
+    // 書き換えは氏名・表示名と同じ 2 点セット：実入力（#id_salutation_name＝auto 時も
+    // js-derived-manual[hidden] 内で DOM 残存し POST される）と淡色 span（js-derived-display）。
+    const input = document.querySelector('#id_salutation_name');
+    if (input) input.value = result;
+    setDerivedDisplay('salutation_name', result);
+  }
+
   function setManualMode(field, manual) {
     // 派生フィールドの自動/手動表示を切り替え、hidden フラグを true/false にセットする。
     const auto = field.querySelector('.js-derived-auto');
@@ -701,6 +728,9 @@
         setManualMode(field, false);
         // 自動に戻したら原本から再組み立てして表示を即追従（保存時にサーバも再計算）。
         composeFullNameField();
+        // 敬称も同様に再追従（ja のときだけ・自身の auto 判定でゲート。両者とも自分の
+        // is_manual を見るのでどの派生欄の↻でも安全）。
+        composeSalutationField();
       }
     }
   });
@@ -714,6 +744,9 @@
       target.classList.contains('js-name-other')
     ) {
       composeFullNameField();
+      // 敬称は full_name 手動でも姓変更で追従させたいので、composeFullNameField の
+      // early-return に依存せず独立に呼ぶ（内部で ja 判定と salutation の auto 判定を行う）。
+      composeSalutationField();
     }
   });
 
@@ -721,6 +754,7 @@
     const target = event.target;
     if (target && target.classList && target.classList.contains('js-name-order')) {
       composeFullNameField();
+      composeSalutationField();
     }
   });
 })();

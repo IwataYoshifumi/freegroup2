@@ -30,7 +30,7 @@ _contact_field.html を is_editable=False で include し、編集 UI なしの�
       {% include "contacts/_contact_field.html" with field_name="first_name" label="名" value=contact.first_name is_editable=False %}
     {% endif %}
     {% if contact.salutation_name %}
-      {% include "contacts/_contact_field.html" with field_name="salutation_name" label="敬称付き氏名" value=contact.salutation_name is_editable=False %}
+      {% include "contacts/_contact_field.html" with field_name="salutation_name" label="敬称付き氏名（メール宛名）" value=contact.salutation_name is_editable=False %}
     {% endif %}
   {% endif %}
 
