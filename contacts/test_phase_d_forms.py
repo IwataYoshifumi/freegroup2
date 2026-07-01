@@ -664,6 +664,63 @@ class LegalEntityTypeEnHiddenTests(TestCase):
         self.assertEqual(c.legal_entity_type_code, code_before)
 
 
+class OtherNamePartsJaHiddenTests(TestCase):
+    """v1.7：ミドルネーム等(other_name_parts)は ja で画面非表示だが as_hidden で値を保持し、
+    ja 保存時に既存値が空で上書きされないことを担保する（法人格 en 隠蔽の ja 版・方向逆）。
+
+    ja の氏名組み立ては「姓 名」で other 不使用のため、隠してもライブ追従は無傷。
+    """
+
+    def _contact(self, lang, other="ビン"):
+        p = Person.objects.create(status=Person.Status.ACTIVE)
+        return Contact.objects.create(
+            person=p,
+            status=Contact.Status.PRIMARY,
+            full_name="山田 太郎",
+            last_name="山田",
+            first_name="太郎",
+            other_name_parts=other,
+            salutation_name="山田 様",
+            lang=lang,
+        )
+
+    def _render(self, lang):
+        c = self._contact(lang)
+        form = ContactUpdateForm(target_contact=c)
+        sns_formset = build_contact_sns_formset(instance=c)
+        return render_to_string(
+            "contacts/_contact_fields.html",
+            {"form": form, "sns_formset": sns_formset},
+        )
+
+    def test_en_renders_visible_other_name_parts_field(self):
+        """en：ミドルネーム等は従来どおり通常入力欄（ラベル可視・hidden ではない）。"""
+        html = self._render("en")
+        self.assertIn(">ミドルネーム等<", html)
+        self.assertNotIn('type="hidden" name="other_name_parts"', html)
+
+    def test_ja_renders_other_name_parts_as_hidden(self):
+        """ja：ミドルネーム等は画面ラベルを出さず、値を hidden で POST に保持する。"""
+        html = self._render("ja")
+        self.assertNotIn(">ミドルネーム等<", html)  # 画面ラベルは出ない
+        self.assertIn('type="hidden" name="other_name_parts"', html)
+        self.assertIn('value="ビン"', html)  # 既存値が hidden に乗る（POST 保持の根拠）
+
+    def test_ja_save_preserves_other_name_parts(self):
+        """ja 保存で other_name_parts の既存値が維持される（hidden が POST に乗るため
+        cleaned 実値→get_update_contact→fix で old==new となり空上書きされない）。"""
+        c = self._contact("ja", other="ビン")
+        user = User.objects.create_user(username="onp_ja_user", password="x")
+        # ja ページは as_hidden で other_name_parts を送る＝POST に値が乗る状況を再現。
+        data = {fn: getattr(c, fn) or "" for fn in Contact.UPDATABLE_FIELDS}
+        form = ContactUpdateActiveForm(data=data, target_contact=c)
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data["other_name_parts"], "ビン")
+        c.fix(form, user)
+        c.refresh_from_db()
+        self.assertEqual(c.other_name_parts, "ビン")
+
+
 class ManualFlagToggleViewTests(TestCase):
     """v1.7 コミット3/3 要素3：hidden フラグによる手動/自動/自動戻しの送信反映。"""
 

@@ -12,16 +12,17 @@
 {# en は分岐せず現行の単一フローを維持する（下の {% else %} は従来マークアップそのまま）。 #}
 <div class="app-section__header"><h2>氏名</h2></div>
 {% if form.effective_lang == "ja" %}
-  {# 上バンド＝入力欄（姓 / 名 / ミドルネーム等 / フリガナ / 別名）。ja 固定なので姓→名の順で include。 #}
+  {# 上バンド＝入力欄（姓 / 名 / フリガナ / 別名）。ja 固定なので姓→名の順で include。 #}
+  {# ミドルネーム等は ja では画面に出さず as_hidden で値を保持する（下記 hidden、法人格 :95-103 と同方式・方向逆）。 #}
   <div class="app-form-grid">
     <div class="app-subsection-title app-form__group--full">入力</div>
     {% include "contacts/_name_part_field.html" with field=form.last_name label="姓" %}
     {% include "contacts/_name_part_field.html" with field=form.first_name label="名" %}
-    <div class="app-form__group">
-      <label class="app-form__label" for="{{ form.other_name_parts.id_for_label }}">ミドルネーム等</label>
-      {{ form.other_name_parts }}
-      {{ form.other_name_parts.errors }}
-    </div>
+    {# ミドルネーム等（other_name_parts）は ja では画面に出さず as_hidden で値を POST 保持する。 #}
+    {# 丸ごと省略すると ja 未送信→clean で "" になり保存経路（get_update_contact/fix）で既存値を空上書き #}
+    {# するため、hidden で値を POST に保持し（old==new で上書きを防ぐ）画面表示だけ抑える。en は下の {% else %} で従来表示。 #}
+    {# ※ja の氏名組み立ては「姓 名」で other 不使用のため、隠しても full_name/敬称のライブ追従は無傷（app.js 裏取り済み）。 #}
+    {{ form.other_name_parts.as_hidden }}
     {# フリガナは ja のみ表示。この上バンド自体が ja 分岐内なので条件は不要（＝ja のみ出力を維持）。 #}
     <div class="app-form__group">
       <label class="app-form__label" for="{{ form.phonetic_name.id_for_label }}">フリガナ</label>
