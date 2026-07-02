@@ -1751,6 +1751,28 @@ class ContactListViewTests(TestCase):
         person.save(update_fields=["primary_contact", "updated_at"])
         return contact
 
+    def test_status_and_lang_columns_expose_sort_keys(self):
+        """状態・言語列の <td> に並べ替え用 data-sort-key が描画される。
+
+        見出しクリックのその場並べ替え（app.js initTable）用の隠し値。
+        状態は業務語順の順序値（主=0/副=1/旧=2）、言語は lang 生値を出す。
+        """
+        # contact_a は primary（主=0）・lang 既定 "ja"。副（active=1）も別 Person で用意。
+        sub_person = Person.objects.create()
+        Contact.objects.create(
+            person=sub_person, status=Contact.Status.ACTIVE, full_name="Sub"
+        )
+        # 既定は主のみ表示のため、主+副を明示して両方を一覧に載せる。
+        html = self.client.get(
+            self.url, {"searched": "1", "status": ["primary", "active"]}
+        ).content.decode()
+        # 主コンタクト（primary）→ 順序値 0。
+        self.assertIn('data-col-key="status" data-sort-key="0"', html)
+        # 副コンタクト（active）→ 順序値 1。
+        self.assertIn('data-col-key="status" data-sort-key="1"', html)
+        # 言語列は lang 生値（既定 ja）。
+        self.assertIn('data-col-key="lang" data-sort-key="ja"', html)
+
     def test_default_shows_primary_only(self):
         """初回アクセス（searched なし）→ primary のみ、active / inactive は非表示。"""
         active = Contact.objects.create(

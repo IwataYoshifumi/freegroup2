@@ -35,12 +35,12 @@
           <tr>
             <th class="app-table__col--action">操作</th>
             <th class="app-table__col--name" data-col-key="name" data-sort-col>氏名</th>
-            <th class="app-table__col--status" data-col-key="status">状態</th>
-            <th data-col-key="lang">言語</th>
+            <th class="app-table__col--status" data-col-key="status" data-sort-col>状態</th>
             <th class="app-table__col--organization" data-col-key="company" data-sort-col>会社</th>
             <th class="app-table__col--dept" data-col-key="title" data-sort-col>役職</th>
             <th class="app-table__col--email" data-col-key="email" data-sort-col>連絡先</th>
-            <th class="app-table__col--date" data-col-key="updated_at">更新日時</th>
+            <th data-col-key="lang" data-sort-col>言語</th>
+            <th class="app-table__col--date" data-col-key="updated_at" data-sort-col>更新日時</th>
           </tr>
         </thead>
         <tbody>
@@ -51,10 +51,9 @@
                 <a href="{% append_back_url detail_url back %}" class="app-btn app-btn--secondary app-btn--sm">詳細</a>
               </td>
               <td data-col-key="name" data-sort-key="{{ contact.phonetic_name }}">{{ contact.full_name|default:"-" }}</td>
-              <td data-col-key="status">
+              <td data-col-key="status" data-sort-key="{{ contact|status_sort_key }}">
                 {% status_badge contact %}
               </td>
-              <td data-col-key="lang">{{ contact.lang|lang_label }}</td>
               <td data-col-key="company">
                 {% if contact.organization %}
                   <span class="app-ellipsis" data-tooltip="{{ contact.organization }}">{{ contact.organization|truncatechars:30 }}</span>
@@ -68,6 +67,7 @@
                 {% if contact.personal_fax %}<div>FAX: {{ contact.personal_fax }}</div>{% endif %}
                 {% if not contact.email and not contact.mobile_phone and not contact.personal_phone and not contact.personal_fax %}-{% endif %}
               </td>
+              <td data-col-key="lang" data-sort-key="{{ contact.lang }}">{{ contact.lang|lang_label }}</td>
               <td data-col-key="updated_at">{{ contact.updated_at|date:"Y/m/d H:i" }}</td>
             </tr>
           {% empty %}
