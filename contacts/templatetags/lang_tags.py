@@ -31,12 +31,12 @@ def lang_label(value):
         - lower().startswith('ja'/'en'/'ko'/'zh') → 日本語 / 英語 / 韓国語 / 中国語
           （ja-JP・zh-CN 等の地域コード付きも接頭辞で寄せる）
         - 'und' → 未判定
-        - 空文字・None → 未設定
+        - 空文字・None → -（未設定を表す一覧のプレースホルダ）
         - 上記いずれにも当たらない未知値 → 生値をそのまま表示（握りつぶさない）
     """
     s = "" if value is None else str(value).strip()
     if s == "":
-        return "未設定"
+        return "-"
     low = s.lower()
     for code in ("ja", "en", "ko", "zh"):
         if low.startswith(code):

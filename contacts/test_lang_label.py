@@ -39,14 +39,14 @@ class LangLabelFilterTests(SimpleTestCase):
         self.assertEqual(lang_label("und"), "未判定")
 
     def test_empty_string(self):
-        self.assertEqual(lang_label(""), "未設定")
+        self.assertEqual(lang_label(""), "-")
 
     def test_whitespace_only(self):
-        # strip 後に空なら未設定。
-        self.assertEqual(lang_label("   "), "未設定")
+        # strip 後に空なら未設定プレースホルダ（-）。
+        self.assertEqual(lang_label("   "), "-")
 
     def test_none(self):
-        self.assertEqual(lang_label(None), "未設定")
+        self.assertEqual(lang_label(None), "-")
 
     def test_unknown_value_is_returned_raw(self):
         # 未知値は握りつぶさず生値をそのまま表示。
