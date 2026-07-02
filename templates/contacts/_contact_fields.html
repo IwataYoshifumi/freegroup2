@@ -129,7 +129,8 @@
     {{ form.qualification }}
     {{ form.qualification.errors }}
   </div>
-  <div class="app-form__group">
+  {# キャッチコピーは所属グリッド（3列）で2列ぶん幅にして「資格1＋キャッチ2」を1行に収める（--span2、ja/en 共通）。 #}
+  <div class="app-form__group app-form__group--span2">
     <label class="app-form__label" for="{{ form.catchphrase.id_for_label }}">キャッチコピー</label>
     {{ form.catchphrase }}
     {{ form.catchphrase.errors }}
@@ -200,7 +201,7 @@
     {{ form.city.errors }}
   </div>
   <div class="app-form__group">
-    <label class="app-form__label" for="{{ form.rest_of_address.id_for_label }}">番地以降</label>
+    <label class="app-form__label" for="{{ form.rest_of_address.id_for_label }}">町名番地以降</label>
     {{ form.rest_of_address }}
     {{ form.rest_of_address.errors }}
   </div>

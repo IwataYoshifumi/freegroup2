@@ -574,6 +574,8 @@ a { color: inherit; text-decoration: none; }
   }
   .app-action-area { justify-content: flex-start; }
   .app-form-grid { grid-template-columns: 1fr; }
+  /* 1 列化したら span2 は無効化（1fr グリッドで span 2 だと暗黙列が生えて横溢れするため）。 */
+  .app-form__group--span2 { grid-column: auto; }
   .app-table-wrapper { display: none; }
   .app-card-list { display: block; }
 }
@@ -699,6 +701,9 @@ a { color: inherit; text-decoration: none; }
 }
 
 .app-form__group--full { grid-column: 1 / -1; }
+/* 3列グリッド内で 1 セルを 2 列ぶんに広げる汎用ユーティリティ（例：資格1＋キャッチコピー2で1行）。
+   狭幅（≤900px）で app-form-grid が 1 列化する際は span を打ち消す（下の @media で auto に戻す）。 */
+.app-form__group--span2 { grid-column: span 2; }
 
 .app-textarea {
   min-height: 96px;
