@@ -623,10 +623,13 @@
 
   function isDerivedAuto(name) {
     // 派生フィールドが自動状態か（hidden フラグが 'true' でない＝自動）。
+    // 判定は大文字小文字非依存：サーバ初期描画は Django 標準の "True"/"False"、JS の
+    // setManualMode は小文字 'true'/'false' を書くため、両系統を同一に扱わないと load 時
+    // is_manual=True のコンタクトを auto と誤判定して手動値を上書きしてしまう（v1.7 修正）。
     const field = derivedField(name);
     if (!field) return false;
     const flag = field.querySelector('input[type="hidden"][name$="_is_manual"]');
-    return flag ? flag.value !== 'true' : false;
+    return flag ? flag.value.toLowerCase() !== 'true' : false;
   }
 
   function setDerivedDisplay(name, value) {
@@ -672,25 +675,39 @@
   }
 
   function composeSalutationField() {
-    // 敬称付き氏名（salutation_name）を ja のときだけライブ追従する（v1.7）。
-    // lang 判定は毎回 #id_lang を読み startsWith('ja')。effective_lang / name_order は
-    // ko/zh/und を ja に丸めるため使わない（サーバ normalization.compute_salutation_name の
-    // ja 判定＝lang.startswith('ja') と一致させる）。ja 以外（en/ko/zh/und/空）は敬称に
-    // 一切触れない（既存値維持＝サーバ確定のまま）。
+    // 敬称付き氏名（salutation_name）を全言語でライブ追従する（v1.7）。サーバ
+    // normalization.compute_salutation_name の 4 分岐（ja / ko / zh / en=und・その他）と
+    // 出力文字列をバイト単位で一致させる（画面プレビューと save 再計算値のズレ防止）。
+    // lang 判定は毎回 #id_lang を読み lower().startsWith(...)（ja-JP 等も接頭辞で寄せる。
+    // どれにも当たらない未知値・und は else＝en 扱いで、サーバの分岐順と一致させる）。
     const langEl = document.querySelector('#id_lang');
     const lang = langEl ? langEl.value.trim().toLowerCase() : '';
-    if (!lang.startsWith('ja')) return;
-    // 敬称が手動状態なら書き換えない。full_name の手動状態からは独立（salutation 自身の
-    // is_manual だけでゲート＝composeFullNameField の early-return には相乗りしない）。
+    // 敬称が手動状態なら書き換えない（全言語共通）。full_name の手動状態からは独立
+    // （salutation 自身の is_manual だけでゲート＝composeFullNameField の early-return に相乗りしない）。
     if (!isDerivedAuto('salutation_name')) return;
     const valueOf = function (selector) {
       const el = document.querySelector(selector);
       return el ? el.value.trim() : '';
     };
-    // ja ルール：base = last_name（空なら full_name）→「{base} 様」。区切りは半角スペース固定
-    // （全角にするとサーバ保存値とズレる）。
-    const base = valueOf('.js-name-last') || valueOf('.js-name-full');
-    const result = base ? base + ' 様' : '';
+    // base はサーバと同じ取り方：ja/ko は last_name（空なら full_name）、zh/en/und は full_name。
+    // full は composeFullNameField が先に更新した .js-name-full の現在値（auto/manual 問わず）。
+    const last = valueOf('.js-name-last');
+    const full = valueOf('.js-name-full');
+    let result;
+    if (lang.startsWith('ja')) {
+      const base = last || full;         // サーバ: f"{base} 様"（半角スペース）
+      result = base ? base + ' 様' : '';
+    } else if (lang.startsWith('ko')) {
+      const base = last || full;         // サーバ: f"{base} 님"（半角スペース）
+      result = base ? base + ' 님' : '';
+    } else if (lang.startsWith('zh')) {
+      result = full;                     // サーバ: full_name のみ（接尾辞なし）
+    } else {
+      result = full ? 'Dear ' + full + ',' : '';  // サーバ: f"Dear {full_name},"
+    }
+    // base（full）が空なら空文字＝敬称欄を書き換えず前の値を残す（氏名未入力時は触らない。
+    // "Dear ," のような空ベースの文字列を出さない。サーバも空なら空文字を返す）。
+    if (!result) return;
     // 書き換えは氏名・表示名と同じ 2 点セット：実入力（#id_salutation_name＝auto 時も
     // js-derived-manual[hidden] 内で DOM 残存し POST される）と淡色 span（js-derived-display）。
     const input = document.querySelector('#id_salutation_name');
@@ -728,7 +745,7 @@
         setManualMode(field, false);
         // 自動に戻したら原本から再組み立てして表示を即追従（保存時にサーバも再計算）。
         composeFullNameField();
-        // 敬称も同様に再追従（ja のときだけ・自身の auto 判定でゲート。両者とも自分の
+        // 敬称も同様に再追従（全言語・自身の auto 判定でゲート。両者とも自分の
         // is_manual を見るのでどの派生欄の↻でも安全）。
         composeSalutationField();
       }
@@ -745,7 +762,7 @@
     ) {
       composeFullNameField();
       // 敬称は full_name 手動でも姓変更で追従させたいので、composeFullNameField の
-      // early-return に依存せず独立に呼ぶ（内部で ja 判定と salutation の auto 判定を行う）。
+      // early-return に依存せず独立に呼ぶ（内部で lang 別分岐と salutation の auto 判定を行う）。
       composeSalutationField();
     }
   });
