@@ -34,7 +34,6 @@
             <th class="app-table__col--action">操作</th>
             <th class="app-table__col--name" data-col-key="name" data-sort-col>氏名</th>
             <th class="app-table__col--status" data-col-key="status" data-sort-col>状態</th>
-            <th data-col-key="lang">言語</th>
             <th class="app-table__col--organization" data-col-key="company" data-sort-col>会社</th>
             <th class="app-table__col--dept" data-col-key="title" data-sort-col>役職</th>
             <th class="app-table__col--email" data-col-key="email" data-sort-col>メール</th>
@@ -43,6 +42,7 @@
             <th data-col-key="org_contact" data-sort-col>会社電話・FAX</th>
             <th data-col-key="address" data-sort-col>住所</th>
             <th data-col-key="active_count" data-sort-col>アクティブ数</th>
+            <th data-col-key="lang" data-sort-col>言語</th>
             <th class="app-table__col--date" data-col-key="updated_at" data-sort-col>更新日時</th>
           </tr>
         </thead>
@@ -59,7 +59,6 @@
               <td data-col-key="status">
                 {% if person.status != "active" %}{% status_badge person %}{% endif %}
               </td>
-              <td data-col-key="lang">{{ person.primary_contact.lang|lang_label }}</td>
               <td data-col-key="company">
                 {% if person.primary_contact.organization %}
                   <span class="app-ellipsis" data-tooltip="{{ person.primary_contact.organization }}">{{ person.primary_contact.organization|truncatechars:30 }}</span>
@@ -100,6 +99,7 @@
                 {% else %}-{% endif %}
               </td>
               <td data-col-key="active_count">{{ person.active_count }}</td>
+              <td data-col-key="lang" data-sort-key="{{ person.primary_contact.lang }}">{{ person.primary_contact.lang|lang_label }}</td>
               <td data-col-key="updated_at">{{ person.updated_at|date:"Y/m/d H:i" }}</td>
             </tr>
           {% empty %}

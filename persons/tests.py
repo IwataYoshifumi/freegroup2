@@ -102,6 +102,16 @@ class PersonListViewTests(TestCase):
         person.save(update_fields=["primary_contact", "updated_at"])
         return person, contact
 
+    def test_lang_column_exposes_raw_lang_sort_key(self):
+        """言語列の <td> に lang 生値の data-sort-key が描画される。
+
+        見出しクリックのその場並べ替え（app.js initTable）用の隠し値。
+        表示は日本語ラベルのまま、比較用に primary_contact.lang の生値を出す。
+        """
+        # person_a の primary_contact.lang は既定 "ja"。
+        html = self.client.get(self.url).content.decode()
+        self.assertIn('data-col-key="lang" data-sort-key="ja"', html)
+
     def test_default_shows_active_only(self):
         """初回（searched なし）→ active のみ、merged / archived は非表示。"""
         merged = Person.objects.create(status=Person.Status.MERGED)
