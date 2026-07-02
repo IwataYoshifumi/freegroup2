@@ -721,6 +721,89 @@ class OtherNamePartsJaHiddenTests(TestCase):
         self.assertEqual(c.other_name_parts, "ビン")
 
 
+class LangSelectPreservesExistingValueTests(TestCase):
+    """v1.7：lang をプルダウン（Select）化しても既存値を壊さない。
+
+    選択肢は ja/en/ko/zh/und。選択肢外の既存値（ja-JP / 空 等）は動的に選択肢へ
+    追加して選択状態で描画し、保存でも消えない/化けないことを担保する。
+    """
+
+    def _contact(self, lang):
+        p = Person.objects.create(status=Person.Status.ACTIVE)
+        return Contact.objects.create(
+            person=p,
+            status=Contact.Status.PRIMARY,
+            full_name="山田 太郎",
+            last_name="山田",
+            first_name="太郎",
+            salutation_name="山田 様",
+            lang=lang,
+        )
+
+    def _render(self, lang):
+        c = self._contact(lang)
+        form = ContactUpdateForm(target_contact=c)
+        sns_formset = build_contact_sns_formset(instance=c)
+        return render_to_string(
+            "contacts/_contact_fields.html",
+            {"form": form, "sns_formset": sns_formset},
+        )
+
+    def test_lang_renders_as_select_with_id_lang(self):
+        """lang は <select id="id_lang"> で描画される（テキスト入力ではない）。"""
+        html = self._render("ja")
+        self.assertIn('<select name="lang"', html)
+        self.assertIn('id="id_lang"', html)
+
+    def test_ja_option_selected(self):
+        """lang=ja：ja option が選択済みで描画される。"""
+        html = self._render("ja")
+        self.assertInHTML(
+            '<option value="ja" selected>日本語 (ja)</option>', html
+        )
+
+    def test_en_option_selected(self):
+        """lang=en：en option が選択済みで描画される。"""
+        html = self._render("en")
+        self.assertInHTML('<option value="en" selected>英語 (en)</option>', html)
+
+    def test_out_of_choice_lang_preserved_in_render(self):
+        """選択肢外 lang=ja-JP は動的追加され選択済みで描画される（消えない）。"""
+        html = self._render("ja-JP")
+        self.assertInHTML(
+            '<option value="ja-JP" selected>ja-JP（現在値）</option>', html
+        )
+
+    def test_empty_lang_preserved_in_render(self):
+        """空 lang="" も選択肢として保持され（未設定）で選択済み描画される。"""
+        html = self._render("")
+        self.assertInHTML('<option value="" selected>（未設定）</option>', html)
+
+    def test_out_of_choice_lang_saved_unchanged(self):
+        """選択肢外 lang=ja-JP を送信しても保存で維持される（空上書き・化けなし）。"""
+        c = self._contact("ja-JP")
+        user = User.objects.create_user(username="lang_jajp_user", password="x")
+        data = {fn: getattr(c, fn) or "" for fn in Contact.UPDATABLE_FIELDS}
+        form = ContactUpdateActiveForm(data=data, target_contact=c)
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data["lang"], "ja-JP")
+        c.fix(form, user)
+        c.refresh_from_db()
+        self.assertEqual(c.lang, "ja-JP")
+
+    def test_empty_lang_saved_unchanged(self):
+        """空 lang="" を送信しても保存で空のまま維持される（既定 ja へ化けない）。"""
+        c = self._contact("")
+        user = User.objects.create_user(username="lang_empty_user", password="x")
+        data = {fn: getattr(c, fn) or "" for fn in Contact.UPDATABLE_FIELDS}
+        form = ContactUpdateActiveForm(data=data, target_contact=c)
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data["lang"], "")
+        c.fix(form, user)
+        c.refresh_from_db()
+        self.assertEqual(c.lang, "")
+
+
 class ManualFlagToggleViewTests(TestCase):
     """v1.7 コミット3/3 要素3：hidden フラグによる手動/自動/自動戻しの送信反映。"""
 

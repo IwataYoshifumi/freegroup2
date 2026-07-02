@@ -113,6 +113,18 @@ class ContactBaseForm(forms.ModelForm):
     # effective_lang から確定する name_order（要素2）。ja=姓+名 / en=名+姓。
     _NAME_ORDER_BY_LANG = {"ja": "last_first", "en": "first_last"}
 
+    # lang プルダウン（v1.7）の基本選択肢。値は小文字言語コードで、既存の判定
+    # （effective_lang / compute_salutation_name / name_order / フリガナ表示は
+    # いずれも lower().startswith(...)）と齟齬が出ないように揃える。選択肢外の
+    # 既存値（ja-JP / zh-CN / 空 等）は _setup_lang_choices が動的に追加して保持する。
+    _LANG_CHOICES = (
+        ("ja", "日本語 (ja)"),
+        ("en", "英語 (en)"),
+        ("ko", "韓国語 (ko)"),
+        ("zh", "中国語 (zh)"),
+        ("und", "未判定 (und)"),
+    )
+
     class Meta:
         model = Contact
         fields = list(Contact.UPDATABLE_FIELDS)
@@ -128,6 +140,7 @@ class ContactBaseForm(forms.ModelForm):
         self._setup_effective_lang()
         self._setup_name_order_hidden()
         self._add_manual_flag_fields()
+        self._setup_lang_choices()
 
     def _source_contact(self):
         """effective_lang / 手動フラグ初期値の参照元 Contact を返す（無ければ None）。
@@ -195,6 +208,44 @@ class ContactBaseForm(forms.ModelForm):
                 initial=bool(getattr(src, flag, False)) if src else False,
                 widget=forms.HiddenInput(),
             )
+
+    def _setup_lang_choices(self):
+        """lang をテキスト入力から Select（プルダウン）にする（v1.7）。既存値を壊さない。
+
+        [性質] 副作用あり（lang フィールドの widget を Select に差し替え）。DB 操作なし
+
+        フィールド型は ModelForm 既定の CharField のまま widget だけ Select に差し替える
+        （ChoiceField にせず choices 検証を効かせない）ことで、選択肢外の既存値でも
+        バリデーションエラー・空上書きを起こさない。参照元／POST の現在 lang が基本選択肢
+        （_LANG_CHOICES）に無ければ、その値を選択肢へ動的に追加して選択状態で描画する
+        （ja-JP / zh-CN / 空 等の保持）。id は Django 既定で id_lang のまま＝敬称ライブ追従
+        （app.js が #id_lang を startsWith('ja') で読む）に影響しない。app-input クラスは
+        子 Form の _apply_widget_classes（super().__init__ 後に実行）が付与する。
+        """
+        if "lang" not in self.fields:
+            return
+        # 現在の lang 値：bound は POST 値、unbound は参照元 Contact（update）→
+        # initial / instance（create）の順。空文字も正しく保持するため update は
+        # 参照元をそのまま採用する（"" or ... の連鎖で既定 ja に化けないようにする）。
+        if self.is_bound:
+            current = (self.data.get(self.add_prefix("lang")) or "").strip()
+        else:
+            src = self._source_contact()
+            if src is not None:
+                current = (getattr(src, "lang", "") or "").strip()
+            else:
+                current = (
+                    self.initial.get("lang")
+                    or getattr(self.instance, "lang", "")
+                    or ""
+                ).strip()
+        choices = list(self._LANG_CHOICES)
+        values = {v for v, _ in choices}
+        # 選択肢に無い既存値は動的追加して保持（空文字は「（未設定）」として選択可能にする）。
+        if current not in values:
+            label = f"{current}（現在値）" if current else "（未設定）"
+            choices.append((current, label))
+        self.fields["lang"].widget = forms.Select(choices=choices)
 
     def _tag_name_compose_widgets(self):
         """氏名系 widget に full_name 補助 JS 用の js- フッククラスを付与する（Phase D §3.7）。
