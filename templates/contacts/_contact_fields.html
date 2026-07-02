@@ -43,11 +43,16 @@
     </div>
   </div>
 {% else %}
+{# en：単一グリッド維持のまま、セルの並びだけ「自動生成グループ（上）→入力グループ（下）」に揃える（B-1）。 #}
+{# 小見出し・段間 margin-top・span2 は入れない（ja のような装飾なし）。各欄は中身そのまま位置移動のみ。 #}
 <div class="app-form-grid">
+  {# 自動生成グループ：氏名 / 表示名 / 敬称付き氏名。派生トグル・hidden POST・↻ は include のまま。 #}
   {% include "contacts/_derived_field.html" with field=form.full_name label="氏名" flag=form.full_name_is_manual name="full_name" %}
+  {% include "contacts/_derived_field.html" with field=form.display_name label="表示名" flag=form.display_name_is_manual name="display_name" %}
+  {% include "contacts/_derived_field.html" with field=form.salutation_name label="敬称付き氏名（メール宛名）" flag=form.salutation_name_is_manual name="salutation_name" required=True %}
+  {# 入力グループ：名 → 姓 → ミドルネーム等 → 別名。 #}
   {# 姓/名の原本入力欄は表示順だけを effective_lang で出し分ける（ja=姓→名 / en=名→姓）。 #}
   {# ブロックは _name_part_field.html に単一定義し、ここでは include 順だけ入れ替える #}
-  {# （:23 フリガナ / :58 法人格の位置と同じ effective_lang 参照方式）。 #}
   {# 役割（last_name/first_name の対応）・ラベル文言・i18n は変えない＝順序のみ。 #}
   {% if form.effective_lang == "en" %}
     {% include "contacts/_name_part_field.html" with field=form.first_name label="名" %}
@@ -56,7 +61,7 @@
     {% include "contacts/_name_part_field.html" with field=form.last_name label="姓" %}
     {% include "contacts/_name_part_field.html" with field=form.first_name label="名" %}
   {% endif %}
-  {% include "contacts/_derived_field.html" with field=form.display_name label="表示名" flag=form.display_name_is_manual name="display_name" %}
+  {# フリガナは ja のみ表示（en は非出力）。この分岐は en 側だが、条件包みを保って非表示制御を維持する。 #}
   {% if form.effective_lang == "ja" %}
   <div class="app-form__group">
     <label class="app-form__label" for="{{ form.phonetic_name.id_for_label }}">フリガナ</label>
@@ -74,7 +79,6 @@
     {{ form.alias_name }}
     {{ form.alias_name.errors }}
   </div>
-  {% include "contacts/_derived_field.html" with field=form.salutation_name label="敬称付き氏名（メール宛名）" flag=form.salutation_name_is_manual name="salutation_name" required=True %}
 </div>
 {% endif %}
 {# 語順（name_order）は effective_lang から確定（ja=姓+名 / en=名+姓）。hidden で保持＝画面に出さない。 #}
