@@ -1,6 +1,7 @@
 {% extends "cards/app_base.html" %}
 {% load back_tags %}
 {% load badge_tags %}
+{% load lang_tags %}
 
 {% block title %}コンタクト一覧 — FreeGroup2{% endblock %}
 
@@ -35,6 +36,7 @@
             <th class="app-table__col--action">操作</th>
             <th class="app-table__col--name" data-col-key="name" data-sort-col>氏名</th>
             <th class="app-table__col--status" data-col-key="status">状態</th>
+            <th data-col-key="lang">言語</th>
             <th class="app-table__col--organization" data-col-key="company" data-sort-col>会社</th>
             <th class="app-table__col--dept" data-col-key="title" data-sort-col>役職</th>
             <th class="app-table__col--email" data-col-key="email" data-sort-col>連絡先</th>
@@ -52,6 +54,7 @@
               <td data-col-key="status">
                 {% status_badge contact %}
               </td>
+              <td data-col-key="lang">{{ contact.lang|lang_label }}</td>
               <td data-col-key="company">
                 {% if contact.organization %}
                   <span class="app-ellipsis" data-tooltip="{{ contact.organization }}">{{ contact.organization|truncatechars:30 }}</span>
@@ -68,7 +71,7 @@
               <td data-col-key="updated_at">{{ contact.updated_at|date:"Y/m/d H:i" }}</td>
             </tr>
           {% empty %}
-            <tr><td colspan="7" class="app-muted">
+            <tr><td colspan="8" class="app-muted">
               該当するコンタクトがありません。新しい名刺を取り込むか、コンタクトを新規作成しましょう。
               <a href="{% url 'cards:card_upload' %}">名刺を取り込む →</a>
               <a href="{% append_back_url create_url back %}" style="margin-left:12px;">コンタクト新規作成 →</a>
