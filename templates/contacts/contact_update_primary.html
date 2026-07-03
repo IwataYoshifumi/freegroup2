@@ -24,6 +24,20 @@
       </div>
     {% endif %}
 
+    {# ==================== 修正理由（先出しモーダルで選択→ここに反映） ==================== #}
+    {# 表示位置を「入力末尾」から「到着時モーダル」へ移すだけ。実フィールド change_reason は hidden で #}
+    {# 保持して従来どおり送信し、サーバーの fix/transfer 分岐（views.py:562-583）は一切変えない。 #}
+    <div style="display:none;">{{ form.change_reason }}</div>
+    <div class="app-alert app-alert--info js-change-reason-banner"
+         style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+      <span class="js-change-reason-message"></span>
+      <button type="button" class="app-btn app-btn--secondary app-btn--sm js-change-reason-reopen"
+              data-action="open-modal" data-target="changeReasonModal">理由を選び直す</button>
+    </div>
+    {% if form.change_reason.errors %}
+      <div class="app-alert app-alert--danger">{{ form.change_reason.errors }}</div>
+    {% endif %}
+
     {% block contact_fields %}
       {% include "contacts/_contact_fields.html" %}
     {% endblock %}
@@ -43,14 +57,6 @@
       {% endif %}
     {% endfor %}
 
-    {# ==================== 修正理由 ==================== #}
-    <div class="app-section__header" style="margin-top:var(--app-space-md);"><h2>修正理由</h2></div>
-    <div class="app-form__group">
-      <label class="app-form__label" for="{{ form.change_reason.id_for_label }}">修正理由</label>
-      {{ form.change_reason }}
-      {{ form.change_reason.errors }}
-    </div>
-
     {# ==================== 備考 ==================== #}
     <div class="app-section__header" style="margin-top:var(--app-space-md);"><h2>備考</h2></div>
     <div class="app-form__group">
@@ -66,4 +72,92 @@
       <button type="submit" class="app-btn app-btn--success">保存</button>
     </div>
   </form>
+
+  {# ==================== 修正理由 先出しモーダル（到着時オープン。既存 .app-modal / open-modal を流用） ==================== #}
+  {# フォームの外に置く（UI ラジオ js-change-reason-choice を送信に混ぜないため）。選択値は #id_change_reason へ書く。 #}
+  <div class="app-modal-backdrop" hidden></div>
+  <div class="app-modal" id="changeReasonModal" hidden>
+    <div class="app-modal__panel" style="width:min(520px,95vw);">
+      <div class="app-modal__header">
+        <h2>修正理由を選択 <span class="app-required">必須</span></h2>
+      </div>
+      <div class="app-modal__body">
+        <p class="app-muted" style="margin-top:0;">修正理由によってコンタクトの扱いが変わります（誤字訂正＝上書き／異動・転職等＝履歴を残して新規作成）。理由を選んでから修正に進んでください。</p>
+        <div class="js-change-reason-options" style="display:flex; flex-direction:column; gap:8px;">
+          {% for value, label in form.change_reason.field.choices %}
+            <label style="display:flex; align-items:center; gap:8px; padding:8px 10px; border:1px solid var(--app-border); border-radius:8px; cursor:pointer;">
+              <input type="radio" name="js-change-reason-choice" value="{{ value }}"> {{ label }}
+            </label>
+          {% endfor %}
+        </div>
+      </div>
+      <div class="app-modal__footer">
+        {# キャンセル＝編集ページ既存の戻る動線で呼び出し元（詳細）へ。push_current は増やさない。 #}
+        {% back_link back %}
+        <button type="button" class="app-btn app-btn--primary js-change-reason-next"
+                data-action="close-modal" disabled>次へ</button>
+      </div>
+    </div>
+  </div>
+  <script>
+    (function () {
+      var modal = document.getElementById('changeReasonModal');
+      if (!modal) return;
+      // 実フィールド（送信・サーバー分岐の正本）。UI ラジオはここへ値を書くだけ。
+      var realSelect = document.getElementById('id_change_reason');
+      var radios = modal.querySelectorAll('input[name="js-change-reason-choice"]');
+      var nextBtn = modal.querySelector('.js-change-reason-next');
+      var reopenBtn = document.querySelector('.js-change-reason-reopen');
+      var msgEl = document.querySelector('.js-change-reason-message');
+      var MESSAGES = {
+        fix: '入力間違い・誤字訂正として修正します。この画面の内容で、いまのコンタクトを上書きします。',
+        transfer: '異動・部署変更として修正します。いまの情報は履歴として残り、新しいコンタクトが作られます。',
+        promotion: '役職変更・昇進として修正します。いまの情報は履歴として残り、新しいコンタクトが作られます。',
+        job_change: '転職として修正します。いまの情報は履歴として残り、新しいコンタクトが作られます。',
+        name_change: '結婚等による姓変更として修正します。いまの情報は履歴として残り、新しいコンタクトが作られます。'
+      };
+      // 到着時は未選択（＝明示選択を必須化）。一度選ぶと以降の「選び直す」は現在値をプリセット。
+      var chosen = false;
+
+      function updateMessage() {
+        if (!msgEl) return;
+        var v = realSelect ? realSelect.value : '';
+        msgEl.textContent = chosen ? (MESSAGES[v] || '') : '';
+      }
+      function setNext(on) { if (nextBtn) nextBtn.disabled = !on; }
+
+      // ラジオ選択 → #id_change_reason に反映＋上部メッセージ更新＋「次へ」活性化。
+      Array.prototype.forEach.call(radios, function (r) {
+        r.addEventListener('change', function () {
+          if (!r.checked) return;
+          if (realSelect) realSelect.value = r.value;
+          chosen = true;
+          updateMessage();
+          setNext(true);
+        });
+      });
+
+      // モーダルを開く直前の同期：初回（未選択）はクリア＋「次へ」不可、選び直しは現在値をプリセット。
+      // reopenBtn の click は既存 open-modal（app.js）も発火するが、target 段の本リスナが先に走る。
+      function syncOnOpen() {
+        var v = realSelect ? realSelect.value : '';
+        Array.prototype.forEach.call(radios, function (r) {
+          r.checked = chosen && r.value === v;
+        });
+        setNext(chosen);
+        updateMessage();
+      }
+      if (reopenBtn) reopenBtn.addEventListener('click', syncOnOpen);
+
+      // 到着時に自動オープン（既存 openModal 経由で activeModal をセット＝Escape/背景/「次へ」で閉じられる）。
+      function init() {
+        if (reopenBtn) reopenBtn.click();
+      }
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+      } else {
+        init();
+      }
+    })();
+  </script>
 {% endblock %}
