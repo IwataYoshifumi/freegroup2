@@ -288,7 +288,7 @@ class ContactBaseForm(forms.ModelForm):
 
         [性質] 副作用あり（self.fields の widget.attrs を変更、DB 操作なし）
 
-        Form の動的フィールド追加後に呼ぶことで change_reason / note /
+        Form の動的フィールド追加後に呼ぶことで change_reason /
         confirmed_<field> にも付与される。チェックボックス・ラジオ・複数選択は
         付与すると <input> 側に当たって形が崩れるためスキップ（HIG v1.2 §4.1 の
         app-radio-toggle と整合）。
@@ -399,8 +399,8 @@ class ContactUpdateForm(ContactBaseForm):
     """primary Contact 修正用 Form（仕様書 §11.6.2 / §11.7.1）。
 
     UpdatePrimaryContactView（12 番、未実装）と Execute_Merge_with_Updates（§9.4）
-    で使う基底。Contact フィールド + change_reason + note + 動的 confirmed_<field>
-    チェックボックスを束ねる。
+    で使う基底。Contact フィールド + change_reason + 動的 confirmed_<field>
+    チェックボックスを束ねる（備考 note は v1.7 で撤去：保存経路が無く破棄されていたため）。
 
     [性質] presentation 層クラス
     [入力] target_contact: Contact（必須、kwarg）
@@ -409,11 +409,6 @@ class ContactUpdateForm(ContactBaseForm):
     change_reason = forms.ChoiceField(
         choices=PersonChangeReason.choices,
         label="修正理由",
-    )
-    note = forms.CharField(
-        required=False,
-        widget=forms.Textarea,
-        label="備考",
     )
 
     def __init__(self, *args, target_contact=None, **kwargs):

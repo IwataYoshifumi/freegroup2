@@ -2575,7 +2575,8 @@ class UpdatePrimaryContactViewTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         form = resp.context["form"]
         self.assertIn("change_reason", form.fields)
-        self.assertIn("note", form.fields)
+        # 備考（note）は v1.7 で撤去（保存経路が無く破棄されていたため）。
+        self.assertNotIn("note", form.fields)
         # low/mid CFC（organization）の確認 CB が動的追加されている
         self.assertIn("confirmed_organization", form.fields)
 

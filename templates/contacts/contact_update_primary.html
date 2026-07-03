@@ -57,14 +57,6 @@
       {% endif %}
     {% endfor %}
 
-    {# ==================== 備考 ==================== #}
-    <div class="app-section__header" style="margin-top:var(--app-space-md);"><h2>備考</h2></div>
-    <div class="app-form__group">
-      <label class="app-form__label" for="{{ form.note.id_for_label }}">備考</label>
-      {{ form.note }}
-      {{ form.note.errors }}
-    </div>
-
     {# ==================== 操作ボタン ==================== #}
     <div class="app-action-area" style="margin-top:24px;">
       {% back_all_link back %}
