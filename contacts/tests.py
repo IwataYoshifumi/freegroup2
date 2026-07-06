@@ -1773,6 +1773,43 @@ class ContactListViewTests(TestCase):
         # 言語列は lang 生値（既定 ja）。
         self.assertIn('data-col-key="lang" data-sort-key="ja"', html)
 
+    def test_unconfirmed_low_mid_shows_confirm_badge(self):
+        """未確認の low/mid CFC（9項目内）を持つ行に「要確認」バッジが出る。"""
+        ContactFieldConfidence.objects.create(
+            contact=self.contact_a,
+            field_name="organization",
+            confidence=ContactFieldConfidence.Confidence.LOW,
+        )
+        html = self.client.get(self.url).content.decode()
+        # テーブル氏名セル + モバイル app-list-card の 2 箇所に出る。
+        self.assertEqual(html.count('aria-label="要確認"'), 2)
+
+    def test_no_cfc_hides_confirm_badge(self):
+        """CFC が無い行にはバッジが出ない（既定の contact_a）。"""
+        html = self.client.get(self.url).content.decode()
+        self.assertNotIn("要確認", html)
+
+    def test_confirmed_cfc_hides_confirm_badge(self):
+        """確認済み（confirmed_at セット済み）CFC はバッジ対象外。"""
+        ContactFieldConfidence.objects.create(
+            contact=self.contact_a,
+            field_name="organization",
+            confidence=ContactFieldConfidence.Confidence.MID,
+            confirmed_at=timezone.now(),
+        )
+        html = self.client.get(self.url).content.decode()
+        self.assertNotIn("要確認", html)
+
+    def test_cfc_outside_duplicate_check_fields_hides_badge(self):
+        """9項目（DUPLICATE_CHECK_FIELDS）外の未確認 CFC はバッジ対象外。"""
+        ContactFieldConfidence.objects.create(
+            contact=self.contact_a,
+            field_name="notes",
+            confidence=ContactFieldConfidence.Confidence.LOW,
+        )
+        html = self.client.get(self.url).content.decode()
+        self.assertNotIn("要確認", html)
+
     def test_default_shows_primary_only(self):
         """初回アクセス（searched なし）→ primary のみ、active / inactive は非表示。"""
         active = Contact.objects.create(

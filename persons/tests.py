@@ -112,6 +112,24 @@ class PersonListViewTests(TestCase):
         html = self.client.get(self.url).content.decode()
         self.assertIn('data-col-key="lang" data-sort-key="ja"', html)
 
+    def test_unconfirmed_low_mid_shows_confirm_badge(self):
+        """primary_contact が未確認 low/mid CFC を持つ行に「要確認」バッジが出る。"""
+        from contacts.models import ContactFieldConfidence
+
+        ContactFieldConfidence.objects.create(
+            contact=self.contact_a,
+            field_name="organization",
+            confidence=ContactFieldConfidence.Confidence.LOW,
+        )
+        html = self.client.get(self.url).content.decode()
+        # テーブル氏名セル + モバイル app-list-card の 2 箇所に出る。
+        self.assertEqual(html.count('aria-label="要確認"'), 2)
+
+    def test_no_cfc_hides_confirm_badge(self):
+        """CFC が無い行にはバッジが出ない（既定の person_a）。"""
+        html = self.client.get(self.url).content.decode()
+        self.assertNotIn("要確認", html)
+
     def test_default_shows_active_only(self):
         """初回（searched なし）→ active のみ、merged / archived は非表示。"""
         merged = Person.objects.create(status=Person.Status.MERGED)

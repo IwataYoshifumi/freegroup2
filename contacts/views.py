@@ -189,7 +189,11 @@ class ContactListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
 
         qs = Contact.objects.filter(
             status__in=selected, person__status="active"
-        ).select_related("person", "business_card")
+        ).select_related("person", "business_card").annotate(
+            # 氏名セルの「要確認」バッジ用（未確認 low/mid が 1 件でもあれば True）。
+            # 行が Contact 自身なので contact_ref="pk"。Exists 1 本で N+1 を避ける。
+            has_unconfirmed_low_mid=ContactFieldConfidence.unconfirmed_low_mid_exists("pk"),
+        )
 
         # Person 絞り込み（人物詳細「コンタクト一覧」導線用、?person=<uuid>）。
         # person__status="active" は base 側で固定済み。不正 UUID・非 active Person は

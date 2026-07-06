@@ -50,7 +50,7 @@
               <td class="app-table__col--action">
                 <a href="{% append_back_url detail_url back %}" class="app-btn app-btn--secondary app-btn--sm">詳細</a>
               </td>
-              <td data-col-key="name" data-sort-key="{{ contact.phonetic_name }}">{{ contact.full_name|default:"-" }}</td>
+              <td data-col-key="name" data-sort-key="{{ contact.phonetic_name }}">{{ contact.full_name|default:"-" }}{% if contact.has_unconfirmed_low_mid %} <span class="app-status-badge app-status-badge--warning" title="未確認の低信頼項目があります" aria-label="要確認">要確認</span>{% endif %}</td>
               <td data-col-key="status" data-sort-key="{{ contact|status_sort_key }}">
                 {% status_badge contact %}
               </td>
@@ -86,7 +86,7 @@
         {% url 'contacts:contact_detail' pk=contact.id as detail_url %}
         <a href="{% append_back_url detail_url back %}" class="app-list-card" style="display:block; text-decoration:none; color:inherit;">
           <div class="app-list-card__main">
-            <strong>{{ contact.full_name|default:"(氏名なし)" }}</strong>
+            <strong>{{ contact.full_name|default:"(氏名なし)" }}</strong>{% if contact.has_unconfirmed_low_mid %} <span class="app-status-badge app-status-badge--warning" title="未確認の低信頼項目があります" aria-label="要確認">要確認</span>{% endif %}
             {% status_badge contact %}
             {% if contact.organization %}<div>{{ contact.organization }}</div>{% endif %}
             {% if contact.title %}<div class="app-muted">{{ contact.title }}</div>{% endif %}

@@ -27,7 +27,7 @@ from django.views.generic.edit import FormView
 from accounts.services import is_self_link_email_match
 from back_navigator.back_navigator import BackNavigator
 from contacts.forms import ContactAddAdditionalRoleForm, build_contact_sns_formset
-from contacts.models import Contact
+from contacts.models import Contact, ContactFieldConfidence
 from contacts.services.detail_context import build_contact_detail_context
 from contacts.views import _create_sns_from_formset
 from duplicates.models import PersonMergeLog
@@ -152,6 +152,13 @@ class PersonListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
         # v1.6 Phase 1b: 検索ロジックを persons.services.person_search に切り出し（論点 A-1）。
         # HIG 第6章：?sort=key,-key,... があればサーバー側で全件多段ソート、無ければ既定並びを維持。
         qs = search_persons(self.request.GET)
+        # 氏名セルの「要確認」バッジ用（primary_contact の未確認 low/mid が 1 件でもあれば True）。
+        # primary_contact NULL の Person は OuterRef が NULL となり False（バッジ非表示）。
+        qs = qs.annotate(
+            has_unconfirmed_low_mid=ContactFieldConfidence.unconfirmed_low_mid_exists(
+                "primary_contact_id"
+            )
+        )
         return _apply_person_list_sort(qs, self.request.GET)
 
     def get_context_data(self, **kwargs):

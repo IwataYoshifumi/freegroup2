@@ -3,7 +3,7 @@ import uuid
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
-from django.db.models import CheckConstraint, Q, UniqueConstraint
+from django.db.models import CheckConstraint, Exists, OuterRef, Q, UniqueConstraint
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
@@ -893,4 +893,27 @@ class ContactFieldConfidence(models.Model):
             confirmed_at=now,
             confirmed_by=user,
             updated_at=now,
+        )
+
+    @classmethod
+    def unconfirmed_low_mid_exists(cls, contact_ref):
+        """一覧の「要確認」バッジ判定用の Exists() サブクエリを返す（v1.7）。
+
+        [性質] 準関数（クエリ式を組み立てるだけ。呼び出し時点では DB 非接触）
+        [入力] contact_ref: str（外側 queryset から CFC.contact を指す OuterRef 用パス。
+               コンタクト一覧＝"pk" / パーソン一覧＝"primary_contact_id"）
+        [出力] Exists（DUPLICATE_CHECK_FIELDS 9 項目のいずれかで confidence が low/mid
+               かつ confirmed_at IS NULL の CFC が 1 件でもあれば True）
+
+        3 一覧（contacts / persons / 将来の cards）で使い回すため、外側モデルに応じて
+        contact_ref のパスだけ差し替える。primary_contact が NULL の Person は
+        OuterRef("primary_contact_id") が NULL となり一致行なし＝False（バッジ非表示）。
+        """
+        return Exists(
+            cls.objects.filter(
+                contact=OuterRef(contact_ref),
+                field_name__in=DUPLICATE_CHECK_FIELDS,
+                confidence__in=(cls.Confidence.LOW, cls.Confidence.MID),
+                confirmed_at__isnull=True,
+            )
         )
