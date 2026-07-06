@@ -1031,6 +1031,27 @@ a { color: inherit; text-decoration: none; }
   padding-top: 2px;
 }
 
+/* モバイル（≤900px、一覧のテーブル↔カード切替と同じ閾値）：セクション名（所属/連絡先/
+   住所/その他）を左固定列ではなく独立した見出し行にし、フィールドを全幅で縦に並べる
+   （左列の右にできる余白を解消）。デスクトップの 2 列（100px/1fr）は不変。サブ項目の
+   縦積み（app-cd-stacked）・ボタン（確認OK/要修正）は変更しない。 */
+@media (max-width: 900px) {
+  .app-cd-section { grid-template-columns: 1fr; }
+  /* メール・住所等（full_width＝app-cd-stacked が付かない項目）は 140px ラベル列のせいで
+     値がインデント＆折り返す。狭幅では全項目を「ラベル上・値下」の縦積みにし、値を全幅・
+     左揃えにする。compound セレクタ（app-detail-list.app-contact-detail-fields）で
+     共通の .app-detail-list .app-detail-item（140px/1fr）より高特異度＝順序に依らず勝つ。
+     長い値（メール/URL/住所）は .app-detail-value の word-break:break-word で全幅時のみ折り返す。 */
+  .app-detail-list.app-contact-detail-fields .app-detail-item { display: block; }
+  .app-detail-list.app-contact-detail-fields .app-detail-item .app-detail-label {
+    display: block;
+    margin-bottom: 2px;
+    color: var(--app-muted);
+    font-size: 12px;
+    font-weight: 700;
+  }
+}
+
 /* 2 列に並ぶ短項目（full_width でない＝stacked）は「ラベル上・値下」の縦セットに。
    1 組が縦に固まり、横に複数並んでも各組が独立して読める。左端は値と縦に揃う（block）。
    共通 .app-detail-list .app-detail-item（140px/1fr 横並び）を、特異度を上げてこの画面限定で上書き。
@@ -1044,6 +1065,30 @@ a { color: inherit; text-decoration: none; }
   color: var(--app-muted);
   font-size: 12px;
   font-weight: 700;
+}
+
+/* 低信頼フィールドの確認アクション（確認OK/要修正トグル＋確定/修正/戻る）。トグルが大きい
+   ので当該箇所限定で小さくし、行の上下にマージンを付ける。機能・分岐は不変（見た目のみ）。
+   .app-contact-field-actions スコープなので他画面の app-radio-toggle には影響しない。 */
+.app-contact-field-actions {
+  margin: var(--app-space-sm) 0;
+}
+.app-contact-field-actions .app-radio-toggle label {
+  padding: 4px 12px;
+  min-height: 30px;
+  font-size: 13px;
+}
+/* 「要修正」で開く編集フォーム（入力欄＋修正/戻る）。トグル列との間・次フィールドとの間に
+   .app-contact-field-actions と同量（space-sm）の上下マージンを付ける。hidden 時は
+   display:none となり余白も出ない。機能・分岐は不変（見た目のみ）。 */
+.app-contact-field-actions .js-contact-field-edit-form {
+  margin: var(--app-space-sm) 0;
+}
+/* 編集フォーム内部：入力欄（全幅）とその下の「修正」「戻る」ボタン行の間に余白を付ける
+   （外側マージンと同量 space-sm）。入力欄は width:100% で 1 行を占めボタンは下段に回るため、
+   入力欄の margin-bottom で縦の間隔を作る。 */
+.app-contact-field-actions .js-contact-field-edit-input {
+  margin-bottom: var(--app-space-sm);
 }
 
 /* duplicates のフィルタフォーム（重複候補一覧・マージログ一覧）：各グループ
