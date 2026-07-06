@@ -152,8 +152,10 @@
               {% include "contacts/_contact_field.html" with field_name="postal_code" label="郵便番号" value=contact.postal_code %}
             {% endif %}
             {% if contact.address %}
-              {# Phase E：address は自動 compose の完成形。読み取り専用表示。全幅。 #}
-              {% include "contacts/_contact_field.html" with field_name="address" label="住所" value=contact.address is_editable=False full_width=True %}
+              {# Phase E：address は自動 compose の完成形。読み取り専用表示（全幅）。 #}
+              {# ただし確認OKはインライン確認、要修正は編集ページ遷移を出すため、ページ編集可否を #}
+              {# contact_editable で渡す（address 用のアクション表示ゲート。他 include は未指定＝非表示）。 #}
+              {% include "contacts/_contact_field.html" with field_name="address" label="住所" value=contact.address is_editable=False full_width=True contact_editable=is_editable %}
             {% endif %}
           </div>
         </div>

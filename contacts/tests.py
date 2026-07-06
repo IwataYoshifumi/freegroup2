@@ -626,6 +626,19 @@ class ContactAjaxConfirmFieldsViewTests(_ContactAjaxTestBase):
         self.cfc_organization.refresh_from_db()
         self.assertIsNotNone(self.cfc_organization.confirmed_at)
 
+    def test_address_field_confirmable(self):
+        """address（UPDATABLE_FIELDS 外だが DUPLICATE_CHECK_FIELDS）も確認OKできる（v1.7）。"""
+        cfc_address = ContactFieldConfidence.objects.create(
+            contact=self.contact_a,
+            field_name="address",
+            confidence=ContactFieldConfidence.Confidence.MID,
+        )
+        resp = self._post_json(self._url(), {"field_names": ["address"]})
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.json()["success"])
+        cfc_address.refresh_from_db()
+        self.assertIsNotNone(cfc_address.confirmed_at)
+
     def test_n2_multiple_fields_bulk(self):
         """N2: 複数フィールドの確認（一括確定）→ 200 / 全 CFC confirmed。"""
         resp = self._post_json(
@@ -934,6 +947,47 @@ class ContactDetailViewTests(TestCase):
             "contacts:contact_detail",
             kwargs={"pk": (contact or self.contact_a).pk},
         )
+
+    # ---- 住所（読み取り専用）の確認OK（インライン）／要修正（編集ページ遷移） ----
+
+    def _give_address_cfc(self, *, confirmed=False):
+        """contact_a に住所値＋住所 CFC（mid）を付与する（confirmed=True で確認済み）。"""
+        self.contact_a.address = "愛知県豊田市西町1-2-3"
+        self.contact_a.save()
+        ContactFieldConfidence.objects.create(
+            contact=self.contact_a,
+            field_name="address",
+            confidence=ContactFieldConfidence.Confidence.MID,
+            confirmed_at=timezone.now() if confirmed else None,
+        )
+
+    def test_address_shows_inline_confirm_and_edit_link(self):
+        """住所（未確認 mid）に確認OKラジオ（インライン）＋要修正リンク（?change_reason=fix）が出る。"""
+        self._give_address_cfc()
+        html = self.client.get(self._url()).content.decode()
+        # 確認OK＝他フィールドと同じインライン確認（address 専用の action ラジオ）。
+        self.assertIn('name="contact-field-action-address"', html)
+        # 要修正＝主コンタクト修正へ ?change_reason=fix 付きで遷移（モーダルスキップ）。
+        edit_url = reverse(
+            "contacts:contact_update_primary", kwargs={"pk": self.contact_a.pk}
+        )
+        self.assertIn(edit_url, html)
+        self.assertIn("change_reason=fix", html)
+
+    def test_address_no_actions_when_confirmed(self):
+        """住所 CFC が確認済みなら確認OK/要修正は出ない。"""
+        self._give_address_cfc(confirmed=True)
+        html = self.client.get(self._url()).content.decode()
+        self.assertNotIn('name="contact-field-action-address"', html)
+        self.assertNotIn("change_reason=fix", html)
+
+    def test_address_no_actions_when_no_cfc(self):
+        """住所値はあるが CFC が無ければ確認OK/要修正は出ない。"""
+        self.contact_a.address = "愛知県豊田市西町1-2-3"
+        self.contact_a.save()
+        html = self.client.get(self._url()).content.decode()
+        self.assertNotIn('name="contact-field-action-address"', html)
+        self.assertNotIn("change_reason=fix", html)
 
     # ---- 正常系 ----
 
@@ -2616,6 +2670,21 @@ class UpdatePrimaryContactViewTests(TestCase):
         self.assertNotIn("note", form.fields)
         # low/mid CFC（organization）の確認 CB が動的追加されている
         self.assertIn("confirmed_organization", form.fields)
+
+    def test_get_default_does_not_skip_reason_modal(self):
+        """?change_reason 無し → モーダルスキップフラグは False（従来どおりモーダルを開く）。"""
+        resp = self.client.get(self._url())
+        self.assertFalse(resp.context["skip_change_reason_modal"])
+
+    def test_get_change_reason_fix_skips_modal_and_presets(self):
+        """?change_reason=fix → skip フラグ True・change_reason 初期値 fix・script に SKIP_MODAL=true。"""
+        resp = self.client.get(self._url() + "?change_reason=fix")
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.context["skip_change_reason_modal"])
+        # change_reason は fix に preset される。
+        self.assertEqual(resp.context["form"]["change_reason"].value(), "fix")
+        # テンプレートの先出しモーダル制御 JS が SKIP_MODAL=true で描画される。
+        self.assertIn("var SKIP_MODAL = true;", resp.content.decode())
 
     def test_get_active_returns_404(self):
         """active Contact → 404（このViewはprimary専用）。"""

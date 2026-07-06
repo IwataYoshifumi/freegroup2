@@ -516,6 +516,27 @@ class PersonDetailViewTests(TestCase):
         person.save(update_fields=["primary_contact", "updated_at"])
         return person, contact
 
+    def test_active_person_address_shows_inline_confirm_and_edit_link(self):
+        """人物詳細（active・contact_detail.html 流用）でも住所の確認OK＋要修正リンクが出る。"""
+        from contacts.models import ContactFieldConfidence
+
+        person, contact = self._make_active_with_primary()
+        contact.address = "愛知県豊田市西町1-2-3"
+        contact.save()
+        ContactFieldConfidence.objects.create(
+            contact=contact,
+            field_name="address",
+            confidence=ContactFieldConfidence.Confidence.MID,
+        )
+        html = self.client.get(self._url(person)).content.decode()
+        # 確認OK（インライン）＋要修正（primary_contact は status=primary → 主コンタクト修正へ fix 直行）。
+        self.assertIn('name="contact-field-action-address"', html)
+        self.assertIn(
+            reverse("contacts:contact_update_primary", kwargs={"pk": contact.pk}),
+            html,
+        )
+        self.assertIn("change_reason=fix", html)
+
     def test_active_person_renders_person_detail(self):
         """active + primary_contact あり → リダイレクトせず人物詳細を render（v1.7）。
 

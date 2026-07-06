@@ -36,7 +36,7 @@ from django.views.generic import DetailView, ListView, UpdateView
 from back_navigator.back_navigator import BackNavigator
 from cards.models import BusinessCard
 from cards.tasks.ocr_pipeline import _update_original_image_status
-from config.constants import PersonChangeReason
+from config.constants import DUPLICATE_CHECK_FIELDS, PersonChangeReason
 from duplicates.models import DuplicateCandidate
 from duplicates.services.duplicate_detection import find_duplicate_contacts
 from persons.models import Person
@@ -473,9 +473,13 @@ class ContactAjaxConfirmFieldsView(_ContactAjaxBase):
         if not isinstance(field_names, list):
             return _error("field_names must be a list", 400)
 
-        # 各要素が UPDATABLE_FIELDS に含まれることを確認
+        # 確認OK は値を触らず CFC を confirmed 化するだけなので、信頼度対象の DUPLICATE_CHECK_FIELDS
+        # も許可対象に含める（address を通すため）。既存許可（UPDATABLE_FIELDS）は狭めず和集合にする
+        # ことで従来確認できたフィールドの挙動は不変、実質増えるのは address（Phase E で UPDATABLE_FIELDS
+        # から除外された読み取り専用だが詳細画面でインライン確認可にする）のみ（v1.7）。
+        allowed_confirm_fields = set(Contact.UPDATABLE_FIELDS) | set(DUPLICATE_CHECK_FIELDS)
         for fn in field_names:
-            if not isinstance(fn, str) or fn not in Contact.UPDATABLE_FIELDS:
+            if not isinstance(fn, str) or fn not in allowed_confirm_fields:
                 return _error(f"Invalid field name: {fn}", 400)
 
         # 空配列なら no-op（D-3c 論点 5）
@@ -533,6 +537,14 @@ class UpdatePrimaryContactView(LoginRequiredMixin, PermissionRequiredMixin, Upda
         kwargs["target_contact"] = self.object
         return kwargs
 
+    def get_initial(self):
+        initial = super().get_initial()
+        # ?change_reason=fix（住所「要修正」等からの直行）では change_reason を fix に preset。
+        # 先出しモーダルをスキップして直接 fix の入力フォームを表示する（skip フラグは context 側）。
+        if self.request.GET.get("change_reason") == PersonChangeReason.FIX:
+            initial["change_reason"] = PersonChangeReason.FIX
+        return initial
+
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         back = BackNavigator(self.request)
@@ -543,6 +555,10 @@ class UpdatePrimaryContactView(LoginRequiredMixin, PermissionRequiredMixin, Upda
                 "field_confidences": self.object.get_field_confidences(),
                 "active_app": "contacts",
                 "active_menu": "contacts:contact_list",
+                # ?change_reason=fix のときは修正理由モーダルを開かず直接入力フォームを出す。
+                "skip_change_reason_modal": (
+                    self.request.GET.get("change_reason") == PersonChangeReason.FIX
+                ),
             }
         )
         # ContactSns 編集ブロック（§11.6.7）。POST 再描画時は form_invalid が

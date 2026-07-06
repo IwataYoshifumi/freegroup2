@@ -141,8 +141,18 @@
       }
       if (reopenBtn) reopenBtn.addEventListener('click', syncOnOpen);
 
+      // ?change_reason=fix（住所「要修正」等からの直行）はモーダルをスキップ（View が context で通知）。
+      var SKIP_MODAL = {% if skip_change_reason_modal %}true{% else %}false{% endif %};
+
       // 到着時に自動オープン（既存 openModal 経由で activeModal をセット＝Escape/背景/「次へ」で閉じられる）。
+      // SKIP_MODAL のときは開かず、fix を選択済み扱いにして入力フォームを直接表示する
+      // （#id_change_reason は View の get_initial で fix を preset 済み）。
       function init() {
+        if (SKIP_MODAL) {
+          chosen = true;
+          syncOnOpen();  // ラジオを現在値(fix)にプリセット＋「次へ」活性＋上部メッセージ更新（モーダルは開かない）
+          return;
+        }
         if (reopenBtn) reopenBtn.click();
       }
       if (document.readyState === 'loading') {
