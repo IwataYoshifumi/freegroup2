@@ -2695,6 +2695,20 @@ class UpdatePrimaryContactViewTests(TestCase):
         # 旧「確認チェック」まとめセクションの見出しは無い。
         self.assertNotIn("<h2>確認チェック</h2>", html)
 
+    def test_address_confirm_toggle_has_no_duplicate_field_label(self):
+        """住所の確認トグルにフィールド名見出し（住所）を出さない（セクション <h2>住所</h2> と重複するため）。"""
+        # address を mid CFC 化 → 住所グループ末尾に確認トグルが描画される。
+        ContactFieldConfidence.objects.create(
+            contact=self.primary,
+            field_name="address",
+            confidence=ContactFieldConfidence.Confidence.MID,
+        )
+        html = self.client.get(self._url()).content.decode()
+        # 住所の確認トグル自体は描画される（「この項目を確認」＋確認 CB）。
+        self.assertIn('name="confirmed_address"', html)
+        # 住所グループの見出しは <h2>住所</h2> のみ。app-form__label としての「住所」二重表示は無い。
+        self.assertNotIn('app-form__label">住所', html)
+
     def test_get_active_returns_404(self):
         """active Contact → 404（このViewはprimary専用）。"""
         active_person = Person.objects.create()

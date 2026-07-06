@@ -1082,6 +1082,14 @@ a { color: inherit; text-decoration: none; }
   min-height: 30px;
   font-size: 13px;
 }
+/* 確認トグル（確認しました／未確認・確認OK／要修正）は2ボタンを常に横並びに固定する。
+   共通 .app-radio-toggle は flex-wrap:wrap のため、狭幅セルや大きいサイズで描画された際に
+   2ボタンが2行へ折り返して崩れる。当該スコープ限定で nowrap にして1行に留める（実幅は
+   小型トグル約164px でスマホ1列セル約335px に十分収まる）。他画面の app-radio-toggle は不変。 */
+.app-contact-field-actions .app-radio-toggle,
+.app-contact-confirm-inline .app-radio-toggle {
+  flex-wrap: nowrap;
+}
 /* 「要修正」で開く編集フォーム（入力欄＋修正/戻る）。トグル列との間・次フィールドとの間に
    .app-contact-field-actions と同量（space-sm）の上下マージンを付ける。hidden 時は
    display:none となり余白も出ない。機能・分岐は不変（見た目のみ）。 */

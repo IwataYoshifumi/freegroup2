@@ -225,8 +225,9 @@
   {# 住所（address）は4要素からの自動組み立て＝入力欄が無いため、住所グループ末尾に全幅で #}
   {# 確認チェックを置く（詳細画面で住所バッジ近傍に確認を出すのと同思想）。無ければ非表示。 #}
   {% if form.confirmed_address %}
+  {# 住所は自動組み立てで入力欄が無いため全幅で確認トグルのみ置く。フィールド名見出し（住所）は #}
+  {# セクション見出し <h2>住所</h2> と重複するため付けない（他フィールドと同じく「この項目を確認」＋トグルのみ）。 #}
   <div class="app-form__group" style="grid-column:1 / -1;">
-    <span class="app-form__label">住所</span>
     {% include "contacts/_confirm_toggle.html" with cf=form.confirmed_address %}
   </div>
   {% endif %}
