@@ -39,23 +39,10 @@
     {% endif %}
 
     {% block contact_fields %}
+      {# 確認チェック（confirmed_<field>）は各フィールド直下にインライン配置（_contact_fields.html）。 #}
+      {# 末尾のまとめ「確認チェック」セクションは廃止（v1.7、フィールド近傍化）。 #}
       {% include "contacts/_contact_fields.html" %}
     {% endblock %}
-
-    {# ==================== 確認トグル（low/mid 未確認フィールドのみ動的、HIG v1.2 §4.1） ==================== #}
-    <div class="app-section__header" style="margin-top:var(--app-space-md);">
-      <h2>確認チェック</h2>
-      <p class="app-muted">信頼度の低い項目について、内容を確認したことを「確認しました」に切り替えてください。</p>
-    </div>
-    {% for field in form %}
-      {% if field.name|slice:":10" == "confirmed_" %}
-        <div class="app-form__group">
-          <div class="app-form__label">{{ field.label }}</div>
-          {{ field }}
-          {{ field.errors }}
-        </div>
-      {% endif %}
-    {% endfor %}
 
     {# ==================== 操作ボタン ==================== #}
     <div class="app-action-area" style="margin-top:24px;">

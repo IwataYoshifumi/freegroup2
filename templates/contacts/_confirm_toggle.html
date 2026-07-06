@@ -1,0 +1,18 @@
+{% comment %}
+フィールド近傍のインライン確認チェック（確認しました/未確認トグル）。
+引数 cf = confirmed_<field> の BoundField（呼び出し側で form.confirmed_<field> を渡す）。
+
+主/副コンタクト修正フォームで、低信頼（未確認 low/mid）フィールドにのみ confirmed_<field> が
+動的生成される（contacts/forms.py）。存在しないフォーム（新規作成・別肩書追加）や確認済み・
+high フィールドでは cf が空になり、何も描画しない（詳細画面の確認OK/要修正の表示条件と同思想）。
+
+機能（確認しました/未確認の選択、保存時 clean() の確認必須化）は不変。表示位置のみ末尾セクション
+から各フィールドの直下へ移す。
+{% endcomment %}
+{% if cf %}
+  <div class="app-contact-confirm-inline" style="margin-top:6px;">
+    <span class="app-muted" style="display:block; font-size:12px; margin-bottom:2px;">この項目を確認</span>
+    {{ cf }}
+    {{ cf.errors }}
+  </div>
+{% endif %}

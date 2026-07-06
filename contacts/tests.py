@@ -2686,6 +2686,15 @@ class UpdatePrimaryContactViewTests(TestCase):
         # テンプレートの先出しモーダル制御 JS が SKIP_MODAL=true で描画される。
         self.assertIn("var SKIP_MODAL = true;", resp.content.decode())
 
+    def test_confirm_toggle_is_inline_not_end_section(self):
+        """確認チェックは各フィールド近傍にインライン配置。末尾のまとめセクションは廃止。"""
+        html = self.client.get(self._url()).content.decode()
+        # organization は mid CFC（setUp）→ 確認トグルが描画される（インライン近傍）。
+        self.assertIn('name="confirmed_organization"', html)
+        self.assertIn("この項目を確認", html)
+        # 旧「確認チェック」まとめセクションの見出しは無い。
+        self.assertNotIn("<h2>確認チェック</h2>", html)
+
     def test_get_active_returns_404(self):
         """active Contact → 404（このViewはprimary専用）。"""
         active_person = Person.objects.create()
