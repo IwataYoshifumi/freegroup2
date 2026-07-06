@@ -1073,7 +1073,11 @@ a { color: inherit; text-decoration: none; }
 .app-contact-field-actions {
   margin: var(--app-space-sm) 0;
 }
-.app-contact-field-actions .app-radio-toggle label {
+/* 確認トグルの小型サイズは詳細画面（.app-contact-field-actions）と編集フォームの
+   インライン確認（.app-contact-confirm-inline）で共通。両スコープを同一ルールで揃える
+   （値は 1 箇所・詳細画面基準。他画面の app-radio-toggle には影響しない）。 */
+.app-contact-field-actions .app-radio-toggle label,
+.app-contact-confirm-inline .app-radio-toggle label {
   padding: 4px 12px;
   min-height: 30px;
   font-size: 13px;
