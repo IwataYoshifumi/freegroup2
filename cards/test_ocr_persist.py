@@ -75,19 +75,48 @@ class JudgeAndPersistOcrResultTests(TestCase):
                 contact=contact, field_name="email", confidence="low"
             ).exists()
         )
-        # salutation_name は pipeline の cfc_map から除外され二重作成されない
-        # （Contact.save() の補完経路で 1 件のみ作られる）。
+        # salutation_name は pipeline の cfc_map から除外される。日本語コンタクトでは
+        # 「姓＋様」が自明な確定規則のため Contact.save() が low CFC を付けない（v1.7 fbf7a9c）。
+        # ＝この JP カードでは salutation_name の CFC は 0 件。
         self.assertEqual(
             ContactFieldConfidence.objects.filter(
                 contact=contact, field_name="salutation_name"
             ).count(),
-            1,
+            0,
         )
 
         # --- SNS が ContactSns として作られる ---
         self.assertEqual(
             ContactSns.objects.filter(
                 contact=contact, sns_type=ContactSns.SnsType.TWITTER, sns_id="taro_handle"
+            ).count(),
+            1,
+        )
+
+    def test_non_japanese_card_generates_salutation_name_cfc(self):
+        # 非日本語（primary_lang="en"）カードでは salutation_name の抑止が効かず、
+        # Contact.save() の補完経路で low CFC が 1 件だけ作られる（fbf7a9c の抑止は ja 限定）。
+        card = _build_card(
+            country="US",
+            primary_lang="en",
+            contact_override={"email": _E("taro@sample.co.jp", "low")},
+        )
+        adopted_raw_json = {"cards": [card], "api_response": {}}
+
+        _judge_and_persist_ocr_result(
+            self.bc,
+            adopted_raw_json,
+            "normal",
+            adopted_raw_json,
+            None,
+            [],
+        )
+
+        contact = Contact.objects.get()
+        # en では salutation_name の low CFC が 1 件だけ作られる。
+        self.assertEqual(
+            ContactFieldConfidence.objects.filter(
+                contact=contact, field_name="salutation_name"
             ).count(),
             1,
         )
