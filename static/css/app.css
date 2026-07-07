@@ -1996,6 +1996,10 @@ form:has(.js-decision-additional_role:checked) .app-merge-survivor__label--prima
 .app-original-overlay__img {
   display: block;
   max-width: 100%;
+  /* 縦長画像がビューポート高を超えて伸びるのを防ぐ。width/height:auto と
+     併用し縦横比を保ったまま画面内に収める。object-fit は使わない
+     （上に重なる検出枠/手動切り出しの SVG 面と img ボックスをズラさないため）。 */
+  max-height: 75vh;
   height: auto;
 }
 
