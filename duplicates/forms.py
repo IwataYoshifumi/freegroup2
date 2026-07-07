@@ -313,7 +313,11 @@ class MergeForm(ContactBaseForm):
             chk_on = bool(
                 self.cleaned_data.get(f"confirmed_{field_name}")
             )
-            current_value = getattr(surviving_primary, field_name)
+            # name_order は clean() で effective_lang から強制導出されるため、現在値側にも同じ
+            # 導出を適用して比較する（無編集で name_order を差分扱いしない、D-4a 回帰）。
+            current_value = self.current_value_for_diff(
+                surviving_primary, field_name
+            )
             submitted_value = self.cleaned_data.get(field_name)
             edited = submitted_value != current_value
             if chk_on or edited:
@@ -333,7 +337,11 @@ class MergeForm(ContactBaseForm):
         """
         surviving_primary = self.surviving_person.primary_contact
         for field_name in Contact.UPDATABLE_FIELDS:
-            current_value = getattr(surviving_primary, field_name)
+            # name_order は clean() で強制導出されるため、現在値側にも同じ導出を適用して比較
+            # （無編集で name_order を差分扱いしない、D-4a 回帰）。
+            current_value = self.current_value_for_diff(
+                surviving_primary, field_name
+            )
             submitted_value = self.cleaned_data.get(field_name)
             if submitted_value != current_value:
                 return True

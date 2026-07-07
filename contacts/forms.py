@@ -157,6 +157,26 @@ class ContactBaseForm(forms.ModelForm):
             return self.instance
         return None
 
+    def current_value_for_diff(self, source_contact, field_name):
+        """差分検出用に、clean() が導出する値と同じ土俵で比較するための「現在値」を返す。
+
+        [性質] 準関数（source_contact の属性参照のみ・DB/副作用なし）
+        [入力] source_contact: Contact（比較元。surviving 側 primary / target_contact 等）
+               field_name: str（Contact.UPDATABLE_FIELDS の要素）
+        [出力] 比較用の現在値
+
+        name_order は clean() で effective_lang から強制確定される（_setup_name_order_hidden /
+        clean 参照）。生の現在値（多くは ""）と cleaned["name_order"] を直接比べると、ユーザーが
+        無編集でも「変更あり」と誤判定される。現在値側にも同じ effective_lang 導出を一度適用して
+        比較し、「無編集なら差分なし」の契約を保つ（lang を実際に変えたときは lang 自身が差分検出
+        されるため、name_order の追従は二重計上しない）。それ以外のフィールドは現在値そのまま。
+
+        has_field_updates / confirmed_field_names（MergeForm・ContactUpdateForm）から共用する。
+        """
+        if field_name == "name_order":
+            return self._NAME_ORDER_BY_LANG[self.effective_lang]
+        return getattr(source_contact, field_name)
+
     def _setup_effective_lang(self):
         """表示出し分け用の実効言語を算出して self.effective_lang に持つ（要素1）。
 
@@ -486,7 +506,11 @@ class ContactUpdateForm(ContactBaseForm):
         confirmed = []
         for field_name in Contact.UPDATABLE_FIELDS:
             chk_on = bool(self.cleaned_data.get(f"confirmed_{field_name}"))
-            current_value = getattr(self.target_contact, field_name)
+            # name_order は clean() で effective_lang から強制導出されるため、現在値側にも同じ
+            # 導出を適用して比較する（無編集で name_order を差分扱いしない、MergeForm と同型）。
+            current_value = self.current_value_for_diff(
+                self.target_contact, field_name
+            )
             submitted_value = self.cleaned_data.get(field_name)
             edited = submitted_value != current_value
             if chk_on or edited:
