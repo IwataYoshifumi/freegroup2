@@ -698,6 +698,35 @@ def check_name_consistency(name_block):
     return corrections
 
 
+def compute_full_name(last_name, first_name, other_name_parts, name_order):
+    """姓・名・ミドル・name_order から full_name（氏名）を組み立てる。
+
+    [性質] 純関数（DB 操作なし・副作用なし）
+    [入力] last_name / first_name / other_name_parts: str（原本フィールド）
+           name_order: str（Contact.NameOrder の値。last_first / first_last / single 等）
+    [出力] str（組み立てた氏名）または None（自動組み立て対象外の name_order）
+
+    クライアント JS（static/js/app.js の js-name-full 補助組み立て）と同じ並びにする：
+      - last_first ：「{姓} {名}」（ミドルは含めない）
+      - first_last ：「{名} {ミドル} {姓}」
+      - single     ：姓（無ければ名）
+      - other / 未選択 / 不明：自動組み立てしない → None を返す（呼び出し側は full_name を据え置く）
+    各要素は strip し、空要素は半角スペース結合から除外する（JS の filter(Boolean) と同じ）。
+    """
+    last = (last_name or "").strip()
+    first = (first_name or "").strip()
+    other = (other_name_parts or "").strip()
+    order = (name_order or "").strip()
+    if order == "last_first":
+        return " ".join(p for p in (last, first) if p)
+    if order == "first_last":
+        return " ".join(p for p in (first, other, last) if p)
+    if order == "single":
+        return last or first
+    # other / 未選択は自動組み立てしない（手入力のみ、JS と同じ）
+    return None
+
+
 def compute_salutation_name(contact):
     """Contact の言語と姓名から salutation_name 文字列を組み立てる（仕様書 §1.5.1 / §11.9.7）。
 

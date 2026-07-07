@@ -18,6 +18,7 @@ D-3c で追加した AJAX 2 エンドポイント、および D-3b で追加し�
 """
 
 import json
+import uuid
 
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin, PermissionRequiredMixin
@@ -35,8 +36,8 @@ from django.views.generic import DetailView, ListView, UpdateView
 from back_navigator.back_navigator import BackNavigator
 from cards.models import BusinessCard
 from cards.tasks.ocr_pipeline import _update_original_image_status
-from config.constants import PersonChangeReason
-from duplicates.models import DuplicateCandidate, PersonMergeLog
+from config.constants import DUPLICATE_CHECK_FIELDS, PersonChangeReason
+from duplicates.models import DuplicateCandidate
 from duplicates.services.duplicate_detection import find_duplicate_contacts
 from persons.models import Person
 
@@ -47,6 +48,7 @@ from .forms import (
     build_contact_sns_formset,
 )
 from .models import Contact, ContactFieldConfidence, ContactSns
+from .services.detail_context import build_contact_detail_context
 from .services.permissions import can_edit_contact
 
 
@@ -187,7 +189,22 @@ class ContactListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
 
         qs = Contact.objects.filter(
             status__in=selected, person__status="active"
-        ).select_related("person", "business_card")
+        ).select_related("person", "business_card").annotate(
+            # 氏名セルの「要確認」バッジ用（未確認 low/mid が 1 件でもあれば True）。
+            # 行が Contact 自身なので contact_ref="pk"。Exists 1 本で N+1 を避ける。
+            has_unconfirmed_low_mid=ContactFieldConfidence.unconfirmed_low_mid_exists("pk"),
+        )
+
+        # Person 絞り込み（人物詳細「コンタクト一覧」導線用、?person=<uuid>）。
+        # person__status="active" は base 側で固定済み。不正 UUID・非 active Person は
+        # 0 件に倒して安全側（現状挙動を踏襲＝該当なしと同じ）。
+        person_id = self.request.GET.get("person", "").strip()
+        if person_id:
+            try:
+                uuid.UUID(person_id)
+            except ValueError:
+                return Contact.objects.none()
+            qs = qs.filter(person_id=person_id)
 
         p = self.request.GET
         if p.get("name", "").strip():
@@ -230,6 +247,8 @@ class ContactListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
                 "address",
                 "status",
                 "searched",
+                # 人物詳細「コンタクト一覧」導線の Person 絞り込みを戻るで復元するため追加。
+                "person",
                 # HIG §6.1：並び替え・ページ状態を戻るで復元するため sort を追加（単一パラメータ）。
                 "sort",
                 "page",
@@ -242,6 +261,8 @@ class ContactListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
         for key in self._SEARCH_PARAMS:
             context[key] = self.request.GET.get(key, "")
         context["selected_statuses"] = self._get_selected_statuses()
+        # 検索フォーム・ソート・ページ送りで Person 絞りが外れないよう hidden 保持用に渡す。
+        context["person_filter"] = self.request.GET.get("person", "")
         context["searched"] = self.request.GET.get("searched") == "1"
         # 検索フォーム内ソートコントロール用（sort_rows / sort_is_active / sort_value）。
         context.update(_contact_sort_context(self.request.GET))
@@ -282,66 +303,26 @@ class ContactDetailView(LoginRequiredMixin, PermissionRequiredMixin, DetailView)
         context = super().get_context_data(**kwargs)
         contact = self.object
 
-        # モード判定（D-3b §3.2）
-        is_primary = contact.status == Contact.Status.PRIMARY
-        is_active = contact.status == Contact.Status.ACTIVE
-        is_inactive = contact.status == Contact.Status.INACTIVE
-        is_editable = (
-            contact.status in (Contact.Status.PRIMARY, Contact.Status.ACTIVE)
-            and contact.person.status == "active"
-        )
+        # 主役 Contact 1 枚分の表示 context は共通部品に集約（active 人物詳細と共有）。
+        context.update(build_contact_detail_context(contact, self.request.user))
 
-        # 他のアクティブコンタクト（D-3b 論点 4）
-        if is_primary:
-            other_active_contacts = contact.person.contact_set.filter(
-                status=Contact.Status.ACTIVE
-            )
-        elif is_active:
-            other_active_contacts = (
-                contact.person.contact_set.filter(
-                    status__in=[
-                        Contact.Status.PRIMARY,
-                        Contact.Status.ACTIVE,
-                    ]
-                )
-                .exclude(pk=contact.pk)
-            )
-        else:
-            other_active_contacts = Contact.objects.none()
-
-        # 重複候補・マージログ・previous_person
-        pending_duplicates = DuplicateCandidate.get_pending(contact)
-        merge_logs = PersonMergeLog.get_for_person(contact.person)
-        previous_person = contact.previous_person
-
-        # 同一 Person 配下の inactive Contact 履歴（自分自身は除外）。
-        # active / primary のときは exclude は no-op、自分が inactive なら自身を弾く。
-        inactive_contacts = (
-            contact.person.get_inactive_contacts().exclude(pk=contact.pk)
-        )
-
-        # BackNavigator（詳細画面なので push_current は呼ばない、既存 cards 慣例に揃える。
-        # BackNavigator.push_current は keys=[] を DEBUG 時に ValueError として弾くため、
-        # 詳細画面ではスタック生成だけ行い、一覧画面側で push_current 済みのスタックを参照する）
+        # BackNavigator：コンタクト詳細を起点ハブ化し、子画面（別肩書追加・主コンタクト修正・名刺
+        # 詳細・将来の案件/報告書 等）の「戻る」がここへ戻るよう、自身を push_current で積む
+        # （ガイド §9：クエリ無し詳細でも push_current して戻り先にする正規の使い方）。
+        # 保存すべき GET クエリを持たないため、keys は path-only になる無害な非空キー
+        # 1 つ（"page"）を渡す（空 keys は §8 NG・DEBUG で ValueError）。view_name + view_kwargs
+        # の重複チェック（back_navigator.py）でリロード・子からの戻り時の二重 push は防止される。
         back = BackNavigator(self.request)
+        back.push_current("コンタクト詳細", ["page"])
 
+        # 画面メタ（共通部品には含めない＝各 View の責務）。
         context.update(
             {
-                "contact": contact,
-                "field_confidences": contact.get_field_confidences(),
-                "is_editable": is_editable,
-                "is_primary": is_primary,
-                "is_active": is_active,
-                "is_inactive": is_inactive,
-                "business_card": contact.business_card,
-                "other_active_contacts": other_active_contacts,
-                "pending_duplicates": pending_duplicates,
-                "merge_logs": merge_logs,
-                "previous_person": previous_person,
-                "inactive_contacts": inactive_contacts,
                 "back": back,
+                "page_title": "コンタクト詳細",
                 "active_app": "cards",
-                "active_menu": "cards:card_list",
+                # サイドバーは「コンタクト一覧」をアクティブに（兄弟の Contact 系 View と整合）。
+                "active_menu": "contacts:contact_list",
             }
         )
         return context
@@ -492,9 +473,13 @@ class ContactAjaxConfirmFieldsView(_ContactAjaxBase):
         if not isinstance(field_names, list):
             return _error("field_names must be a list", 400)
 
-        # 各要素が UPDATABLE_FIELDS に含まれることを確認
+        # 確認OK は値を触らず CFC を confirmed 化するだけなので、信頼度対象の DUPLICATE_CHECK_FIELDS
+        # も許可対象に含める（address を通すため）。既存許可（UPDATABLE_FIELDS）は狭めず和集合にする
+        # ことで従来確認できたフィールドの挙動は不変、実質増えるのは address（Phase E で UPDATABLE_FIELDS
+        # から除外された読み取り専用だが詳細画面でインライン確認可にする）のみ（v1.7）。
+        allowed_confirm_fields = set(Contact.UPDATABLE_FIELDS) | set(DUPLICATE_CHECK_FIELDS)
         for fn in field_names:
-            if not isinstance(fn, str) or fn not in Contact.UPDATABLE_FIELDS:
+            if not isinstance(fn, str) or fn not in allowed_confirm_fields:
                 return _error(f"Invalid field name: {fn}", 400)
 
         # 空配列なら no-op（D-3c 論点 5）
@@ -552,6 +537,14 @@ class UpdatePrimaryContactView(LoginRequiredMixin, PermissionRequiredMixin, Upda
         kwargs["target_contact"] = self.object
         return kwargs
 
+    def get_initial(self):
+        initial = super().get_initial()
+        # ?change_reason=fix（住所「要修正」等からの直行）では change_reason を fix に preset。
+        # 先出しモーダルをスキップして直接 fix の入力フォームを表示する（skip フラグは context 側）。
+        if self.request.GET.get("change_reason") == PersonChangeReason.FIX:
+            initial["change_reason"] = PersonChangeReason.FIX
+        return initial
+
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         back = BackNavigator(self.request)
@@ -562,6 +555,10 @@ class UpdatePrimaryContactView(LoginRequiredMixin, PermissionRequiredMixin, Upda
                 "field_confidences": self.object.get_field_confidences(),
                 "active_app": "contacts",
                 "active_menu": "contacts:contact_list",
+                # ?change_reason=fix のときは修正理由モーダルを開かず直接入力フォームを出す。
+                "skip_change_reason_modal": (
+                    self.request.GET.get("change_reason") == PersonChangeReason.FIX
+                ),
             }
         )
         # ContactSns 編集ブロック（§11.6.7）。POST 再描画時は form_invalid が
@@ -586,7 +583,7 @@ class UpdatePrimaryContactView(LoginRequiredMixin, PermissionRequiredMixin, Upda
         with transaction.atomic():
             change_reason = form.cleaned_data["change_reason"]
             if change_reason == PersonChangeReason.FIX:
-                _fix_with_salutation_flag(self.object, form, self.request.user)
+                _fix_with_derived_manual_flags(self.object, form, self.request.user)
                 # fix は既存 Contact のインプレース編集なので formset.save() で
                 # 追加・更新・削除を反映する（instance は self.object）。
                 sns_formset.save()
@@ -680,7 +677,7 @@ class UpdateActiveContactView(LoginRequiredMixin, PermissionRequiredMixin, Updat
 
     def form_valid(self, form, sns_formset):
         with transaction.atomic():
-            _fix_with_salutation_flag(self.object, form, self.request.user)
+            _fix_with_derived_manual_flags(self.object, form, self.request.user)
             # active 修正は fix 相当のインプレース編集（instance は self.object）。
             sns_formset.save()
         back = BackNavigator(self.request)
@@ -716,17 +713,35 @@ _RANK_PRIORITY = {
 }
 
 
-def _salutation_name_edited(form):
-    """フォーム経路で salutation_name が編集されたか判定する（Phase D §3.6・View 層）。
+# 派生フィールド → 手動入力フラグ属性（v1.7、Phase D §3.6 を全派生に拡張）。
+# フォームで当該フィールドが編集されたら、対応する *_is_manual を True にして Contact.save()
+# の自動再計算をスキップさせる。full_name / display_name は v1.7 で salutation と同型化。
+_DERIVED_MANUAL_FLAGS = {
+    "full_name": "full_name_is_manual",
+    "display_name": "display_name_is_manual",
+    "salutation_name": "salutation_name_is_manual",
+}
 
-    [性質] 純関数（form.changed_data を読むだけ・DB 操作なし）
-    [入力] form: ContactBaseForm 系（changed_data を持つバリデーション済みフォーム）
-    [出力] bool（salutation_name が changed_data に含まれれば True）
 
-    OCR 経路（json_parser）は本判定を通さず salutation_name_is_manual=False のまま。
-    手動 Form 経路でのみ、ユーザーが宛名を書き換えたかを Django 標準の changed_data で判定する。
+def _apply_manual_flags_from_form(contact, form):
+    """フォームの hidden フラグ（*_is_manual）を contact に明示反映する（v1.7 コミット3/3・View 層）。
+
+    [性質] 副作用あり（contact のフラグ属性をメモリ上で更新。DB 保存は呼び出し側の責務）
+    [入力] contact: Contact、form: バリデーション済みフォーム（ContactBaseForm 系）
+    [出力] list[str]（反映したフラグ field 名。限定 save の update_fields に使う）
+
+    鉛筆/自動トグル UI が hidden BooleanField を 0/1 でセットして送る。changed_data の
+    ヒューリスティック（2/3）と異なり、True も False も明示反映する：
+      - 手動化（同値でも True が立つ）／自動に戻す（False に戻り save() で再計算 → 自動値へ復帰）。
+    フラグは UPDATABLE_FIELDS 外＝get_update_contact() には載らないため、ここで個別に反映する。
+    OCR 経路（json_parser）はフォームを通らないため本関数を呼ばずフラグ False のまま。
     """
-    return "salutation_name" in form.changed_data
+    applied = []
+    for flag_attr in _DERIVED_MANUAL_FLAGS.values():
+        if flag_attr in form.cleaned_data:
+            setattr(contact, flag_attr, bool(form.cleaned_data[flag_attr]))
+            applied.append(flag_attr)
+    return applied
 
 
 def _create_sns_from_formset(contact, sns_formset):
@@ -755,25 +770,23 @@ def _create_sns_from_formset(contact, sns_formset):
         )
 
 
-def _fix_with_salutation_flag(contact, form, user):
-    """Contact.fix() を呼びつつ salutation_name_is_manual を設定・永続化する（§3.6・View 層）。
+def _fix_with_derived_manual_flags(contact, form, user):
+    """Contact.fix() を呼びつつ派生フィールドの手動フラグを設定・永続化する（§3.6・View 層）。
 
     [性質] 副作用あり（DB 書込：Contact.fix() + 手動フラグ立て時の限定 save）
     [入力] contact: Contact（保存済み primary/active）、form: バリデーション済みフォーム、user: 操作者
     [出力] None
 
-    salutation_name がフォームで編集された場合のみ手動フラグを True にする。Contact.save()
-    の自動再計算（姓系フィールド変更時の宛名上書き）より前にフラグを立てる必要があるため、
-    fix() 呼び出し前にメモリ上のフラグを立て、fix() 後に当該フィールドだけ限定 save で
-    永続化する（salutation_name_is_manual は UPDATABLE_FIELDS 外で fix() の差分 save には
-    載らないため）。編集がなければ既存値を維持する（False への戻しはしない、§3.6）。
+    full_name / display_name / salutation_name がフォームで編集された場合のみ、対応する手動
+    フラグを True にする。Contact.save() の自動再計算（原本変更時の上書き）より前にフラグを
+    立てる必要があるため、fix() 呼び出し前にメモリ上のフラグを立て、fix() 後にそのフラグ
+    field だけ限定 save で永続化する（*_is_manual は UPDATABLE_FIELDS 外で fix() の差分 save
+    には載らないため）。編集がなければ既存値を維持する（False への戻しはしない、§3.6）。
     """
-    edited = _salutation_name_edited(form)
-    if edited:
-        contact.salutation_name_is_manual = True
+    flags = _apply_manual_flags_from_form(contact, form)
     contact.fix(form, user)
-    if edited:
-        contact.save(update_fields=["salutation_name_is_manual"])
+    if flags:
+        contact.save(update_fields=flags)
 
 
 @transaction.atomic
@@ -803,9 +816,9 @@ def _create_person_and_contact(form, user, business_card=None):
     # 名刺詳細からの手動作成経路は save 前に BC を OneToOne 紐づけする（指示書 §3-1）。
     if business_card is not None:
         contact.business_card = business_card
-    # §3.6：宛名がフォームで編集されていれば手動扱い（save 前に立てて自動再計算を抑止）。
-    if _salutation_name_edited(form):
-        contact.salutation_name_is_manual = True
+    # 派生フィールド（氏名/表示名/宛名）の手動フラグを hidden から明示反映（save 前に立てて
+    # 自動再計算を抑止）。新規 Contact の full save で永続化される。
+    _apply_manual_flags_from_form(contact, form)
     contact.save()
     person.set_primary_contact(contact)
     return contact
@@ -852,9 +865,9 @@ def _promote_new_contact_as_primary(form, target_contact, user):
     new_contact.status = Contact.Status.ACTIVE
     new_contact.created_by = user
     new_contact.updated_by = user
-    # §3.6：宛名がフォームで編集されていれば手動扱い（save 前に立てて自動再計算を抑止）。
-    if _salutation_name_edited(form):
-        new_contact.salutation_name_is_manual = True
+    # 派生フィールド（氏名/表示名/宛名）の手動フラグを hidden から明示反映（save 前に立てて
+    # 自動再計算を抑止）。新規 Contact の full save で永続化される。
+    _apply_manual_flags_from_form(new_contact, form)
     new_contact.save()
     target_contact.person.set_primary_contact(
         new_contact, old_primary_new_status="inactive"

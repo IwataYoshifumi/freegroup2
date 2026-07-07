@@ -1,31 +1,21 @@
 {% extends "base.html" %}
+{% load back_tags %}
 
 {% block title %}ホーム — FreeGroup2{% endblock %}
 {% block app_name %}ホーム{% endblock %}
 
 {% block app_content %}
   <main class="app-main">
-    {% if person_link_status == 'single_candidate' %}
-      {% for candidate in person_link_candidates %}
-        <div class="app-alert app-alert--info">
-          <p>あなたの名刺データが見つかりました: <strong>{{ candidate.full_name }}</strong></p>
-          <form method="post" action="{% url 'accounts:link_user_person' user_id=request.user.id person_id=candidate.person_id %}">
-            {% csrf_token %}
-            <button type="submit" class="app-btn app-btn--primary">紐付ける</button>
-          </form>
-        </div>
-      {% endfor %}
+    {# 紐付け候補アラートは共通 partial に切り出し（profile と同一部品・同一分岐）。 #}
+    {# ホームは 0 件状態を出さない現行挙動を維持するため show_no_candidate は渡さない（＝偽）。 #}
+    {% include "accounts/_link_candidate_alert.html" %}
 
-    {% elif person_link_status == 'multiple_candidates_need_merge' %}
-      <div class="app-alert app-alert--warning">
-        <p>あなたの可能性がある Person が複数見つかりました。</p>
-        <p>先に <a href="{% url 'duplicates:duplicate_group_list' %}">Person のマージ画面</a> で重複を整理してください。</p>
-        <ul>
-          {% for candidate in person_link_candidates %}
-            <li>{{ candidate.full_name }} ({{ candidate.email }})</li>
-          {% endfor %}
-        </ul>
-      </div>
+    {# 本人の名刺が未取り込み（no_candidate）のときだけ、ようこそカードの上に促しを出す。 #}
+    {# profile と同一部品（_link_candidate_alert.html）を show_no_candidate=True で流用し info 枠1枚に統一。 #}
+    {# status ガードで no_candidate のみに限定し、single/multiple（上部 include）との二重表示を防ぐ。 #}
+    {# 間隔は app-alert 自身の margin-bottom で確保（ようこそカードとの分離）。 #}
+    {% if person_link_status == 'no_candidate' %}
+      {% include "accounts/_link_candidate_alert.html" with show_no_candidate=True %}
     {% endif %}
 
     <section class="app-card">

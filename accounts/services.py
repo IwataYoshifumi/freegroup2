@@ -1,8 +1,15 @@
+from urllib.parse import urlencode
+
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.db.models.functions import Lower, Trim
+from django.urls import reverse
 from django.utils.text import slugify
 
-from .constants import ActionLogAction, ADMIN_ROLE_CODE
+from contacts.models import Contact
+from persons.models import Person
+
+from .constants import ActionLogAction, ADMIN_ROLE_CODE, PersonLinkStatus
 
 
 def apply_role(user, role):
@@ -284,21 +291,111 @@ def _normalize_email(value):
     return (value or "").strip().lower()
 
 
+# 本人同定（self-link）で email 一致とみなす Contact の status 集合。
+# 入口（ホーム抽出 self_link_candidate_contacts）と出口（確認画面ガード
+# is_self_link_email_match）が同一の集合を参照し、照合基準のズレを防ぐ。
+# 本人同定の根拠は Person の代表名刺 primary_contact（= status=primary、Person につき1枚）
+# のメール一致のみに限定する。副(active)Contact は集約経緯が不確かで誤同定リスクがあるため
+# 自動同定の根拠にしない（副一致でしか拾えない本人は管理者の手動紐づけ operator≠user で救済）。
+SELF_LINK_MATCH_CONTACT_STATUSES = (Contact.Status.PRIMARY,)
+
+
+def self_link_candidate_contacts(user):
+    """user.email に一致する本人紐付け候補 Contact の QuerySet を返す（入口：ホーム抽出用）。
+
+    [性質] 準関数（DB 読み取りのみ・副作用なし）
+    [入力] user: CustomUser
+    [出力] Contact の QuerySet（status が primary（代表名刺）・email 正規化一致・
+            Person が active かつ未紐づけ）。user.email が空なら空 QuerySet。
+
+    出口 is_self_link_email_match と同一基準（SELF_LINK_MATCH_CONTACT_STATUSES＝primary のみ ＋
+    Lower(Trim(email)) 正規化）で判定し、入口・出口の照合基準のズレを防ぐ。
+    """
+    normalized = _normalize_email(user.email)
+    if not normalized:
+        return Contact.objects.none()
+    return (
+        Contact.objects.filter(
+            status__in=SELF_LINK_MATCH_CONTACT_STATUSES,
+            person__status=Person.Status.ACTIVE,
+            person__user__isnull=True,
+        )
+        .annotate(_norm_email=Lower(Trim("email")))
+        .filter(_norm_email=normalized)
+        .select_related("person")
+    )
+
+
+def self_link_person_list_url(user):
+    """本人紐付けフローの着地URL（人物一覧へメールプリフィル）を組み立てて返す。
+
+    [性質] 純関数（reverse + urlencode のみ・DB 操作なし・副作用なし）
+    [入力] user: CustomUser
+    [出力] str（persons:person_list ＋ email / searched=1 / status=active のクエリ付き URL）
+
+    StartLinkFlowView と profile/ホームの複数候補誘導が同一URLに着地するための共通化
+    （URL 組み立ての二重化を防ぐ）。status は active（Person の状態）。本人同定の
+    primary_contact メール一致は person_list の email 検索（primary_contact 経由）が
+    担保するため status=primary は使わない（person_list では無効値＝0件化する）。
+    """
+    params = urlencode([
+        ("email", user.email),
+        ("searched", "1"),
+        ("status", "active"),
+    ])
+    return f"{reverse('persons:person_list')}?{params}"
+
+
+def self_link_alert_context(user):
+    """紐付け候補アラートの状態とコンテキストを返す（ホーム／プロフィール共通）。
+
+    [性質] 準関数（DB 読み取りのみ・self_link_candidate_contacts を呼ぶだけ・副作用なし）
+    [入力] user: CustomUser
+    [出力] dict（person_link_status: PersonLinkStatus の値／
+            person_link_candidates: 候補 Contact のリスト／
+            person_link_select_url: 複数候補時の誘導先＝人物一覧メールプリフィルURL）
+
+    distinct Person 件数で状態を決める：>1=複数候補（本人を選んで紐付け）／==1=単一候補（紐付け）／
+    0=候補なし（プロフィールで名刺アップロード誘導）。ホーム home/views.py と入口・基準を
+    一本化し、判定の二重化を防ぐ（_link_candidate_alert.html partial がこの dict を描画）。
+    """
+    candidates = list(self_link_candidate_contacts(user))
+    distinct_persons = {c.person_id for c in candidates}
+    if len(distinct_persons) > 1:
+        status = PersonLinkStatus.MULTIPLE_CANDIDATES_NEED_MERGE
+    elif distinct_persons:
+        status = PersonLinkStatus.SINGLE_CANDIDATE
+    else:
+        status = PersonLinkStatus.NO_CANDIDATE
+    return {
+        "person_link_status": status,
+        "person_link_candidates": candidates,
+        # 複数候補時の誘導先（StartLinkFlow と同一の人物一覧メールプリフィルURL）。
+        "person_link_select_url": self_link_person_list_url(user),
+    }
+
+
 def is_self_link_email_match(user, person):
-    """本人フロー紐付けで User.email と Person.primary_contact.email が一致するか判定する。
+    """本人フロー紐付けで User.email が Person 配下の対象 Contact と一致するか判定する。
 
-    [性質] 純関数（DB 読み取りは person.primary_contact 参照のみ・副作用なし）
+    [性質] 準関数（DB 読み取り：person.contact_set を参照・副作用なし）
     [入力] user: CustomUser / person: Person
-    [出力] bool（両者を strip + 小文字化して完全一致なら True）
+    [出力] bool（status=primary（代表名刺）の Contact と email 正規化一致なら True）
 
-    Person 側メールが空（primary_contact 無し / email 空）は一致しない（False）。
+    入口 self_link_candidate_contacts と同一基準（SELF_LINK_MATCH_CONTACT_STATUSES＝primary のみ ＋
+    Lower(Trim(email)) 正規化）。本人同定は代表名刺 primary_contact のメール一致のみを根拠とする。
+    primary_contact が null／email 空なら一致なし（False）。
     本人フロー（operator == user）専用のガード判定。他人紐付け経路では使わない。
     """
-    primary = getattr(person, "primary_contact", None)
-    person_email = _normalize_email(getattr(primary, "email", "") if primary else "")
-    if not person_email:
+    normalized = _normalize_email(user.email)
+    if not normalized:
         return False
-    return _normalize_email(user.email) == person_email
+    return (
+        person.contact_set.filter(status__in=SELF_LINK_MATCH_CONTACT_STATUSES)
+        .annotate(_norm_email=Lower(Trim("email")))
+        .filter(_norm_email=normalized)
+        .exists()
+    )
 
 
 def link_user_to_person(operator, user, person):
@@ -334,6 +431,13 @@ def link_user_to_person(operator, user, person):
         raise ValidationError(
             f"Person は既に User ({existing_user.username}) に紐付いています。"
             "先に既存紐付けを解除してください"
+        )
+
+    # 入口（self_link_candidate_contacts）は active 限定。出口も active に限定し、
+    # 非active（MERGED/ARCHIVED 等）Person への person_id 直叩き紐付けを防ぐ。
+    if person.status != Person.Status.ACTIVE:
+        raise ValidationError(
+            "このパーソンは通常状態（active）ではないため紐付けできません。"
         )
 
     if operator == user and not is_self_link_email_match(user, person):

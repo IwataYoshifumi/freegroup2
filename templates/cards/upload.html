@@ -6,7 +6,6 @@
 {% block content %}
   <div class="app-page-header" style="max-width:760px;">
     <div>
-      <div class="app-breadcrumb">名刺管理 / アップロード</div>
       <h1>名刺アップロード</h1>
     </div>
     <div class="app-action-area">
@@ -128,7 +127,9 @@
         if (trigger) trigger.addEventListener('click', openDialog);
         dropzone.addEventListener('click', function (event) {
           // 「ファイルを選択」ボタン経由のクリックは trigger 側で処理済み（二重ダイアログ回避）。
-          if (event.target === trigger) return;
+          // input.click() で発火した input 自身の click もここにバブリングしてくるため除外する
+          // （除外しないと openDialog の preventDefault がダイアログを握りつぶす＋再帰する）。
+          if (event.target === trigger || event.target === input) return;
           openDialog(event);
         });
         input.addEventListener('change', renderList);

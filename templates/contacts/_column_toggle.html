@@ -42,6 +42,9 @@ localStorage キーは contacts 専用（contact_list_visible_columns）で pers
     <label style="display:flex; align-items:center; gap:6px; padding:4px; cursor:pointer;">
       <input type="checkbox" class="js-contact-column-toggle__cb" data-col-key="updated_at"> 更新日時
     </label>
+    <label style="display:flex; align-items:center; gap:6px; padding:4px; cursor:pointer;">
+      <input type="checkbox" class="js-contact-column-toggle__cb" data-col-key="lang" data-default="0"> 言語
+    </label>
   </div>
 </div>
 <script>
@@ -57,6 +60,10 @@ localStorage キーは contacts 専用（contact_list_visible_columns）で pers
       var btn = wrap.querySelector('.js-contact-column-toggle__btn');
       var menu = wrap.querySelector('.js-contact-column-toggle__menu');
       var cbs = wrap.querySelectorAll('.js-contact-column-toggle__cb');
+      // display 切替の対象は一覧テーブル配下のみ。メニュー内の選択UI（同名 data-col-key を
+      // 持つ input）を巻き込むと、列OFF時にトグル自体が消えるため起点をテーブルに限定する
+      // （persons の _column_toggle.html と同方式。特に data-default="0" の初期OFF列で顕在化する）。
+      var table = document.querySelector('table.js-contact-page-sort');
 
       btn.addEventListener('click', function (e) {
         e.stopPropagation();
@@ -88,7 +95,8 @@ localStorage キーは contacts 専用（contact_list_visible_columns）で pers
       function apply(cb) {
         var key = cb.dataset.colKey;
         var visible = cb.checked;
-        document.querySelectorAll('[data-col-key="' + key + '"]').forEach(function (el) {
+        if (!table) return;
+        table.querySelectorAll('[data-col-key="' + key + '"]').forEach(function (el) {
           el.style.display = visible ? '' : 'none';
         });
       }

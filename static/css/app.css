@@ -135,17 +135,24 @@ a { color: inherit; text-decoration: none; }
   cursor: pointer;
 }
 
-.app-user-dropdown {
+/* ドロップダウン共通の見た目（枠・影・背景・角丸・余白）。ユーザーメニューとアプリ切り替え▼で共有し、
+   影の rgba ハードコードを1箇所に集約（二重管理を解消）。位置・幅は各セレクタ側で個別指定する。 */
+.app-user-dropdown,
+.app-app-dropdown,
+.app-filter-dropdown {
   display: none;
   position: absolute;
-  right: 0;
   top: 42px;
-  width: 180px;
   background: var(--app-surface);
   border: 1px solid var(--app-border);
   border-radius: var(--app-radius);
   box-shadow: 0 12px 28px rgba(15, 23, 42, 0.12);
   padding: var(--app-space-sm);
+}
+
+.app-user-dropdown {
+  right: 0;
+  width: 180px;
 }
 
 .app-user-dropdown.is-open { display: block; }
@@ -158,6 +165,48 @@ a { color: inherit; text-decoration: none; }
 }
 
 .app-user-dropdown a:hover { background: #f1f5f9; }
+
+/* ロゴ横アプリ切り替えメニュー（▼）。スマホ幅で横断ナビをロゴ直下にドロップダウン表示する。
+   PC幅では .app-app-switcher の横並びを使い、▼トグル・ドロップダウンは出さない（下の @media で出し分け）。
+   実装はユーザーメニュー（.app-user-menu / .app-user-dropdown）と同型。 */
+.app-app-menu { position: relative; }
+.app-app-menu__logo { display: flex; align-items: center; gap: var(--app-space-xs); }
+.app-app-menu__toggle { display: none; min-height: 28px; padding: 2px 8px; }
+
+.app-app-dropdown {
+  left: 0;
+  width: 200px;
+}
+
+.app-app-menu.is-open .app-app-dropdown { display: block; }
+
+.app-app-dropdown a {
+  display: block;
+  padding: 10px;
+  border-radius: 8px;
+}
+
+.app-app-dropdown a:hover { background: #f1f5f9; }
+
+/* 対象モデル絞り込み▼（パーミッション一覧）。見た目は上のドロップダウン共通宣言を流用し、
+   多数のチェックボックスを縦スクロールで収める。位置・幅・最大高のみ個別指定。 */
+.app-filter-menu { position: relative; }
+.app-filter-dropdown {
+  left: 0;
+  width: 280px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.app-filter-menu.is-open .app-filter-dropdown { display: block; }
+.app-filter-dropdown__item {
+  display: flex;
+  align-items: center;
+  gap: var(--app-space-xs);
+  padding: 6px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.app-filter-dropdown__item:hover { background: #f1f5f9; }
 
 .app-main-area {
   display: flex;
@@ -300,6 +349,15 @@ a { color: inherit; text-decoration: none; }
   display: block;
   font-weight: 600;
   margin-bottom: 6px;
+}
+
+/* 派生フィールドの自動（淡色読み取り）表示。値の隣に鉛筆アイコン（HIG 3.5/3.7）。 */
+.app-derived-display {
+  display: inline-block;
+  color: var(--app-muted);
+  padding: 5px 0;
+  min-height: 1.2em;
+  word-break: break-word;
 }
 
 .app-input {
@@ -500,9 +558,15 @@ a { color: inherit; text-decoration: none; }
 .app-backdrop.is-open { display: block; }
 
 @media (max-width: 900px) {
-  .app-topbar__menu-btn { display: inline-flex; align-items: center; justify-content: center; }
+  /* ≡ はアプリ内サイドバーを持つページ（body.has-sidebar）でのみ表示。home/profile では出さない。 */
+  body.has-sidebar .app-topbar__menu-btn { display: inline-flex; align-items: center; justify-content: center; }
+  /* ロゴ横の▼トグルはスマホ幅のみ表示（横断ナビを▼ドロップダウンへ集約）。 */
+  .app-app-menu__toggle { display: inline-flex; align-items: center; justify-content: center; }
   .app-app-switcher { display: none; }
   .app-sidebar { display: none; }
+  /* ドロワー内に複製したサイドバーは隠さず表示を戻す（メインレイアウト側のみ非表示を維持）。
+     .app-drawer .app-sidebar（0,2,0）が上の .app-sidebar（0,1,0）に特異度で勝つ。 */
+  .app-drawer .app-sidebar { display: block; }
   .app-main { padding: var(--app-space-md); }
   .app-page-header {
     align-items: stretch;
@@ -510,6 +574,8 @@ a { color: inherit; text-decoration: none; }
   }
   .app-action-area { justify-content: flex-start; }
   .app-form-grid { grid-template-columns: 1fr; }
+  /* 1 列化したら span2 は無効化（1fr グリッドで span 2 だと暗黙列が生えて横溢れするため）。 */
+  .app-form__group--span2 { grid-column: auto; }
   .app-table-wrapper { display: none; }
   .app-card-list { display: block; }
 }
@@ -635,6 +701,9 @@ a { color: inherit; text-decoration: none; }
 }
 
 .app-form__group--full { grid-column: 1 / -1; }
+/* 3列グリッド内で 1 セルを 2 列ぶんに広げる汎用ユーティリティ（例：資格1＋キャッチコピー2で1行）。
+   狭幅（≤900px）で app-form-grid が 1 列化する際は span を打ち消す（下の @media で auto に戻す）。 */
+.app-form__group--span2 { grid-column: span 2; }
 
 .app-textarea {
   min-height: 96px;
@@ -809,7 +878,7 @@ a { color: inherit; text-decoration: none; }
 /* ========== 一覧操作・ツールチップ・レスポンシブ列制御 ========== */
 .app-table--nowrap {
   table-layout: fixed;
-  min-width: 860px;
+  min-width: 900px;
 }
 
 .app-table--nowrap th,
@@ -867,13 +936,17 @@ a { color: inherit; text-decoration: none; }
 .app-icon--search::before { content: "⌕"; font-size: 17px; }
 .app-icon--back::before { content: "‹"; font-size: 22px; font-weight: 800; }
 
-.app-table__col--action { width: 200px; text-align: center; white-space: nowrap; }
-.app-table__col--name { width: 120px; }
+.app-table__col--action { width: 88px; text-align: center; white-space: nowrap; }
+.app-table__col--name { width: 232px; }
 .app-table__col--organization { width: 220px; }
 .app-table__col--dept { width: 190px; }
 .app-table__col--personal_phone { width: 130px; }
 .app-table__col--email { width: 230px; }
-.app-table__col--status { width: 62px; text-align: center; }
+.app-table__col--status { width: 100px; text-align: center; }
+/* 状態列のバッジ（マージ済み／アーカイブ）は丸ピルを1行で全文表示する。
+   nowrap テーブルの td 既定 overflow:hidden で右端がクリップされないよう、
+   状態セルだけはみ出しを許可し中央寄せする（列幅 100px に収まる想定）。 */
+.app-table--nowrap td[data-col-key="status"] { overflow: visible; text-align: center; }
 .app-table__col--date { width: 128px; }
 
 /* ========== 人物一覧：検索フォーム横長是正・フィルタ折りたたみ・列見出しソート ==========
@@ -889,6 +962,17 @@ a { color: inherit; text-decoration: none; }
 .app-person-search input[name="department"],
 .app-person-search input[name="email"] { max-width: 340px; }
 .app-person-search input[name="address"] { max-width: 100%; }
+
+/* 名刺一覧の検索カードを人物一覧と同じ収まりに揃える（全幅に伸ばさず左寄せ＋入力欄を中身相応に）。
+   値は .app-person-search と同じだが cards スコープで独立させ persons 側へ影響させない。 */
+.app-card-search { max-width: 960px; margin-inline: 0; }
+.app-card-search input[name="name"],
+.app-card-search input[name="title"],
+.app-card-search input[name="tel"] { max-width: 200px; }
+.app-card-search input[name="organization"],
+.app-card-search input[name="department"],
+.app-card-search input[name="email"] { max-width: 340px; }
+.app-card-search input[name="address"] { max-width: 100%; }
 
 /* item4/5：ステータス・ソートの折りたたみ。操作部を枠で囲い、バー（ヘッダ）と展開部（枠）の
    左右端を一致させる。グリッド配置（横並び/縦積み）もここで制御する（旧インライン grid-column を CSS へ移管）。
@@ -906,6 +990,124 @@ a { color: inherit; text-decoration: none; }
   border: 1px solid var(--app-border);
   border-radius: var(--app-radius);
   padding: var(--app-space-md);
+}
+
+/* duplicates 重複候補一覧：ソート・表示件数の折りたたみヘッダーだけ半幅に絞る。
+   共通 .app-collapsible__header（width:100%）は7テンプレ共有のため触らず、
+   duplicates 専用ラッパー .app-dup-sort-collapsible 経由でスコープ上書きする
+   （persons の .app-person-filter-collapsible と同じ流儀）。開閉動作は変えない。 */
+.app-dup-sort-collapsible .app-collapsible__header {
+  max-width: 360px;
+}
+
+/* 人物詳細（contact_detail）：セクション内フィールドを auto-fit 2 列グリッドに。
+   情報カラムが広い（名刺画像なし＝全幅）と 2 列、狭い（名刺ありで左 1fr）と自動で
+   1 列へ折り返す。名刺有無の条件分岐はテンプレに書かず CSS の auto-fit に委ねる。
+   各フィールド（.app-detail-list .app-detail-item の 140px/1fr）は維持。共通クラス本体は不変。
+   長い値は include 側 full_width=True → グリッド項目に grid-column:1/-1 を当てて全幅。 */
+.app-contact-detail-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 0 var(--app-space-md);
+  align-items: start;
+}
+
+/* 人物詳細：各セクションを「左端＝セクション名（固定幅列・行ヘッダー）／右＝フィールド群」の
+   行に。独立見出し行（app-section__header）を廃して縦を詰め、左端を縦に見ればグループが分かる。
+   セクション名は上揃え（align-items:start）。右が折り返してもセクション名は左上に留まる。
+   共通 .app-section__header / .app-detail-* 本体は不変。画面限定。 */
+.app-cd-section {
+  display: grid;
+  grid-template-columns: 100px 1fr;
+  gap: var(--app-space-sm);
+  align-items: start;
+  padding: var(--app-space-sm) 0;
+}
+.app-cd-section + .app-cd-section {
+  border-top: 1px solid var(--app-border);
+}
+.app-cd-section__name {
+  font-weight: 700;
+  padding-top: 2px;
+}
+
+/* モバイル（≤900px、一覧のテーブル↔カード切替と同じ閾値）：セクション名（所属/連絡先/
+   住所/その他）を左固定列ではなく独立した見出し行にし、フィールドを全幅で縦に並べる
+   （左列の右にできる余白を解消）。デスクトップの 2 列（100px/1fr）は不変。サブ項目の
+   縦積み（app-cd-stacked）・ボタン（確認OK/要修正）は変更しない。 */
+@media (max-width: 900px) {
+  .app-cd-section { grid-template-columns: 1fr; }
+  /* メール・住所等（full_width＝app-cd-stacked が付かない項目）は 140px ラベル列のせいで
+     値がインデント＆折り返す。狭幅では全項目を「ラベル上・値下」の縦積みにし、値を全幅・
+     左揃えにする。compound セレクタ（app-detail-list.app-contact-detail-fields）で
+     共通の .app-detail-list .app-detail-item（140px/1fr）より高特異度＝順序に依らず勝つ。
+     長い値（メール/URL/住所）は .app-detail-value の word-break:break-word で全幅時のみ折り返す。 */
+  .app-detail-list.app-contact-detail-fields .app-detail-item { display: block; }
+  .app-detail-list.app-contact-detail-fields .app-detail-item .app-detail-label {
+    display: block;
+    margin-bottom: 2px;
+    color: var(--app-muted);
+    font-size: 12px;
+    font-weight: 700;
+  }
+}
+
+/* 2 列に並ぶ短項目（full_width でない＝stacked）は「ラベル上・値下」の縦セットに。
+   1 組が縦に固まり、横に複数並んでも各組が独立して読める。左端は値と縦に揃う（block）。
+   共通 .app-detail-list .app-detail-item（140px/1fr 横並び）を、特異度を上げてこの画面限定で上書き。
+   full_width 項目（氏名・メール・住所等）はクラスが付かないため従来どおりラベル左・値右のまま。 */
+.app-contact-detail-fields .app-detail-item.app-cd-stacked {
+  display: block;
+}
+.app-contact-detail-fields .app-detail-item.app-cd-stacked .app-detail-label {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--app-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/* 低信頼フィールドの確認アクション（確認OK/要修正トグル＋確定/修正/戻る）。トグルが大きい
+   ので当該箇所限定で小さくし、行の上下にマージンを付ける。機能・分岐は不変（見た目のみ）。
+   .app-contact-field-actions スコープなので他画面の app-radio-toggle には影響しない。 */
+.app-contact-field-actions {
+  margin: var(--app-space-sm) 0;
+}
+/* 確認トグルの小型サイズは詳細画面（.app-contact-field-actions）と編集フォームの
+   インライン確認（.app-contact-confirm-inline）で共通。両スコープを同一ルールで揃える
+   （値は 1 箇所・詳細画面基準。他画面の app-radio-toggle には影響しない）。 */
+.app-contact-field-actions .app-radio-toggle label,
+.app-contact-confirm-inline .app-radio-toggle label {
+  padding: 4px 12px;
+  min-height: 30px;
+  font-size: 13px;
+}
+/* 確認トグル（確認しました／未確認・確認OK／要修正）は2ボタンを常に横並びに固定する。
+   共通 .app-radio-toggle は flex-wrap:wrap のため、狭幅セルや大きいサイズで描画された際に
+   2ボタンが2行へ折り返して崩れる。当該スコープ限定で nowrap にして1行に留める（実幅は
+   小型トグル約164px でスマホ1列セル約335px に十分収まる）。他画面の app-radio-toggle は不変。 */
+.app-contact-field-actions .app-radio-toggle,
+.app-contact-confirm-inline .app-radio-toggle {
+  flex-wrap: nowrap;
+}
+/* 「要修正」で開く編集フォーム（入力欄＋修正/戻る）。トグル列との間・次フィールドとの間に
+   .app-contact-field-actions と同量（space-sm）の上下マージンを付ける。hidden 時は
+   display:none となり余白も出ない。機能・分岐は不変（見た目のみ）。 */
+.app-contact-field-actions .js-contact-field-edit-form {
+  margin: var(--app-space-sm) 0;
+}
+/* 編集フォーム内部：入力欄（全幅）とその下の「修正」「戻る」ボタン行の間に余白を付ける
+   （外側マージンと同量 space-sm）。入力欄は width:100% で 1 行を占めボタンは下段に回るため、
+   入力欄の margin-bottom で縦の間隔を作る。 */
+.app-contact-field-actions .js-contact-field-edit-input {
+  margin-bottom: var(--app-space-sm);
+}
+
+/* duplicates のフィルタフォーム（重複候補一覧・マージログ一覧）：各グループ
+   （rank/進捗/ユーザー/ソート、状態/ユーザー 等）の上下の隙間を空ける。
+   共通 .app-form__group は触らず duplicates のフォーム限定。 */
+.app-dup-filter .app-form__group {
+  margin-bottom: var(--app-space-md);
 }
 
 /* 検索フォーム上段グリッド。元は _search_form.html のインライン grid-template-columns:repeat(4,1fr)。
@@ -1287,6 +1489,13 @@ a { color: inherit; text-decoration: none; }
 /* Django連携想定の推奨フォーム */
 .app-card--recommended {
   border-color: #bbf7d0;
+}
+
+/* info 系の淡い青カード（要対応の注目ゾーン用）。塗りは信号機4色を避け、
+   既存 info トーン（app-alert--info と同値）の明度高めの淡い青で操作色と階層を分ける。 */
+.app-card--info {
+  border-color: #bfdbfe;
+  background: #eff6ff;
 }
 
 .app-form-note--success {

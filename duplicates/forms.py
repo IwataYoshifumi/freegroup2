@@ -43,8 +43,8 @@ class MergeForm(ContactBaseForm):
 
     review_decision = forms.ChoiceField(
         choices=[
-            ("merged", "同一人物"),
-            ("additional_role", "同一人物（別肩書追加）"),
+            ("merged", "同一パーソン"),
+            ("additional_role", "同一パーソン（別肩書追加）"),
             ("different", "別人"),
         ],
         required=True,
@@ -189,12 +189,12 @@ class MergeForm(ContactBaseForm):
             if not result_set:
                 self.add_error(
                     "review_result",
-                    "「同一人物」を選択した場合は判定理由を 1 つ以上選択してください",
+                    "「同一パーソン」を選択した場合は判定理由を 1 つ以上選択してください",
                 )
             elif not result_set.issubset(merged_ui_values):
                 self.add_error(
                     "review_result",
-                    "「同一人物」を選択した場合はマージ系の判定理由のみを選択してください",
+                    "「同一パーソン」を選択した場合はマージ系の判定理由のみを選択してください",
                 )
         elif review_decision == "additional_role":
             # additional_role は判定理由 UI を出さないため、cleaned 上で固定値に整形。
@@ -202,7 +202,7 @@ class MergeForm(ContactBaseForm):
             if result_set and not result_set.issubset(all_merged_values):
                 self.add_error(
                     "review_result",
-                    "「同一人物（別肩書追加）」では別人系の判定理由は選択できません",
+                    "「同一パーソン（別肩書追加）」では別人系の判定理由は選択できません",
                 )
             cleaned["review_result"] = [
                 DuplicateMergeReason.ADDITIONAL_ROLE.value
@@ -313,7 +313,11 @@ class MergeForm(ContactBaseForm):
             chk_on = bool(
                 self.cleaned_data.get(f"confirmed_{field_name}")
             )
-            current_value = getattr(surviving_primary, field_name)
+            # name_order は clean() で effective_lang から強制導出されるため、現在値側にも同じ
+            # 導出を適用して比較する（無編集で name_order を差分扱いしない、D-4a 回帰）。
+            current_value = self.current_value_for_diff(
+                surviving_primary, field_name
+            )
             submitted_value = self.cleaned_data.get(field_name)
             edited = submitted_value != current_value
             if chk_on or edited:
@@ -333,7 +337,11 @@ class MergeForm(ContactBaseForm):
         """
         surviving_primary = self.surviving_person.primary_contact
         for field_name in Contact.UPDATABLE_FIELDS:
-            current_value = getattr(surviving_primary, field_name)
+            # name_order は clean() で強制導出されるため、現在値側にも同じ導出を適用して比較
+            # （無編集で name_order を差分扱いしない、D-4a 回帰）。
+            current_value = self.current_value_for_diff(
+                surviving_primary, field_name
+            )
             submitted_value = self.cleaned_data.get(field_name)
             if submitted_value != current_value:
                 return True

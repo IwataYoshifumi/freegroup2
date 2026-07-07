@@ -7,7 +7,6 @@
   {# HIG v1.3 §2.1：外側のカード枠ごと中央寄せ。視覚的に揃えるためヘッダー・メッセージも同じ max-width に揃える。 #}
   <div class="app-page-header" style="max-width: 720px; margin: 0 auto;">
     <div>
-      <div class="app-breadcrumb">メール配信 / キャンペーン / {% if is_create %}新規作成{% else %}編集{% endif %}</div>
       <h1>{% if is_create %}キャンペーン新規作成{% else %}キャンペーン編集：{{ campaign.name }}{% endif %}</h1>
     </div>
   </div>

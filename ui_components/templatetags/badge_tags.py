@@ -47,7 +47,7 @@ _STATUS_BADGE_VARIANTS = {
     ("Contact", "status"): {
         "primary": "success",   # 主コンタクト
         "active": "warning",    # 副コンタクト
-        "inactive": "muted",    # 非アクティブ
+        "inactive": "muted",    # 旧コンタクト
     },
     ("Person", "status"): {
         "active": "success",    # 通常
@@ -62,6 +62,56 @@ _STATUS_BADGE_VARIANTS = {
         "failed": "error",      # 配信失敗
     },
 }
+
+
+# バッジ表示専用のラベル短縮（HIG 対照表は別途是正。バッジは幅が狭いセル＝状態列に
+# 収めるため短縮形を使う。get_FIELD_display（フォームの絞り込み選択肢・ドロップダウン等）
+# には波及させず、本タグの描画ラベルだけ差し替える）。
+#   - Contact.status の primary/active/inactive を「主」「副」「旧」へ短縮。
+#   - Person.status / Campaign.status 等は対象外（get_FIELD_display のまま）。
+_STATUS_BADGE_LABEL_OVERRIDES = {
+    ("Contact", "status"): {
+        "primary": "主",
+        "active": "副",
+        "inactive": "旧",
+    },
+}
+
+
+# ----------------------------------------------------------------------
+# 並べ替え順序値マップ：(モデル名, フィールド名) → {内部値: 順序値}
+#   一覧の「見出しクリックその場並べ替え」（app.js initTable）の data-sort-key 用。
+#   status はコード順・文字列順ではなく業務語の並び（主→副→旧）で並べたいため、
+#   表示ラベル（バッジ）とは別に隠しの順序値を持たせる。単一ソースをここに置き、
+#   variant / ラベル短縮と同じ (モデル, フィールド) 文脈キーで揃える。
+# ----------------------------------------------------------------------
+_STATUS_SORT_ORDER = {
+    ("Contact", "status"): {
+        "primary": 0,   # 主コンタクト
+        "active": 1,    # 副コンタクト
+        "inactive": 2,  # 旧コンタクト
+    },
+}
+
+# 未登録値の順序値（末尾に寄せる。空セルが端に寄る挙動を避けつつ既知値の後ろへ）。
+_STATUS_SORT_FALLBACK = 99
+
+
+@register.filter
+def status_sort_key(instance, field="status"):
+    """status の業務語順（主→副→旧）を表す並べ替え用の順序値を返す。
+
+    [性質] 純関数（DB 操作なし・副作用なし）
+    [入力] instance: choices 付き status を持つモデルインスタンス（Contact 等）
+           field: str（対象フィールド名。既定 "status"）
+    [出力] int（順序値。主=0 / 副=1 / 旧=2、未登録・None は末尾寄せの 99）
+        一覧の <td data-sort-key> に埋め、initTable の数値比較で業務語順に並べる用途。
+    """
+    if instance is None:
+        return _STATUS_SORT_FALLBACK
+    value = getattr(instance, field, None)
+    order_map = _STATUS_SORT_ORDER.get((type(instance).__name__, field), {})
+    return order_map.get(value, _STATUS_SORT_FALLBACK)
 
 
 def _render_badge(variant, label):
@@ -106,6 +156,12 @@ def status_badge(instance, field="status"):
     # 表示テキストは必ずモデルラベル（get_FIELD_display）から。無ければ最終手段で値。
     display_getter = getattr(instance, f"get_{field}_display", None)
     label = display_getter() if callable(display_getter) else value
+
+    # バッジ専用のラベル短縮（Contact.status の primary/active のみ）。未登録は据え置き。
+    label_override = _STATUS_BADGE_LABEL_OVERRIDES.get(
+        (type(instance).__name__, field), {}
+    )
+    label = label_override.get(value, label)
 
     variant_map = _STATUS_BADGE_VARIANTS.get((type(instance).__name__, field), {})
     variant = variant_map.get(value, _FALLBACK_VARIANT)

@@ -1,14 +1,13 @@
 {% extends "cards/app_base.html" %}
 {% load back_tags %}
 
-{% block title %}人物詳細（primary_contact 未設定） — FreeGroup2{% endblock %}
+{% block title %}パーソン詳細（primary_contact 未設定） — FreeGroup2{% endblock %}
 
 {% block content %}
   <div class="app-page-header" style="max-width:1100px;">
     <div>
-      <div class="app-breadcrumb">人物管理 / 人物一覧 / 詳細</div>
       <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
-        <h1>人物詳細</h1>
+        <h1>パーソン詳細</h1>
         <span class="app-status-badge app-status-badge--warning">primary_contact 未設定</span>
       </div>
     </div>
@@ -26,7 +25,7 @@
 
   <section class="app-card" style="max-width:1100px;">
     <p>
-      この人物には主コンタクト（<code>primary_contact</code>）が設定されていません。
+      このパーソンには主コンタクト（<code>primary_contact</code>）が設定されていません。
       Django Admin で <code>primary_contact</code> を設定してください。
     </p>
     <p>
@@ -88,8 +87,11 @@
   {% include "persons/_tag_assignment_ui.html" %}
 
   {# ---- User-Person 紐付け UI ---- #}
+  {# このボタンの遷移先 confirm は self-link 専用。未紐付けボタンは出口ガード（email_match＋ #}
+  {# person_active）に揃え、押せる時だけ出す。perms 分岐は self-link 固定では無意味なため除去。 #}
+  {# セクションは「未紐付けかつ紐付け可能」または「何らか紐付け済み」のときだけ表示する。 #}
   {% with linked=person.linked_user %}
-    {% if not linked or linked == user or perms.accounts.link_user_to_person %}
+    {% if not linked and email_match and person_active or linked %}
       <section class="app-card" style="max-width:1100px; margin-top:var(--app-space-md);">
         <div class="app-section__header"><h2>ユーザー紐付け</h2></div>
         {% if not linked %}

@@ -102,6 +102,34 @@ class PersonListViewTests(TestCase):
         person.save(update_fields=["primary_contact", "updated_at"])
         return person, contact
 
+    def test_lang_column_exposes_raw_lang_sort_key(self):
+        """言語列の <td> に lang 生値の data-sort-key が描画される。
+
+        見出しクリックのその場並べ替え（app.js initTable）用の隠し値。
+        表示は日本語ラベルのまま、比較用に primary_contact.lang の生値を出す。
+        """
+        # person_a の primary_contact.lang は既定 "ja"。
+        html = self.client.get(self.url).content.decode()
+        self.assertIn('data-col-key="lang" data-sort-key="ja"', html)
+
+    def test_unconfirmed_low_mid_shows_confirm_badge(self):
+        """primary_contact が未確認 low/mid CFC を持つ行に「要確認」バッジが出る。"""
+        from contacts.models import ContactFieldConfidence
+
+        ContactFieldConfidence.objects.create(
+            contact=self.contact_a,
+            field_name="organization",
+            confidence=ContactFieldConfidence.Confidence.LOW,
+        )
+        html = self.client.get(self.url).content.decode()
+        # テーブル氏名セル + モバイル app-list-card の 2 箇所に出る。
+        self.assertEqual(html.count('aria-label="要確認"'), 2)
+
+    def test_no_cfc_hides_confirm_badge(self):
+        """CFC が無い行にはバッジが出ない（既定の person_a）。"""
+        html = self.client.get(self.url).content.decode()
+        self.assertNotIn("要確認", html)
+
     def test_default_shows_active_only(self):
         """初回（searched なし）→ active のみ、merged / archived は非表示。"""
         merged = Person.objects.create(status=Person.Status.MERGED)
@@ -488,16 +516,228 @@ class PersonDetailViewTests(TestCase):
         person.save(update_fields=["primary_contact", "updated_at"])
         return person, contact
 
-    def test_active_person_redirects_to_primary_contact_detail(self):
-        """active + primary_contact あり → 302 リダイレクト → ContactDetailView。"""
+    def test_active_person_address_shows_inline_confirm_and_edit_link(self):
+        """人物詳細（active・contact_detail.html 流用）でも住所の確認OK＋要修正リンクが出る。"""
+        from contacts.models import ContactFieldConfidence
+
+        person, contact = self._make_active_with_primary()
+        contact.address = "愛知県豊田市西町1-2-3"
+        contact.save()
+        ContactFieldConfidence.objects.create(
+            contact=contact,
+            field_name="address",
+            confidence=ContactFieldConfidence.Confidence.MID,
+        )
+        html = self.client.get(self._url(person)).content.decode()
+        # 確認OK（インライン）＋要修正（primary_contact は status=primary → 主コンタクト修正へ fix 直行）。
+        self.assertIn('name="contact-field-action-address"', html)
+        self.assertIn(
+            reverse("contacts:contact_update_primary", kwargs={"pk": contact.pk}),
+            html,
+        )
+        self.assertIn("change_reason=fix", html)
+
+    def test_active_person_renders_person_detail(self):
+        """active + primary_contact あり → リダイレクトせず人物詳細を render（v1.7）。
+
+        主役 Contact（primary_contact）の情報で contact_detail.html を流用し、
+        タイトルは「人物詳細」。旧挙動（302 → ContactDetailView）は廃止。
+        """
         person, contact = self._make_active_with_primary()
         resp = self.client.get(self._url(person))
-        self.assertEqual(resp.status_code, 302)
-        expected = reverse(
-            "contacts:contact_detail", kwargs={"pk": contact.pk}
+        self.assertEqual(resp.status_code, 200)
+        self.assertTemplateUsed(resp, "contacts/contact_detail.html")
+        body = resp.content.decode()
+        # タイトル（h1・タブ）が「パーソン詳細」、主コンタクトの氏名が出る。
+        self.assertIn("パーソン詳細", body)
+        self.assertIn(contact.full_name, body)
+
+    def test_active_person_without_additional_roles_shows_empty_section(self):
+        """v1.7：別肩書 0 件でも人物詳細では別肩書セクションを表示する。
+
+        「別肩書を追加」「コンタクト一覧」導線を見出し横に常時残すため、0 件でも
+        セクション見出し＋空状態メッセージを出す（追加導線の孤児化を防ぐ）。テーブル
+        行（詳細ボタン）は出ない。"""
+        person, _ = self._make_active_with_primary()
+        resp = self.client.get(self._url(person))
+        self.assertEqual(resp.status_code, 200)
+        body = resp.content.decode()
+        # 見出しと追加導線は 0 件でも出る。
+        self.assertIn(">別肩書</h2>", body)
+        self.assertIn("別肩書を追加", body)
+        # 空状態メッセージが出て、テーブル行（詳細ボタン）は無い。
+        self.assertIn("別肩書はまだありません", body)
+        self.assertNotRegex(
+            body,
+            r'class="app-btn app-btn--outline-secondary app-btn--sm"[^>]*>\s*詳細\s*</a>',
         )
-        # back_stack を渡していないので URL に付かず素のまま
-        self.assertEqual(resp.url, expected)
+
+    def test_active_person_with_additional_roles_shows_section(self):
+        """別肩書を持つ人物詳細では「別肩書」セクションに会社・部署・役職が出て、
+        各行から該当コンタクト詳細へ飛べる（created_at 昇順）。氏名は別肩書行に出さない。"""
+        person, primary = self._make_active_with_primary()
+        role1 = Contact.objects.create(
+            person=person,
+            status=Contact.Status.ACTIVE,
+            full_name="役職テスト氏名1",
+            organization="別肩書カンパニーA",
+            department="営業部",
+            title="課長",
+        )
+        role2 = Contact.objects.create(
+            person=person,
+            status=Contact.Status.ACTIVE,
+            full_name="役職テスト氏名2",
+            organization="別肩書カンパニーB",
+            department="技術部",
+            title="主任",
+        )
+        resp = self.client.get(self._url(person))
+        self.assertEqual(resp.status_code, 200)
+        body = resp.content.decode()
+        # 見出し「別肩書」（セクション h2）と会社・部署・役職が出る。
+        self.assertIn(">別肩書</h2>", body)
+        for value in ("別肩書カンパニーA", "営業部", "課長",
+                      "別肩書カンパニーB", "技術部", "主任"):
+            self.assertIn(value, body)
+        # 各別肩書行は該当コンタクト詳細へのリンクを持つ。
+        self.assertIn(
+            reverse("contacts:contact_detail", kwargs={"pk": role1.id}), body
+        )
+        self.assertIn(
+            reverse("contacts:contact_detail", kwargs={"pk": role2.id}), body
+        )
+        # 別肩書行に氏名は出さない（仕様）。
+        self.assertNotIn("役職テスト氏名1", body)
+        # created_at 昇順（role1 が role2 より前に出る）。
+        self.assertLess(body.index("別肩書カンパニーA"), body.index("別肩書カンパニーB"))
+
+    def test_additional_roles_table_detail_button_no_row_link(self):
+        """v1.7：別肩書は表形式。行全体クリックは無く「詳細」ボタン経由のみ。
+
+        thead は（操作｜状態｜会社｜部署｜役職｜メール｜携帯）。詳細ボタン
+        （app-btn--outline-secondary）が該当コンタクト詳細へ。カード全体を包む
+        <a class="app-list-card"> は無い。会社・部署・役職・メール・携帯が個別列に出て、
+        氏名は出ない。内容自動調整（app-table--nowrap・状態列固定幅は無し）。
+        """
+        person, _ = self._make_active_with_primary()
+        role = Contact.objects.create(
+            person=person,
+            status=Contact.Status.ACTIVE,
+            full_name="別肩書氏名X",
+            organization="サンプル商事",
+            department="営業部",
+            title="課長",
+            email="role-x@example.com",
+            mobile_phone="090-1111-2222",
+        )
+        resp = self.client.get(self._url(person))
+        body = resp.content.decode()
+        # テーブル化（app-table）され、行全体クリック <a class="app-list-card"> は無い。
+        self.assertIn("app-table", body)
+        self.assertNotRegex(body, r'<a[^>]*class="app-list-card"')
+        # thead は（操作｜状態｜会社｜部署｜役職｜メール｜携帯）。
+        for col in ("操作", "状態", "会社", "部署", "役職", "メール", "携帯"):
+            self.assertIn(col, body)
+        # 内容自動調整：当テーブルは素の app-table（nowrap なし）、状態列固定幅も無し。
+        self.assertIn('<table class="app-table">', body)
+        self.assertNotIn("width:48px", body)
+        # 詳細ボタン（outline-secondary）が該当コンタクト詳細へ。
+        self.assertRegex(
+            body,
+            r'class="app-btn app-btn--outline-secondary app-btn--sm"[^>]*>\s*詳細\s*</a>',
+        )
+        self.assertIn(
+            reverse("contacts:contact_detail", kwargs={"pk": role.id}), body
+        )
+        # 会社・部署・役職・メール・携帯が個別列に出る。
+        for value in ("サンプル商事", "営業部", "課長",
+                      "role-x@example.com", "090-1111-2222"):
+            self.assertIn(value, body)
+        # 別肩書行に氏名は出さない。
+        self.assertNotIn("別肩書氏名X", body)
+
+    def test_role_buttons_moved_to_section_heading(self):
+        """v1.7：別肩書を追加・コンタクト一覧ボタンはアクション帯から別肩書セクション
+        見出し横へ移設。
+
+        移設後はいずれも app-btn--sm（見出し横の小ボタン）。アクション帯の旧ボタン
+        （--sm 無し：別肩書を追加＝primary／コンタクト一覧＝secondary）は出ない。
+        コンタクト一覧の絞り込みクエリは維持。
+        """
+        person, _ = self._make_active_with_primary()
+        Contact.objects.create(
+            person=person,
+            status=Contact.Status.ACTIVE,
+            full_name="別肩書ロール",
+            organization="別肩書社",
+        )
+        resp = self.client.get(self._url(person))
+        self.assertEqual(resp.status_code, 200)
+        body = resp.content.decode()
+        # 別肩書を追加・コンタクト一覧は見出し横の小ボタン（--sm）として存在。
+        self.assertIn(
+            'app-btn--primary app-btn--sm">別肩書を追加</a>', body
+        )
+        self.assertIn(
+            'app-btn--secondary app-btn--sm">コンタクト一覧</a>', body
+        )
+        # アクション帯の旧ボタン（--sm 無し）は無くなる。
+        self.assertNotIn('app-btn--primary">別肩書を追加', body)
+        self.assertNotIn('app-btn--secondary">コンタクト一覧', body)
+        # 絞り込みクエリ（person 全 active = status=primary かつ active）は維持。
+        self.assertIn("person=%s" % person.id, body)
+        self.assertIn("status=primary", body)
+        self.assertIn("status=active", body)
+
+    SELF_LINK_LABEL = "このパーソンをログインアカウントに紐付ける"
+
+    def test_active_person_band_shows_self_link_when_email_match_unlinked(self):
+        """v1.7：パーソン詳細 band で email 一致 ∧ active ∧ 未紐付けのとき、
+        黄（warning）の「このパーソンをログインアカウントに紐付ける」を出す。"""
+        self.user.email = "selflink-person@example.com"
+        self.user.save(update_fields=["email"])
+        person = Person.objects.create()
+        contact = Contact.objects.create(
+            person=person,
+            status=Contact.Status.PRIMARY,
+            full_name="A",
+            email="selflink-person@example.com",
+        )
+        person.primary_contact = contact
+        person.save(update_fields=["primary_contact", "updated_at"])
+        resp = self.client.get(self._url(person))
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.context["can_self_link"])
+        body = resp.content.decode()
+        self.assertIn(self.SELF_LINK_LABEL, body)
+        self.assertIn('app-btn--warning">' + self.SELF_LINK_LABEL, body)
+
+    def test_active_person_band_hides_self_link_when_mismatch_or_linked(self):
+        """email 不一致／既に紐付け済みのときは人物詳細 band に紐付けボタンを出さない。"""
+        # (1) email 不一致（primary の email 空 → 一致しない）。
+        self.user.email = "me@example.com"
+        self.user.save(update_fields=["email"])
+        person, _ = self._make_active_with_primary()
+        resp = self.client.get(self._url(person))
+        self.assertFalse(resp.context["can_self_link"])
+        self.assertNotIn(self.SELF_LINK_LABEL, resp.content.decode())
+
+        # (2) email 一致でも既に紐付け済み（linked_user あり）なら出さない。
+        person2 = Person.objects.create()
+        c2 = Contact.objects.create(
+            person=person2,
+            status=Contact.Status.PRIMARY,
+            full_name="B",
+            email="me@example.com",
+        )
+        person2.primary_contact = c2
+        person2.save(update_fields=["primary_contact", "updated_at"])
+        self.user.person = person2
+        self.user.save(update_fields=["person"])
+        resp2 = self.client.get(self._url(person2))
+        self.assertFalse(resp2.context["can_self_link"])
+        self.assertNotIn(self.SELF_LINK_LABEL, resp2.content.decode())
 
     def test_active_person_with_null_primary_renders_orphan_page(self):
         """active + primary_contact NULL → orphan テンプレート + Admin リンク。"""
@@ -565,6 +805,68 @@ class PersonDetailViewTests(TestCase):
         body = resp.content.decode()
         self.assertIn("inactive Contact 履歴", body)
         self.assertIn("inactive-name", body)
+
+
+class PersonDetailOrphanSelfLinkButtonTests(TestCase):
+    """person_detail_orphan「このユーザーで紐付ける」ボタン（self-link 専用）の表示条件が
+    出口ガード（email_match＋person_active）に揃うことの検証。"""
+
+    LABEL = "このユーザーで紐付ける"
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="orphan_selflink_user", password="dummy", email="me@example.com"
+        )
+        _grant_view_person(self.user)
+        self.client = Client()
+        self.client.force_login(self.user)
+
+    def _url(self, person):
+        return reverse("persons:person_detail", kwargs={"pk": person.pk})
+
+    def _orphan_with_primary_email(self, email):
+        # orphan（primary_contact NULL → orphan テンプレート）だが status=primary の
+        # Contact を持たせ、is_self_link_email_match の判定対象を作る。
+        person = Person.objects.create()  # active, primary_contact NULL
+        Contact.objects.create(
+            person=person, status=Contact.Status.PRIMARY,
+            full_name="孤児", email=email,
+        )
+        return person
+
+    def test_orphan_button_shown_when_email_match(self):
+        person = self._orphan_with_primary_email("me@example.com")
+        resp = self.client.get(self._url(person))
+        self.assertEqual(resp.status_code, 200)
+        self.assertTemplateUsed(resp, "persons/person_detail_orphan.html")
+        self.assertTrue(resp.context["email_match"])
+        self.assertTrue(resp.context["person_active"])
+        self.assertContains(resp, self.LABEL)
+
+    def test_orphan_button_hidden_when_email_mismatch(self):
+        person = self._orphan_with_primary_email("other@example.com")
+        resp = self.client.get(self._url(person))
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(resp.context["email_match"])
+        self.assertNotContains(resp, self.LABEL)
+
+    def test_orphan_button_hidden_when_no_primary_contact(self):
+        # 真の孤児（primary Contact なし）→ メール一致しようがなく非表示。
+        person = Person.objects.create()
+        resp = self.client.get(self._url(person))
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(resp.context["email_match"])
+        self.assertNotContains(resp, self.LABEL)
+
+    def test_orphan_linked_to_self_shows_unlink(self):
+        person = self._orphan_with_primary_email("me@example.com")
+        self.user.person = person
+        self.user.save(update_fields=["person"])
+        resp = self.client.get(self._url(person))
+        self.assertEqual(resp.status_code, 200)
+        # 本人紐付け済み → 解除導線。self-link ボタンは出ない。
+        self.assertContains(resp, "紐付けを解除")
+        self.assertNotContains(resp, self.LABEL)
 
 
 # ======================================================================

@@ -6,7 +6,6 @@
 {% block content %}
   <div class="app-page-header">
     <div>
-      <div class="app-breadcrumb">重複候補管理 / マージログ一覧</div>
       <h1>マージログ一覧</h1>
     </div>
     <div class="app-action-area">
@@ -16,32 +15,40 @@
   </div>
 
   <section class="app-card">
-    <form method="get" class="app-form-grid-edit">
+    {# HIG §4.1：素のチェックボックスをトグルボタンに統一（duplicate_group_list と同方式）。 #}
+    {# 送信は隠し checkbox（name/value は現状維持＝status/user）。ボタンは checked を操作するだけ。 #}
+    <form method="get" class="app-form-grid-edit app-dup-filter js-mergelog-filter">
       <input type="hidden" name="searched" value="1">
-      <div class="app-form__group" style="grid-column: span 4;">
+
+      {# ---- 状態（複数選択トグル・常時展開）。3値と少ないため「すべて/クリア」は付けない。 ---- #}
+      <div class="app-form__group" style="grid-column: 1 / -1;">
         <label class="app-form__label">状態</label>
-        <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:center;">
+        {# 実送信用の隠しチェックボックス：name=status・value は現状維持。 #}
+        <div class="js-status-hidden" hidden>
           {% for status in valid_statuses %}
-            <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
-              <input type="checkbox" name="status" value="{{ status }}"
-                     {% if status in selected_statuses %}checked{% endif %}>
-              {% if status == "undoable" %}復元可能
-              {% elif status == "undone" %}復元済み
-              {% elif status == "locked" %}復元不可
-              {% else %}{{ status }}{% endif %}
-            </label>
+            <input type="checkbox" name="status" value="{{ status }}" {% if status in selected_statuses %}checked{% endif %}>
+          {% endfor %}
+        </div>
+        <div style="display:flex; flex-wrap:wrap; gap:8px;">
+          {% for status in valid_statuses %}
+            <button type="button"
+                    class="app-btn app-btn--sm js-status-toggle {% if status in selected_statuses %}app-btn--primary{% else %}app-btn--secondary{% endif %}"
+                    data-status-value="{{ status }}"
+                    aria-pressed="{% if status in selected_statuses %}true{% else %}false{% endif %}">{% if status == "undoable" %}復元可能{% elif status == "undone" %}復元済み{% elif status == "locked" %}復元不可{% else %}{{ status }}{% endif %}</button>
           {% endfor %}
         </div>
       </div>
 
-      <div class="app-form__group" style="grid-column: span 4;">
+      {# ---- ユーザー（単一 ON/OFF トグル）。送信は隠し checkbox name=user value=me を維持。 ---- #}
+      <div class="app-form__group" style="grid-column: 1 / -1;">
         <label class="app-form__label">ユーザー</label>
-        <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:center;">
-          <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
-            <input type="checkbox" name="user" value="me"
-                   {% if user_filter_on %}checked{% endif %}>
-            自分が実行したマージのみ
-          </label>
+        <div class="js-user-hidden" hidden>
+          <input type="checkbox" name="user" value="me" {% if user_filter_on %}checked{% endif %}>
+        </div>
+        <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
+          <button type="button"
+                  class="app-btn app-btn--sm js-user-toggle {% if user_filter_on %}app-btn--primary{% else %}app-btn--secondary{% endif %}"
+                  aria-pressed="{% if user_filter_on %}true{% else %}false{% endif %}">自分が実行したマージのみ</button>
         </div>
       </div>
 
@@ -51,6 +58,58 @@
       </div>
     </form>
   </section>
+
+  {# フィルタのトグルボタン↔隠しcheckbox 同期（duplicate_group_list と同方式・テンプレ内インライン／新規JSファイルは作らない）。 #}
+  <script>
+    (function () {
+      function init() {
+        var form = document.querySelector('form.js-mergelog-filter');
+        if (!form) return;
+
+        function syncBtn(btn, cb) {
+          var on = !!(cb && cb.checked);
+          btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+          btn.classList.toggle('app-btn--primary', on);
+          btn.classList.toggle('app-btn--secondary', !on);
+        }
+        function wire(hiddenSel, btnSel, attr) {
+          var hidden = Array.prototype.slice.call(form.querySelectorAll(hiddenSel));
+          var btns = Array.prototype.slice.call(form.querySelectorAll(btnSel));
+          function cbByValue(v) {
+            for (var i = 0; i < hidden.length; i++) { if (hidden[i].value === v) return hidden[i]; }
+            return null;
+          }
+          btns.forEach(function (btn) {
+            var cb = cbByValue(btn.getAttribute(attr));
+            btn.addEventListener('click', function () {
+              if (cb) cb.checked = !cb.checked;
+              syncBtn(btn, cb);
+            });
+            syncBtn(btn, cb);
+          });
+        }
+
+        // 状態：複数選択トグル。
+        wire('.js-status-hidden input[type="checkbox"]', '.js-status-toggle', 'data-status-value');
+
+        // ユーザー：単一 ON/OFF トグル。
+        var userCb = form.querySelector('.js-user-hidden input[type="checkbox"]');
+        var userBtn = form.querySelector('.js-user-toggle');
+        if (userBtn && userCb) {
+          userBtn.addEventListener('click', function () {
+            userCb.checked = !userCb.checked;
+            syncBtn(userBtn, userCb);
+          });
+          syncBtn(userBtn, userCb);
+        }
+      }
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+      } else {
+        init();
+      }
+    })();
+  </script>
 
   <section class="app-card">
     <div class="app-table-wrapper">

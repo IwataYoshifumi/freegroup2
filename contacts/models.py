@@ -3,7 +3,7 @@ import uuid
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
-from django.db.models import CheckConstraint, Q, UniqueConstraint
+from django.db.models import CheckConstraint, Exists, OuterRef, Q, UniqueConstraint
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
@@ -20,7 +20,7 @@ class Contact(models.Model):
 
         PRIMARY = "primary", _("主コンタクト")
         ACTIVE = "active", _("副コンタクト")
-        INACTIVE = "inactive", _("非アクティブ")
+        INACTIVE = "inactive", _("旧コンタクト")
 
     class NameOrder(models.TextChoices):
         """氏名の構成順序（仕様書 v1.6.0 別表 A.5 / OCR プロンプト §2 name ブロック）。"""
@@ -124,6 +124,11 @@ class Contact(models.Model):
     alias_name = models.CharField(max_length=255, blank=True, default="")
     # v1.6.0 新規（敬称手動入力フラグ、Contact.save() の自動再計算スキップ判定用、§11.9.7）
     salutation_name_is_manual = models.BooleanField(default=False)
+    # v1.7 派生フィールド手動入力フラグ（salutation_name_is_manual と同型）。
+    # full_name は原本（姓/名/ミドル/語順）から、display_name は full_name から自動追従するが、
+    # 手動入力された場合は True を立てて Contact.save() の自動再計算をスキップする。
+    full_name_is_manual = models.BooleanField(default=False)
+    display_name_is_manual = models.BooleanField(default=False)
 
     organization = models.CharField(max_length=255, blank=True, default="")
     # v1.6.0 新規（組織サブ）
@@ -254,6 +259,16 @@ class Contact(models.Model):
     # との比較で変更を検知する（マイグレーション不要）。
     _SALUTATION_SOURCE_FIELDS = ("last_name", "full_name", "lang", "name_order")
 
+    # full_name 自動組み立て（v1.7）のトリガーとなる原本フィールド（姓/名/ミドル/語順）。
+    # これらが save() で変更された場合、full_name_is_manual=False なら compute_full_name を
+    # 再実行する。salutation と同じスナップショット方式で変更検知（マイグレーション不要）。
+    _FULL_NAME_SOURCE_FIELDS = (
+        "last_name",
+        "first_name",
+        "other_name_parts",
+        "name_order",
+    )
+
     # address 自動 compose（仕様書 §11.9.4 / Phase E §2）のトリガーとなる住所構成要素。
     # これらが save() で変更された場合、compose_full_address を呼んで self.address を組み立て
     # 直す。salutation_name と同じスナップショット方式で変更検知する（マイグレーション不要）。
@@ -266,10 +281,59 @@ class Contact(models.Model):
         "lang",
     )
 
+    # 派生フィールドの手動フラグ（v1.7）。「自動に戻す」（True→False）を save() で検知して
+    # source 変更が無くても強制再計算（手動値を破棄して自動値へ）するため、スナップショットを持つ。
+    _MANUAL_FLAG_FIELDS = (
+        "full_name_is_manual",
+        "display_name_is_manual",
+        "salutation_name_is_manual",
+    )
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._store_salutation_source_snapshot()
         self._store_address_source_snapshot()
+        self._store_full_name_source_snapshot()
+        self._store_manual_flag_snapshot()
+
+    def _store_manual_flag_snapshot(self):
+        """[性質] 副作用あり（_manual_flag_snapshot を更新）。
+
+        手動フラグの現在値を保持する。__init__ 直後と save() 完了後に呼び、次回 save() で
+        「自動に戻す」（True→False）の遷移検知に使う。self.__dict__ 直読みで deferred ロード
+        を誘発しない。
+        """
+        self._manual_flag_snapshot = {
+            f: self.__dict__.get(f) for f in self._MANUAL_FLAG_FIELDS
+        }
+
+    def _manual_flag_reverted(self, flag_field):
+        """[性質] 準関数（属性比較のみ）。当該フラグが前回 True → 今回 False に戻ったか。"""
+        snapshot = getattr(self, "_manual_flag_snapshot", {})
+        return bool(snapshot.get(flag_field)) and not getattr(self, flag_field, False)
+
+    def _store_full_name_source_snapshot(self):
+        """[性質] 副作用あり（インスタンス属性 _full_name_source_snapshot を更新）。
+
+        原本フィールド（姓/名/ミドル/語順）の現在値を保持する。salutation 側と同じく
+        self.__dict__ から直接読み、deferred フィールドのロード（refresh_from_db）を誘発しない。
+        """
+        self._full_name_source_snapshot = {
+            field: self.__dict__.get(field)
+            for field in self._FULL_NAME_SOURCE_FIELDS
+        }
+
+    def _full_name_source_changed(self):
+        """[性質] 準関数（インスタンス属性の比較のみ・DB 操作なし）。
+
+        前回スナップショット以降に原本フィールド（last_name / first_name /
+        other_name_parts / name_order）のいずれかが変更されたかを返す。
+        """
+        snapshot = getattr(self, "_full_name_source_snapshot", {})
+        return any(
+            snapshot.get(field) != getattr(self, field, None)
+            for field in self._FULL_NAME_SOURCE_FIELDS
+        )
 
     def _store_salutation_source_snapshot(self):
         """[性質] 副作用あり（インスタンス属性 _salutation_source_snapshot を更新）。
@@ -352,12 +416,53 @@ class Contact(models.Model):
         # 循環 import 回避のため遅延 import（normalization は Contact を import しない）
         from contacts.services.normalization import (
             compose_full_address,
+            compute_full_name,
             compute_salutation_name,
         )
 
+        # full_name の自動組み立て（v1.7）。full_name_is_manual=False のとき、原本（姓/名/
+        # ミドル/語順）の変更時・full_name が空・または「自動に戻す」（手動→自動の遷移）のときに
+        # compute_full_name で再計算する。name_order が自動対象外（other/未選択）なら None を返すので
+        # 据え置く。salutation は full_name を source に持つため、salutation 再計算より前に行う（依存順）。
+        if not self.full_name_is_manual:
+            if (
+                not self.full_name
+                or self._full_name_source_changed()
+                or self._manual_flag_reverted("full_name_is_manual")
+            ):
+                computed_full = compute_full_name(
+                    self.last_name,
+                    self.first_name,
+                    self.other_name_parts,
+                    self.name_order,
+                )
+                if computed_full is not None and computed_full != self.full_name:
+                    self.full_name = computed_full
+                    update_fields = kwargs.get("update_fields")
+                    if update_fields is not None:
+                        update_fields = set(update_fields)
+                        update_fields.add("full_name")
+                        kwargs["update_fields"] = update_fields
+
+        # display_name の自動追従（v1.7）。display_name_is_manual=False のとき full_name と同値に
+        # 揃える。full_name 再計算後に行うことで、原本変更 → full_name → display_name と追従する。
+        if not self.display_name_is_manual:
+            if self.display_name != self.full_name:
+                self.display_name = self.full_name
+                update_fields = kwargs.get("update_fields")
+                if update_fields is not None:
+                    update_fields = set(update_fields)
+                    update_fields.add("display_name")
+                    kwargs["update_fields"] = update_fields
+
         salutation_was_computed = False
         if not self.salutation_name_is_manual:
-            if not self.salutation_name or self._salutation_source_changed():
+            # 空・姓系変更・「自動に戻す」（手動→自動の遷移）のいずれかで再計算（v1.7 で revert 追加）。
+            if (
+                not self.salutation_name
+                or self._salutation_source_changed()
+                or self._manual_flag_reverted("salutation_name_is_manual")
+            ):
                 new_value = compute_salutation_name(self)
                 if new_value != self.salutation_name:
                     self.salutation_name = new_value
@@ -391,11 +496,17 @@ class Contact(models.Model):
         super().save(*args, **kwargs)
         self._store_salutation_source_snapshot()
         self._store_address_source_snapshot()
+        self._store_full_name_source_snapshot()
+        self._store_manual_flag_snapshot()
 
         # 補完が走ったときのみ salutation_name の CFC を low で記録（§1.8）。
-        # 再計算で既に CFC がある場合は再作成しない（UniqueConstraint 違反回避。
-        # 値が変わっても confidence メタは low のまま据え置きで業務上問題ない）。
-        if salutation_was_computed:
+        # ただし日本語（lang が ja 始まり）は「姓＋様」の自明な確定規則のため要確認に入れない
+        # （low CFC を付けない）。ja 以外は敬称の確度が落ちるため従来どおり low CFC を付ける。
+        # 自動生成（値を作ること）自体は言語問わず維持。ja 判定は compute_salutation_name と同じ
+        # 「小文字化して startswith('ja')」に揃える（"ja-JP" 等も日本語扱い）。
+        # 再計算で既に CFC がある場合は再作成しない（UniqueConstraint 違反回避）。
+        is_japanese = (self.lang or "").strip().lower().startswith("ja")
+        if salutation_was_computed and not is_japanese:
             already_recorded = ContactFieldConfidence.objects.filter(
                 contact=self, field_name="salutation_name"
             ).exists()
@@ -526,6 +637,15 @@ class Contact(models.Model):
                 if field_name == "salutation_name":
                     self.salutation_name_is_manual = True
                     update_fields.append("salutation_name_is_manual")
+                # v1.7：派生フィールド（full_name / display_name）を AJAX で直接更新したら
+                # 手動入力フラグを立てる（salutation_name と同型。以後 save() の自動再計算で
+                # 上書きされないようにする。いずれも UPDATABLE_FIELDS 外で field_name 経由では来ない）。
+                elif field_name == "full_name":
+                    self.full_name_is_manual = True
+                    update_fields.append("full_name_is_manual")
+                elif field_name == "display_name":
+                    self.display_name_is_manual = True
+                    update_fields.append("display_name_is_manual")
                 self.save(update_fields=update_fields)
 
             # 2. 当該フィールドの ContactFieldConfidence を confirmed 化
@@ -773,4 +893,27 @@ class ContactFieldConfidence(models.Model):
             confirmed_at=now,
             confirmed_by=user,
             updated_at=now,
+        )
+
+    @classmethod
+    def unconfirmed_low_mid_exists(cls, contact_ref):
+        """一覧の「要確認」バッジ判定用の Exists() サブクエリを返す（v1.7）。
+
+        [性質] 準関数（クエリ式を組み立てるだけ。呼び出し時点では DB 非接触）
+        [入力] contact_ref: str（外側 queryset から CFC.contact を指す OuterRef 用パス。
+               コンタクト一覧＝"pk" / パーソン一覧＝"primary_contact_id"）
+        [出力] Exists（DUPLICATE_CHECK_FIELDS 9 項目のいずれかで confidence が low/mid
+               かつ confirmed_at IS NULL の CFC が 1 件でもあれば True）
+
+        3 一覧（contacts / persons / 将来の cards）で使い回すため、外側モデルに応じて
+        contact_ref のパスだけ差し替える。primary_contact が NULL の Person は
+        OuterRef("primary_contact_id") が NULL となり一致行なし＝False（バッジ非表示）。
+        """
+        return Exists(
+            cls.objects.filter(
+                contact=OuterRef(contact_ref),
+                field_name__in=DUPLICATE_CHECK_FIELDS,
+                confidence__in=(cls.Confidence.LOW, cls.Confidence.MID),
+                confirmed_at__isnull=True,
+            )
         )

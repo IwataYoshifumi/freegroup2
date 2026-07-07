@@ -24,9 +24,11 @@ from django.urls import reverse
 from django.views.generic import DetailView, ListView
 from django.views.generic.edit import FormView
 
+from accounts.services import is_self_link_email_match
 from back_navigator.back_navigator import BackNavigator
 from contacts.forms import ContactAddAdditionalRoleForm, build_contact_sns_formset
-from contacts.models import Contact
+from contacts.models import Contact, ContactFieldConfidence
+from contacts.services.detail_context import build_contact_detail_context
 from contacts.views import _create_sns_from_formset
 from duplicates.models import PersonMergeLog
 
@@ -150,6 +152,13 @@ class PersonListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
         # v1.6 Phase 1b: 検索ロジックを persons.services.person_search に切り出し（論点 A-1）。
         # HIG 第6章：?sort=key,-key,... があればサーバー側で全件多段ソート、無ければ既定並びを維持。
         qs = search_persons(self.request.GET)
+        # 氏名セルの「要確認」バッジ用（primary_contact の未確認 low/mid が 1 件でもあれば True）。
+        # primary_contact NULL の Person は OuterRef が NULL となり False（バッジ非表示）。
+        qs = qs.annotate(
+            has_unconfirmed_low_mid=ContactFieldConfidence.unconfirmed_low_mid_exists(
+                "primary_contact_id"
+            )
+        )
         return _apply_person_list_sort(qs, self.request.GET)
 
     def get_context_data(self, **kwargs):
@@ -221,12 +230,9 @@ class PersonDetailView(LoginRequiredMixin, PermissionRequiredMixin, DetailView):
 
         if person.status == Person.Status.ACTIVE:
             if person.primary_contact_id is not None:
-                back = BackNavigator(self.request)
-                target = reverse(
-                    "contacts:contact_detail",
-                    kwargs={"pk": person.primary_contact_id},
-                )
-                return HttpResponseRedirect(back.append_url(target))
+                # active + primary_contact あり → 独立した人物詳細画面を render する
+                # （旧：ContactDetailView へ 302 リダイレクト。v1.7 でリダイレクト廃止）。
+                return self._render_active_person_detail(request, person)
             template_name = "persons/person_detail_orphan.html"
         elif person.status == Person.Status.MERGED:
             template_name = "persons/person_detail_merged.html"
@@ -235,6 +241,71 @@ class PersonDetailView(LoginRequiredMixin, PermissionRequiredMixin, DetailView):
 
         context = self.get_context_data(**kwargs)
         return render(request, template_name, context)
+
+    def _render_active_person_detail(self, request, person):
+        """active かつ primary_contact ありの人物詳細を render する（リダイレクト廃止）。
+
+        主役 Contact は primary_contact に固定し、コンタクト詳細と同じ共通部品
+        （build_contact_detail_context）で context を組み立てて contact_detail.html を流用する。
+        画面メタ（back / active_app / active_menu / page_title）は人物詳細として設定する
+        （別肩書リスト等のパーソン単位データは次段スコープのため、ここでは積まない）。
+        """
+        # ContactDetailView.get_queryset と同じ select_related で主役 Contact を取得。
+        contact = (
+            Contact.objects.select_related(
+                "person", "business_card", "previous_person"
+            ).get(pk=person.primary_contact_id)
+        )
+        context = build_contact_detail_context(contact, request.user)
+
+        # 別肩書セクション（パーソン単位データ＝共通部品には入れず人物詳細 View 側で組み立てる）。
+        # primary を除く active コンタクト（get_active_contacts は status='active' のみ＝primary を含まない）を
+        # created_at 昇順（追加順）で並べ、テンプレの「同じ人物の他のコンタクト」セクションを
+        # additional_roles_mode フラグで「別肩書」表示に切り替える。0 件なら既存の {% if %} で非表示。
+        # ※ コンタクト詳細側の other_active_contacts（共通部品の生成）は触らない＝挙動不変。
+        context["other_active_contacts"] = (
+            person.get_active_contacts().order_by("created_at")
+        )
+        context["additional_roles_mode"] = True
+
+        # 本人紐付けボタン（アクション帯・黄）の表示可否：email 一致 ∧ active Person ∧ 対象未紐付け
+        # ∧ ログインユーザ自身が未紐付け（既に別 Person に紐付け済みなら出さない／ホーム・プロフィール
+        # accounts/views.py:44 の self_link_alert と同じ整合。OneToOne なので二重紐付けは
+        # services.link_user_to_person:423-427 でも弾かれるが、死にボタンを出さない＝表示側でも揃える）。
+        # 紐付けは Person↔User の操作なので人物詳細にのみ出す（コンタクト詳細には出さない）。
+        # email_match / person_active は build_contact_detail_context 由来（primary_contact の email 基準
+        # ＝コンタクト詳細と同一判定）。共有ヘルパーには入れない＝コンタクト詳細へ伝播させない。
+        context["can_self_link"] = (
+            context["email_match"]
+            and context["person_active"]
+            and person.linked_user is None
+            and request.user.is_authenticated
+            and request.user.person is None
+        )
+
+        # BackNavigator：人物詳細画面として自身を push_current（コンタクト詳細と同じ起点ハブ運用）。
+        back = BackNavigator(request)
+        back.push_current("パーソン詳細", ["page"])
+
+        # アクション帯「コンタクト一覧」導線：この Person の active コンタクトを primary 含め全件表示する。
+        # ContactListView の status は Contact.status 値そのもの（active=副コンタクト＝primary 除外）なので、
+        # primary を含む active 全件には status=primary と status=active の 2 値が必要。
+        # BackNavigator.append_url は多値クエリを先頭 1 個に潰すため、back を適用した後に status 2 値を付与する
+        # （テンプレ側はこの URL をそのまま href に出す＝append_back_url で二重適用しない）。
+        list_base = f"{reverse('contacts:contact_list')}?person={person.id}&searched=1"
+        context["contact_list_url"] = (
+            f"{back.append_url(list_base)}&status=primary&status=active"
+        )
+
+        context.update(
+            {
+                "back": back,
+                "page_title": "パーソン詳細",
+                "active_app": "persons",
+                "active_menu": "persons:person_list",
+            }
+        )
+        return render(request, "contacts/contact_detail.html", context)
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -250,6 +321,11 @@ class PersonDetailView(LoginRequiredMixin, PermissionRequiredMixin, DetailView):
         context["back"] = BackNavigator(self.request)
         context["active_app"] = "persons"
         context["active_menu"] = "persons:person_list"
+
+        # 本人紐付けボタン（orphan 画面の self-link 専用）の表示条件を出口ガードに揃える。
+        # 既存の本人同定基準 is_self_link_email_match を再利用（新規判定は作らない）。
+        context["email_match"] = is_self_link_email_match(self.request.user, person)
+        context["person_active"] = person.status == Person.Status.ACTIVE
 
         # v1.6 Phase 1b-β：タグ付与・解除 UI 用 context（仕様書 §5.2.3）。
         # 遅延 import で循環回避（tags は persons より後の INSTALLED_APPS）。
@@ -358,9 +434,11 @@ class PersonAddAdditionalRoleView(LoginRequiredMixin, PermissionRequiredMixin, F
             new_contact = form.get_update_contact()
             new_contact.person = self.person
             new_contact.status = Contact.Status.ACTIVE
-            # §3.6：宛名がフォームで編集されていれば手動扱い（save 前に立てて自動再計算を抑止）。
-            if "salutation_name" in form.changed_data:
-                new_contact.salutation_name_is_manual = True
+            # v1.7：派生フィールド（氏名/表示名/宛名）の手動フラグを hidden から明示反映
+            # （save 前に立てて自動再計算を抑止）。新規 Contact の full save で永続化される。
+            for flag_attr in form._MANUAL_FLAG_FIELDS:
+                if flag_attr in form.cleaned_data:
+                    setattr(new_contact, flag_attr, bool(form.cleaned_data[flag_attr]))
             new_contact.save()
             # submit された SNS 行を新規 Contact 配下に作成（§11.6.7）。
             _create_sns_from_formset(new_contact, sns_formset)

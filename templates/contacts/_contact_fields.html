@@ -1,0 +1,252 @@
+{# Contact フォームのフィールド群（氏名/所属/連絡先/住所/SNS/その他）共通 partial。 #}
+{# contact_create / contact_update_active / contact_update_primary / person_add_additional_role の #}
+{# 4 画面で重複していた {% block contact_fields %} の中身を抽出（純粋なリファクタ、出力 HTML 不変）。 #}
+{# 親テンプレートの context（form / sns_formset）をそのまま受け取る（include で全 context を継承）。 #}
+{# ==================== 氏名グループ ==================== #}
+{# v1.7：原本（姓/名/ミドル/別名/フリガナ）は通常入力。派生（氏名/表示名/敬称付き氏名）は #}
+{# 自動/手動トグル（_derived_field.html）。語順は effective_lang から確定し hidden で保持。 #}
+{# フリガナは ja のみ表示（en は非表示）。 #}
+{# v1.7：ja のときだけ氏名セクションを上下2段の .app-form-grid に分ける（見た目のゾーン分け）。 #}
+{# 順序は 上＝自動生成欄（氏名/表示名/敬称付き氏名）→ 下＝入力欄（姓/名/フリガナ/別名、ミドルは as_hidden）。 #}
+{# 小見出しは置かず、段間は「2番目に来る入力グリッド」の margin-top で確保する（1番目には付けない）。 #}
+{# 欄の中身・include・派生トグル/hidden POST/↻・フリガナ ja 制御・name_order hidden は現行のまま移設。 #}
+{# en は分岐せず現行の単一フローを維持する（下の {% else %} は従来マークアップそのまま）。 #}
+<div class="app-section__header"><h2>氏名</h2></div>
+{% if form.effective_lang == "ja" %}
+  {# 上グリッド＝自動生成欄（氏名 / 表示名 / 敬称付き氏名）。派生トグル・hidden POST・↻ は include のまま。 #}
+  {# 段間は下の入力グリッド側で確保するため、こちらには margin-top を付けない（氏名見出しとの間隔は app-section__header 側）。 #}
+  <div class="app-form-grid">
+    {% include "contacts/_derived_field.html" with field=form.full_name label="氏名" flag=form.full_name_is_manual name="full_name" %}
+    {% include "contacts/_derived_field.html" with field=form.display_name label="表示名" flag=form.display_name_is_manual name="display_name" %}
+    {% include "contacts/_derived_field.html" with field=form.salutation_name label="敬称付き氏名（メール宛名）" flag=form.salutation_name_is_manual name="salutation_name" required=True %}
+  </div>
+  {# 下グリッド＝入力欄（姓 / 名 / フリガナ / 別名）。ja 固定なので姓→名の順で include。段間の余白はこちらに付ける。 #}
+  {# ミドルネーム等は ja では画面に出さず as_hidden で値を保持する（下記 hidden、法人格 :95-103 と同方式・方向逆）。 #}
+  <div class="app-form-grid" style="margin-top:var(--app-space-md);">
+    {% include "contacts/_name_part_field.html" with field=form.last_name label="姓" %}
+    {% include "contacts/_name_part_field.html" with field=form.first_name label="名" %}
+    {# ミドルネーム等（other_name_parts）は ja では画面に出さず as_hidden で値を POST 保持する。 #}
+    {# 丸ごと省略すると ja 未送信→clean で "" になり保存経路（get_update_contact/fix）で既存値を空上書き #}
+    {# するため、hidden で値を POST に保持し（old==new で上書きを防ぐ）画面表示だけ抑える。en は下の {% else %} で従来表示。 #}
+    {# ※ja の氏名組み立ては「姓 名」で other 不使用のため、隠しても full_name/敬称のライブ追従は無傷（app.js 裏取り済み）。 #}
+    {{ form.other_name_parts.as_hidden }}
+    {# フリガナは ja のみ表示。この下グリッド自体が ja 分岐内なので条件は不要（＝ja のみ出力を維持）。 #}
+    <div class="app-form__group">
+      <label class="app-form__label" for="{{ form.phonetic_name.id_for_label }}">フリガナ</label>
+      {{ form.phonetic_name }}
+      {{ form.phonetic_name.errors }}
+    </div>
+    <div class="app-form__group">
+      <label class="app-form__label" for="{{ form.alias_name.id_for_label }}">別名（旧姓など）</label>
+      {{ form.alias_name }}
+      {{ form.alias_name.errors }}
+    </div>
+  </div>
+{% else %}
+{# en：単一グリッド維持のまま、セルの並びだけ「自動生成グループ（上）→入力グループ（下）」に揃える（B-1）。 #}
+{# 小見出し・段間 margin-top・span2 は入れない（ja のような装飾なし）。各欄は中身そのまま位置移動のみ。 #}
+<div class="app-form-grid">
+  {# 自動生成グループ：氏名 / 表示名 / 敬称付き氏名。派生トグル・hidden POST・↻ は include のまま。 #}
+  {% include "contacts/_derived_field.html" with field=form.full_name label="氏名" flag=form.full_name_is_manual name="full_name" %}
+  {% include "contacts/_derived_field.html" with field=form.display_name label="表示名" flag=form.display_name_is_manual name="display_name" %}
+  {% include "contacts/_derived_field.html" with field=form.salutation_name label="敬称付き氏名（メール宛名）" flag=form.salutation_name_is_manual name="salutation_name" required=True %}
+  {# 入力グループ：名 → 姓 → ミドルネーム等 → 別名。 #}
+  {# 姓/名の原本入力欄は表示順だけを effective_lang で出し分ける（ja=姓→名 / en=名→姓）。 #}
+  {# ブロックは _name_part_field.html に単一定義し、ここでは include 順だけ入れ替える #}
+  {# 役割（last_name/first_name の対応）・ラベル文言・i18n は変えない＝順序のみ。 #}
+  {% if form.effective_lang == "en" %}
+    {% include "contacts/_name_part_field.html" with field=form.first_name label="名" %}
+    {% include "contacts/_name_part_field.html" with field=form.last_name label="姓" %}
+  {% else %}
+    {% include "contacts/_name_part_field.html" with field=form.last_name label="姓" %}
+    {% include "contacts/_name_part_field.html" with field=form.first_name label="名" %}
+  {% endif %}
+  {# フリガナは ja のみ表示（en は非出力）。この分岐は en 側だが、条件包みを保って非表示制御を維持する。 #}
+  {% if form.effective_lang == "ja" %}
+  <div class="app-form__group">
+    <label class="app-form__label" for="{{ form.phonetic_name.id_for_label }}">フリガナ</label>
+    {{ form.phonetic_name }}
+    {{ form.phonetic_name.errors }}
+  </div>
+  {% endif %}
+  <div class="app-form__group">
+    <label class="app-form__label" for="{{ form.other_name_parts.id_for_label }}">ミドルネーム等</label>
+    {{ form.other_name_parts }}
+    {{ form.other_name_parts.errors }}
+  </div>
+  <div class="app-form__group">
+    <label class="app-form__label" for="{{ form.alias_name.id_for_label }}">別名（旧姓など）</label>
+    {{ form.alias_name }}
+    {{ form.alias_name.errors }}
+  </div>
+</div>
+{% endif %}
+{# 語順（name_order）は effective_lang から確定（ja=姓+名 / en=名+姓）。hidden で保持＝画面に出さない。 #}
+{{ form.name_order }}
+
+{# 氏名（full_name＝派生欄）の確認チェックは氏名グループ直下に置く（入力欄が派生欄で個別セルに #}
+{# 差し込めないため氏名グループ末尾に全幅で配置）。confirmed_full_name が無いフォームでは非表示。 #}
+{% if form.confirmed_full_name %}
+<div class="app-form__group" style="margin-top:var(--app-space-sm);">{% include "contacts/_confirm_toggle.html" with cf=form.confirmed_full_name field_name="full_name" %}</div>
+{% endif %}
+
+{# ==================== 所属グループ ==================== #}
+<div class="app-section__header" style="margin-top:var(--app-space-md);"><h2>所属</h2></div>
+<div class="app-form-grid">
+  <div class="app-form__group">
+    <label class="app-form__label" for="{{ form.organization.id_for_label }}">会社</label>
+    {{ form.organization }}
+    {{ form.organization.errors }}
+    {% include "contacts/_confirm_toggle.html" with cf=form.confirmed_organization field_name="organization" %}
+  </div>
+  {# 法人格は補助の「法人格の位置」と概念ペア。位置が en 非表示なので法人格も en では画面から消す。 #}
+  {# ただしフリガナ・法人格の位置（en で実質空）と違い、法人格は en でも値を持ちうる（Inc./Ltd. 等）。 #}
+  {# 丸ごと省略すると未送信→clean で "" になり保存経路（fix/get_update_contact）で既存値を消すため、 #}
+  {# en では hidden で値を POST に保持し（old==new で上書きを防ぐ）、画面表示だけ抑える。 #}
+  {# ＝法人格のみ「hidden 保持」、フリガナ・法人格の位置は現状の丸ごと省略のまま（方式差は意図的）。 #}
+  {% if form.effective_lang == "ja" %}
+  <div class="app-form__group">
+    <label class="app-form__label" for="{{ form.legal_entity_type.id_for_label }}">法人格</label>
+    {{ form.legal_entity_type }}
+    {{ form.legal_entity_type.errors }}
+  </div>
+  {% else %}
+  {{ form.legal_entity_type.as_hidden }}
+  {% endif %}
+  {% if form.effective_lang == "ja" %}
+  <div class="app-form__group">
+    <label class="app-form__label" for="{{ form.legal_entity_type_position.id_for_label }}">法人格の位置</label>
+    {{ form.legal_entity_type_position }}
+    {{ form.legal_entity_type_position.errors }}
+  </div>
+  {% endif %}
+  <div class="app-form__group">
+    <label class="app-form__label" for="{{ form.branch.id_for_label }}">支店・店舗</label>
+    {{ form.branch }}
+    {{ form.branch.errors }}
+    {% include "contacts/_confirm_toggle.html" with cf=form.confirmed_branch field_name="branch" %}
+  </div>
+  <div class="app-form__group">
+    <label class="app-form__label" for="{{ form.department.id_for_label }}">部署</label>
+    {{ form.department }}
+    {{ form.department.errors }}
+    {% include "contacts/_confirm_toggle.html" with cf=form.confirmed_department field_name="department" %}
+  </div>
+  <div class="app-form__group">
+    <label class="app-form__label" for="{{ form.title.id_for_label }}">役職</label>
+    {{ form.title }}
+    {{ form.title.errors }}
+    {% include "contacts/_confirm_toggle.html" with cf=form.confirmed_title field_name="title" %}
+  </div>
+  <div class="app-form__group">
+    <label class="app-form__label" for="{{ form.qualification.id_for_label }}">資格</label>
+    {{ form.qualification }}
+    {{ form.qualification.errors }}
+  </div>
+  {# キャッチコピーは所属グリッド（3列）で2列ぶん幅にして「資格1＋キャッチ2」を1行に収める（--span2、ja/en 共通）。 #}
+  <div class="app-form__group app-form__group--span2">
+    <label class="app-form__label" for="{{ form.catchphrase.id_for_label }}">キャッチコピー</label>
+    {{ form.catchphrase }}
+    {{ form.catchphrase.errors }}
+  </div>
+</div>
+
+{# ==================== 連絡先グループ ==================== #}
+<div class="app-section__header" style="margin-top:var(--app-space-md);"><h2>連絡先</h2></div>
+<div class="app-form-grid">
+  <div class="app-form__group">
+    <label class="app-form__label" for="{{ form.email.id_for_label }}">メール</label>
+    {{ form.email }}
+    {{ form.email.errors }}
+    {% include "contacts/_confirm_toggle.html" with cf=form.confirmed_email field_name="email" %}
+  </div>
+  <div class="app-form__group">
+    <label class="app-form__label" for="{{ form.mobile_phone.id_for_label }}">携帯</label>
+    {{ form.mobile_phone }}
+    {{ form.mobile_phone.errors }}
+    {% include "contacts/_confirm_toggle.html" with cf=form.confirmed_mobile_phone field_name="mobile_phone" %}
+  </div>
+  <div class="app-form__group">
+    <label class="app-form__label" for="{{ form.personal_phone.id_for_label }}">電話</label>
+    {{ form.personal_phone }}
+    {{ form.personal_phone.errors }}
+    {% include "contacts/_confirm_toggle.html" with cf=form.confirmed_personal_phone field_name="personal_phone" %}
+  </div>
+  <div class="app-form__group">
+    <label class="app-form__label" for="{{ form.personal_fax.id_for_label }}">FAX</label>
+    {{ form.personal_fax }}
+    {{ form.personal_fax.errors }}
+  </div>
+  <div class="app-form__group">
+    <label class="app-form__label" for="{{ form.org_phone.id_for_label }}">会社電話</label>
+    {{ form.org_phone }}
+    {{ form.org_phone.errors }}
+  </div>
+  <div class="app-form__group">
+    <label class="app-form__label" for="{{ form.org_fax.id_for_label }}">会社FAX</label>
+    {{ form.org_fax }}
+    {{ form.org_fax.errors }}
+  </div>
+  <div class="app-form__group">
+    <label class="app-form__label" for="{{ form.website.id_for_label }}">ウェブサイト</label>
+    {{ form.website }}
+    {{ form.website.errors }}
+  </div>
+</div>
+
+{# ==================== 住所グループ ==================== #}
+<div class="app-section__header" style="margin-top:var(--app-space-md);"><h2>住所</h2></div>
+<div class="app-form-grid">
+  <div class="app-form__group">
+    <label class="app-form__label" for="{{ form.postal_code.id_for_label }}">郵便番号</label>
+    {{ form.postal_code }}
+    {{ form.postal_code.errors }}
+  </div>
+  <div class="app-form__group">
+    <label class="app-form__label" for="{{ form.country.id_for_label }}">国（2文字）</label>
+    {{ form.country }}
+    {{ form.country.errors }}
+  </div>
+  <div class="app-form__group">
+    <label class="app-form__label" for="{{ form.region.id_for_label }}">都道府県</label>
+    {{ form.region }}
+    {{ form.region.errors }}
+  </div>
+  <div class="app-form__group">
+    <label class="app-form__label" for="{{ form.city.id_for_label }}">市区町村</label>
+    {{ form.city }}
+    {{ form.city.errors }}
+  </div>
+  <div class="app-form__group">
+    <label class="app-form__label" for="{{ form.rest_of_address.id_for_label }}">町名番地以降</label>
+    {{ form.rest_of_address }}
+    {{ form.rest_of_address.errors }}
+  </div>
+  {# 住所（address）は4要素からの自動組み立て＝入力欄が無いため、住所グループ末尾に全幅で #}
+  {# 確認チェックを置く（詳細画面で住所バッジ近傍に確認を出すのと同思想）。無ければ非表示。 #}
+  {% if form.confirmed_address %}
+  {# 住所は自動組み立てで入力欄が無いため全幅で確認トグルのみ置く。フィールド名見出し（住所）は #}
+  {# セクション見出し <h2>住所</h2> と重複するため付けない（他フィールドと同じく「この項目を確認」＋トグルのみ）。 #}
+  <div class="app-form__group" style="grid-column:1 / -1;">
+    {% include "contacts/_confirm_toggle.html" with cf=form.confirmed_address field_name="address" %}
+  </div>
+  {% endif %}
+</div>
+
+{# SNS グループ（v1.6.1 で ContactSns 別テーブル化、Phase F1 で InlineFormSet 化、§11.6.7） #}
+{% include "contacts/_contact_sns_formset.html" with formset=sns_formset %}
+
+{# ==================== その他グループ ==================== #}
+<div class="app-section__header" style="margin-top:var(--app-space-md);"><h2>その他</h2></div>
+<div class="app-form-grid">
+  <div class="app-form__group">
+    <label class="app-form__label" for="{{ form.notes.id_for_label }}">メモ</label>
+    {{ form.notes }}
+    {{ form.notes.errors }}
+  </div>
+  <div class="app-form__group">
+    <label class="app-form__label" for="{{ form.lang.id_for_label }}">言語</label>
+    {{ form.lang }}
+    {{ form.lang.errors }}
+  </div>
+</div>

@@ -1,5 +1,3 @@
-import urllib.parse
-
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin, PermissionRequiredMixin
 from django.contrib.auth.models import Group, Permission
@@ -25,6 +23,8 @@ from .services import (
     link_user_to_person,
     retire_user,
     role_holder_count,
+    self_link_alert_context,
+    self_link_person_list_url,
     unlink_user_from_person,
     update_role,
 )
@@ -36,7 +36,14 @@ class ProfileView(LoginRequiredMixin, View):
     template_name = "accounts/profile.html"
 
     def get(self, request):
-        return render(request, self.template_name)
+        # 確認画面リンクに back_stack を引き継げるよう BackNavigator を渡す（push_current は呼ばない＝
+        # PersonDetailView 同型。プロフィールはルート画面でクエリ状態を持たないため push しない）。
+        ctx = {"back": BackNavigator(request)}
+        # 未紐付け時はホームと同一基準で候補状態を算出し、淡い青カード内の共通 partial で出し分ける。
+        # profile は 0 件状態（名刺アップロード誘導）も出すため show_no_candidate=True で include する。
+        if request.user.person is None:
+            ctx.update(self_link_alert_context(request.user))
+        return render(request, self.template_name, ctx)
 
 
 class LinkUserPersonConfirmView(LoginRequiredMixin, View):
@@ -53,9 +60,12 @@ class LinkUserPersonConfirmView(LoginRequiredMixin, View):
         # 本フローは常に本人フロー（operator == user == request.user）。
         # メール不一致なら確認画面で link ボタンを出さず、理由を表示する（GET 時点判定）。
         email_match = is_self_link_email_match(request.user, person)
+        # 出口も入口（active 限定）と揃える：非active Person には link ボタンを出さない。
+        person_active = person.status == Person.Status.ACTIVE
         return render(request, self.template_name, {
             "person": person,
             "email_match": email_match,
+            "person_active": person_active,
             "back": BackNavigator(request),
         })
 
@@ -87,12 +97,8 @@ class StartLinkFlowView(LoginRequiredMixin, View):
             request,
             "紐付け対象の Person を表示しています。リストから自分の Person を選んでください。",
         )
-        params = urllib.parse.urlencode([
-            ("email", request.user.email),
-            ("searched", "1"),
-            ("status", "active"),
-        ])
-        return redirect(f"{reverse('persons:person_list')}?{params}")
+        # 着地URLは accounts.services の共通ヘルパーで組み立て（複数候補誘導と同一）。
+        return redirect(self_link_person_list_url(request.user))
 
 
 class LinkUserPersonView(LoginRequiredMixin, View):
@@ -174,6 +180,11 @@ class UserListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
         context["q"] = self.request.GET.get("q", "")
         context["active_app"] = "user_mgmt"
         context["active_menu"] = "accounts:user_list"
+        # BackNavigator：ユーザ管理一覧を起点画面として push_current で積む。子画面（ユーザ詳細）の
+        # 「戻る」がここへ戻る。keys は一覧の状態を成すクエリ（検索 q・退職表示 show_retired）。
+        back = BackNavigator(self.request)
+        back.push_current("ユーザ管理", ["q", "show_retired"])
+        context["back"] = back
         return context
 
 
@@ -189,6 +200,11 @@ class UserDetailView(LoginRequiredMixin, PermissionRequiredMixin, DetailView):
         context = super().get_context_data(**kwargs)
         context["active_app"] = "user_mgmt"
         context["active_menu"] = "accounts:user_list"
+        # 戻るボタン用 BackNavigator。遷移元（人物詳細・ユーザ管理一覧の「ユーザ詳細」リンク）が
+        # append_back で積んだ back_stack を読み、戻る先を直前画面にする。スタックが無ければ
+        # back_link が自動で非表示（HIG 3.2：表示判定はテンプレに書かない）。push_current は
+        # しない＝本画面は戻り先ハブにしない。
+        context["back"] = BackNavigator(self.request)
         return context
 
 
@@ -592,28 +608,33 @@ class PermissionListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
     permission_required = "accounts.manage_role"
 
     def get_queryset(self):
-        qs = (
+        # 全 permission を app/モデル順→codename順で取得（フレームワーク app も含める＝除外しない。
+        # アプリ▼の初期OFFで隠す方式へ移行）。テキスト/モデル/アプリ絞り込みはクライアント側 JS
+        # 即時フィルタで行うためサーバサイド検索（q）は持たない。
+        return (
             Permission.objects.select_related("content_type")
-            .exclude(content_type__app_label__in=FRAMEWORK_APP_LABELS)
             .prefetch_related("group_set")
             .order_by("content_type__app_label", "content_type__model", "codename")
         )
-        q = self.request.GET.get("q", "").strip()
-        if q:
-            qs = qs.filter(
-                Q(codename__icontains=q)
-                | Q(name__icontains=q)
-                | Q(content_type__app_label__icontains=q)
-                | Q(content_type__model__icontains=q)
-            )
-        return qs
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        # ドメイン app に絞り済みなので hidden は捨てる。グルーピングは (C-2) と共通。
-        sections, _ = group_permissions_by_section(context["permissions"])
-        context["perm_sections"] = sections
-        context["q"] = self.request.GET.get("q", "")
+        # 各行に app/モデル見出しを持たせるため (content_type ラベル, permission) を1リストで渡す
+        # （グループ別表をやめ1表に統合）。並びは queryset の app/モデル順→codename順を踏襲。
+        rows = [
+            {"section": _permission_section_label(p.content_type), "perm": p}
+            for p in context["permissions"]
+        ]
+        context["perm_rows"] = rows
+        # ▼ドロップダウンのチェックボックス列挙用（出現順を保った distinct リスト）。
+        context["content_types"] = list(dict.fromkeys(r["section"] for r in rows))
+        context["app_labels"] = list(dict.fromkeys(r["perm"].content_type.app_label for r in rows))
+        # フレームワーク app はアプリ▼で初期OFF（業務appのみ初期表示）にするためテンプレへ渡す。
+        context["framework_apps"] = FRAMEWORK_APP_LABELS
+        # アプリ▼の初期選択件数（業務app数）。JS でも更新するが初期描画を正確にするため。
+        context["app_initial_count"] = sum(
+            1 for a in context["app_labels"] if a not in FRAMEWORK_APP_LABELS
+        )
         context["active_app"] = "user_mgmt"
         context["active_menu"] = "accounts:permission_list"
         return context

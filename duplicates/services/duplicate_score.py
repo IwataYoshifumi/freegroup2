@@ -23,6 +23,7 @@ confidence のみで判定する純粋なスコア計算ロジック。Duplicate
 import re
 
 from config.constants import (
+    DUPLICATE_CHECK_FIELDS,
     DUPLICATE_FIELD_SCORES,
     DUPLICATE_GENERIC_EMAIL_LOCALPARTS,
     DUPLICATE_LOCATION_FIELDS,
@@ -46,6 +47,71 @@ def determine_score_and_rank(contact_a, contact_b):
     score = _calculate_score(contact_a, contact_b)
     rank = _determine_rank(score, contact_a, contact_b)
     return score, rank
+
+
+def get_matched_fields(contact_a, contact_b, high_a, high_b):
+    """両 Contact で一致した DUPLICATE_CHECK_FIELDS のフィールド名を返す（表示用）。
+
+    [性質] 純関数（high_a / high_b の set と Contact 属性を読むだけ、DB 操作なし）
+    [入力] contact_a / contact_b: Contact（status='primary' 想定）
+           high_a / high_b: set[str]（各 Contact の「実質 high」フィールド集合。
+             Contact.get_high_fields() もしくは build_high_fields_map() の値）
+    [出力] list[str]（一致したフィールド名。DUPLICATE_CHECK_FIELDS の定義順）
+
+    一致判定はスコア計算と同じ `_both_high_and_equal`（両方 high 扱い かつ 値完全一致）
+    を再利用する。スコア寄与の有無で絞らないため、配点 0 の branch も一致していれば含む
+    （仕様書 §8.3 配点表で branch は加点なしだが、表示上は「一致したフィールド」として扱う）。
+    """
+    return [
+        field
+        for field in DUPLICATE_CHECK_FIELDS
+        if _both_high_and_equal(contact_a, contact_b, field, high_a, high_b)
+    ]
+
+
+def build_high_fields_map(contact_ids):
+    """複数 Contact の「実質 high」フィールド集合をまとめて構築する（N+1 回避）。
+
+    [性質] 準関数（ContactFieldConfidence を 1 クエリで読むだけ・書き込みなし）
+    [入力] contact_ids: Iterable[uuid]（主コンタクトの id 群）
+    [出力] dict[contact_id -> set[str]]（DUPLICATE_CHECK_FIELDS のうち実質 high なもの）
+
+    high 判定ルールは Contact.get_high_fields() /
+    ContactFieldConfidence.get_for_contact() と同一にする：
+      - DB に low/mid レコードが無いフィールド → 疑似 high（high 扱い）
+      - DB レコードがあり confirmed_at != None（確認済み）→ high 扱い
+      - DB レコードがあり confirmed_at == None（未確認 low/mid）→ high にしない
+    high レコードは保存されない仕様（§4.6.1）なので DB には low/mid のみ存在する。
+
+    一覧の各行で個別に confidence を引くと N+1 になる（get_for_contact が
+    contact 単位の filter で都度クエリし prefetch を効かせないため）。本関数は
+    contact_id__in でまとめて 1 クエリ取得し、行数に依らずクエリ本数を固定する。
+    """
+    from contacts.models import ContactFieldConfidence
+
+    ids = list(contact_ids)
+    if not ids:
+        return {}
+
+    recorded = {}   # contact_id -> set(DB レコードのある field_name)
+    confirmed = {}  # contact_id -> set(confirmed_at != None の field_name)
+    for cid, fname, confirmed_at in ContactFieldConfidence.objects.filter(
+        contact_id__in=ids
+    ).values_list("contact_id", "field_name", "confirmed_at"):
+        recorded.setdefault(cid, set()).add(fname)
+        if confirmed_at is not None:
+            confirmed.setdefault(cid, set()).add(fname)
+
+    result = {}
+    for cid in ids:
+        rec = recorded.get(cid, set())
+        conf = confirmed.get(cid, set())
+        result[cid] = {
+            field
+            for field in DUPLICATE_CHECK_FIELDS
+            if field not in rec or field in conf
+        }
+    return result
 
 
 def _calculate_score(contact_a, contact_b):

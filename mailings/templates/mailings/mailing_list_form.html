@@ -6,7 +6,6 @@
 {% block content %}
   <div class="app-page-header">
     <div>
-      <div class="app-breadcrumb">メール配信 / 配信リスト一覧 / {% if is_create %}新規作成{% else %}編集{% endif %}</div>
       <h1 style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
         {% if not is_create and is_frozen %}
           <i class="bi bi-lock-fill" style="color:#64748b;"

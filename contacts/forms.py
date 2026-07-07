@@ -16,6 +16,7 @@ ModelForm 基底クラス。UI 構造を持たず、子 Form から継承して�
 """
 
 from django import forms
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.forms.utils import ErrorList
 
@@ -100,6 +101,30 @@ class ContactBaseForm(forms.ModelForm):
         "name_order": "js-name-order",
     }
 
+    # 派生フィールド → 手動入力フラグ（v1.7 コミット3/3）。鉛筆/自動トグル UI から hidden で
+    # 明示送信し、View 側で contact.*_is_manual に True/False を反映する。UPDATABLE_FIELDS には
+    # 入れない（一般フィールド経由の書き換えを塞ぐ）。salutation は 2/3 既存・full/display は 2/3 新設。
+    _MANUAL_FLAG_FIELDS = (
+        "full_name_is_manual",
+        "display_name_is_manual",
+        "salutation_name_is_manual",
+    )
+
+    # effective_lang から確定する name_order（要素2）。ja=姓+名 / en=名+姓。
+    _NAME_ORDER_BY_LANG = {"ja": "last_first", "en": "first_last"}
+
+    # lang プルダウン（v1.7）の基本選択肢。値は小文字言語コードで、既存の判定
+    # （effective_lang / compute_salutation_name / name_order / フリガナ表示は
+    # いずれも lower().startswith(...)）と齟齬が出ないように揃える。選択肢外の
+    # 既存値（ja-JP / zh-CN / 空 等）は _setup_lang_choices が動的に追加して保持する。
+    _LANG_CHOICES = (
+        ("ja", "日本語 (ja)"),
+        ("en", "英語 (en)"),
+        ("ko", "韓国語 (ko)"),
+        ("zh", "中国語 (zh)"),
+        ("und", "未判定 (und)"),
+    )
+
     class Meta:
         model = Contact
         fields = list(Contact.UPDATABLE_FIELDS)
@@ -110,6 +135,137 @@ class ContactBaseForm(forms.ModelForm):
         # Phase E：address は UPDATABLE_FIELDS から除外され Form フィールドではなくなった。
         # 住所組み立ては Contact.save() が住所構成要素から自動で行う（§11.9.4 / Phase E §2）。
         self._tag_name_compose_widgets()
+        # v1.7 コミット3/3：言語出し分け（effective_lang）・name_order の hidden 確定値化・
+        # 派生フィールドの手動フラグ hidden を用意する（4 画面共通＝基底で行う）。
+        self._setup_effective_lang()
+        self._setup_name_order_hidden()
+        self._add_manual_flag_fields()
+        self._setup_lang_choices()
+
+    def _source_contact(self):
+        """effective_lang / 手動フラグ初期値の参照元 Contact を返す（無ければ None）。
+
+        [性質] 準関数（DB は触らない。属性参照のみ）
+
+        ContactUpdateForm 系は instance を新規にして target_contact を別持ちするため
+        （§11.6.2 の設計）、target_contact を優先して参照する。Create/AddRole は新規のため None。
+        """
+        target = getattr(self, "target_contact", None)
+        if target is not None:
+            return target
+        if self.instance is not None and self.instance.pk:
+            return self.instance
+        return None
+
+    def current_value_for_diff(self, source_contact, field_name):
+        """差分検出用に、clean() が導出する値と同じ土俵で比較するための「現在値」を返す。
+
+        [性質] 準関数（source_contact の属性参照のみ・DB/副作用なし）
+        [入力] source_contact: Contact（比較元。surviving 側 primary / target_contact 等）
+               field_name: str（Contact.UPDATABLE_FIELDS の要素）
+        [出力] 比較用の現在値
+
+        name_order は clean() で effective_lang から強制確定される（_setup_name_order_hidden /
+        clean 参照）。生の現在値（多くは ""）と cleaned["name_order"] を直接比べると、ユーザーが
+        無編集でも「変更あり」と誤判定される。現在値側にも同じ effective_lang 導出を一度適用して
+        比較し、「無編集なら差分なし」の契約を保つ（lang を実際に変えたときは lang 自身が差分検出
+        されるため、name_order の追従は二重計上しない）。それ以外のフィールドは現在値そのまま。
+
+        has_field_updates / confirmed_field_names（MergeForm・ContactUpdateForm）から共用する。
+        """
+        if field_name == "name_order":
+            return self._NAME_ORDER_BY_LANG[self.effective_lang]
+        return getattr(source_contact, field_name)
+
+    def _setup_effective_lang(self):
+        """表示出し分け用の実効言語を算出して self.effective_lang に持つ（要素1）。
+
+        [性質] 副作用あり（self.effective_lang を設定）。DB 操作なし
+
+        参照元 Contact.lang → settings.LANGUAGE_CODE → "ja" の順でフォールバックし、
+        en で始まれば "en"、それ以外（ja/ko/zh/und/空）はすべて "ja" に丸める
+        （zh/und 専用 UI は作らない、ja フォールバック）。算出層の "ja" 判定（lang.startswith）
+        には手を入れない＝フォールバックは表示層（本属性）に閉じる（2/3 据え置き方針）。
+        """
+        src = self._source_contact()
+        raw = (getattr(src, "lang", "") if src else "") or settings.LANGUAGE_CODE or "ja"
+        self.effective_lang = "en" if raw.strip().lower().startswith("en") else "ja"
+
+    def _setup_name_order_hidden(self):
+        """name_order を hidden 化し effective_lang から確定値を初期表示にする（要素2）。
+
+        [性質] 副作用あり（name_order の widget / initial を変更）。DB 操作なし
+
+        値は clean() で effective_lang から強制確定する（POST 改ざん耐性）。ここでは GET 表示の
+        initial と hidden 化のみ。check_name_consistency は OCR 経路でのみ走るため衝突しない。
+        """
+        if "name_order" in self.fields:
+            # hidden 化しても js-name-order クラスは維持する（app.js の full_name 自動組み立てが
+            # `.js-name-order` で語順値を読むため。クラスが無いと compose が語順を取得できない）。
+            self.fields["name_order"].widget = forms.HiddenInput(
+                attrs={"class": "js-name-order"}
+            )
+            derived = self._NAME_ORDER_BY_LANG[self.effective_lang]
+            self.fields["name_order"].initial = derived
+            # 子フォーム（ContactUpdateForm）は initial dict を target_contact から埋めるため、
+            # hidden の表示値（＝JS が読む語順）も effective_lang の確定値で上書きする
+            # （未バインド GET 表示用。POST/save 時の確定は clean() が担保）。
+            if not self.is_bound:
+                self.initial["name_order"] = derived
+
+    def _add_manual_flag_fields(self):
+        """派生フィールドの手動フラグ hidden BooleanField を追加する（要素3・送信機構）。
+
+        [性質] 副作用あり（self.fields に hidden フィールドを追加）。DB 操作なし
+
+        初期値は参照元 Contact の現在フラグ（無ければ False）。テンプレ/JS はこの hidden を
+        0/1 でトグルし、View が cleaned_data から contact.*_is_manual へ明示反映する。
+        """
+        src = self._source_contact()
+        for flag in self._MANUAL_FLAG_FIELDS:
+            self.fields[flag] = forms.BooleanField(
+                required=False,
+                initial=bool(getattr(src, flag, False)) if src else False,
+                widget=forms.HiddenInput(),
+            )
+
+    def _setup_lang_choices(self):
+        """lang をテキスト入力から Select（プルダウン）にする（v1.7）。既存値を壊さない。
+
+        [性質] 副作用あり（lang フィールドの widget を Select に差し替え）。DB 操作なし
+
+        フィールド型は ModelForm 既定の CharField のまま widget だけ Select に差し替える
+        （ChoiceField にせず choices 検証を効かせない）ことで、選択肢外の既存値でも
+        バリデーションエラー・空上書きを起こさない。参照元／POST の現在 lang が基本選択肢
+        （_LANG_CHOICES）に無ければ、その値を選択肢へ動的に追加して選択状態で描画する
+        （ja-JP / zh-CN / 空 等の保持）。id は Django 既定で id_lang のまま＝敬称ライブ追従
+        （app.js が #id_lang を startsWith('ja') で読む）に影響しない。app-input クラスは
+        子 Form の _apply_widget_classes（super().__init__ 後に実行）が付与する。
+        """
+        if "lang" not in self.fields:
+            return
+        # 現在の lang 値：bound は POST 値、unbound は参照元 Contact（update）→
+        # initial / instance（create）の順。空文字も正しく保持するため update は
+        # 参照元をそのまま採用する（"" or ... の連鎖で既定 ja に化けないようにする）。
+        if self.is_bound:
+            current = (self.data.get(self.add_prefix("lang")) or "").strip()
+        else:
+            src = self._source_contact()
+            if src is not None:
+                current = (getattr(src, "lang", "") or "").strip()
+            else:
+                current = (
+                    self.initial.get("lang")
+                    or getattr(self.instance, "lang", "")
+                    or ""
+                ).strip()
+        choices = list(self._LANG_CHOICES)
+        values = {v for v, _ in choices}
+        # 選択肢に無い既存値は動的追加して保持（空文字は「（未設定）」として選択可能にする）。
+        if current not in values:
+            label = f"{current}（現在値）" if current else "（未設定）"
+            choices.append((current, label))
+        self.fields["lang"].widget = forms.Select(choices=choices)
 
     def _tag_name_compose_widgets(self):
         """氏名系 widget に full_name 補助 JS 用の js- フッククラスを付与する（Phase D §3.7）。
@@ -152,7 +308,7 @@ class ContactBaseForm(forms.ModelForm):
 
         [性質] 副作用あり（self.fields の widget.attrs を変更、DB 操作なし）
 
-        Form の動的フィールド追加後に呼ぶことで change_reason / note /
+        Form の動的フィールド追加後に呼ぶことで change_reason /
         confirmed_<field> にも付与される。チェックボックス・ラジオ・複数選択は
         付与すると <input> 側に当たって形が崩れるためスキップ（HIG v1.2 §4.1 の
         app-radio-toggle と整合）。
@@ -184,6 +340,9 @@ class ContactBaseForm(forms.ModelForm):
         cleaned = super().clean()
         self._normalize_cleaned_fields(cleaned)
         self._normalize_address_by_country(cleaned)
+        # 要素2：name_order は effective_lang から確定（hidden の POST 値は信用せず強制上書き）。
+        if "name_order" in self.fields:
+            cleaned["name_order"] = self._NAME_ORDER_BY_LANG[self.effective_lang]
         # address の組み立ては Contact.save() が住所構成要素から自動で行う（Phase E §3）。
         return cleaned
 
@@ -260,8 +419,8 @@ class ContactUpdateForm(ContactBaseForm):
     """primary Contact 修正用 Form（仕様書 §11.6.2 / §11.7.1）。
 
     UpdatePrimaryContactView（12 番、未実装）と Execute_Merge_with_Updates（§9.4）
-    で使う基底。Contact フィールド + change_reason + note + 動的 confirmed_<field>
-    チェックボックスを束ねる。
+    で使う基底。Contact フィールド + change_reason + 動的 confirmed_<field>
+    チェックボックスを束ねる（備考 note は v1.7 で撤去：保存経路が無く破棄されていたため）。
 
     [性質] presentation 層クラス
     [入力] target_contact: Contact（必須、kwarg）
@@ -270,11 +429,6 @@ class ContactUpdateForm(ContactBaseForm):
     change_reason = forms.ChoiceField(
         choices=PersonChangeReason.choices,
         label="修正理由",
-    )
-    note = forms.CharField(
-        required=False,
-        widget=forms.Textarea,
-        label="備考",
     )
 
     def __init__(self, *args, target_contact=None, **kwargs):
@@ -352,7 +506,11 @@ class ContactUpdateForm(ContactBaseForm):
         confirmed = []
         for field_name in Contact.UPDATABLE_FIELDS:
             chk_on = bool(self.cleaned_data.get(f"confirmed_{field_name}"))
-            current_value = getattr(self.target_contact, field_name)
+            # name_order は clean() で effective_lang から強制導出されるため、現在値側にも同じ
+            # 導出を適用して比較する（無編集で name_order を差分扱いしない、MergeForm と同型）。
+            current_value = self.current_value_for_diff(
+                self.target_contact, field_name
+            )
             submitted_value = self.cleaned_data.get(field_name)
             edited = submitted_value != current_value
             if chk_on or edited:

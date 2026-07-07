@@ -2,10 +2,14 @@
 列表示切替 partial（HIG 第6章。mailings の _column_toggle.html を手本に persons 用へ
 複製・persons 専用。共通化はしない）。
 
-ドロップダウン＋チェックボックスで列を表示/非表示し、localStorage に永続化する。
-氏名列は固定（disabled checked、非表示不可）。状態・会社・役職・メール・携帯電話・
-個人電話/FAX・会社電話/FAX・住所・アクティブ数・更新日時を切替可能。localStorage キーは
-persons 専用（person_list_visible_columns）で他画面と混ざらない。
+ドロップダウン＋トグルボタン（app-radio-toggle）で列を表示/非表示し、localStorage に
+永続化する。氏名列は固定（disabled checked、非表示不可）。状態・会社・役職・メール・
+携帯電話・個人電話/FAX・会社電話/FAX・住所・アクティブ数・更新日時を切替可能。
+localStorage キーは persons 専用（person_list_visible_columns）で他画面と混ざらない。
+
+選択UIは素のチェックボックスではなく既存 app-radio-toggle（app.css）に揃える（HIG §4.1）。
+非選択列も薄色の outline トグルとして常に視認でき、選択中は塗りで着色される。input は
+app-radio-toggle CSS で視覚的に隠し、隣の label をボタンとして見せる。
 
 既定表示（列が多いので初期は絞る）：
   ON  = 状態・会社・役職・メール・携帯電話・アクティブ数・更新日時
@@ -17,9 +21,11 @@ localStorage に保存済みのキーは保存値を優先、未保存キーは 
   <td data-col-key="company">...</td>
 
 挙動：
-  - デフォルト：全列表示
-  - [data-col-key="<key>"] を一括で display 切替
-  - localStorage が空 / JSON 不正なら全列表示で復元
+  - デフォルト：上記既定に従う
+  - [data-col-key="<key>"] を一括で display 切替。ただし対象は一覧テーブル配下のみに
+    スコープする（テーブル要素を起点に検索）。メニュー内の同名 data-col-key を持つ input を
+    巻き込んで隠さないため（巻き込むと列OFF時に選択UIごと消える不具合になる）。
+  - localStorage が空 / JSON 不正なら既定表示で復元
 {% endcomment %}
 <div class="js-person-column-toggle" style="position:relative; display:inline-block;">
   <button type="button" class="app-btn app-btn--outline-secondary app-btn--sm js-person-column-toggle__btn"
@@ -29,42 +35,70 @@ localStorage に保存済みのキーは保存値を優先、未保存キーは 
   <div class="js-person-column-toggle__menu" hidden
        style="position:absolute; top:100%; left:0; z-index:1000;
               background:#fff; border:1px solid #cbd5e1; border-radius:6px;
-              box-shadow:0 4px 12px rgba(0,0,0,0.12); padding:8px;
-              min-width:200px; text-align:left;">
-    <label style="display:flex; align-items:center; gap:6px; padding:4px;">
-      <input type="checkbox" disabled checked> 氏名
-      <span style="color:#94a3b8; font-size:0.85em;">(必須)</span>
-    </label>
-    <label style="display:flex; align-items:center; gap:6px; padding:4px; cursor:pointer;">
-      <input type="checkbox" class="js-person-column-toggle__cb" data-col-key="status"> 状態
-    </label>
-    <label style="display:flex; align-items:center; gap:6px; padding:4px; cursor:pointer;">
-      <input type="checkbox" class="js-person-column-toggle__cb" data-col-key="company"> 会社
-    </label>
-    <label style="display:flex; align-items:center; gap:6px; padding:4px; cursor:pointer;">
-      <input type="checkbox" class="js-person-column-toggle__cb" data-col-key="title"> 役職
-    </label>
-    <label style="display:flex; align-items:center; gap:6px; padding:4px; cursor:pointer;">
-      <input type="checkbox" class="js-person-column-toggle__cb" data-col-key="email"> メール
-    </label>
-    <label style="display:flex; align-items:center; gap:6px; padding:4px; cursor:pointer;">
-      <input type="checkbox" class="js-person-column-toggle__cb" data-col-key="mobile_phone"> 携帯電話
-    </label>
-    <label style="display:flex; align-items:center; gap:6px; padding:4px; cursor:pointer;">
-      <input type="checkbox" class="js-person-column-toggle__cb" data-col-key="personal_contact" data-default="0"> 個人電話・FAX
-    </label>
-    <label style="display:flex; align-items:center; gap:6px; padding:4px; cursor:pointer;">
-      <input type="checkbox" class="js-person-column-toggle__cb" data-col-key="org_contact" data-default="0"> 会社電話・FAX
-    </label>
-    <label style="display:flex; align-items:center; gap:6px; padding:4px; cursor:pointer;">
-      <input type="checkbox" class="js-person-column-toggle__cb" data-col-key="address" data-default="0"> 住所
-    </label>
-    <label style="display:flex; align-items:center; gap:6px; padding:4px; cursor:pointer;">
-      <input type="checkbox" class="js-person-column-toggle__cb" data-col-key="active_count"> アクティブ数
-    </label>
-    <label style="display:flex; align-items:center; gap:6px; padding:4px; cursor:pointer;">
-      <input type="checkbox" class="js-person-column-toggle__cb" data-col-key="updated_at"> 更新日時
-    </label>
+              box-shadow:0 4px 12px rgba(0,0,0,0.12); padding:10px;
+              min-width:300px; max-width:340px; text-align:left;">
+    <ul class="app-radio-toggle" style="display:flex;">
+      <li>
+        <label style="cursor:default;">
+          <input type="checkbox" disabled checked> 氏名（必須）
+        </label>
+      </li>
+      <li>
+        <label>
+          <input type="checkbox" class="js-person-column-toggle__cb" data-col-key="status"> 状態
+        </label>
+      </li>
+      <li>
+        <label>
+          <input type="checkbox" class="js-person-column-toggle__cb" data-col-key="lang" data-default="0"> 言語
+        </label>
+      </li>
+      <li>
+        <label>
+          <input type="checkbox" class="js-person-column-toggle__cb" data-col-key="company"> 会社
+        </label>
+      </li>
+      <li>
+        <label>
+          <input type="checkbox" class="js-person-column-toggle__cb" data-col-key="title"> 役職
+        </label>
+      </li>
+      <li>
+        <label>
+          <input type="checkbox" class="js-person-column-toggle__cb" data-col-key="email"> メール
+        </label>
+      </li>
+      <li>
+        <label>
+          <input type="checkbox" class="js-person-column-toggle__cb" data-col-key="mobile_phone"> 携帯電話
+        </label>
+      </li>
+      <li>
+        <label>
+          <input type="checkbox" class="js-person-column-toggle__cb" data-col-key="personal_contact" data-default="0"> 個人電話・FAX
+        </label>
+      </li>
+      <li>
+        <label>
+          <input type="checkbox" class="js-person-column-toggle__cb" data-col-key="org_contact" data-default="0"> 会社電話・FAX
+        </label>
+      </li>
+      <li>
+        <label>
+          <input type="checkbox" class="js-person-column-toggle__cb" data-col-key="address" data-default="0"> 住所
+        </label>
+      </li>
+      <li>
+        <label>
+          <input type="checkbox" class="js-person-column-toggle__cb" data-col-key="active_count"> アクティブ数
+        </label>
+      </li>
+      <li>
+        <label>
+          <input type="checkbox" class="js-person-column-toggle__cb" data-col-key="updated_at"> 更新日時
+        </label>
+      </li>
+    </ul>
   </div>
 </div>
 <script>
@@ -80,6 +114,9 @@ localStorage に保存済みのキーは保存値を優先、未保存キーは 
       var btn = wrap.querySelector('.js-person-column-toggle__btn');
       var menu = wrap.querySelector('.js-person-column-toggle__menu');
       var cbs = wrap.querySelectorAll('.js-person-column-toggle__cb');
+      // display 切替の対象は一覧テーブル配下のみ。メニュー内の選択UI（同名 data-col-key を
+      // 持つ input）を巻き込むと、列OFF時にトグル自体が消えるため起点をテーブルに限定する。
+      var table = document.querySelector('table.js-person-page-sort');
 
       btn.addEventListener('click', function (e) {
         e.stopPropagation();
@@ -111,7 +148,8 @@ localStorage に保存済みのキーは保存値を優先、未保存キーは 
       function apply(cb) {
         var key = cb.dataset.colKey;
         var visible = cb.checked;
-        document.querySelectorAll('[data-col-key="' + key + '"]').forEach(function (el) {
+        if (!table) return;
+        table.querySelectorAll('[data-col-key="' + key + '"]').forEach(function (el) {
           el.style.display = visible ? '' : 'none';
         });
       }

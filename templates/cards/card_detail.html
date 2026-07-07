@@ -7,7 +7,6 @@
 {% block content %}
   <div class="app-page-header" style="max-width:1100px;">
     <div>
-      <div class="app-breadcrumb">名刺管理 / 名刺一覧 / 詳細</div>
       <div style="display:flex; align-items:center; gap:12px;">
         <h1>名刺詳細</h1>
         <a href="{% url 'cards:card_upload' %}"
@@ -126,7 +125,7 @@
               {% include "contacts/_contact_field.html" with field_name="first_name" label="名" value=contact.first_name %}
             {% endif %}
             {% if contact.salutation_name %}
-              {% include "contacts/_contact_field.html" with field_name="salutation_name" label="敬称付き氏名" value=contact.salutation_name %}
+              {% include "contacts/_contact_field.html" with field_name="salutation_name" label="敬称付き氏名（メール宛名）" value=contact.salutation_name %}
             {% endif %}
           {% endif %}
 

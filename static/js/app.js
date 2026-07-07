@@ -2,6 +2,7 @@
   const drawer = document.getElementById('drawer');
   const backdrop = document.querySelector('.app-backdrop');
   const userMenu = document.getElementById('userMenu');
+  const appMenu = document.getElementById('appMenu');
   const modalBackdrop = document.querySelector('.app-modal-backdrop');
   const toast = document.querySelector('.app-toast');
   const loadingOverlay = document.querySelector('.app-loading-overlay');
@@ -12,12 +13,15 @@
     if (!drawer || !backdrop) return;
     drawer.classList.add('is-open');
     backdrop.classList.add('is-open');
+    // is-open と aria-hidden を同期（開いている間は支援技術にも公開）。
+    drawer.setAttribute('aria-hidden', 'false');
   }
 
   function closeDrawer() {
     if (!drawer || !backdrop) return;
     drawer.classList.remove('is-open');
     backdrop.classList.remove('is-open');
+    drawer.setAttribute('aria-hidden', 'true');
   }
 
   function toggleUserMenu() {
@@ -28,6 +32,17 @@
   function closeUserMenu() {
     if (!userMenu) return;
     userMenu.classList.remove('is-open');
+  }
+
+  // ロゴ横の▼（横断ナビ）ドロップダウン。ユーザーメニューと同型（is-open トグル）。
+  function toggleAppMenu() {
+    if (!appMenu) return;
+    appMenu.classList.toggle('is-open');
+  }
+
+  function closeAppMenu() {
+    if (!appMenu) return;
+    appMenu.classList.remove('is-open');
   }
 
   function toggleCollapsible(event, trigger) {
@@ -126,6 +141,7 @@
     'toggle-drawer': openDrawer,
     'close-drawer': closeDrawer,
     'toggle-user-menu': toggleUserMenu,
+    'toggle-app-menu': toggleAppMenu,
     'toggle-collapsible': toggleCollapsible,
     'toggle-drawer-section': toggleDrawerSection,
     'open-modal': openModal,
@@ -155,15 +171,88 @@
     if (!event.target.closest('.app-user-menu')) {
       closeUserMenu();
     }
+
+    if (!event.target.closest('.app-app-menu')) {
+      closeAppMenu();
+    }
   });
 
   document.addEventListener('keydown', function (event) {
     if (event.key === 'Escape') {
       closeDrawer();
       closeUserMenu();
+      closeAppMenu();
       closeModal();
     }
   });
+})();
+
+/* パーミッション一覧：アプリ▼・対象モデル▼（各複数選択）＋テキストの即時フィルタ。該当ページのみ動作。
+   表示は appOk && ctOk && textOk。▼開閉はユーザーメニュー同型（is-open トグル／外側・Escapeで閉じる／
+   内部チェック操作では閉じない）。開閉は .app-filter-menu 単位に一般化しアプリ▼・モデル▼で共用。 */
+(function () {
+  const table = document.getElementById('permTable');
+  if (!table) return;
+  const textInput = document.querySelector('.js-perm-filter-text');
+  const appChecks = Array.prototype.slice.call(document.querySelectorAll('.js-perm-app-check'));
+  const ctChecks = Array.prototype.slice.call(document.querySelectorAll('.js-perm-ct-check'));
+  const rows = Array.prototype.slice.call(table.querySelectorAll('.js-perm-row'));
+  const appCountEl = document.querySelector('.js-perm-app-count');
+  const ctCountEl = document.querySelector('.js-perm-ct-count');
+  const emptyEl = document.querySelector('.js-perm-empty');
+  const menus = Array.prototype.slice.call(document.querySelectorAll('.app-filter-menu'));
+
+  function checkedSet(checks, countEl) {
+    const set = {};
+    let n = 0;
+    checks.forEach(function (c) { if (c.checked) { set[c.value] = true; n++; } });
+    if (countEl) countEl.textContent = String(n);
+    return set;
+  }
+
+  function applyFilter() {
+    const text = (textInput ? textInput.value : '').trim().toLowerCase();
+    const checkedApps = checkedSet(appChecks, appCountEl);
+    const checkedCts = checkedSet(ctChecks, ctCountEl);
+    let visible = 0;
+    rows.forEach(function (row) {
+      const appOk = checkedApps[row.getAttribute('data-app')] === true;
+      const ctOk = checkedCts[row.getAttribute('data-ct')] === true;
+      const search = row.getAttribute('data-search') || '';
+      const textOk = !text || search.indexOf(text) !== -1;
+      const show = appOk && ctOk && textOk;
+      row.hidden = !show;
+      if (show) visible++;
+    });
+    if (emptyEl) emptyEl.hidden = visible !== 0;
+  }
+
+  function closeAllMenus(except) {
+    menus.forEach(function (m) { if (m !== except) m.classList.remove('is-open'); });
+  }
+  menus.forEach(function (menu) {
+    const toggle = menu.querySelector('button[aria-haspopup]');
+    if (!toggle) return;
+    toggle.addEventListener('click', function (event) {
+      // 外側クリッククローズに即座に拾われないよう伝播を止める。
+      event.stopPropagation();
+      const willOpen = !menu.classList.contains('is-open');
+      closeAllMenus(menu);
+      menu.classList.toggle('is-open', willOpen);
+    });
+  });
+  document.addEventListener('click', function (event) {
+    // ドロップダウン内（チェックボックス含む）クリックでは閉じない。
+    if (!event.target.closest('.app-filter-menu')) closeAllMenus(null);
+  });
+  document.addEventListener('keydown', function (event) {
+    if (event.key === 'Escape') closeAllMenus(null);
+  });
+
+  if (textInput) textInput.addEventListener('input', applyFilter);
+  appChecks.forEach(function (c) { c.addEventListener('change', applyFilter); });
+  ctChecks.forEach(function (c) { c.addEventListener('change', applyFilter); });
+  applyFilter();
 })();
 
 /* PC向けツールチップ。テーブルのoverflowに邪魔されないようbody直下に表示する。 */
@@ -523,16 +612,39 @@
     }
   });
 
-  // ----- full_name 補助組み立て（Phase D §3.7、仕様書 §6.5 / §11.9.5）-----
-  // last_name / first_name / other_name_parts / name_order の変更に追従して full_name を
-  // 補助組み立てする。ユーザーが full_name を直接編集したら以後の自動組み立てを停止する
-  // （手入力尊重）。ブラウザストレージは使わずメモリ内フラグのみで管理する。
-  let nameComposeManual = false;
+  // ----- full_name 補助組み立て＋派生フィールドの自動/手動トグル（v1.7 コミット3/3）-----
+  // 原本（last/first/other/name_order）の変更に追従して、自動状態（is_manual=false）の派生
+  // フィールド（氏名 full_name・表示名 display_name）の表示と入力値をリアルタイム更新する
+  // （正本はサーバ save。本JSは入力中の補助）。salutation の自動値は save 時に確定する。
+
+  function derivedField(name) {
+    return document.querySelector('.js-derived-field[data-derived="' + name + '"]');
+  }
+
+  function isDerivedAuto(name) {
+    // 派生フィールドが自動状態か（hidden フラグが 'true' でない＝自動）。
+    // 判定は大文字小文字非依存：サーバ初期描画は Django 標準の "True"/"False"、JS の
+    // setManualMode は小文字 'true'/'false' を書くため、両系統を同一に扱わないと load 時
+    // is_manual=True のコンタクトを auto と誤判定して手動値を上書きしてしまう（v1.7 修正）。
+    const field = derivedField(name);
+    if (!field) return false;
+    const flag = field.querySelector('input[type="hidden"][name$="_is_manual"]');
+    return flag ? flag.value.toLowerCase() !== 'true' : false;
+  }
+
+  function setDerivedDisplay(name, value) {
+    // 自動表示モードの淡色 span を更新する（見た目の追従）。
+    const field = derivedField(name);
+    if (!field) return;
+    const disp = field.querySelector('.js-derived-display');
+    if (disp) disp.textContent = value;
+  }
 
   function composeFullNameField() {
-    if (nameComposeManual) return;
     const full = document.querySelector('.js-name-full');
     if (!full) return;
+    // 氏名が手動状態なら自動組み立てしない（手入力尊重）。
+    if (!isDerivedAuto('full_name')) return;
     const valueOf = function (selector) {
       const el = document.querySelector(selector);
       return el ? el.value.trim() : '';
@@ -553,21 +665,105 @@
       return; // other / 未選択 は自動組み立てしない（手入力のみ、仕様書 §6.5）
     }
     full.value = result;
+    setDerivedDisplay('full_name', result);
+    // 表示名が自動なら full_name に追従（入力値＋淡色表示）。
+    if (isDerivedAuto('display_name')) {
+      const disp = document.querySelector('#id_display_name');
+      if (disp) disp.value = result;
+      setDerivedDisplay('display_name', result);
+    }
   }
+
+  function composeSalutationField() {
+    // 敬称付き氏名（salutation_name）を全言語でライブ追従する（v1.7）。サーバ
+    // normalization.compute_salutation_name の 4 分岐（ja / ko / zh / en=und・その他）と
+    // 出力文字列をバイト単位で一致させる（画面プレビューと save 再計算値のズレ防止）。
+    // lang 判定は毎回 #id_lang を読み lower().startsWith(...)（ja-JP 等も接頭辞で寄せる。
+    // どれにも当たらない未知値・und は else＝en 扱いで、サーバの分岐順と一致させる）。
+    const langEl = document.querySelector('#id_lang');
+    const lang = langEl ? langEl.value.trim().toLowerCase() : '';
+    // 敬称が手動状態なら書き換えない（全言語共通）。full_name の手動状態からは独立
+    // （salutation 自身の is_manual だけでゲート＝composeFullNameField の early-return に相乗りしない）。
+    if (!isDerivedAuto('salutation_name')) return;
+    const valueOf = function (selector) {
+      const el = document.querySelector(selector);
+      return el ? el.value.trim() : '';
+    };
+    // base はサーバと同じ取り方：ja/ko は last_name（空なら full_name）、zh/en/und は full_name。
+    // full は composeFullNameField が先に更新した .js-name-full の現在値（auto/manual 問わず）。
+    const last = valueOf('.js-name-last');
+    const full = valueOf('.js-name-full');
+    let result;
+    if (lang.startsWith('ja')) {
+      const base = last || full;         // サーバ: f"{base} 様"（半角スペース）
+      result = base ? base + ' 様' : '';
+    } else if (lang.startsWith('ko')) {
+      const base = last || full;         // サーバ: f"{base} 님"（半角スペース）
+      result = base ? base + ' 님' : '';
+    } else if (lang.startsWith('zh')) {
+      result = full;                     // サーバ: full_name のみ（接尾辞なし）
+    } else {
+      result = full ? 'Dear ' + full + ',' : '';  // サーバ: f"Dear {full_name},"
+    }
+    // base（full）が空なら空文字＝敬称欄を書き換えず前の値を残す（氏名未入力時は触らない。
+    // "Dear ," のような空ベースの文字列を出さない。サーバも空なら空文字を返す）。
+    if (!result) return;
+    // 書き換えは氏名・表示名と同じ 2 点セット：実入力（#id_salutation_name＝auto 時も
+    // js-derived-manual[hidden] 内で DOM 残存し POST される）と淡色 span（js-derived-display）。
+    const input = document.querySelector('#id_salutation_name');
+    if (input) input.value = result;
+    setDerivedDisplay('salutation_name', result);
+  }
+
+  function setManualMode(field, manual) {
+    // 派生フィールドの自動/手動表示を切り替え、hidden フラグを true/false にセットする。
+    const auto = field.querySelector('.js-derived-auto');
+    const man = field.querySelector('.js-derived-manual');
+    const flag = field.querySelector('input[type="hidden"][name$="_is_manual"]');
+    if (auto) auto.hidden = manual;
+    if (man) man.hidden = !manual;
+    if (flag) flag.value = manual ? 'true' : 'false';
+  }
+
+  document.addEventListener('click', function (event) {
+    const editBtn = event.target.closest('.js-derived-edit');
+    if (editBtn) {
+      const field = editBtn.closest('.js-derived-field');
+      if (field) {
+        setManualMode(field, true);
+        const input = field.querySelector(
+          '.js-derived-manual input, .js-derived-manual textarea'
+        );
+        if (input) input.focus();
+      }
+      return;
+    }
+    const revertBtn = event.target.closest('.js-derived-revert');
+    if (revertBtn) {
+      const field = revertBtn.closest('.js-derived-field');
+      if (field) {
+        setManualMode(field, false);
+        // 自動に戻したら原本から再組み立てして表示を即追従（保存時にサーバも再計算）。
+        composeFullNameField();
+        // 敬称も同様に再追従（全言語・自身の auto 判定でゲート。両者とも自分の
+        // is_manual を見るのでどの派生欄の↻でも安全）。
+        composeSalutationField();
+      }
+    }
+  });
 
   document.addEventListener('input', function (event) {
     const target = event.target;
     if (!target || !target.classList) return;
-    if (target.classList.contains('js-name-full')) {
-      nameComposeManual = true; // ユーザーが直接編集 → 以後は補助しない
-      return;
-    }
     if (
       target.classList.contains('js-name-last') ||
       target.classList.contains('js-name-first') ||
       target.classList.contains('js-name-other')
     ) {
       composeFullNameField();
+      // 敬称は full_name 手動でも姓変更で追従させたいので、composeFullNameField の
+      // early-return に依存せず独立に呼ぶ（内部で lang 別分岐と salutation の auto 判定を行う）。
+      composeSalutationField();
     }
   });
 
@@ -575,6 +771,7 @@
     const target = event.target;
     if (target && target.classList && target.classList.contains('js-name-order')) {
       composeFullNameField();
+      composeSalutationField();
     }
   });
 })();

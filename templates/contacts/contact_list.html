@@ -1,6 +1,7 @@
 {% extends "cards/app_base.html" %}
 {% load back_tags %}
 {% load badge_tags %}
+{% load lang_tags %}
 
 {% block title %}コンタクト一覧 — FreeGroup2{% endblock %}
 
@@ -8,7 +9,6 @@
   {% url 'contacts:contact_create' as create_url %}
   <div class="app-page-header">
     <div>
-      <div class="app-breadcrumb">コンタクト管理 / コンタクト一覧</div>
       <h1>コンタクト一覧</h1>
     </div>
     <div class="app-action-area">
@@ -35,11 +35,12 @@
           <tr>
             <th class="app-table__col--action">操作</th>
             <th class="app-table__col--name" data-col-key="name" data-sort-col>氏名</th>
-            <th class="app-table__col--status" data-col-key="status">状態</th>
+            <th class="app-table__col--status" data-col-key="status" data-sort-col>状態</th>
             <th class="app-table__col--organization" data-col-key="company" data-sort-col>会社</th>
             <th class="app-table__col--dept" data-col-key="title" data-sort-col>役職</th>
             <th class="app-table__col--email" data-col-key="email" data-sort-col>連絡先</th>
-            <th class="app-table__col--date" data-col-key="updated_at">更新日時</th>
+            <th data-col-key="lang" data-sort-col>言語</th>
+            <th class="app-table__col--date" data-col-key="updated_at" data-sort-col>更新日時</th>
           </tr>
         </thead>
         <tbody>
@@ -49,8 +50,8 @@
               <td class="app-table__col--action">
                 <a href="{% append_back_url detail_url back %}" class="app-btn app-btn--secondary app-btn--sm">詳細</a>
               </td>
-              <td data-col-key="name" data-sort-key="{{ contact.phonetic_name }}">{{ contact.full_name|default:"-" }}</td>
-              <td data-col-key="status">
+              <td data-col-key="name" data-sort-key="{{ contact.phonetic_name }}">{{ contact.full_name|default:"-" }}{% if contact.has_unconfirmed_low_mid %} <span class="app-status-badge app-status-badge--warning" title="未確認の低信頼項目があります" aria-label="要確認">要確認</span>{% endif %}</td>
+              <td data-col-key="status" data-sort-key="{{ contact|status_sort_key }}">
                 {% status_badge contact %}
               </td>
               <td data-col-key="company">
@@ -66,10 +67,11 @@
                 {% if contact.personal_fax %}<div>FAX: {{ contact.personal_fax }}</div>{% endif %}
                 {% if not contact.email and not contact.mobile_phone and not contact.personal_phone and not contact.personal_fax %}-{% endif %}
               </td>
+              <td data-col-key="lang" data-sort-key="{{ contact.lang }}">{{ contact.lang|lang_label }}</td>
               <td data-col-key="updated_at">{{ contact.updated_at|date:"Y/m/d H:i" }}</td>
             </tr>
           {% empty %}
-            <tr><td colspan="7" class="app-muted">
+            <tr><td colspan="8" class="app-muted">
               該当するコンタクトがありません。新しい名刺を取り込むか、コンタクトを新規作成しましょう。
               <a href="{% url 'cards:card_upload' %}">名刺を取り込む →</a>
               <a href="{% append_back_url create_url back %}" style="margin-left:12px;">コンタクト新規作成 →</a>
@@ -84,7 +86,7 @@
         {% url 'contacts:contact_detail' pk=contact.id as detail_url %}
         <a href="{% append_back_url detail_url back %}" class="app-list-card" style="display:block; text-decoration:none; color:inherit;">
           <div class="app-list-card__main">
-            <strong>{{ contact.full_name|default:"(氏名なし)" }}</strong>
+            <strong>{{ contact.full_name|default:"(氏名なし)" }}</strong>{% if contact.has_unconfirmed_low_mid %} <span class="app-status-badge app-status-badge--warning" title="未確認の低信頼項目があります" aria-label="要確認">要確認</span>{% endif %}
             {% status_badge contact %}
             {% if contact.organization %}<div>{{ contact.organization }}</div>{% endif %}
             {% if contact.title %}<div class="app-muted">{{ contact.title }}</div>{% endif %}

@@ -7,7 +7,9 @@ salutation_name_is_manual の View 層自動セット（§3.6）を検証する�
 §4.1〜§4.3 のテストは既存（test_normalization.py / tests.py）にあるため本ファイルでは扱わない。
 """
 
+from django import forms
 from django.contrib.auth import get_user_model
+from django.template.loader import render_to_string
 from django.test import Client, TestCase
 from django.urls import reverse
 
@@ -16,6 +18,7 @@ from contacts.forms import (
     ContactCreateForm,
     ContactUpdateActiveForm,
     ContactUpdateForm,
+    build_contact_sns_formset,
 )
 from contacts.models import Contact
 from persons.models import Person
@@ -202,10 +205,15 @@ class SalutationIsManualViewTests(TestCase):
         self.client.force_login(self.user)
 
     def test_create_with_explicit_salutation_sets_manual_true(self):
-        """新規作成で宛名を明示入力 → salutation_name_is_manual=True、値が保持される。"""
+        """新規作成で宛名を手動化（hidden フラグ=true 送信）→ is_manual=True、値が保持される。
+
+        v1.7 コミット3/3：手動/自動は changed_data ではなく hidden フラグ
+        （salutation_name_is_manual）で明示送信する（鉛筆 UI が立てる）。
+        """
         data = {f: "" for f in Contact.UPDATABLE_FIELDS}
         data["full_name"] = "手動太郎"
         data["salutation_name"] = "手動 会長"  # 自動生成（手動太郎 様）と異なる明示値
+        data["salutation_name_is_manual"] = "true"  # 鉛筆 UI 相当（手動化フラグ）
         data.update(_empty_sns_management_form())
         resp = self.client.post(reverse("contacts:contact_create"), data=data)
         self.assertEqual(resp.status_code, 302)
@@ -214,7 +222,7 @@ class SalutationIsManualViewTests(TestCase):
         self.assertEqual(contact.salutation_name, "手動 会長")
 
     def test_update_active_edit_salutation_sets_manual_true(self):
-        """active Contact 修正で宛名を書き換え → is_manual=True、値が保持される。"""
+        """active Contact 修正で宛名を手動化（hidden フラグ=true）→ is_manual=True、値が保持される。"""
         person = Person.objects.create(status=Person.Status.ACTIVE)
         contact = Contact.objects.create(
             person=person,
@@ -227,6 +235,7 @@ class SalutationIsManualViewTests(TestCase):
         data = {f: getattr(contact, f) or "" for f in Contact.UPDATABLE_FIELDS}
         data["note"] = ""
         data["salutation_name"] = "渡辺 社長"  # 明示変更
+        data["salutation_name_is_manual"] = "true"  # 鉛筆 UI 相当（手動化フラグ）
         data.update(_empty_sns_management_form())
         url = reverse("contacts:contact_update_active", kwargs={"pk": contact.pk})
         resp = self.client.post(url, data=data)
@@ -387,8 +396,11 @@ class UpdatePreservesRenderedFieldsTests(TestCase):
         self.assertEqual(self.contact.country, "JP")
         self.assertEqual(self.contact.org_phone, "0565000000")
         self.assertEqual(self.contact.org_fax, "0565000001")
-        # 案①で追加した 5 フィールドも空化されない（潜在バグ完全解消）
-        self.assertEqual(self.contact.display_name, "保持(営業)")
+        # 案①で追加した 5 フィールドも空化されない（潜在バグ完全解消）。
+        # v1.7：display_name は display_name_is_manual=False のとき full_name に自動追従する
+        # （本ケースは display_name を手動編集していない＝changed_data に無いため非 manual のまま）。
+        # 「空化しない」意図は維持され、値は full_name（保持太郎）になる。
+        self.assertEqual(self.contact.display_name, "保持太郎")
         self.assertEqual(self.contact.phonetic_name, "ホジタロウ")
         self.assertEqual(self.contact.alias_name, "旧姓田中")
         self.assertEqual(self.contact.legal_entity_type, "株式会社")
@@ -480,3 +492,395 @@ class PostalDisplayContactDetailTests(TestCase):
         # DB は raw のまま（整形は表示専用）
         contact.refresh_from_db()
         self.assertEqual(contact.postal_code, "4710001")
+
+
+class EffectiveLangAndNameOrderTests(TestCase):
+    """v1.7 コミット3/3 要素1・2：effective_lang の算出と name_order の hidden 確定値。"""
+
+    def _contact(self, lang):
+        p = Person.objects.create(status=Person.Status.ACTIVE)
+        return Contact.objects.create(
+            person=p,
+            status=Contact.Status.PRIMARY,
+            full_name="山田太郎",
+            last_name="山田",
+            first_name="太郎",
+            lang=lang,
+        )
+
+    def test_effective_lang_ja(self):
+        f = ContactUpdateForm(target_contact=self._contact("ja"))
+        self.assertEqual(f.effective_lang, "ja")
+
+    def test_effective_lang_en(self):
+        f = ContactUpdateForm(target_contact=self._contact("en"))
+        self.assertEqual(f.effective_lang, "en")
+
+    def test_effective_lang_empty_falls_back_to_settings_ja(self):
+        # 空 lang → settings.LANGUAGE_CODE（"ja"）にフォールバック
+        f = ContactUpdateForm(target_contact=self._contact(""))
+        self.assertEqual(f.effective_lang, "ja")
+
+    def test_effective_lang_zh_rounds_to_ja(self):
+        # zh / und 等は ja に丸める（zh 専用 UI は作らない）
+        f = ContactUpdateForm(target_contact=self._contact("zh"))
+        self.assertEqual(f.effective_lang, "ja")
+
+    def test_name_order_is_hidden(self):
+        f = ContactUpdateForm(target_contact=self._contact("ja"))
+        self.assertIsInstance(f.fields["name_order"].widget, forms.HiddenInput)
+
+    def test_name_order_forced_last_first_for_ja(self):
+        c = self._contact("ja")
+        data = {fn: getattr(c, fn) or "" for fn in Contact.UPDATABLE_FIELDS}
+        data["change_reason"] = "fix"
+        data["name_order"] = "first_last"  # 改ざんしても effective_lang で上書きされる
+        f = ContactUpdateForm(data=data, target_contact=c)
+        self.assertTrue(f.is_valid(), f.errors)
+        self.assertEqual(f.cleaned_data["name_order"], "last_first")
+
+    def test_name_order_forced_first_last_for_en(self):
+        c = self._contact("en")
+        data = {fn: getattr(c, fn) or "" for fn in Contact.UPDATABLE_FIELDS}
+        data["change_reason"] = "fix"
+        data["name_order"] = "last_first"
+        f = ContactUpdateForm(data=data, target_contact=c)
+        self.assertTrue(f.is_valid(), f.errors)
+        self.assertEqual(f.cleaned_data["name_order"], "first_last")
+
+
+class NamePartOrderRenderTests(TestCase):
+    """v1.7：氏名原本（姓 last_name / 名 first_name）入力欄の表示順を effective_lang で
+    出し分ける（ja=姓→名 / en=名→姓）。表示順のみで役割・ラベルは不変。
+
+    _contact_fields.html を実コンテキストで描画し、姓欄(id_last_name)と名欄(id_first_name)の
+    出現順を検証する。派生（full_name 等）の js- 追従フックは順序非依存のため、ここでは
+    並び順のみを担保する（追従ロジックは既存テストが担保）。
+    """
+
+    def _contact(self, lang):
+        p = Person.objects.create(status=Person.Status.ACTIVE)
+        return Contact.objects.create(
+            person=p,
+            status=Contact.Status.PRIMARY,
+            full_name="山田太郎",
+            last_name="山田",
+            first_name="太郎",
+            lang=lang,
+        )
+
+    def _render(self, lang):
+        c = self._contact(lang)
+        form = ContactUpdateForm(target_contact=c)
+        sns_formset = build_contact_sns_formset(instance=c)
+        html = render_to_string(
+            "contacts/_contact_fields.html",
+            {"form": form, "sns_formset": sns_formset},
+        )
+        return html, html.index('id="id_last_name"'), html.index('id="id_first_name"')
+
+    def test_ja_renders_last_name_before_first_name(self):
+        """ja（既定）：姓 → 名 の順で出る。"""
+        html, last_pos, first_pos = self._render("ja")
+        self.assertIn('id="id_last_name"', html)
+        self.assertIn('id="id_first_name"', html)
+        self.assertLess(last_pos, first_pos, "ja は姓→名の順で描画されるべき")
+
+    def test_en_renders_first_name_before_last_name(self):
+        """en：名 → 姓 の順で出る（表示順のみ。役割・ラベルは不変）。"""
+        html, last_pos, first_pos = self._render("en")
+        self.assertIn('id="id_last_name"', html)
+        self.assertIn('id="id_first_name"', html)
+        self.assertLess(first_pos, last_pos, "en は名→姓の順で描画されるべき")
+
+    def test_js_name_hooks_preserved_in_both_orders(self):
+        """並べ替え後も原本→派生のライブ追従フック（js-name-last/js-name-first）が
+        姓/名 widget に残る（追従の前提が壊れていない）。"""
+        for lang in ("ja", "en"):
+            html, _, _ = self._render(lang)
+            self.assertIn("js-name-last", html)
+            self.assertIn("js-name-first", html)
+
+
+class LegalEntityTypeEnHiddenTests(TestCase):
+    """v1.7：法人格(legal_entity_type)は en で画面非表示だが hidden で値を保持し、
+    en 保存時に既存値が消えないことを担保する。
+
+    フリガナ・法人格の位置（en で実質空）は現状の「丸ごと省略」のままで、本手当ては
+    legal_entity_type のみ（en でも Inc./Ltd. 等の値を持ちうるため）。
+    """
+
+    def _contact(self, lang, legal="Inc."):
+        p = Person.objects.create(status=Person.Status.ACTIVE)
+        return Contact.objects.create(
+            person=p,
+            status=Contact.Status.PRIMARY,
+            full_name="John Smith",
+            last_name="Smith",
+            first_name="John",
+            salutation_name="Mr. John Smith",
+            organization="Acme",
+            legal_entity_type=legal,
+            lang=lang,
+        )
+
+    def _render(self, lang):
+        c = self._contact(lang)
+        form = ContactUpdateForm(target_contact=c)
+        sns_formset = build_contact_sns_formset(instance=c)
+        return render_to_string(
+            "contacts/_contact_fields.html",
+            {"form": form, "sns_formset": sns_formset},
+        )
+
+    def test_ja_renders_visible_legal_entity_type_field(self):
+        """ja：法人格は従来どおり通常入力欄（ラベル可視・hidden ではない）。"""
+        html = self._render("ja")
+        self.assertIn(">法人格<", html)
+        self.assertNotIn('type="hidden" name="legal_entity_type"', html)
+
+    def test_en_renders_legal_entity_type_as_hidden(self):
+        """en：法人格は画面ラベルを出さず、値を hidden で POST に保持する。"""
+        html = self._render("en")
+        self.assertNotIn(">法人格<", html)  # 画面ラベルは出ない
+        self.assertIn('type="hidden" name="legal_entity_type"', html)
+        self.assertIn('value="Inc."', html)  # 既存値が hidden に乗る（POST 保持の根拠）
+
+    def test_en_save_preserves_legal_entity_type(self):
+        """en 保存で legal_entity_type の既存値が維持される（hidden が POST に乗るため
+        cleaned 実値→get_update_contact→fix で old==new となり上書きされない）。
+        派生 legal_entity_type_code も type 値が保たれる結果、不正に空/再導出されない。"""
+        c = self._contact("en", legal="Ltd.")
+        code_before = c.legal_entity_type_code
+        user = User.objects.create_user(username="le_en_user", password="x")
+        # en ページは hidden で legal_entity_type を送る＝POST に値が乗る状況を再現。
+        data = {fn: getattr(c, fn) or "" for fn in Contact.UPDATABLE_FIELDS}
+        form = ContactUpdateActiveForm(data=data, target_contact=c)
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data["legal_entity_type"], "Ltd.")
+        c.fix(form, user)
+        c.refresh_from_db()
+        self.assertEqual(c.legal_entity_type, "Ltd.")
+        self.assertEqual(c.legal_entity_type_code, code_before)
+
+
+class OtherNamePartsJaHiddenTests(TestCase):
+    """v1.7：ミドルネーム等(other_name_parts)は ja で画面非表示だが as_hidden で値を保持し、
+    ja 保存時に既存値が空で上書きされないことを担保する（法人格 en 隠蔽の ja 版・方向逆）。
+
+    ja の氏名組み立ては「姓 名」で other 不使用のため、隠してもライブ追従は無傷。
+    """
+
+    def _contact(self, lang, other="ビン"):
+        p = Person.objects.create(status=Person.Status.ACTIVE)
+        return Contact.objects.create(
+            person=p,
+            status=Contact.Status.PRIMARY,
+            full_name="山田 太郎",
+            last_name="山田",
+            first_name="太郎",
+            other_name_parts=other,
+            salutation_name="山田 様",
+            lang=lang,
+        )
+
+    def _render(self, lang):
+        c = self._contact(lang)
+        form = ContactUpdateForm(target_contact=c)
+        sns_formset = build_contact_sns_formset(instance=c)
+        return render_to_string(
+            "contacts/_contact_fields.html",
+            {"form": form, "sns_formset": sns_formset},
+        )
+
+    def test_en_renders_visible_other_name_parts_field(self):
+        """en：ミドルネーム等は従来どおり通常入力欄（ラベル可視・hidden ではない）。"""
+        html = self._render("en")
+        self.assertIn(">ミドルネーム等<", html)
+        self.assertNotIn('type="hidden" name="other_name_parts"', html)
+
+    def test_ja_renders_other_name_parts_as_hidden(self):
+        """ja：ミドルネーム等は画面ラベルを出さず、値を hidden で POST に保持する。"""
+        html = self._render("ja")
+        self.assertNotIn(">ミドルネーム等<", html)  # 画面ラベルは出ない
+        self.assertIn('type="hidden" name="other_name_parts"', html)
+        self.assertIn('value="ビン"', html)  # 既存値が hidden に乗る（POST 保持の根拠）
+
+    def test_ja_save_preserves_other_name_parts(self):
+        """ja 保存で other_name_parts の既存値が維持される（hidden が POST に乗るため
+        cleaned 実値→get_update_contact→fix で old==new となり空上書きされない）。"""
+        c = self._contact("ja", other="ビン")
+        user = User.objects.create_user(username="onp_ja_user", password="x")
+        # ja ページは as_hidden で other_name_parts を送る＝POST に値が乗る状況を再現。
+        data = {fn: getattr(c, fn) or "" for fn in Contact.UPDATABLE_FIELDS}
+        form = ContactUpdateActiveForm(data=data, target_contact=c)
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data["other_name_parts"], "ビン")
+        c.fix(form, user)
+        c.refresh_from_db()
+        self.assertEqual(c.other_name_parts, "ビン")
+
+
+class LangSelectPreservesExistingValueTests(TestCase):
+    """v1.7：lang をプルダウン（Select）化しても既存値を壊さない。
+
+    選択肢は ja/en/ko/zh/und。選択肢外の既存値（ja-JP / 空 等）は動的に選択肢へ
+    追加して選択状態で描画し、保存でも消えない/化けないことを担保する。
+    """
+
+    def _contact(self, lang):
+        p = Person.objects.create(status=Person.Status.ACTIVE)
+        return Contact.objects.create(
+            person=p,
+            status=Contact.Status.PRIMARY,
+            full_name="山田 太郎",
+            last_name="山田",
+            first_name="太郎",
+            salutation_name="山田 様",
+            lang=lang,
+        )
+
+    def _render(self, lang):
+        c = self._contact(lang)
+        form = ContactUpdateForm(target_contact=c)
+        sns_formset = build_contact_sns_formset(instance=c)
+        return render_to_string(
+            "contacts/_contact_fields.html",
+            {"form": form, "sns_formset": sns_formset},
+        )
+
+    def test_lang_renders_as_select_with_id_lang(self):
+        """lang は <select id="id_lang"> で描画される（テキスト入力ではない）。"""
+        html = self._render("ja")
+        self.assertIn('<select name="lang"', html)
+        self.assertIn('id="id_lang"', html)
+
+    def test_ja_option_selected(self):
+        """lang=ja：ja option が選択済みで描画される。"""
+        html = self._render("ja")
+        self.assertInHTML(
+            '<option value="ja" selected>日本語 (ja)</option>', html
+        )
+
+    def test_en_option_selected(self):
+        """lang=en：en option が選択済みで描画される。"""
+        html = self._render("en")
+        self.assertInHTML('<option value="en" selected>英語 (en)</option>', html)
+
+    def test_out_of_choice_lang_preserved_in_render(self):
+        """選択肢外 lang=ja-JP は動的追加され選択済みで描画される（消えない）。"""
+        html = self._render("ja-JP")
+        self.assertInHTML(
+            '<option value="ja-JP" selected>ja-JP（現在値）</option>', html
+        )
+
+    def test_empty_lang_preserved_in_render(self):
+        """空 lang="" も選択肢として保持され（未設定）で選択済み描画される。"""
+        html = self._render("")
+        self.assertInHTML('<option value="" selected>（未設定）</option>', html)
+
+    def test_out_of_choice_lang_saved_unchanged(self):
+        """選択肢外 lang=ja-JP を送信しても保存で維持される（空上書き・化けなし）。"""
+        c = self._contact("ja-JP")
+        user = User.objects.create_user(username="lang_jajp_user", password="x")
+        data = {fn: getattr(c, fn) or "" for fn in Contact.UPDATABLE_FIELDS}
+        form = ContactUpdateActiveForm(data=data, target_contact=c)
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data["lang"], "ja-JP")
+        c.fix(form, user)
+        c.refresh_from_db()
+        self.assertEqual(c.lang, "ja-JP")
+
+    def test_empty_lang_saved_unchanged(self):
+        """空 lang="" を送信しても保存で空のまま維持される（既定 ja へ化けない）。"""
+        c = self._contact("")
+        user = User.objects.create_user(username="lang_empty_user", password="x")
+        data = {fn: getattr(c, fn) or "" for fn in Contact.UPDATABLE_FIELDS}
+        form = ContactUpdateActiveForm(data=data, target_contact=c)
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data["lang"], "")
+        c.fix(form, user)
+        c.refresh_from_db()
+        self.assertEqual(c.lang, "")
+
+
+class ManualFlagToggleViewTests(TestCase):
+    """v1.7 コミット3/3 要素3：hidden フラグによる手動/自動/自動戻しの送信反映。"""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="manual_flag_user", password="dummy"
+        )
+        _grant_contact_perms(self.user)
+        self.client = Client()
+        self.client.force_login(self.user)
+
+    def _active_contact(self, **kw):
+        person = Person.objects.create(status=Person.Status.ACTIVE)
+        defaults = dict(
+            status=Contact.Status.ACTIVE,
+            last_name="山田",
+            first_name="太郎",
+            name_order="last_first",
+            lang="ja",
+        )
+        defaults.update(kw)
+        return Contact.objects.create(person=person, **defaults)
+
+    def _post_active(self, contact, overrides):
+        data = {fn: getattr(contact, fn) or "" for fn in Contact.UPDATABLE_FIELDS}
+        data["note"] = ""
+        data.update(overrides)
+        data.update(_empty_sns_management_form())
+        url = reverse("contacts:contact_update_active", kwargs={"pk": contact.pk})
+        return self.client.post(url, data=data)
+
+    def test_full_name_manual_flag_true_keeps_value(self):
+        # hidden フラグ true → full_name 手動値を保持（原本変更でも上書きしない）
+        c = self._active_contact(full_name="カスタム氏名", full_name_is_manual=True)
+        resp = self._post_active(
+            c,
+            {
+                "full_name": "カスタム氏名",
+                "full_name_is_manual": "true",
+                "last_name": "佐藤",  # 原本変更
+            },
+        )
+        self.assertEqual(resp.status_code, 302)
+        c.refresh_from_db()
+        self.assertTrue(c.full_name_is_manual)
+        self.assertEqual(c.full_name, "カスタム氏名")
+
+    def test_full_name_revert_to_auto_recomputes(self):
+        # 「自動に戻す」（hidden=false）→ 手動値破棄・原本から自動再計算（source 不変でも revert で再計算）
+        c = self._active_contact(full_name="カスタム氏名", full_name_is_manual=True)
+        resp = self._post_active(
+            c,
+            {
+                "full_name": "カスタム氏名",  # 値は据え置きで送るが revert で破棄される
+                "full_name_is_manual": "",  # 自動に戻す
+            },
+        )
+        self.assertEqual(resp.status_code, 302)
+        c.refresh_from_db()
+        self.assertFalse(c.full_name_is_manual)
+        self.assertEqual(c.full_name, "山田 太郎")
+
+    def test_salutation_revert_to_auto_recomputes(self):
+        # 宛名を「自動に戻す」→ 手動値破棄・lang から自動再計算（ja＝姓＋様）
+        c = self._active_contact(
+            full_name="山田太郎",
+            salutation_name="特別な宛名",
+            salutation_name_is_manual=True,
+        )
+        resp = self._post_active(
+            c,
+            {
+                "salutation_name": "特別な宛名",
+                "salutation_name_is_manual": "",  # 自動に戻す
+            },
+        )
+        self.assertEqual(resp.status_code, 302)
+        c.refresh_from_db()
+        self.assertFalse(c.salutation_name_is_manual)
+        self.assertEqual(c.salutation_name, "山田 様")

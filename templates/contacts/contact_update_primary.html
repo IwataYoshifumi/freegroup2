@@ -6,7 +6,6 @@
 {% block content %}
   <div class="app-page-header" style="max-width:900px;">
     <div>
-      <div class="app-breadcrumb">名刺管理 / 名刺一覧 / コンタクト詳細 / プライマリーコンタクト修正</div>
       <h1>プライマリーコンタクト修正</h1>
     </div>
     <div class="app-action-area">
@@ -25,221 +24,25 @@
       </div>
     {% endif %}
 
+    {# ==================== 修正理由（先出しモーダルで選択→ここに反映） ==================== #}
+    {# 表示位置を「入力末尾」から「到着時モーダル」へ移すだけ。実フィールド change_reason は hidden で #}
+    {# 保持して従来どおり送信し、サーバーの fix/transfer 分岐（views.py:562-583）は一切変えない。 #}
+    <div style="display:none;">{{ form.change_reason }}</div>
+    <div class="app-alert app-alert--info js-change-reason-banner"
+         style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+      <span class="js-change-reason-message"></span>
+      <button type="button" class="app-btn app-btn--secondary app-btn--sm js-change-reason-reopen"
+              data-action="open-modal" data-target="changeReasonModal">理由を選び直す</button>
+    </div>
+    {% if form.change_reason.errors %}
+      <div class="app-alert app-alert--danger">{{ form.change_reason.errors }}</div>
+    {% endif %}
+
     {% block contact_fields %}
-      {# ==================== 氏名グループ ==================== #}
-      <div class="app-section__header"><h2>氏名</h2></div>
-      <div class="app-form-grid">
-        <div class="app-form__group">
-          <label class="app-form__label" for="{{ form.full_name.id_for_label }}">氏名</label>
-          {{ form.full_name }}
-          {{ form.full_name.errors }}
-        </div>
-        <div class="app-form__group">
-          <label class="app-form__label" for="{{ form.last_name.id_for_label }}">姓</label>
-          {{ form.last_name }}
-          {{ form.last_name.errors }}
-        </div>
-        <div class="app-form__group">
-          <label class="app-form__label" for="{{ form.first_name.id_for_label }}">名</label>
-          {{ form.first_name }}
-          {{ form.first_name.errors }}
-        </div>
-        <div class="app-form__group">
-          <label class="app-form__label" for="{{ form.display_name.id_for_label }}">表示名</label>
-          {{ form.display_name }}
-          {{ form.display_name.errors }}
-        </div>
-        <div class="app-form__group">
-          <label class="app-form__label" for="{{ form.phonetic_name.id_for_label }}">フリガナ</label>
-          {{ form.phonetic_name }}
-          {{ form.phonetic_name.errors }}
-        </div>
-        <div class="app-form__group">
-          <label class="app-form__label" for="{{ form.other_name_parts.id_for_label }}">ミドルネーム等</label>
-          {{ form.other_name_parts }}
-          {{ form.other_name_parts.errors }}
-        </div>
-        <div class="app-form__group">
-          <label class="app-form__label" for="{{ form.alias_name.id_for_label }}">別名・旧姓</label>
-          {{ form.alias_name }}
-          {{ form.alias_name.errors }}
-        </div>
-        <div class="app-form__group">
-          <label class="app-form__label" for="{{ form.name_order.id_for_label }}">氏名の順序</label>
-          {{ form.name_order }}
-          {{ form.name_order.errors }}
-        </div>
-        <div class="app-form__group">
-          <label class="app-form__label" for="{{ form.salutation_name.id_for_label }}">敬称付き氏名 <span class="app-required">必須</span></label>
-          {{ form.salutation_name }}
-          {{ form.salutation_name.errors }}
-        </div>
-      </div>
-
-      {# ==================== 所属グループ ==================== #}
-      <div class="app-section__header" style="margin-top:var(--app-space-md);"><h2>所属</h2></div>
-      <div class="app-form-grid">
-        <div class="app-form__group">
-          <label class="app-form__label" for="{{ form.organization.id_for_label }}">会社</label>
-          {{ form.organization }}
-          {{ form.organization.errors }}
-        </div>
-        <div class="app-form__group">
-          <label class="app-form__label" for="{{ form.legal_entity_type.id_for_label }}">法人格</label>
-          {{ form.legal_entity_type }}
-          {{ form.legal_entity_type.errors }}
-        </div>
-        <div class="app-form__group">
-          <label class="app-form__label" for="{{ form.legal_entity_type_position.id_for_label }}">法人格の位置</label>
-          {{ form.legal_entity_type_position }}
-          {{ form.legal_entity_type_position.errors }}
-        </div>
-        <div class="app-form__group">
-          <label class="app-form__label" for="{{ form.branch.id_for_label }}">支店・店舗</label>
-          {{ form.branch }}
-          {{ form.branch.errors }}
-        </div>
-        <div class="app-form__group">
-          <label class="app-form__label" for="{{ form.department.id_for_label }}">部署</label>
-          {{ form.department }}
-          {{ form.department.errors }}
-        </div>
-        <div class="app-form__group">
-          <label class="app-form__label" for="{{ form.title.id_for_label }}">役職</label>
-          {{ form.title }}
-          {{ form.title.errors }}
-        </div>
-        <div class="app-form__group">
-          <label class="app-form__label" for="{{ form.qualification.id_for_label }}">資格</label>
-          {{ form.qualification }}
-          {{ form.qualification.errors }}
-        </div>
-        <div class="app-form__group">
-          <label class="app-form__label" for="{{ form.catchphrase.id_for_label }}">キャッチコピー</label>
-          {{ form.catchphrase }}
-          {{ form.catchphrase.errors }}
-        </div>
-      </div>
-
-      {# ==================== 連絡先グループ ==================== #}
-      <div class="app-section__header" style="margin-top:var(--app-space-md);"><h2>連絡先</h2></div>
-      <div class="app-form-grid">
-        <div class="app-form__group">
-          <label class="app-form__label" for="{{ form.email.id_for_label }}">メール</label>
-          {{ form.email }}
-          {{ form.email.errors }}
-        </div>
-        <div class="app-form__group">
-          <label class="app-form__label" for="{{ form.mobile_phone.id_for_label }}">携帯</label>
-          {{ form.mobile_phone }}
-          {{ form.mobile_phone.errors }}
-        </div>
-        <div class="app-form__group">
-          <label class="app-form__label" for="{{ form.personal_phone.id_for_label }}">電話</label>
-          {{ form.personal_phone }}
-          {{ form.personal_phone.errors }}
-        </div>
-        <div class="app-form__group">
-          <label class="app-form__label" for="{{ form.personal_fax.id_for_label }}">FAX</label>
-          {{ form.personal_fax }}
-          {{ form.personal_fax.errors }}
-        </div>
-        <div class="app-form__group">
-          <label class="app-form__label" for="{{ form.org_phone.id_for_label }}">会社電話</label>
-          {{ form.org_phone }}
-          {{ form.org_phone.errors }}
-        </div>
-        <div class="app-form__group">
-          <label class="app-form__label" for="{{ form.org_fax.id_for_label }}">会社FAX</label>
-          {{ form.org_fax }}
-          {{ form.org_fax.errors }}
-        </div>
-        <div class="app-form__group">
-          <label class="app-form__label" for="{{ form.website.id_for_label }}">ウェブサイト</label>
-          {{ form.website }}
-          {{ form.website.errors }}
-        </div>
-      </div>
-
-      {# ==================== 住所グループ ==================== #}
-      <div class="app-section__header" style="margin-top:var(--app-space-md);"><h2>住所</h2></div>
-      <div class="app-form-grid">
-        <div class="app-form__group">
-          <label class="app-form__label" for="{{ form.postal_code.id_for_label }}">郵便番号</label>
-          {{ form.postal_code }}
-          {{ form.postal_code.errors }}
-        </div>
-        <div class="app-form__group">
-          <label class="app-form__label" for="{{ form.country.id_for_label }}">国（2文字）</label>
-          {{ form.country }}
-          {{ form.country.errors }}
-        </div>
-        <div class="app-form__group">
-          <label class="app-form__label" for="{{ form.region.id_for_label }}">都道府県</label>
-          {{ form.region }}
-          {{ form.region.errors }}
-        </div>
-        <div class="app-form__group">
-          <label class="app-form__label" for="{{ form.city.id_for_label }}">市区町村</label>
-          {{ form.city }}
-          {{ form.city.errors }}
-        </div>
-        <div class="app-form__group">
-          <label class="app-form__label" for="{{ form.rest_of_address.id_for_label }}">番地以降</label>
-          {{ form.rest_of_address }}
-          {{ form.rest_of_address.errors }}
-        </div>
-      </div>
-
-      {# SNS グループ（v1.6.1 で ContactSns 別テーブル化、Phase F1 で InlineFormSet 化、§11.6.7） #}
-      {% include "contacts/_contact_sns_formset.html" with formset=sns_formset %}
-
-      {# ==================== その他グループ ==================== #}
-      <div class="app-section__header" style="margin-top:var(--app-space-md);"><h2>その他</h2></div>
-      <div class="app-form-grid">
-        <div class="app-form__group">
-          <label class="app-form__label" for="{{ form.notes.id_for_label }}">メモ</label>
-          {{ form.notes }}
-          {{ form.notes.errors }}
-        </div>
-        <div class="app-form__group">
-          <label class="app-form__label" for="{{ form.lang.id_for_label }}">言語</label>
-          {{ form.lang }}
-          {{ form.lang.errors }}
-        </div>
-      </div>
+      {# 確認チェック（confirmed_<field>）は各フィールド直下にインライン配置（_contact_fields.html）。 #}
+      {# 末尾のまとめ「確認チェック」セクションは廃止（v1.7、フィールド近傍化）。 #}
+      {% include "contacts/_contact_fields.html" %}
     {% endblock %}
-
-    {# ==================== 確認トグル（low/mid 未確認フィールドのみ動的、HIG v1.2 §4.1） ==================== #}
-    <div class="app-section__header" style="margin-top:var(--app-space-md);">
-      <h2>確認チェック</h2>
-      <p class="app-muted">信頼度の低い項目について、内容を確認したことを「確認しました」に切り替えてください。</p>
-    </div>
-    {% for field in form %}
-      {% if field.name|slice:":10" == "confirmed_" %}
-        <div class="app-form__group">
-          <div class="app-form__label">{{ field.label }}</div>
-          {{ field }}
-          {{ field.errors }}
-        </div>
-      {% endif %}
-    {% endfor %}
-
-    {# ==================== 修正理由 ==================== #}
-    <div class="app-section__header" style="margin-top:var(--app-space-md);"><h2>修正理由</h2></div>
-    <div class="app-form__group">
-      <label class="app-form__label" for="{{ form.change_reason.id_for_label }}">修正理由</label>
-      {{ form.change_reason }}
-      {{ form.change_reason.errors }}
-    </div>
-
-    {# ==================== 備考 ==================== #}
-    <div class="app-section__header" style="margin-top:var(--app-space-md);"><h2>備考</h2></div>
-    <div class="app-form__group">
-      <label class="app-form__label" for="{{ form.note.id_for_label }}">備考</label>
-      {{ form.note }}
-      {{ form.note.errors }}
-    </div>
 
     {# ==================== 操作ボタン ==================== #}
     <div class="app-action-area" style="margin-top:24px;">
@@ -248,4 +51,102 @@
       <button type="submit" class="app-btn app-btn--success">保存</button>
     </div>
   </form>
+
+  {# ==================== 修正理由 先出しモーダル（到着時オープン。既存 .app-modal / open-modal を流用） ==================== #}
+  {# フォームの外に置く（UI ラジオ js-change-reason-choice を送信に混ぜないため）。選択値は #id_change_reason へ書く。 #}
+  <div class="app-modal-backdrop" hidden></div>
+  <div class="app-modal" id="changeReasonModal" hidden>
+    <div class="app-modal__panel" style="width:min(520px,95vw);">
+      <div class="app-modal__header">
+        <h2>修正理由を選択 <span class="app-required">必須</span></h2>
+      </div>
+      <div class="app-modal__body">
+        <p class="app-muted" style="margin-top:0;">修正理由によってコンタクトの扱いが変わります（誤字訂正＝上書き／異動・転職等＝履歴を残して新規作成）。理由を選んでから修正に進んでください。</p>
+        <div class="js-change-reason-options" style="display:flex; flex-direction:column; gap:8px;">
+          {% for value, label in form.change_reason.field.choices %}
+            <label style="display:flex; align-items:center; gap:8px; padding:8px 10px; border:1px solid var(--app-border); border-radius:8px; cursor:pointer;">
+              <input type="radio" name="js-change-reason-choice" value="{{ value }}"> {{ label }}
+            </label>
+          {% endfor %}
+        </div>
+      </div>
+      <div class="app-modal__footer">
+        {# キャンセル＝編集ページ既存の戻る動線で呼び出し元（詳細）へ。push_current は増やさない。 #}
+        {% back_link back %}
+        <button type="button" class="app-btn app-btn--primary js-change-reason-next"
+                data-action="close-modal" disabled>次へ</button>
+      </div>
+    </div>
+  </div>
+  <script>
+    (function () {
+      var modal = document.getElementById('changeReasonModal');
+      if (!modal) return;
+      // 実フィールド（送信・サーバー分岐の正本）。UI ラジオはここへ値を書くだけ。
+      var realSelect = document.getElementById('id_change_reason');
+      var radios = modal.querySelectorAll('input[name="js-change-reason-choice"]');
+      var nextBtn = modal.querySelector('.js-change-reason-next');
+      var reopenBtn = document.querySelector('.js-change-reason-reopen');
+      var msgEl = document.querySelector('.js-change-reason-message');
+      var MESSAGES = {
+        fix: '入力間違い・誤字訂正として修正します。この画面の内容で、いまのコンタクトを上書きします。',
+        transfer: '異動・部署変更として修正します。いまの情報は履歴として残り、新しいコンタクトが作られます。',
+        promotion: '役職変更・昇進として修正します。いまの情報は履歴として残り、新しいコンタクトが作られます。',
+        job_change: '転職として修正します。いまの情報は履歴として残り、新しいコンタクトが作られます。',
+        name_change: '結婚等による姓変更として修正します。いまの情報は履歴として残り、新しいコンタクトが作られます。'
+      };
+      // 到着時は未選択（＝明示選択を必須化）。一度選ぶと以降の「選び直す」は現在値をプリセット。
+      var chosen = false;
+
+      function updateMessage() {
+        if (!msgEl) return;
+        var v = realSelect ? realSelect.value : '';
+        msgEl.textContent = chosen ? (MESSAGES[v] || '') : '';
+      }
+      function setNext(on) { if (nextBtn) nextBtn.disabled = !on; }
+
+      // ラジオ選択 → #id_change_reason に反映＋上部メッセージ更新＋「次へ」活性化。
+      Array.prototype.forEach.call(radios, function (r) {
+        r.addEventListener('change', function () {
+          if (!r.checked) return;
+          if (realSelect) realSelect.value = r.value;
+          chosen = true;
+          updateMessage();
+          setNext(true);
+        });
+      });
+
+      // モーダルを開く直前の同期：初回（未選択）はクリア＋「次へ」不可、選び直しは現在値をプリセット。
+      // reopenBtn の click は既存 open-modal（app.js）も発火するが、target 段の本リスナが先に走る。
+      function syncOnOpen() {
+        var v = realSelect ? realSelect.value : '';
+        Array.prototype.forEach.call(radios, function (r) {
+          r.checked = chosen && r.value === v;
+        });
+        setNext(chosen);
+        updateMessage();
+      }
+      if (reopenBtn) reopenBtn.addEventListener('click', syncOnOpen);
+
+      // ?change_reason=fix（住所「要修正」等からの直行）はモーダルをスキップ（View が context で通知）。
+      var SKIP_MODAL = {% if skip_change_reason_modal %}true{% else %}false{% endif %};
+
+      // 到着時に自動オープン（既存 openModal 経由で activeModal をセット＝Escape/背景/「次へ」で閉じられる）。
+      // SKIP_MODAL のときは開かず、fix を選択済み扱いにして入力フォームを直接表示する
+      // （#id_change_reason は View の get_initial で fix を preset 済み）。
+      function init() {
+        if (SKIP_MODAL) {
+          chosen = true;
+          syncOnOpen();  // ラジオを現在値(fix)にプリセット＋「次へ」活性＋上部メッセージ更新（モーダルは開かない）
+          return;
+        }
+        if (reopenBtn) reopenBtn.click();
+      }
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+      } else {
+        init();
+      }
+    })();
+  </script>
 {% endblock %}

@@ -1,14 +1,14 @@
 {% extends "cards/app_base.html" %}
 {% load back_tags %}
 {% load badge_tags %}
+{% load lang_tags %}
 
-{% block title %}人物一覧 — FreeGroup2{% endblock %}
+{% block title %}パーソン一覧 — FreeGroup2{% endblock %}
 
 {% block content %}
   <div class="app-page-header">
     <div>
-      <div class="app-breadcrumb">人物管理 / 人物一覧</div>
-      <h1>人物一覧</h1>
+      <h1>パーソン一覧</h1>
     </div>
   </div>
 
@@ -42,6 +42,7 @@
             <th data-col-key="org_contact" data-sort-col>会社電話・FAX</th>
             <th data-col-key="address" data-sort-col>住所</th>
             <th data-col-key="active_count" data-sort-col>アクティブ数</th>
+            <th data-col-key="lang" data-sort-col>言語</th>
             <th class="app-table__col--date" data-col-key="updated_at" data-sort-col>更新日時</th>
           </tr>
         </thead>
@@ -53,7 +54,7 @@
                 <a href="{% append_back_url detail_url back %}" class="app-btn app-btn--secondary app-btn--sm">詳細</a>
               </td>
               <td data-col-key="name" data-sort-key="{{ person.primary_contact.phonetic_name }}">
-                {{ person.primary_contact.full_name|default:"(氏名なし)" }}
+                <span class="app-ellipsis" data-tooltip="{{ person.primary_contact.full_name|default:'(氏名なし)' }}">{{ person.primary_contact.full_name|default:"(氏名なし)" }}</span>{% if person.has_unconfirmed_low_mid %} <span class="app-status-badge app-status-badge--warning" title="未確認の低信頼項目があります" aria-label="要確認">要確認</span>{% endif %}
               </td>
               <td data-col-key="status">
                 {% if person.status != "active" %}{% status_badge person %}{% endif %}
@@ -98,11 +99,12 @@
                 {% else %}-{% endif %}
               </td>
               <td data-col-key="active_count">{{ person.active_count }}</td>
+              <td data-col-key="lang" data-sort-key="{{ person.primary_contact.lang }}">{{ person.primary_contact.lang|lang_label }}</td>
               <td data-col-key="updated_at">{{ person.updated_at|date:"Y/m/d H:i" }}</td>
             </tr>
           {% empty %}
-            <tr><td colspan="12" class="app-muted">
-              該当する人物がいません。新しい名刺を取り込めば人物が自動で作られます。
+            <tr><td colspan="13" class="app-muted">
+              該当するパーソンがいません。新しい名刺を取り込めばパーソンが自動で作られます。
               <a href="{% url 'cards:card_upload' %}">名刺を取り込む →</a>
             </td></tr>
           {% endfor %}
@@ -117,7 +119,7 @@
           <div class="app-list-card__main">
             <strong>
               {{ person.primary_contact.full_name|default:"(氏名なし)" }}
-            </strong>
+            </strong>{% if person.has_unconfirmed_low_mid %} <span class="app-status-badge app-status-badge--warning" title="未確認の低信頼項目があります" aria-label="要確認">要確認</span>{% endif %}
             {% if person.status != "active" %}{% status_badge person %}{% endif %}
             {% if person.primary_contact.organization %}<div>{{ person.primary_contact.organization }}</div>{% endif %}
             {% if person.primary_contact.title %}<div class="app-muted">{{ person.primary_contact.title }}</div>{% endif %}
@@ -129,7 +131,7 @@
         </a>
       {% empty %}
         <p class="app-muted">
-          該当する人物がいません。新しい名刺を取り込めば人物が自動で作られます。
+          該当するパーソンがいません。新しい名刺を取り込めばパーソンが自動で作られます。
           <a href="{% url 'cards:card_upload' %}">名刺を取り込む →</a>
         </p>
       {% endfor %}

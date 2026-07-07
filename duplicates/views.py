@@ -33,16 +33,35 @@ from django.views.generic import ListView, View
 
 from back_navigator.back_navigator import BackNavigator
 from config.constants import DifferentPersonReason, DuplicateMergeReason
-from contacts.models import ContactSns
+from contacts.models import Contact, ContactSns
 from contacts.services.normalization import format_postal_by_country
+
+from persons.models import Person
 
 from .forms import MergeForm, MergeUndoForm
 from .models import DuplicateCandidate, PersonMergeLog
+from .services.duplicate_score import build_high_fields_map, get_matched_fields
 from .services.merge_executor import (
     Execute_Merge_Only,
     Execute_Merge_Undo,
     Mark_as_Different_Person,
 )
+
+
+# 重複候補グループ一覧の「一致フィールド」バッジ用 日本語ラベル
+# （DUPLICATE_CHECK_FIELDS の 9 フィールド。詳細画面の FIELD_LABEL_JA とは別系統で、
+# branch は「支店」/ address は「住所」と一覧バッジ向けの簡潔表記にする）。
+MATCHED_FIELD_LABEL_JA = {
+    "full_name": "氏名",
+    "organization": "会社",
+    "department": "部署",
+    "title": "役職",
+    "branch": "支店",
+    "email": "メール",
+    "personal_phone": "電話",
+    "mobile_phone": "携帯",
+    "address": "住所",
+}
 
 
 # 17 番マージレビュー画面の Contact フィールド表示用ラベル（仕様書 §11.5.5、D-4d）。
@@ -57,7 +76,7 @@ FIELD_LABEL_JA = {
     "full_name": "氏名",
     "last_name": "姓",
     "first_name": "名",
-    "salutation_name": "敬称付き氏名",
+    "salutation_name": "敬称付き氏名（メール宛名）",
     "other_name_parts": "他の名前部分",
     "name_order": "氏名の順序",
     "display_name": "表示名",
@@ -150,6 +169,64 @@ FIELD_GROUPS = (
 )
 
 
+# 重複候補グループ一覧の多段ソート（persons の検索フォーム内多段ソート方式に準拠、HIG §6.2）。
+# キー → グループ集計クエリの並び替え対象（annotate 済みフィールド）にマップする。
+DUP_SORT_FIELD_MAP = {
+    "rank": "rank_order",       # 昇順＝完全一致→高→中→低（rank_order=0..3）
+    "detected": "detected_at",  # 検出日時（候補作成日時の集約）
+    "pair_count": "pair_count", # グループ内ペア件数
+}
+DUP_SORT_MAX_KEYS = 3
+DUP_PER_PAGE_CHOICES = (50, 100, 200)
+DUP_DEFAULT_PER_PAGE = 50
+
+
+def _parse_dup_sort(params):
+    """?sort=key,-key,... を [(key, "asc"|"desc"), ...] に解釈する（純関数）。
+
+    不正キー・同一キー二重指定は捨てる。最大 DUP_SORT_MAX_KEYS 段まで。
+    """
+    raw = (params.get("sort") or "").strip()
+    tokens = []
+    seen = set()
+    if not raw:
+        return tokens
+    for part in raw.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        desc = part.startswith("-")
+        key = part[1:] if desc else part
+        if key not in DUP_SORT_FIELD_MAP or key in seen:
+            continue
+        seen.add(key)
+        tokens.append((key, "desc" if desc else "asc"))
+        if len(tokens) >= DUP_SORT_MAX_KEYS:
+            break
+    return tokens
+
+
+def _dup_sort_order_fields(tokens):
+    """[(key, dir)] を order_by 用フィールド名リストに変換する（純関数）。"""
+    return [
+        ("-" if d == "desc" else "") + DUP_SORT_FIELD_MAP[key]
+        for key, d in tokens
+    ]
+
+
+def _dup_sort_context(params):
+    """ソートUI（折りたたみ）描画用 context（純関数）。sort_rows / sort_is_active / sort_value。"""
+    tokens = _parse_dup_sort(params)
+    rows = [{"key": k, "dir": d} for (k, d) in tokens]
+    while len(rows) < DUP_SORT_MAX_KEYS:
+        rows.append({"key": "", "dir": "asc"})
+    return {
+        "sort_rows": rows,
+        "sort_is_active": bool(tokens),
+        "sort_value": ",".join(("-" + k if d == "desc" else k) for k, d in tokens),
+    }
+
+
 class DuplicateCandidateGroupListView(
     LoginRequiredMixin, PermissionRequiredMixin, ListView
 ):
@@ -176,7 +253,15 @@ class DuplicateCandidateGroupListView(
 
     template_name = "duplicates/duplicate_group_list.html"
     context_object_name = "groups"
-    paginate_by = 20
+    paginate_by = DUP_DEFAULT_PER_PAGE
+
+    def get_paginate_by(self, queryset):
+        """表示件数（per_page）。他一覧と揃え 50/100/200・既定 50。不正値は既定へ。"""
+        try:
+            n = int(self.request.GET.get("per_page", DUP_DEFAULT_PER_PAGE))
+        except (TypeError, ValueError):
+            return DUP_DEFAULT_PER_PAGE
+        return n if n in DUP_PER_PAGE_CHOICES else DUP_DEFAULT_PER_PAGE
 
     _VALID_RANKS = (
         DuplicateCandidate.Rank.EXACT_MATCH,
@@ -241,6 +326,7 @@ class DuplicateCandidateGroupListView(
                     review_status=DuplicateCandidate.ReviewStatus.PENDING
                 ),
             ),
+            detected_at=Min("created_at"),
         )
 
         # progress フィルタ：annotate 後の has_pending で絞り込み
@@ -257,15 +343,32 @@ class DuplicateCandidateGroupListView(
             default=Value(99),
             output_field=IntegerField(),
         )
-        pending_order = Case(
-            When(pending_count__gt=0, then=Value(0)),
-            default=Value(1),
-            output_field=IntegerField(),
-        )
-        return groups.annotate(
-            rank_order=rank_order,
-            pending_order=pending_order,
-        ).order_by("pending_order", "rank_order", "group_id")
+        groups = groups.annotate(rank_order=rank_order)
+
+        # 多段ソート（?sort=）。既定は rank 優先（完全一致が上）。group_id を安定タイブレークに付ける。
+        order = _dup_sort_order_fields(_parse_dup_sort(self.request.GET))
+        if not order:
+            order = ["rank_order"]
+        order.append("group_id")
+        return groups.order_by(*order)
+
+    @staticmethod
+    def _select_lead_person(rep):
+        """代表 candidate から主役 Person（名前を出す側）を選ぶ。
+
+        [性質] 純関数（rep の person_a / person_b の status を読むだけ）
+        [入力] rep: DuplicateCandidate（person_a / person_b を select_related 済み）
+        [出力] Person
+
+        status='active' の側を主役にする（吸収された merged 側は primary_contact が
+        None で「(氏名なし)」になるため、active 側を出して回避する）。両方 active なら
+        person_a。どちらも active でない（稀）場合も person_a にフォールバック。
+        """
+        if rep.person_a.status == Person.Status.ACTIVE:
+            return rep.person_a
+        if rep.person_b.status == Person.Status.ACTIVE:
+            return rep.person_b
+        return rep.person_a
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -287,16 +390,54 @@ class DuplicateCandidateGroupListView(
             if c.group_id not in rep_by_group:
                 rep_by_group[c.group_id] = c
 
+        # 代表ペアの主コンタクトの confidence をバルク取得（N+1 回避・行数非依存の 1 クエリ）。
+        primary_ids = set()
+        for rep in rep_by_group.values():
+            for person in (rep.person_a, rep.person_b):
+                pc = person.primary_contact
+                if pc is not None:
+                    primary_ids.add(pc.id)
+        high_map = build_high_fields_map(primary_ids)
+
         enriched = []
         for g in object_list:
             rep = rep_by_group.get(g["group_id"])
-            enriched.append({**dict(g), "rep_candidate": rep})
+            lead_name = ""
+            lead_person_id = None
+            matched_field_labels = []
+            rep_rank = None
+            if rep is not None:
+                rep_rank = rep.rank
+                lead = self._select_lead_person(rep)
+                lead_person_id = lead.id
+                lead_pc = lead.primary_contact
+                lead_name = lead_pc.full_name if lead_pc is not None else ""
+
+                pc_a = rep.person_a.primary_contact
+                pc_b = rep.person_b.primary_contact
+                if pc_a is not None and pc_b is not None:
+                    matched = get_matched_fields(
+                        pc_a, pc_b,
+                        high_map.get(pc_a.id, set()),
+                        high_map.get(pc_b.id, set()),
+                    )
+                    matched_field_labels = [
+                        MATCHED_FIELD_LABEL_JA[f] for f in matched
+                    ]
+            enriched.append({
+                **dict(g),
+                "rep_candidate": rep,
+                "lead_name": lead_name,
+                "lead_person_id": lead_person_id,
+                "matched_field_labels": matched_field_labels,
+                "rep_rank": rep_rank,
+            })
         context["enriched_groups"] = enriched
 
         back = BackNavigator(self.request)
         back.push_current(
             "",
-            ["rank", "progress", "user", "searched", "page"],
+            ["rank", "progress", "user", "searched", "sort", "per_page", "page"],
         )
         context["back"] = back
 
@@ -305,6 +446,11 @@ class DuplicateCandidateGroupListView(
         context["selected_progress"] = self._get_selected_progress()
         context["user_filter_on"] = self._is_user_filter_on()
         context["searched"] = self._is_searched()
+
+        # ソート・表示件数 UI 用 context（persons 多段ソート方式に準拠）。
+        context.update(_dup_sort_context(self.request.GET))
+        context["per_page"] = self.get_paginate_by(None)
+        context["per_page_choices"] = list(DUP_PER_PAGE_CHOICES)
 
         context["active_app"] = "duplicates"
         context["active_menu"] = "duplicates:duplicate_group_list"
@@ -334,23 +480,35 @@ class DuplicateCandidateGroupDetailView(
     def get(self, request, group_id):
         candidates = DuplicateCandidate.objects.filter(
             group_id=group_id
-        ).select_related("person_a", "person_b")
+        ).select_related(
+            "person_a__primary_contact",
+            "person_b__primary_contact",
+        )
         if not candidates.exists():
             raise Http404("Duplicate candidate group not found.")
 
         pending_candidates = candidates.filter(
             review_status=DuplicateCandidate.ReviewStatus.PENDING
         )
-        merged_candidates = candidates.filter(
-            review_status=DuplicateCandidate.ReviewStatus.MERGED
+        # レビュー済み（merged + different_person）を 1 表に統合表示（v1.7 UI 改善）。
+        # invalidated は従来どおり集計・表示の対象外。並びは直近レビュー順。
+        reviewed_candidates = list(
+            candidates.filter(
+                review_status__in=[
+                    DuplicateCandidate.ReviewStatus.MERGED,
+                    DuplicateCandidate.ReviewStatus.DIFFERENT_PERSON,
+                ]
+            ).order_by("-reviewed_at")
         )
-        different_person_candidates = candidates.filter(
-            review_status=DuplicateCandidate.ReviewStatus.DIFFERENT_PERSON
-        )
+        self._enrich_reviewed_candidates(reviewed_candidates)
 
         pending_count = pending_candidates.count()
-        merged_count = merged_candidates.count()
-        different_person_count = different_person_candidates.count()
+        merged_count = candidates.filter(
+            review_status=DuplicateCandidate.ReviewStatus.MERGED
+        ).count()
+        different_person_count = candidates.filter(
+            review_status=DuplicateCandidate.ReviewStatus.DIFFERENT_PERSON
+        ).count()
 
         back = BackNavigator(request)
         context = {
@@ -358,15 +516,80 @@ class DuplicateCandidateGroupDetailView(
             "pending_count": pending_count,
             "merged_count": merged_count,
             "different_person_count": different_person_count,
+            "reviewed_count": merged_count + different_person_count,
+            "total_count": (
+                pending_count + merged_count + different_person_count
+            ),
             "has_pending": pending_count > 0,
             "pending_candidates": pending_candidates,
-            "merged_candidates": merged_candidates,
-            "different_person_candidates": different_person_candidates,
+            "reviewed_candidates": reviewed_candidates,
             "back": back,
             "active_app": "duplicates",
             "active_menu": "duplicates:duplicate_group_list",
         }
         return render(request, self.template_name, context)
+
+    @staticmethod
+    def _resolve_display_name(person, name_by_prev_person):
+        """Person の表示氏名を解決する（吸収側は previous_person 経由で復元）。
+
+        [性質] 純関数（引数の dict / 既ロード FK を読むだけ、DB 操作なし）
+        [入力] person: Person / name_by_prev_person: dict[person_id -> full_name]
+        [出力] str（primary_contact があればその full_name、無ければ復元辞書の値、
+               いずれも無ければ空文字 → テンプレ側で「(氏名なし)」にフォールバック）
+        """
+        primary = person.primary_contact
+        if primary is not None:
+            return primary.full_name
+        return name_by_prev_person.get(person.id, "")
+
+    def _enrich_reviewed_candidates(self, reviewed_candidates):
+        """レビュー済み候補に復元可否・表示氏名を付与する（②③、N+1 回避）。
+
+        [性質] 副作用あり（DB 読み取り 2 本 + 各 candidate へ属性付与）
+        [入力] reviewed_candidates: list[DuplicateCandidate]
+        [出力] None（各 candidate に restore_status / person_a_display_name /
+               person_b_display_name 属性を付与する）
+
+        行数に依らず追加クエリは 2 本に固定する：
+          a. duplicate_candidate で PersonMergeLog をまとめ引き（③ status / ② 吸収側）
+          b. 吸収側 Person の元 primary Contact をまとめ引き（② マージ前氏名）
+        """
+        if not reviewed_candidates:
+            return
+
+        candidate_ids = [c.id for c in reviewed_candidates]
+
+        # a. candidate -> PersonMergeLog（1 candidate につき 1 件想定、先勝ち）。
+        merge_log_by_candidate = {}
+        for ml in PersonMergeLog.objects.filter(
+            duplicate_candidate_id__in=candidate_ids
+        ).select_related("merged_person"):
+            merge_log_by_candidate.setdefault(ml.duplicate_candidate_id, ml)
+
+        # b. 吸収側 Person の元 primary Contact の full_name をまとめ引き。
+        merged_person_ids = [
+            ml.merged_person_id for ml in merge_log_by_candidate.values()
+        ]
+        name_by_prev_person = {}
+        if merged_person_ids:
+            for c in Contact.objects.filter(
+                previous_person_id__in=merged_person_ids,
+                previous_status=Contact.Status.PRIMARY,
+            ):
+                name_by_prev_person.setdefault(
+                    c.previous_person_id, c.full_name
+                )
+
+        for candidate in reviewed_candidates:
+            ml = merge_log_by_candidate.get(candidate.id)
+            candidate.restore_status = ml.status if ml is not None else ""
+            candidate.person_a_display_name = self._resolve_display_name(
+                candidate.person_a, name_by_prev_person
+            )
+            candidate.person_b_display_name = self._resolve_display_name(
+                candidate.person_b, name_by_prev_person
+            )
 
 
 class DuplicateCandidateGroupUpdateView(
@@ -546,8 +769,8 @@ class DuplicateCandidateGroupUpdateView(
             ),
             "merged_confidences": merged_primary.get_field_confidences(),
             "decision_choices": [
-                ("merged", "同一人物"),
-                ("additional_role", "同一人物（別肩書追加）"),
+                ("merged", "同一パーソン"),
+                ("additional_role", "同一パーソン（別肩書追加）"),
                 ("different", "別人"),
             ],
             "merged_reason_choices": [

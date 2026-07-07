@@ -2,20 +2,20 @@
 <header class="app-topbar">
   <div class="app-topbar__left">
     <button type="button" class="app-btn--icon app-topbar__menu-btn" data-action="toggle-drawer" aria-label="メニューを開く">≡</button>
-    <div>
-      <div class="app-topbar__system-name">FreeGroup2</div>
+    {# ロゴ＝ホームリンクは維持。隣の▼トグルはスマホ幅のみ表示し横断ナビをロゴ直下に出す（PC は .app-app-switcher の横並び）。 #}
+    <div class="app-app-menu" id="appMenu">
+      <div class="app-app-menu__logo">
+        <a href="{% url 'home' %}" class="app-topbar__system-name">FreeGroup2</a>
+        <button type="button" class="app-btn--icon app-app-menu__toggle" data-action="toggle-app-menu" aria-haspopup="true" aria-label="アプリ切り替えを開く">▼</button>
+      </div>
       <div class="app-topbar__current-app">{% block app_name %}{% endblock %}</div>
+      <nav class="app-app-dropdown" aria-label="アプリ切り替え">{% include "_app_switcher_nav.html" %}</nav>
     </div>
   </div>
 
   <nav class="app-app-switcher" aria-label="アプリ切り替え">
-    {% block app_switcher %}
-      <a href="{% url 'cards:card_list' %}" class="{% if active_app == 'cards' %}is-active{% endif %}">名刺管理</a>
-      <a href="{% url 'tags:tag_category_list' %}" class="{% if active_app == 'mailings' %}is-active{% endif %}">メール配信</a>
-      {% if perms.accounts.retire_user %}
-        <a href="{% url 'accounts:user_list' %}" class="{% if active_app == 'user_mgmt' %}is-active{% endif %}">ユーザ管理</a>
-      {% endif %}
-    {% endblock %}
+    {# 横断ナビ項目は共通 partial に一本化（ドロワーと二重管理しない）。 #}
+    {% block app_switcher %}{% include "_app_switcher_nav.html" %}{% endblock %}
   </nav>
 
   <div class="app-user-menu" id="userMenu">

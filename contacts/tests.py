@@ -626,6 +626,19 @@ class ContactAjaxConfirmFieldsViewTests(_ContactAjaxTestBase):
         self.cfc_organization.refresh_from_db()
         self.assertIsNotNone(self.cfc_organization.confirmed_at)
 
+    def test_address_field_confirmable(self):
+        """address（UPDATABLE_FIELDS 外だが DUPLICATE_CHECK_FIELDS）も確認OKできる（v1.7）。"""
+        cfc_address = ContactFieldConfidence.objects.create(
+            contact=self.contact_a,
+            field_name="address",
+            confidence=ContactFieldConfidence.Confidence.MID,
+        )
+        resp = self._post_json(self._url(), {"field_names": ["address"]})
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.json()["success"])
+        cfc_address.refresh_from_db()
+        self.assertIsNotNone(cfc_address.confirmed_at)
+
     def test_n2_multiple_fields_bulk(self):
         """N2: 複数フィールドの確認（一括確定）→ 200 / 全 CFC confirmed。"""
         resp = self._post_json(
@@ -935,6 +948,47 @@ class ContactDetailViewTests(TestCase):
             kwargs={"pk": (contact or self.contact_a).pk},
         )
 
+    # ---- 住所（読み取り専用）の確認OK（インライン）／要修正（編集ページ遷移） ----
+
+    def _give_address_cfc(self, *, confirmed=False):
+        """contact_a に住所値＋住所 CFC（mid）を付与する（confirmed=True で確認済み）。"""
+        self.contact_a.address = "愛知県豊田市西町1-2-3"
+        self.contact_a.save()
+        ContactFieldConfidence.objects.create(
+            contact=self.contact_a,
+            field_name="address",
+            confidence=ContactFieldConfidence.Confidence.MID,
+            confirmed_at=timezone.now() if confirmed else None,
+        )
+
+    def test_address_shows_inline_confirm_and_edit_link(self):
+        """住所（未確認 mid）に確認OKラジオ（インライン）＋要修正リンク（?change_reason=fix）が出る。"""
+        self._give_address_cfc()
+        html = self.client.get(self._url()).content.decode()
+        # 確認OK＝他フィールドと同じインライン確認（address 専用の action ラジオ）。
+        self.assertIn('name="contact-field-action-address"', html)
+        # 要修正＝主コンタクト修正へ ?change_reason=fix 付きで遷移（モーダルスキップ）。
+        edit_url = reverse(
+            "contacts:contact_update_primary", kwargs={"pk": self.contact_a.pk}
+        )
+        self.assertIn(edit_url, html)
+        self.assertIn("change_reason=fix", html)
+
+    def test_address_no_actions_when_confirmed(self):
+        """住所 CFC が確認済みなら確認OK/要修正は出ない。"""
+        self._give_address_cfc(confirmed=True)
+        html = self.client.get(self._url()).content.decode()
+        self.assertNotIn('name="contact-field-action-address"', html)
+        self.assertNotIn("change_reason=fix", html)
+
+    def test_address_no_actions_when_no_cfc(self):
+        """住所値はあるが CFC が無ければ確認OK/要修正は出ない。"""
+        self.contact_a.address = "愛知県豊田市西町1-2-3"
+        self.contact_a.save()
+        html = self.client.get(self._url()).content.decode()
+        self.assertNotIn('name="contact-field-action-address"', html)
+        self.assertNotIn("change_reason=fix", html)
+
     # ---- 正常系 ----
 
     def test_n1_primary_contact(self):
@@ -947,6 +1001,28 @@ class ContactDetailViewTests(TestCase):
         self.assertFalse(ctx["is_active"])
         self.assertFalse(ctx["is_inactive"])
         self.assertEqual(ctx["contact"].pk, self.contact_a.pk)
+
+    def test_sidebar_active_menu_is_contact_list(self):
+        """コンタクト詳細のサイドバー選択は「コンタクト一覧」（contacts:contact_list）。
+
+        v1.7：旧 active_menu="cards:card_list"（名刺一覧が点灯）を是正。"""
+        resp = self.client.get(self._url())
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.context["active_menu"], "contacts:contact_list")
+
+    def test_contact_detail_has_no_add_role_button(self):
+        """コンタクト詳細（primary）には「別肩書を追加」導線を出さない（人物詳細へ集約）。
+
+        v1.7：別肩書追加ボタンはコンタクト詳細から撤去し、人物詳細のアクション帯へ移した。
+        additional_roles_mode を渡さないコンタクト詳細では出ない。"""
+        resp = self.client.get(self._url())
+        self.assertEqual(resp.status_code, 200)
+        body = resp.content.decode()
+        self.assertNotIn("別肩書を追加", body)
+        add_role_url = reverse(
+            "persons:person_add_additional_role", kwargs={"pk": self.person_a.pk}
+        )
+        self.assertNotIn(add_role_url, body)
 
     def test_n2_active_contact(self):
         """N2: active Contact → 200、編集可能モード、別肩書追加ボタン非表示。"""
@@ -1038,6 +1114,47 @@ class ContactDetailViewTests(TestCase):
         self.assertIn(self.contact_a, ctx_others)  # primary が含まれる
         self.assertNotIn(active, ctx_others)  # 自分は含まれない
 
+    def test_other_contacts_table_detail_button_no_row_link(self):
+        """v1.7：他コンタクトは表形式。行全体クリックは無く「詳細」ボタン経由のみ。
+
+        thead は（操作｜状態｜氏名｜会社｜メール｜携帯）。詳細ボタン
+        （app-btn--outline-secondary）が出て遷移先が /contacts/<uuid>/（back 付き）。
+        カード全体を包む <a class="app-list-card"> は無い。氏名・会社・メール・携帯が出る。
+        内容自動調整（app-table--nowrap・状態列固定幅は無し）。
+        """
+        other = Contact.objects.create(
+            person=self.person_a,
+            status=Contact.Status.ACTIVE,
+            full_name="他コンタクト氏名",
+            organization="他コンタクト会社",
+            email="other-c@example.com",
+            mobile_phone="080-3333-4444",
+        )
+        resp = self.client.get(self._url())
+        body = resp.content.decode()
+        # テーブル化（app-table）され、行全体クリック <a class="app-list-card"> は無い。
+        self.assertIn("app-table", body)
+        self.assertNotRegex(body, r'<a[^>]*class="app-list-card"')
+        # thead は（操作｜状態｜氏名｜会社｜メール｜携帯）。
+        for col in ("操作", "状態", "氏名", "会社", "メール", "携帯"):
+            self.assertIn(col, body)
+        # 内容自動調整：当テーブルは素の app-table（nowrap なし）、状態列固定幅も無し。
+        self.assertIn('<table class="app-table">', body)
+        self.assertNotIn("width:48px", body)
+        # 詳細ボタン（outline-secondary）が出る。
+        self.assertRegex(
+            body,
+            r'class="app-btn app-btn--outline-secondary app-btn--sm"[^>]*>\s*詳細\s*</a>',
+        )
+        # 遷移先は該当コンタクト詳細（back 付きクエリ）。
+        self.assertIn(
+            reverse("contacts:contact_detail", kwargs={"pk": other.id}), body
+        )
+        # 他コンタクトモードの項目（氏名・会社・メール・携帯）が出る。
+        for value in ("他コンタクト氏名", "他コンタクト会社",
+                      "other-c@example.com", "080-3333-4444"):
+            self.assertIn(value, body)
+
     def test_n8_pending_duplicates(self):
         """N8: 重複候補がある → pending_duplicates に含まれる。"""
         person_b = Person.objects.create()
@@ -1072,14 +1189,24 @@ class ContactDetailViewTests(TestCase):
         )
         resp = self.client.get(self._url())
         self.assertEqual(resp.context["previous_person"], prev_person)
-        self.assertIn("マージ前の人物", resp.content.decode())
+        self.assertIn("マージ前のパーソン", resp.content.decode())
 
-    def test_n10_no_cfc_records(self):
-        """N10: CFC レコードなし（全 high）→ contact_confidence が「確認すべきフィールドなし」表示。"""
-        # CFC を全削除
-        ContactFieldConfidence.objects.filter(contact=self.contact_a).delete()
+    def test_n10_unconfirmed_band_removed(self):
+        """N10: 要確認帯（未確認件数サマリー＋一括確定ボタン）は撤去済み。
+
+        未確認 CFC が 1 件以上あっても（setUp の cfc_organization=mid）、帯・一括ボタン・
+        件数サマリーは出さない。個別フィールドの確認 UI（確認OK/要修正）は別途残る。
+        """
         resp = self.client.get(self._url())
-        self.assertIn("確認すべきフィールドはありません", resp.content.decode())
+        body = resp.content.decode()
+        # 帯は常に無い：一括確定ボタン・件数サマリー文言・summary タグ出力のいずれも出ない。
+        self.assertNotIn("js-bulk-confirm-btn", body)
+        self.assertNotIn("一括確定", body)
+        self.assertNotIn("確認すべきフィールドはありません", body)
+        # context にも帯用キーは投入しない。
+        self.assertNotIn("unconfirmed_count", resp.context)
+        # 個別フィールドの確認 UI（app.js 配線済み）は残る。
+        self.assertIn("js-contact-field-action", body)
 
     # ---- 異常系 ----
 
@@ -1121,11 +1248,42 @@ class ContactDetailViewTests(TestCase):
         ):
             self.assertIn(key, resp.context, f"missing context key: {key}")
 
+    def test_r5_push_current_makes_detail_a_back_target(self):
+        """R5: 起点ハブ化（案A）。push_current で back_stack に「コンタクト詳細」が積まれ、
+        子画面の戻り先になる。keys=["page"] は GET に無いので path-only で積まれる。"""
+        resp = self.client.get(self._url())
+        back = resp.context["back"]
+        titles = [e.get("title") for e in back.back_stack]
+        urls = [e.get("url") for e in back.back_stack]
+        self.assertIn("コンタクト詳細", titles)
+        # path-only（クエリは付かない）。
+        self.assertIn(self._url(), urls)
+
+    def test_r6_push_current_no_double_push(self):
+        """R6: 二重 push 防止。back_stack の先頭が既にコンタクト詳細（同一 view_name+kwargs）なら
+        重複チェックで再 push されない（リロード・子からの戻り想定）。"""
+        from back_navigator.back_navigator import BackNavigator
+
+        # 1 回目：コンタクト詳細を積んだ状態の back_stack をエンコード。
+        resp1 = self.client.get(self._url())
+        back1 = resp1.context["back"]
+        encoded = back1._calc_encode_stack(back1.back_stack)
+
+        # 2 回目：その back_stack を付けて同じコンタクト詳細へ。重複チェックで二重に積まれない。
+        resp2 = self.client.get(
+            self._url(), {BackNavigator.PARAM_NAME: encoded}
+        )
+        back2 = resp2.context["back"]
+        self.assertEqual(
+            [e.get("title") for e in back2.back_stack].count("コンタクト詳細"), 1
+        )
+
     def test_r2_template_rendered(self):
-        """R2: テンプレートが正しくレンダリング、Contact 名が含まれる。"""
+        """R2: テンプレートが正しくレンダリング、Contact 名とタイトル「コンタクト詳細」が含まれる。"""
         resp = self.client.get(self._url())
         body = resp.content.decode()
         self.assertIn("A-name", body)
+        # タイトルは集約設計に合わせ「コンタクト詳細」（HIG 原則4）。
         self.assertIn("コンタクト詳細", body)
 
     def test_r3_edit_ui_in_editable_mode(self):
@@ -1316,6 +1474,157 @@ class ContactDetailViewTests(TestCase):
         self.assertIn("merged-pp-inactive", resp.content.decode())
 
 
+class ContactDetailSelfLinkButtonTests(TestCase):
+    """contact_detail 紐付けユーザーセクションの表示検証。
+
+    v1.7：未紐付け表示（「このユーザーで紐付ける」ボタン・「紐付けられていません」テキスト）は
+    撤去し、紐付け済み（本人(a)／他User(c)）のときだけセクションを出す。本人紐付けの入口は
+    ホーム/プロフィールの候補アラートに一本化。(a)(c) の表示内容は従来どおり。"""
+
+    LABEL = "このユーザーで紐付ける"
+
+    def setUp(self):
+        from django.contrib.auth.models import Permission
+
+        self.user = User.objects.create_user(
+            username="selflink_user", password="dummy", email="me@example.com"
+        )
+        _grant_contact_perms(self.user)
+        # 紐付けユーザーセクションは人物詳細（PersonDetailView, additional_roles_mode）に集約された。
+        # PersonDetailView は persons.view_person を要求するため、人物詳細を開くテスト用に付与する。
+        self.user.user_permissions.add(
+            Permission.objects.get(
+                codename="view_person", content_type__app_label="persons"
+            )
+        )
+        self.client = Client()
+        self.client.force_login(self.user)
+
+    def _make_primary(self, email, person_status=Person.Status.ACTIVE,
+                      full_name="対象", linked_user=None):
+        person = Person.objects.create(status=person_status)
+        c = Contact.objects.create(
+            person=person, status=Contact.Status.PRIMARY,
+            full_name=full_name, email=email,
+        )
+        person.primary_contact = c
+        person.save(update_fields=["primary_contact", "updated_at"])
+        if linked_user is not None:
+            linked_user.person = person
+            linked_user.save(update_fields=["person"])
+        return person, c
+
+    def _url(self, c):
+        return reverse("contacts:contact_detail", kwargs={"pk": c.pk})
+
+    def _person_url(self, person):
+        # 紐付けユーザーセクションは人物詳細に集約（PersonDetailView が primary contact 経路で
+        # contact_detail.html を additional_roles_mode=True で描画）。
+        return reverse("persons:person_detail", kwargs={"pk": person.pk})
+
+    def test_no_self_link_button_on_contact_detail(self):
+        """v1.7：紐付けは人物詳細へ一本化。コンタクト詳細では email 一致でも紐付けボタンを出さない。
+
+        ContactDetailView は can_self_link を渡さないため band に黄ボタンは出ない。
+        カード内未紐付けセクションも従来どおり非表示（撤去維持）。"""
+        _, c = self._make_primary("me@example.com")
+        resp = self.client.get(self._url(c))
+        self.assertEqual(resp.status_code, 200)
+        # email_match は helper 由来で True だが、コンタクト詳細では can_self_link を渡さない。
+        self.assertTrue(resp.context["email_match"])
+        self.assertNotIn("can_self_link", resp.context)
+        self.assertNotContains(resp, self.LABEL)
+        self.assertNotContains(resp, "このパーソンをログインアカウントに紐付ける")
+        # カード内「紐付けユーザー」セクション・常時テキストも非表示のまま。
+        self.assertNotContains(resp, "紐付けユーザー")
+        self.assertNotContains(resp, "ユーザーに紐付けられていません")
+
+    def test_hidden_when_email_mismatch(self):
+        _, c = self._make_primary("other@example.com")
+        resp = self.client.get(self._url(c))
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(resp.context["email_match"])
+        self.assertNotContains(resp, self.LABEL)
+
+    def test_hidden_when_person_not_active(self):
+        # 非active（archived）Person の primary はメール一致でもボタンを出さない。
+        _, c = self._make_primary("me@example.com",
+                                  person_status=Person.Status.ARCHIVED)
+        resp = self.client.get(self._url(c))
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(resp.context["person_active"])
+        self.assertNotContains(resp, self.LABEL)
+
+    def test_linked_to_self_shows_unlink_in_section(self):
+        # (a) 本人紐付け済み：人物詳細の「紐付けユーザー」折りたたみに集約。解除ボタンが出る。
+        person, _ = self._make_primary("me@example.com", linked_user=self.user)
+        resp = self.client.get(self._person_url(person))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "紐付けユーザー")
+        # 紐付け先ユーザー情報（ユーザー名）。
+        self.assertContains(resp, "selflink_user")
+        # 解除は体言止めラベル「紐付けを解除」＋ warning（黄）。旧ラベルは消える。
+        self.assertContains(resp, "紐付けを解除")
+        self.assertContains(resp, "app-btn--warning")
+        self.assertNotContains(resp, "紐付け済み（解除）")
+        # self-link ボタンは出ない。
+        self.assertNotContains(resp, self.LABEL)
+
+    def test_linked_to_other_user_shows_info_without_action(self):
+        # (c) 他 User 紐付け：人物詳細でユーザー情報は出るが、解除など操作系は出さない。
+        other = User.objects.create_user(
+            username="other_owner", password="dummy", email="other@example.com"
+        )
+        person, _ = self._make_primary("me@example.com", linked_user=other)
+        resp = self.client.get(self._person_url(person))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "紐付けユーザー")
+        # 紐付け先ユーザー名は表示される（状態テキスト「〜と紐付け済み」は v1.7 で撤去済み）。
+        self.assertContains(resp, "other_owner")
+        # 操作系（紐付けを解除）は一切出さない。
+        self.assertNotContains(resp, "紐付けを解除")
+        self.assertNotContains(resp, self.LABEL)
+
+    def test_unlinked_card_section_hidden(self):
+        """v1.7：未紐付けではカード内「紐付けユーザー」セクション（見出し・常時テキスト・解除）は出ない。
+        （band の黄ボタンは test_self_link_button_in_band_when_email_match_and_unlinked で検証）"""
+        _, c = self._make_primary("me@example.com")
+        resp = self.client.get(self._url(c))
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, "紐付けユーザー")
+        self.assertNotContains(resp, "ユーザーに紐付けられていません")
+        self.assertNotContains(resp, "紐付けを解除")
+
+    def test_user_detail_button_hidden_without_user_admin_perm(self):
+        # retire_user 権限が無ければ「ユーザ詳細」ボタンは出さない（user_detail で 403 にしないため）。
+        _, c = self._make_primary("me@example.com", linked_user=self.user)
+        resp = self.client.get(self._url(c))
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, "ユーザ詳細")
+
+    def test_user_detail_button_shown_with_user_admin_perm(self):
+        # retire_user 権限があれば、紐付き先ユーザーの「ユーザ詳細」へのボタンが出る。
+        from django.contrib.auth.models import Permission
+
+        self.user.user_permissions.add(
+            Permission.objects.get(
+                codename="retire_user", content_type__app_label="accounts"
+            )
+        )
+        self.user = User.objects.get(pk=self.user.pk)
+        self.client.force_login(self.user)
+        person, _ = self._make_primary("me@example.com", linked_user=self.user)
+        resp = self.client.get(self._person_url(person))
+        self.assertEqual(resp.status_code, 200)
+        # 「ユーザ詳細」は虫眼鏡アイコン化（aria-label/title="ユーザ詳細"）＋ user_detail への href。
+        # href は append_back_url で back_stack が付くため、完全一致ではなく reverse URL を含むかで検証。
+        self.assertContains(resp, "ユーザ詳細")
+        self.assertContains(
+            resp,
+            reverse("accounts:user_detail", kwargs={"user_id": self.user.id}),
+        )
+
+
 class ConfidenceTagTests(TestCase):
     """{% confidence %} カスタムタグの単体テスト（D-3b §8.2 C1〜C4）。"""
 
@@ -1496,6 +1805,65 @@ class ContactListViewTests(TestCase):
         person.save(update_fields=["primary_contact", "updated_at"])
         return contact
 
+    def test_status_and_lang_columns_expose_sort_keys(self):
+        """状態・言語列の <td> に並べ替え用 data-sort-key が描画される。
+
+        見出しクリックのその場並べ替え（app.js initTable）用の隠し値。
+        状態は業務語順の順序値（主=0/副=1/旧=2）、言語は lang 生値を出す。
+        """
+        # contact_a は primary（主=0）・lang 既定 "ja"。副（active=1）も別 Person で用意。
+        sub_person = Person.objects.create()
+        Contact.objects.create(
+            person=sub_person, status=Contact.Status.ACTIVE, full_name="Sub"
+        )
+        # 既定は主のみ表示のため、主+副を明示して両方を一覧に載せる。
+        html = self.client.get(
+            self.url, {"searched": "1", "status": ["primary", "active"]}
+        ).content.decode()
+        # 主コンタクト（primary）→ 順序値 0。
+        self.assertIn('data-col-key="status" data-sort-key="0"', html)
+        # 副コンタクト（active）→ 順序値 1。
+        self.assertIn('data-col-key="status" data-sort-key="1"', html)
+        # 言語列は lang 生値（既定 ja）。
+        self.assertIn('data-col-key="lang" data-sort-key="ja"', html)
+
+    def test_unconfirmed_low_mid_shows_confirm_badge(self):
+        """未確認の low/mid CFC（9項目内）を持つ行に「要確認」バッジが出る。"""
+        ContactFieldConfidence.objects.create(
+            contact=self.contact_a,
+            field_name="organization",
+            confidence=ContactFieldConfidence.Confidence.LOW,
+        )
+        html = self.client.get(self.url).content.decode()
+        # テーブル氏名セル + モバイル app-list-card の 2 箇所に出る。
+        self.assertEqual(html.count('aria-label="要確認"'), 2)
+
+    def test_no_cfc_hides_confirm_badge(self):
+        """CFC が無い行にはバッジが出ない（既定の contact_a）。"""
+        html = self.client.get(self.url).content.decode()
+        self.assertNotIn("要確認", html)
+
+    def test_confirmed_cfc_hides_confirm_badge(self):
+        """確認済み（confirmed_at セット済み）CFC はバッジ対象外。"""
+        ContactFieldConfidence.objects.create(
+            contact=self.contact_a,
+            field_name="organization",
+            confidence=ContactFieldConfidence.Confidence.MID,
+            confirmed_at=timezone.now(),
+        )
+        html = self.client.get(self.url).content.decode()
+        self.assertNotIn("要確認", html)
+
+    def test_cfc_outside_duplicate_check_fields_hides_badge(self):
+        """9項目（DUPLICATE_CHECK_FIELDS）外の未確認 CFC はバッジ対象外。"""
+        ContactFieldConfidence.objects.create(
+            contact=self.contact_a,
+            field_name="notes",
+            confidence=ContactFieldConfidence.Confidence.LOW,
+        )
+        html = self.client.get(self.url).content.decode()
+        self.assertNotIn("要確認", html)
+
     def test_default_shows_primary_only(self):
         """初回アクセス（searched なし）→ primary のみ、active / inactive は非表示。"""
         active = Contact.objects.create(
@@ -1516,6 +1884,54 @@ class ContactListViewTests(TestCase):
         self.assertNotIn(inactive.id, ids)
         self.assertEqual(resp.context["selected_statuses"], ["primary"])
         self.assertFalse(resp.context["searched"])
+
+    def test_person_filter_shows_person_active_including_primary(self):
+        """?person=<uuid>&searched=1&status=primary&status=active →
+        指定 Person の active 全件（primary 含む）。別肩書も primary も出て、他 Person は除外。"""
+        a_active = Contact.objects.create(
+            person=self.person_a,
+            status=Contact.Status.ACTIVE,
+            full_name="A-active",
+            organization="Acme Corp",
+        )
+        # 別 Person の active コンタクト（person 絞り込みで除外されるべき）。
+        other_person = Person.objects.create()
+        other_active = Contact.objects.create(
+            person=other_person,
+            status=Contact.Status.ACTIVE,
+            full_name="Other-active",
+        )
+        resp = self.client.get(
+            self.url,
+            {
+                "person": str(self.person_a.id),
+                "searched": "1",
+                "status": ["primary", "active"],
+            },
+        )
+        self.assertEqual(resp.status_code, 200)
+        ids = [c.id for c in resp.context["contacts"]]
+        # primary（主コンタクト）と active（別肩書）の両方が出る。
+        self.assertIn(self.contact_a.id, ids)
+        self.assertIn(a_active.id, ids)
+        # 別 Person のコンタクトは person 絞り込みで除外。
+        self.assertNotIn(other_active.id, ids)
+        # 再検索・ソートで保持するための hidden 値が context に乗る。
+        self.assertEqual(resp.context["person_filter"], str(self.person_a.id))
+
+    def test_person_filter_invalid_uuid_returns_empty(self):
+        """不正な person UUID は 0 件に倒す（500 を出さない・安全側＝現状挙動踏襲）。"""
+        Contact.objects.create(
+            person=self.person_a,
+            status=Contact.Status.ACTIVE,
+            full_name="A-active",
+        )
+        resp = self.client.get(
+            self.url,
+            {"person": "not-a-uuid", "searched": "1", "status": "active"},
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(list(resp.context["contacts"]), [])
 
     def test_status_filter_primary_active(self):
         """searched=1 + status=[primary, active] → primary + active 表示、inactive 非表示。"""
@@ -2250,9 +2666,65 @@ class UpdatePrimaryContactViewTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         form = resp.context["form"]
         self.assertIn("change_reason", form.fields)
-        self.assertIn("note", form.fields)
+        # 備考（note）は v1.7 で撤去（保存経路が無く破棄されていたため）。
+        self.assertNotIn("note", form.fields)
         # low/mid CFC（organization）の確認 CB が動的追加されている
         self.assertIn("confirmed_organization", form.fields)
+
+    def test_get_default_does_not_skip_reason_modal(self):
+        """?change_reason 無し → モーダルスキップフラグは False（従来どおりモーダルを開く）。"""
+        resp = self.client.get(self._url())
+        self.assertFalse(resp.context["skip_change_reason_modal"])
+
+    def test_get_change_reason_fix_skips_modal_and_presets(self):
+        """?change_reason=fix → skip フラグ True・change_reason 初期値 fix・script に SKIP_MODAL=true。"""
+        resp = self.client.get(self._url() + "?change_reason=fix")
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.context["skip_change_reason_modal"])
+        # change_reason は fix に preset される。
+        self.assertEqual(resp.context["form"]["change_reason"].value(), "fix")
+        # テンプレートの先出しモーダル制御 JS が SKIP_MODAL=true で描画される。
+        self.assertIn("var SKIP_MODAL = true;", resp.content.decode())
+
+    def test_confirm_toggle_is_inline_not_end_section(self):
+        """確認チェックは各フィールド近傍にインライン配置。末尾のまとめセクションは廃止。"""
+        html = self.client.get(self._url()).content.decode()
+        # organization は mid CFC（setUp）→ 確認トグルが描画される（インライン近傍）。
+        self.assertIn('name="confirmed_organization"', html)
+        self.assertIn("この項目を確認", html)
+        # 旧「確認チェック」まとめセクションの見出しは無い。
+        self.assertNotIn("<h2>確認チェック</h2>", html)
+
+    def test_address_confirm_toggle_has_no_duplicate_field_label(self):
+        """住所の確認トグルにフィールド名見出し（住所）を出さない（セクション <h2>住所</h2> と重複するため）。"""
+        # address を mid CFC 化 → 住所グループ末尾に確認トグルが描画される。
+        ContactFieldConfidence.objects.create(
+            contact=self.primary,
+            field_name="address",
+            confidence=ContactFieldConfidence.Confidence.MID,
+        )
+        html = self.client.get(self._url()).content.decode()
+        # 住所の確認トグル自体は描画される（「この項目を確認」＋確認 CB）。
+        self.assertIn('name="confirmed_address"', html)
+        # 住所グループの見出しは <h2>住所</h2> のみ。app-form__label としての「住所」二重表示は無い。
+        self.assertNotIn('app-form__label">住所', html)
+
+    def test_confirm_toggle_shows_confidence_badge(self):
+        """確認トグルに信頼度バッジ（中／低）を詳細画面と同じ ui_tags で表示する。"""
+        # organization は mid CFC（setUp）→ 中バッジ。address を low CFC 追加 → 低バッジ。
+        ContactFieldConfidence.objects.create(
+            contact=self.primary,
+            field_name="address",
+            confidence=ContactFieldConfidence.Confidence.LOW,
+        )
+        html = self.client.get(self._url()).content.decode()
+        # 中（mid=warning）／低（low=error）バッジが編集フォームに詳細画面と同じ見た目で出る。
+        self.assertIn(
+            '<span class="app-status-badge app-status-badge--warning">中</span>', html
+        )
+        self.assertIn(
+            '<span class="app-status-badge app-status-badge--error">低</span>', html
+        )
 
     def test_get_active_returns_404(self):
         """active Contact → 404（このViewはprimary専用）。"""

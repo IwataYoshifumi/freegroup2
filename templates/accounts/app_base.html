@@ -13,6 +13,10 @@
   </div>
 {% endblock %}
 
+{# サイドバーありページ＝≡（ハンバーガー）を出す（CSS は body.has-sidebar で限定）。 #}
+{% block body_class %}has-sidebar{% endblock %}
+
 {% block drawer_content %}
+  {# ドロワーはアプリ内サイドバーのみ（横断ナビはトップバー▼へ分離）。 #}
   {% include "accounts/_sidebar.html" %}
 {% endblock %}
