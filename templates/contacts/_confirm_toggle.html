@@ -1,17 +1,26 @@
+{% load ui_tags %}
 {% comment %}
 フィールド近傍のインライン確認チェック（確認しました/未確認トグル）。
 引数 cf = confirmed_<field> の BoundField（呼び出し側で form.confirmed_<field> を渡す）。
+引数 field_name = 対応する Contact フィールド名（例 "organization"）。信頼度バッジ描画用。
+  信頼度 dict（field_confidences）は編集ビューが context に入れており include の context 継承で届く
+  （UpdatePrimaryContactView / UpdateActiveContactView の get_context_data。新規作成・別肩書追加では
+  cf 自体が空なので本ブロックごと描画されない）。
 
 主/副コンタクト修正フォームで、低信頼（未確認 low/mid）フィールドにのみ confirmed_<field> が
 動的生成される（contacts/forms.py）。存在しないフォーム（新規作成・別肩書追加）や確認済み・
 high フィールドでは cf が空になり、何も描画しない（詳細画面の確認OK/要修正の表示条件と同思想）。
+
+信頼度バッジ（中／低）は詳細画面と同じ {% templatetag openblock %} confidence {% templatetag closeblock %}
+タグ（cards/templatetags/ui_tags.py）をそのまま再利用する。トグルが出る条件（低/中の未確認CFC）＝
+バッジが出る条件なので、cf があれば必ずバッジも出る（confirmed 済み・high は cf も空で非描画）。
 
 機能（確認しました/未確認の選択、保存時 clean() の確認必須化）は不変。表示位置のみ末尾セクション
 から各フィールドの直下へ移す。
 {% endcomment %}
 {% if cf %}
   <div class="app-contact-confirm-inline" style="margin-top:6px;">
-    <span class="app-muted" style="display:block; font-size:12px; margin-bottom:2px;">この項目を確認</span>
+    <span class="app-muted" style="display:block; font-size:12px; margin-bottom:2px;">この項目を確認{% if field_name %} {% confidence field_confidences field_name 'badge' %}{% endif %}</span>
     {{ cf }}
     {{ cf.errors }}
   </div>

@@ -87,7 +87,7 @@
 {# 氏名（full_name＝派生欄）の確認チェックは氏名グループ直下に置く（入力欄が派生欄で個別セルに #}
 {# 差し込めないため氏名グループ末尾に全幅で配置）。confirmed_full_name が無いフォームでは非表示。 #}
 {% if form.confirmed_full_name %}
-<div class="app-form__group" style="margin-top:var(--app-space-sm);">{% include "contacts/_confirm_toggle.html" with cf=form.confirmed_full_name %}</div>
+<div class="app-form__group" style="margin-top:var(--app-space-sm);">{% include "contacts/_confirm_toggle.html" with cf=form.confirmed_full_name field_name="full_name" %}</div>
 {% endif %}
 
 {# ==================== 所属グループ ==================== #}
@@ -97,7 +97,7 @@
     <label class="app-form__label" for="{{ form.organization.id_for_label }}">会社</label>
     {{ form.organization }}
     {{ form.organization.errors }}
-    {% include "contacts/_confirm_toggle.html" with cf=form.confirmed_organization %}
+    {% include "contacts/_confirm_toggle.html" with cf=form.confirmed_organization field_name="organization" %}
   </div>
   {# 法人格は補助の「法人格の位置」と概念ペア。位置が en 非表示なので法人格も en では画面から消す。 #}
   {# ただしフリガナ・法人格の位置（en で実質空）と違い、法人格は en でも値を持ちうる（Inc./Ltd. 等）。 #}
@@ -124,19 +124,19 @@
     <label class="app-form__label" for="{{ form.branch.id_for_label }}">支店・店舗</label>
     {{ form.branch }}
     {{ form.branch.errors }}
-    {% include "contacts/_confirm_toggle.html" with cf=form.confirmed_branch %}
+    {% include "contacts/_confirm_toggle.html" with cf=form.confirmed_branch field_name="branch" %}
   </div>
   <div class="app-form__group">
     <label class="app-form__label" for="{{ form.department.id_for_label }}">部署</label>
     {{ form.department }}
     {{ form.department.errors }}
-    {% include "contacts/_confirm_toggle.html" with cf=form.confirmed_department %}
+    {% include "contacts/_confirm_toggle.html" with cf=form.confirmed_department field_name="department" %}
   </div>
   <div class="app-form__group">
     <label class="app-form__label" for="{{ form.title.id_for_label }}">役職</label>
     {{ form.title }}
     {{ form.title.errors }}
-    {% include "contacts/_confirm_toggle.html" with cf=form.confirmed_title %}
+    {% include "contacts/_confirm_toggle.html" with cf=form.confirmed_title field_name="title" %}
   </div>
   <div class="app-form__group">
     <label class="app-form__label" for="{{ form.qualification.id_for_label }}">資格</label>
@@ -158,19 +158,19 @@
     <label class="app-form__label" for="{{ form.email.id_for_label }}">メール</label>
     {{ form.email }}
     {{ form.email.errors }}
-    {% include "contacts/_confirm_toggle.html" with cf=form.confirmed_email %}
+    {% include "contacts/_confirm_toggle.html" with cf=form.confirmed_email field_name="email" %}
   </div>
   <div class="app-form__group">
     <label class="app-form__label" for="{{ form.mobile_phone.id_for_label }}">携帯</label>
     {{ form.mobile_phone }}
     {{ form.mobile_phone.errors }}
-    {% include "contacts/_confirm_toggle.html" with cf=form.confirmed_mobile_phone %}
+    {% include "contacts/_confirm_toggle.html" with cf=form.confirmed_mobile_phone field_name="mobile_phone" %}
   </div>
   <div class="app-form__group">
     <label class="app-form__label" for="{{ form.personal_phone.id_for_label }}">電話</label>
     {{ form.personal_phone }}
     {{ form.personal_phone.errors }}
-    {% include "contacts/_confirm_toggle.html" with cf=form.confirmed_personal_phone %}
+    {% include "contacts/_confirm_toggle.html" with cf=form.confirmed_personal_phone field_name="personal_phone" %}
   </div>
   <div class="app-form__group">
     <label class="app-form__label" for="{{ form.personal_fax.id_for_label }}">FAX</label>
@@ -228,7 +228,7 @@
   {# 住所は自動組み立てで入力欄が無いため全幅で確認トグルのみ置く。フィールド名見出し（住所）は #}
   {# セクション見出し <h2>住所</h2> と重複するため付けない（他フィールドと同じく「この項目を確認」＋トグルのみ）。 #}
   <div class="app-form__group" style="grid-column:1 / -1;">
-    {% include "contacts/_confirm_toggle.html" with cf=form.confirmed_address %}
+    {% include "contacts/_confirm_toggle.html" with cf=form.confirmed_address field_name="address" %}
   </div>
   {% endif %}
 </div>

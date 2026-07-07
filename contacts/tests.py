@@ -2709,6 +2709,23 @@ class UpdatePrimaryContactViewTests(TestCase):
         # 住所グループの見出しは <h2>住所</h2> のみ。app-form__label としての「住所」二重表示は無い。
         self.assertNotIn('app-form__label">住所', html)
 
+    def test_confirm_toggle_shows_confidence_badge(self):
+        """確認トグルに信頼度バッジ（中／低）を詳細画面と同じ ui_tags で表示する。"""
+        # organization は mid CFC（setUp）→ 中バッジ。address を low CFC 追加 → 低バッジ。
+        ContactFieldConfidence.objects.create(
+            contact=self.primary,
+            field_name="address",
+            confidence=ContactFieldConfidence.Confidence.LOW,
+        )
+        html = self.client.get(self._url()).content.decode()
+        # 中（mid=warning）／低（low=error）バッジが編集フォームに詳細画面と同じ見た目で出る。
+        self.assertIn(
+            '<span class="app-status-badge app-status-badge--warning">中</span>', html
+        )
+        self.assertIn(
+            '<span class="app-status-badge app-status-badge--error">低</span>', html
+        )
+
     def test_get_active_returns_404(self):
         """active Contact → 404（このViewはprimary専用）。"""
         active_person = Person.objects.create()
