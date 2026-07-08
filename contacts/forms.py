@@ -458,7 +458,15 @@ class ContactUpdateForm(ContactBaseForm):
         # widget 差し替え型のトグル化：BooleanField のまま widget を RadioSelect に差し替えて
         # 「確認しました／未確認」の 2 ボタン表示。値は to_python が 'True'/'False' を bool に
         # 変換するので clean() の `if not cleaned.get(chk_name)` 判定はそのまま動く。
-        confidences = self.target_contact.get_field_confidences()
+        # 生成対象は「ゲート対象（get_field_confidences: 重複判定 9 項目）」と「表示拡張対象
+        # （get_all_field_confidences: UPDATABLE_FIELDS ∩ CFC 実在、9 項目外も含む）」の和集合。
+        # required=False のままなので追加分は任意確認であり、必須確認のゲートは下の clean() が
+        # 引き続き get_field_confidences()（9 項目）で判定する（表示は広く／必須は狭く、Step2）。
+        # ※address は DUPLICATE_CHECK_FIELDS だが UPDATABLE_FIELDS 外（4 要素から自動組立）のため、
+        #   get_all_field_confidences() だけでは confirmed_address が生成されず clean() ゲートと
+        #   矛盾して送信不能になる。get_field_confidences() をマージして 9 項目を必ず含める。
+        confidences = dict(self.target_contact.get_field_confidences())
+        confidences.update(self.target_contact.get_all_field_confidences())
         for field_name, conf in confidences.items():
             if conf.confidence in ("low", "mid") and conf.confirmed_at is None:
                 self.fields[f"confirmed_{field_name}"] = forms.BooleanField(

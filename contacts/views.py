@@ -552,7 +552,13 @@ class UpdatePrimaryContactView(LoginRequiredMixin, PermissionRequiredMixin, Upda
             {
                 "back": back,
                 "contact": self.object,
-                "field_confidences": self.object.get_field_confidences(),
+                # 表示バッジ用は「重複判定 9 項目（get_field_confidences、address 含む）」と
+                # 「UPDATABLE ∩ CFC（get_all_field_confidences、9 項目外も）」の和集合（Step2）。
+                # address は UPDATABLE 外のため後者だけだとバッジが出ない（get_field_confidences で補完）。
+                "field_confidences": {
+                    **self.object.get_field_confidences(),
+                    **self.object.get_all_field_confidences(),
+                },
                 "active_app": "contacts",
                 "active_menu": "contacts:contact_list",
                 # ?change_reason=fix のときは修正理由モーダルを開かず直接入力フォームを出す。
@@ -654,7 +660,13 @@ class UpdateActiveContactView(LoginRequiredMixin, PermissionRequiredMixin, Updat
             {
                 "back": back,
                 "contact": self.object,
-                "field_confidences": self.object.get_field_confidences(),
+                # 表示バッジ用は「重複判定 9 項目（get_field_confidences、address 含む）」と
+                # 「UPDATABLE ∩ CFC（get_all_field_confidences、9 項目外も）」の和集合（Step2）。
+                # address は UPDATABLE 外のため後者だけだとバッジが出ない（get_field_confidences で補完）。
+                "field_confidences": {
+                    **self.object.get_field_confidences(),
+                    **self.object.get_all_field_confidences(),
+                },
                 "active_app": "contacts",
                 "active_menu": "contacts:contact_list",
             }

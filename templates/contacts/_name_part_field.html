@@ -6,8 +6,11 @@
 {# widget の js-name-last / js-name-first クラスは forms.py の _tag_name_compose_widgets が #}
 {# 付与済みのため {{ field }} 描画で保持される（原本→派生のライブ追従は順序非依存）。 #}
 {# params: field（姓 or 名の BoundField）/ label（表示ラベル文言） #}
+{# 任意 params（Step2）: cf（form.confirmed_<field> の BoundField）/ field_name（Contact フィールド名）。 #}
+{# 渡された場合のみ確認トグルを欄内に表示する。cf が空（CFC 実在なし）なら _confirm_toggle が非描画。 #}
 <div class="app-form__group">
   <label class="app-form__label" for="{{ field.id_for_label }}">{{ label }}</label>
   {{ field }}
   {{ field.errors }}
+  {% include "contacts/_confirm_toggle.html" with cf=cf field_name=field_name %}
 </div>

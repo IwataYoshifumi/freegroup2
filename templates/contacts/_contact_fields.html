@@ -23,8 +23,8 @@
   {# 下グリッド＝入力欄（姓 / 名 / フリガナ / 別名）。ja 固定なので姓→名の順で include。段間の余白はこちらに付ける。 #}
   {# ミドルネーム等は ja では画面に出さず as_hidden で値を保持する（下記 hidden、法人格 :95-103 と同方式・方向逆）。 #}
   <div class="app-form-grid" style="margin-top:var(--app-space-md);">
-    {% include "contacts/_name_part_field.html" with field=form.last_name label="姓" %}
-    {% include "contacts/_name_part_field.html" with field=form.first_name label="名" %}
+    {% include "contacts/_name_part_field.html" with field=form.last_name label="姓" cf=form.confirmed_last_name field_name="last_name" %}
+    {% include "contacts/_name_part_field.html" with field=form.first_name label="名" cf=form.confirmed_first_name field_name="first_name" %}
     {# ミドルネーム等（other_name_parts）は ja では画面に出さず as_hidden で値を POST 保持する。 #}
     {# 丸ごと省略すると ja 未送信→clean で "" になり保存経路（get_update_contact/fix）で既存値を空上書き #}
     {# するため、hidden で値を POST に保持し（old==new で上書きを防ぐ）画面表示だけ抑える。en は下の {% else %} で従来表示。 #}
@@ -35,11 +35,13 @@
       <label class="app-form__label" for="{{ form.phonetic_name.id_for_label }}">フリガナ</label>
       {{ form.phonetic_name }}
       {{ form.phonetic_name.errors }}
+      {% include "contacts/_confirm_toggle.html" with cf=form.confirmed_phonetic_name field_name="phonetic_name" %}
     </div>
     <div class="app-form__group">
       <label class="app-form__label" for="{{ form.alias_name.id_for_label }}">別名（旧姓など）</label>
       {{ form.alias_name }}
       {{ form.alias_name.errors }}
+      {% include "contacts/_confirm_toggle.html" with cf=form.confirmed_alias_name field_name="alias_name" %}
     </div>
   </div>
 {% else %}
@@ -55,11 +57,11 @@
   {# ブロックは _name_part_field.html に単一定義し、ここでは include 順だけ入れ替える #}
   {# 役割（last_name/first_name の対応）・ラベル文言・i18n は変えない＝順序のみ。 #}
   {% if form.effective_lang == "en" %}
-    {% include "contacts/_name_part_field.html" with field=form.first_name label="名" %}
-    {% include "contacts/_name_part_field.html" with field=form.last_name label="姓" %}
+    {% include "contacts/_name_part_field.html" with field=form.first_name label="名" cf=form.confirmed_first_name field_name="first_name" %}
+    {% include "contacts/_name_part_field.html" with field=form.last_name label="姓" cf=form.confirmed_last_name field_name="last_name" %}
   {% else %}
-    {% include "contacts/_name_part_field.html" with field=form.last_name label="姓" %}
-    {% include "contacts/_name_part_field.html" with field=form.first_name label="名" %}
+    {% include "contacts/_name_part_field.html" with field=form.last_name label="姓" cf=form.confirmed_last_name field_name="last_name" %}
+    {% include "contacts/_name_part_field.html" with field=form.first_name label="名" cf=form.confirmed_first_name field_name="first_name" %}
   {% endif %}
   {# フリガナは ja のみ表示（en は非出力）。この分岐は en 側だが、条件包みを保って非表示制御を維持する。 #}
   {% if form.effective_lang == "ja" %}
@@ -67,17 +69,20 @@
     <label class="app-form__label" for="{{ form.phonetic_name.id_for_label }}">フリガナ</label>
     {{ form.phonetic_name }}
     {{ form.phonetic_name.errors }}
+    {% include "contacts/_confirm_toggle.html" with cf=form.confirmed_phonetic_name field_name="phonetic_name" %}
   </div>
   {% endif %}
   <div class="app-form__group">
     <label class="app-form__label" for="{{ form.other_name_parts.id_for_label }}">ミドルネーム等</label>
     {{ form.other_name_parts }}
     {{ form.other_name_parts.errors }}
+    {% include "contacts/_confirm_toggle.html" with cf=form.confirmed_other_name_parts field_name="other_name_parts" %}
   </div>
   <div class="app-form__group">
     <label class="app-form__label" for="{{ form.alias_name.id_for_label }}">別名（旧姓など）</label>
     {{ form.alias_name }}
     {{ form.alias_name.errors }}
+    {% include "contacts/_confirm_toggle.html" with cf=form.confirmed_alias_name field_name="alias_name" %}
   </div>
 </div>
 {% endif %}
@@ -109,6 +114,7 @@
     <label class="app-form__label" for="{{ form.legal_entity_type.id_for_label }}">法人格</label>
     {{ form.legal_entity_type }}
     {{ form.legal_entity_type.errors }}
+    {% include "contacts/_confirm_toggle.html" with cf=form.confirmed_legal_entity_type field_name="legal_entity_type" %}
   </div>
   {% else %}
   {{ form.legal_entity_type.as_hidden }}
@@ -118,6 +124,7 @@
     <label class="app-form__label" for="{{ form.legal_entity_type_position.id_for_label }}">法人格の位置</label>
     {{ form.legal_entity_type_position }}
     {{ form.legal_entity_type_position.errors }}
+    {% include "contacts/_confirm_toggle.html" with cf=form.confirmed_legal_entity_type_position field_name="legal_entity_type_position" %}
   </div>
   {% endif %}
   <div class="app-form__group">
@@ -142,12 +149,14 @@
     <label class="app-form__label" for="{{ form.qualification.id_for_label }}">資格</label>
     {{ form.qualification }}
     {{ form.qualification.errors }}
+    {% include "contacts/_confirm_toggle.html" with cf=form.confirmed_qualification field_name="qualification" %}
   </div>
   {# キャッチコピーは所属グリッド（3列）で2列ぶん幅にして「資格1＋キャッチ2」を1行に収める（--span2、ja/en 共通）。 #}
   <div class="app-form__group app-form__group--span2">
     <label class="app-form__label" for="{{ form.catchphrase.id_for_label }}">キャッチコピー</label>
     {{ form.catchphrase }}
     {{ form.catchphrase.errors }}
+    {% include "contacts/_confirm_toggle.html" with cf=form.confirmed_catchphrase field_name="catchphrase" %}
   </div>
 </div>
 
@@ -176,21 +185,25 @@
     <label class="app-form__label" for="{{ form.personal_fax.id_for_label }}">FAX</label>
     {{ form.personal_fax }}
     {{ form.personal_fax.errors }}
+    {% include "contacts/_confirm_toggle.html" with cf=form.confirmed_personal_fax field_name="personal_fax" %}
   </div>
   <div class="app-form__group">
     <label class="app-form__label" for="{{ form.org_phone.id_for_label }}">会社電話</label>
     {{ form.org_phone }}
     {{ form.org_phone.errors }}
+    {% include "contacts/_confirm_toggle.html" with cf=form.confirmed_org_phone field_name="org_phone" %}
   </div>
   <div class="app-form__group">
     <label class="app-form__label" for="{{ form.org_fax.id_for_label }}">会社FAX</label>
     {{ form.org_fax }}
     {{ form.org_fax.errors }}
+    {% include "contacts/_confirm_toggle.html" with cf=form.confirmed_org_fax field_name="org_fax" %}
   </div>
   <div class="app-form__group">
     <label class="app-form__label" for="{{ form.website.id_for_label }}">ウェブサイト</label>
     {{ form.website }}
     {{ form.website.errors }}
+    {% include "contacts/_confirm_toggle.html" with cf=form.confirmed_website field_name="website" %}
   </div>
 </div>
 
@@ -201,26 +214,31 @@
     <label class="app-form__label" for="{{ form.postal_code.id_for_label }}">郵便番号</label>
     {{ form.postal_code }}
     {{ form.postal_code.errors }}
+    {% include "contacts/_confirm_toggle.html" with cf=form.confirmed_postal_code field_name="postal_code" %}
   </div>
   <div class="app-form__group">
     <label class="app-form__label" for="{{ form.country.id_for_label }}">国（2文字）</label>
     {{ form.country }}
     {{ form.country.errors }}
+    {% include "contacts/_confirm_toggle.html" with cf=form.confirmed_country field_name="country" %}
   </div>
   <div class="app-form__group">
     <label class="app-form__label" for="{{ form.region.id_for_label }}">都道府県</label>
     {{ form.region }}
     {{ form.region.errors }}
+    {% include "contacts/_confirm_toggle.html" with cf=form.confirmed_region field_name="region" %}
   </div>
   <div class="app-form__group">
     <label class="app-form__label" for="{{ form.city.id_for_label }}">市区町村</label>
     {{ form.city }}
     {{ form.city.errors }}
+    {% include "contacts/_confirm_toggle.html" with cf=form.confirmed_city field_name="city" %}
   </div>
   <div class="app-form__group">
     <label class="app-form__label" for="{{ form.rest_of_address.id_for_label }}">町名番地以降</label>
     {{ form.rest_of_address }}
     {{ form.rest_of_address.errors }}
+    {% include "contacts/_confirm_toggle.html" with cf=form.confirmed_rest_of_address field_name="rest_of_address" %}
   </div>
   {# 住所（address）は4要素からの自動組み立て＝入力欄が無いため、住所グループ末尾に全幅で #}
   {# 確認チェックを置く（詳細画面で住所バッジ近傍に確認を出すのと同思想）。無ければ非表示。 #}
@@ -243,10 +261,12 @@
     <label class="app-form__label" for="{{ form.notes.id_for_label }}">メモ</label>
     {{ form.notes }}
     {{ form.notes.errors }}
+    {% include "contacts/_confirm_toggle.html" with cf=form.confirmed_notes field_name="notes" %}
   </div>
   <div class="app-form__group">
     <label class="app-form__label" for="{{ form.lang.id_for_label }}">言語</label>
     {{ form.lang }}
     {{ form.lang.errors }}
+    {% include "contacts/_confirm_toggle.html" with cf=form.confirmed_lang field_name="lang" %}
   </div>
 </div>
