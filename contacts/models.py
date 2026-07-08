@@ -671,6 +671,31 @@ class Contact(models.Model):
         """
         return ContactFieldConfidence.get_for_contact(self)
 
+    def get_all_field_confidences(self):
+        """UPDATABLE_FIELDS のうち ContactFieldConfidence が実在するフィールドの dict を返す。
+
+        [性質] 準関数（DB 読み取りのみ）
+        [入力] なし
+        [出力] dict[field_name -> ContactFieldConfidence インスタンス]
+
+        確認バッジ表示の拡張用（Step2 以降でテンプレートが参照する想定）。
+        get_field_confidences() が DUPLICATE_CHECK_FIELDS（9 項目）に限定し、レコードの無い
+        フィールドには confidence='high' の疑似インスタンスを補って返すのに対し、本メソッドは
+        UPDATABLE_FIELDS に含まれ、かつ DB に low/mid の ContactFieldConfidence レコードが
+        実在するフィールドのみを返す（phonetic_name 等 9 項目外も対象になる）。疑似 high は
+        生成しない（レコードが無いフィールドはキーごと含めない）。handwritten_text /
+        other_printed_text は UPDATABLE_FIELDS 外のため対象外。
+
+        既存 get_field_confidences()（確認必須ゲート forms.py clean() が参照）は変更しない。
+        N+1 を避けるため DB クエリは 1 回のみ。
+        """
+        updatable = set(self.UPDATABLE_FIELDS)
+        return {
+            cfc.field_name: cfc
+            for cfc in ContactFieldConfidence.objects.filter(contact=self)
+            if cfc.field_name in updatable
+        }
+
     def get_high_fields(self):
         """実質 high なフィールド集合を返す（§10.5.1）。
 

@@ -18,6 +18,7 @@ from contacts.forms import (
     ContactUpdateForm,
     build_contact_sns_formset,
 )
+from config.constants import DUPLICATE_CHECK_FIELDS
 from contacts.models import Contact, ContactFieldConfidence, ContactSns
 from duplicates.models import DuplicateCandidate
 from persons.models import Person
@@ -1699,6 +1700,83 @@ class ConfidenceTagTests(TestCase):
         self.assertEqual(rendered.strip(), "")
         self.assertNotIn("確認済み", rendered)
         self.assertNotIn("app-status-badge--success", rendered)
+
+
+class GetAllFieldConfidencesTests(TestCase):
+    """Contact.get_all_field_confidences() の単体テスト（確認バッジ表示拡張 Step1）。
+
+    get_field_confidences()（DUPLICATE_CHECK_FIELDS の 9 項目に限定）に対し、本メソッドは
+    UPDATABLE_FIELDS ∩ CFC 実在フィールドを返す（9 項目より広い）。既存メソッドは不変。
+    """
+
+    def setUp(self):
+        self.person = Person.objects.create()
+        self.contact = Contact.objects.create(
+            person=self.person,
+            status=Contact.Status.PRIMARY,
+            full_name="T",
+        )
+        # 9 項目内（DUPLICATE_CHECK_FIELDS ∩ UPDATABLE_FIELDS）
+        self.cfc_org = ContactFieldConfidence.objects.create(
+            contact=self.contact,
+            field_name="organization",
+            confidence=ContactFieldConfidence.Confidence.MID,
+        )
+        # 9 項目外だが UPDATABLE_FIELDS 内 → 本メソッドの対象
+        self.cfc_phonetic = ContactFieldConfidence.objects.create(
+            contact=self.contact,
+            field_name="phonetic_name",
+            confidence=ContactFieldConfidence.Confidence.LOW,
+        )
+        self.cfc_region = ContactFieldConfidence.objects.create(
+            contact=self.contact,
+            field_name="region",
+            confidence=ContactFieldConfidence.Confidence.MID,
+        )
+        # UPDATABLE_FIELDS 外 → 対象外
+        self.cfc_other = ContactFieldConfidence.objects.create(
+            contact=self.contact,
+            field_name="other_printed_text",
+            confidence=ContactFieldConfidence.Confidence.LOW,
+        )
+
+    def test_returns_wider_than_duplicate_check_fields(self):
+        """9 項目外の phonetic_name / region も対象に含む。"""
+        result = self.contact.get_all_field_confidences()
+        self.assertIn("phonetic_name", result)
+        self.assertIn("region", result)
+        self.assertIn("organization", result)
+        # DUPLICATE_CHECK_FIELDS（9 項目）の外側フィールドを 1 つ以上含む＝より広い対象。
+        outside = set(result.keys()) - set(DUPLICATE_CHECK_FIELDS)
+        self.assertTrue(
+            outside,
+            "get_all_field_confidences は 9 項目外のフィールドを含むべき",
+        )
+        self.assertIn("phonetic_name", outside)
+
+    def test_excludes_non_updatable_fields(self):
+        """UPDATABLE_FIELDS 外（other_printed_text）は CFC があっても含めない。"""
+        result = self.contact.get_all_field_confidences()
+        self.assertNotIn("other_printed_text", result)
+        self.assertNotIn("handwritten_text", result)
+
+    def test_returns_actual_records_not_pseudo_high(self):
+        """返り値は実在の CFC インスタンス（pk あり・疑似 high を作らない）。"""
+        result = self.contact.get_all_field_confidences()
+        self.assertEqual(result["phonetic_name"].pk, self.cfc_phonetic.pk)
+        self.assertEqual(result["organization"].pk, self.cfc_org.pk)
+        for cfc in result.values():
+            self.assertIsNotNone(cfc.pk)
+            self.assertIn(cfc.confidence, ("low", "mid"))
+        # CFC の無いフィールドはキーごと含まない（疑似 high を生成しない）
+        self.assertNotIn("title", result)
+
+    def test_does_not_alter_get_field_confidences(self):
+        """既存 get_field_confidences() は 9 項目限定のまま（phonetic_name を含まない）。"""
+        legacy = self.contact.get_field_confidences()
+        self.assertNotIn("phonetic_name", legacy)
+        self.assertNotIn("region", legacy)
+        self.assertEqual(set(legacy.keys()), set(DUPLICATE_CHECK_FIELDS))
 
 
 class ContactConfidenceTagTests(TestCase):
