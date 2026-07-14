@@ -36,7 +36,14 @@ from tags.models import Tag, TagCategory
 
 from persons.services.person_search import SEARCH_PARAMS, search_persons
 
-from .forms import CampaignForm, EmailTemplateForm, MailingConfigForm, MailingListForm
+from .forms import (
+    CampaignNameForm,
+    CampaignSenderForm,
+    CampaignScheduleForm,
+    EmailTemplateForm,
+    MailingConfigForm,
+    MailingListForm,
+)
 from .models import Campaign, EmailTemplate, MailingList, MailingListMember
 from .services.list_freeze import (
     freeze_members,
@@ -255,7 +262,7 @@ class MailingListListView(LoginRequiredMixin, PermissionRequiredMixin, ListView)
         context = super().get_context_data(**kwargs)
         back = BackNavigator(self.request)
         # 検索条件・ソート・ページも keys に含め「戻る」で一覧状態を復元する（HIG 6.1）。
-        back.push_current("", ["page", "status", "searched", "name", "sort"])
+        back.push_current("", ["page", "status", "searched", "name", "sort", "select_for_campaign"])
         context.update(
             {
                 "back": back,
@@ -280,7 +287,10 @@ class MailingListListView(LoginRequiredMixin, PermissionRequiredMixin, ListView)
                 MAILING_LIST_SORT_COLUMNS,
             )
         )
+        select_for_campaign_id = self.request.GET.get("select_for_campaign")
+        context["select_for_campaign"] = select_for_campaign_id
         return context
+
 
 
 class MailingListCreateView(LoginRequiredMixin, PermissionRequiredMixin, CreateView):
@@ -331,11 +341,10 @@ class MailingListDetailView(LoginRequiredMixin, PermissionRequiredMixin, DetailV
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        # BackNavigator（詳細画面なので push_current は呼ばない、既存 contacts / cards / duplicates
-        # 慣例に揃える。BackNavigator.push_current は keys=[] を DEBUG 時に ValueError として弾く
-        # ため、詳細画面ではスタック生成だけ行い、一覧画面側で push_current 済みのスタックを参照する。
-        # 詳細→削除→キャンセルで詳細に戻る挙動はテンプレ側で {% append_back_url %} を使って
-        # back_stack に詳細 URL を追加することで実現する）。
+        # BackNavigator: 詳細画面から編集画面等へ遷移した際に、詳細画面へ戻れるように push_current を呼ぶ。
+        # メンバー一覧のソート状態を維持するため、keys=["sort"] を指定する。
+        back = BackNavigator(self.request)
+        back.push_current("", ["sort"])
         members_qs = (
             MailingListMember.objects.filter(mailing_list=self.object)
             .select_related("person", "person__primary_contact", "added_by")
@@ -343,18 +352,71 @@ class MailingListDetailView(LoginRequiredMixin, PermissionRequiredMixin, DetailV
         # ?sort=...&dir=... があれば適用、無ければ name asc がデフォルト（UI 改善 要望1）
         members_qs = _apply_sort_to_members(members_qs, self.request.GET)
         sort_key, sort_dir = _resolve_sort(self.request.GET)
+        
+        select_for_campaign_id = self.request.GET.get("select_for_campaign")
+        campaign_obj = None
+        if select_for_campaign_id:
+            from .models import Campaign
+            campaign_obj = Campaign.objects.filter(
+                pk=select_for_campaign_id,
+                is_archived=False,
+                status=Campaign.Status.DRAFT,
+                mailing_list__isnull=True
+            ).first()
+        
         context.update(
             {
-                "back": BackNavigator(self.request),
+                "back": back,
                 "active_app": "mailings",
                 "active_menu": "mailings:mailing_list_list",
                 "members": members_qs,
                 "is_frozen": self.object.members_frozen_at is not None,
                 "current_sort": sort_key,
                 "current_dir": sort_dir,
+                "select_for_campaign": campaign_obj,
             }
         )
         return context
+
+    def post(self, request, *args, **kwargs):
+        self.object = self.get_object()
+        if request.POST.get("action") == "link_existing":
+            campaign_id = request.GET.get("select_for_campaign")
+            campaign_obj = None
+            if campaign_id:
+                from .models import Campaign
+                campaign_obj = Campaign.objects.filter(
+                    pk=campaign_id,
+                    is_archived=False,
+                    status=Campaign.Status.DRAFT,
+                    mailing_list__isnull=True
+                ).first()
+            if not campaign_obj:
+                from django.contrib import messages
+                messages.error(request, "キャンペーン情報が見つかりません、または既にリストが設定されています。")
+                return redirect("mailings:campaign_list")
+
+            mailing_list = self.object
+            if mailing_list.is_archived:
+                from django.contrib import messages
+                messages.error(request, "選択されたリストはアーカイブされています。")
+                return redirect(request.get_full_path())
+
+            with transaction.atomic():
+                campaign_obj.mailing_list = mailing_list
+                campaign_obj.save(update_fields=["mailing_list", "updated_at"])
+
+            _new_list_clear(request)
+            from django.contrib import messages
+            messages.success(
+                request,
+                f"既存リスト「{mailing_list.name}」をキャンペーンに紐づけました。",
+            )
+            return redirect("mailings:campaign_detail", pk=campaign_obj.pk)
+        
+        # Actionが異なる場合は通常のGET扱いにする
+        context = self.get_context_data()
+        return self.render_to_response(context)
 
 
 class MailingListUpdateView(LoginRequiredMixin, PermissionRequiredMixin, UpdateView):
@@ -388,45 +450,21 @@ class MailingListUpdateView(LoginRequiredMixin, PermissionRequiredMixin, UpdateV
         return MailingList.objects.filter(is_archived=False)
 
     def get_success_url(self):
-        return reverse_lazy("mailings:mailing_list_update", args=[self.object.pk])
+        return reverse_lazy("mailings:mailing_list_detail", args=[self.object.pk])
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         is_frozen = self.object.members_frozen_at is not None
-        # Phase 1b-ε.6 rev14.1：凍結後は閲覧のみ、未凍結時はメンバー追加・削除可能。
-        # 既存メンバー一覧は凍結状態に関わらず常に渡す（未凍結時も削除 UI のため必要）。
-        members = (
-            MailingListMember.objects.filter(mailing_list=self.object)
-            .select_related("person", "person__primary_contact", "added_by")
-            .order_by("created_at")
-        )
-        existing_person_ids = list(members.values_list("person_id", flat=True))
-        # 未凍結時のみ Person 検索結果を渡す（_search_form.html partial で searched=1 のとき）。
-        search_results = None
-        if not is_frozen and self.request.GET.get("searched") == "1":
-            qs = search_persons(self.request.GET, default_statuses=("active",))
-            # 既にメンバーに入っている Person は除外（UniqueConstraint 重複防止 + UX 簡素化）。
-            search_results = qs.exclude(pk__in=existing_person_ids)[:100]
         context.update(
             {
+                "mailing_list": self.object,
                 "back": BackNavigator(self.request),
                 "active_app": "mailings",
                 "active_menu": "mailings:mailing_list_list",
                 "is_create": False,
                 "is_frozen": is_frozen,
-                "tags_by_category": _tags_grouped_by_category_for_picker(),
-                "members": members,
-                "search_results": search_results,
-                # _search_form.html partial が参照するコンテキスト
-                "selected_statuses": ["active"],
-                "reset_url": reverse_lazy(
-                    "mailings:mailing_list_update", args=[self.object.pk]
-                ),
-                "submit_label": "Person 検索",
             }
         )
-        for key in SEARCH_PARAMS:
-            context[key] = self.request.GET.get(key, "")
         return context
 
 
@@ -474,6 +512,48 @@ class MailingListUnarchiveView(LoginRequiredMixin, PermissionRequiredMixin, View
         if back.back_exist:
             return redirect(back.back_url)
         return redirect("mailings:mailing_list_detail", pk=mailing_list.pk)
+
+
+class MailingListCopyView(LoginRequiredMixin, PermissionRequiredMixin, View):
+    """配信リストコピー（POST専用）。
+
+    既存の MailingList を元に新規リストを複製し、メンバーも引き継ぐ。
+    アーカイブ済みのリストもコピー可能。複製先は「未凍結」状態とする。
+
+    認可：mailings.add_mailinglist（新規作成権限）
+    """
+
+    permission_required = "mailings.add_mailinglist"
+
+    def post(self, request, pk):
+        from django.utils import timezone
+        from .models import MailingListMember
+
+        original_list = get_object_or_404(MailingList, pk=pk)
+        
+        with transaction.atomic():
+            new_list = MailingList.objects.create(
+                name=f"{original_list.name} のコピー",
+                description=original_list.description,
+                created_by=request.user,
+                extraction_snapshot=original_list.extraction_snapshot,
+                members_frozen_at=None,
+            )
+            
+            original_members = MailingListMember.objects.filter(mailing_list=original_list)
+            new_members = [
+                MailingListMember(
+                    mailing_list=new_list,
+                    person=m.person,
+                    added_by=request.user,
+                )
+                for m in original_members
+            ]
+            MailingListMember.objects.bulk_create(new_members)
+
+        from django.contrib import messages
+        messages.success(request, f"リスト「{original_list.name}」をコピーしました。")
+        return redirect("mailings:mailing_list_detail", pk=new_list.pk)
 
 
 def _render_delete_confirm(request, mailing_list):
@@ -1890,6 +1970,8 @@ class NewListMetaView(LoginRequiredMixin, PermissionRequiredMixin, View):
         # 【作業5】 ?campaign=<uuid> が渡されており、対象が draft / archived=False ならば
         # session に campaign_id を保存（commit 時に拾って差し替え + 詳細画面へ戻る）。
         campaign_id_param = request.GET.get("campaign", "")
+        campaign_obj = None
+        auto_open_modal = False
         if campaign_id_param:
             target = Campaign.objects.filter(
                 pk=campaign_id_param,
@@ -1897,14 +1979,57 @@ class NewListMetaView(LoginRequiredMixin, PermissionRequiredMixin, View):
                 status=Campaign.Status.DRAFT,
             ).first()
             if target is not None:
+                campaign_obj = target
                 _new_list_save(request, campaign_id=str(target.pk))
+                if target.mailing_list is None:
+                    auto_open_modal = True
         form = MailingListForm()
-        return self._render(request, form)
+        return self._render(
+            request,
+            form,
+            campaign=campaign_obj,
+            auto_open_modal=auto_open_modal,
+        )
 
     def post(self, request):
+        state = _new_list_state(request)
+        campaign_id = state.get("campaign_id")
+        campaign_obj = None
+        if campaign_id:
+            campaign_obj = Campaign.objects.filter(
+                pk=campaign_id,
+                is_archived=False,
+                status=Campaign.Status.DRAFT,
+            ).first()
+
+        if request.POST.get("action") == "link_existing":
+            selected_ml_id = request.POST.get("selected_mailing_list")
+            if not campaign_obj:
+                from django.contrib import messages
+                messages.error(request, "キャンペーン情報が見つかりません。")
+                return redirect("mailings:campaign_list")
+
+            mailing_list = MailingList.objects.filter(pk=selected_ml_id, is_archived=False).first()
+            if not mailing_list:
+                from django.contrib import messages
+                messages.error(request, "選択されたリストが見つからないか、アーカイブされています。")
+                return self._render(request, MailingListForm(), campaign=campaign_obj, status=400)
+
+            with transaction.atomic():
+                campaign_obj.mailing_list = mailing_list
+                campaign_obj.save(update_fields=["mailing_list", "updated_at"])
+
+            _new_list_clear(request)
+            from django.contrib import messages
+            messages.success(
+                request,
+                f"既存リスト「{mailing_list.name}」をキャンペーンに紐づけました。",
+            )
+            return redirect("mailings:campaign_detail", pk=campaign_obj.pk)
+
         form = MailingListForm(request.POST)
         if not form.is_valid():
-            return self._render(request, form, status=400)
+            return self._render(request, form, campaign=campaign_obj, status=400)
         # リスト名重複は警告のみ、許可（ε.6 と同じ方針、エラーにしない）
         name = form.cleaned_data["name"]
         description = form.cleaned_data.get("description", "") or ""
@@ -1920,16 +2045,32 @@ class NewListMetaView(LoginRequiredMixin, PermissionRequiredMixin, View):
         )
         return redirect("mailings:new_list_tag_selection")
 
-    def _render(self, request, form, *, status=200):
+    def _render(self, request, form, *, campaign=None, auto_open_modal=False, status=200):
+        from django.db.models import Count
+        mailing_lists = MailingList.objects.filter(is_archived=False).annotate(
+            member_count=Count("members")
+        ).order_by("-created_at")
+
+        back = BackNavigator(request)
+        back.push_current("", ["campaign"])
+
+        select_existing_url = reverse("mailings:mailing_list_list")
+        if campaign:
+            select_existing_url += f"?select_for_campaign={campaign.pk}"
+
         return render(
             request,
             self.template_name,
             {
                 "form": form,
-                "back": BackNavigator(request),
+                "back": back,
                 "active_app": "mailings",
                 "active_menu": "mailings:mailing_list_list",
                 "list_url": reverse("mailings:mailing_list_list"),
+                "select_existing_url": select_existing_url,
+                "campaign": campaign,
+                "auto_open_modal": auto_open_modal,
+                "mailing_lists": mailing_lists,
             },
             status=status,
         )
@@ -2034,13 +2175,20 @@ class NewListConfirmView(LoginRequiredMixin, PermissionRequiredMixin, View):
         if guard is not None:
             return guard
         state = _new_list_state(request)
+        snapshot_ids = state.get("snapshot_person_ids") or []
+        persons = (
+            Person.objects.filter(pk__in=snapshot_ids)
+            .select_related("primary_contact")
+            .order_by("primary_contact__phonetic_name")
+        )
         return render(
             request,
             self.template_name,
             {
                 "list_name": state["name"],
                 "list_description": state.get("description", "") or "",
-                "snapshot_count": len(state.get("snapshot_person_ids") or []),
+                "snapshot_count": len(snapshot_ids),
+                "persons": persons,
                 "commit_url": reverse("mailings:new_list_commit"),
                 "back_url": reverse("mailings:new_list_tag_selection"),
                 "cancel_url": reverse("mailings:mailing_list_list"),
@@ -3158,8 +3306,22 @@ class CampaignListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
         if creator:
             qs = qs.filter(created_by__username__icontains=creator)
         selected = self._selected_statuses()
-        if selected:
-            qs = qs.filter(status__in=selected)
+        from django.db.models import Q
+        
+        normal_statuses = [s for s in selected if s != "archived"]
+        status_q = Q()
+        if "archived" in selected:
+            if normal_statuses:
+                status_q = Q(status__in=normal_statuses, is_archived=False) | Q(is_archived=True)
+            else:
+                status_q = Q(is_archived=True)
+        else:
+            if normal_statuses:
+                status_q = Q(status__in=normal_statuses, is_archived=False)
+            else:
+                status_q = Q(is_archived=False)
+                
+        qs = qs.filter(status_q)
         # 配信日（scheduled_at＝配信日時）の期間検索（§7）。片側のみ指定も可。
         # 不正な日付文字列は無視（filter に渡すと ValidationError になるため事前検証）。
         from datetime import date as _date
@@ -3180,15 +3342,16 @@ class CampaignListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
         return _apply_multi_sort(qs, self.request.GET, CAMPAIGN_LIST_SORT_FIELD_MAP)
 
     def _selected_statuses(self):
-        """状態トグルの選択値（複数）。キャンペーン一覧は「全部未選択＝全件」を既定とする（§7）。
-
-        [性質] 純関数寄り（request.GET を読むのみ）。既定の事前選択はしない。
-        選択された許可値のみ返す（空＝絞り込みなし＝全件）。
+        """状態トグルの選択値（複数）。アーカイブ済みを含む。
+        初回アクセス時（searched=1 が無い場合）は「アーカイブ済み」以外（通常status全件）をデフォルトとする。
         """
         from .models import Campaign
 
         valid = {c for c, _ in Campaign.Status.choices}
-        return [s for s in self.request.GET.getlist("status") if s in valid]
+        valid.add("archived")
+        if self.request.GET.get("searched"):
+            return [s for s in self.request.GET.getlist("status") if s in valid]
+        return [c for c, _ in Campaign.Status.choices]
 
     def get_context_data(self, **kwargs):
         from .models import Campaign
@@ -3220,7 +3383,9 @@ class CampaignListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
         ctx["search_creator"] = self.request.GET.get("creator", "")
         ctx["search_date_from"] = self.request.GET.get("date_from", "")
         ctx["search_date_to"] = self.request.GET.get("date_to", "")
-        ctx["status_choices"] = Campaign.Status.choices
+        choices = list(Campaign.Status.choices)
+        choices.append(("archived", "アーカイブ済み"))
+        ctx["status_choices"] = choices
         ctx["selected_statuses"] = self._selected_statuses()
         # 列表示切替（localStorage キー＋切替対象列）とソートコントロール（折りたたみ内）。
         ctx["column_storage_key"] = "campaign_list_visible_columns"
@@ -3598,14 +3763,9 @@ class CampaignCreateView(LoginRequiredMixin, PermissionRequiredMixin, CreateView
     """
 
     model = Campaign
-    form_class = CampaignForm
-    template_name = "mailings/campaign_form.html"
+    form_class = CampaignNameForm
+    template_name = "mailings/campaign_form_name.html"
     permission_required = "mailings.add_campaign"
-    def get_form_kwargs(self):
-        kwargs = super().get_form_kwargs()
-        # 新規作成画面は name のみ表示する（CampaignForm 側の出し分け）。
-        kwargs["is_create"] = True
-        return kwargs
 
     def form_valid(self, form):
         from .services.campaign_actions import create_campaign_with_template
@@ -3655,10 +3815,10 @@ class CampaignDetailView(
     context_object_name = "campaign"
     permission_required = "mailings.view_campaign"
     def get_queryset(self):
-        # アーカイブ済み Campaign は詳細画面に出さない（is_archived=True は 404）
+        # アーカイブ済み Campaign も詳細画面に出す（is_archived=True も表示）
         return Campaign.objects.select_related(
             "template", "mailing_list", "created_by"
-        ).filter(is_archived=False)
+        )
 
     def get_context_data(self, **kwargs):
         from mailings.services.recipient_extraction import extract_recipients
@@ -3679,6 +3839,30 @@ class CampaignDetailView(
         # あるためクエリ無し＝["page"] のプレースホルダで path のみを積む）。
         back = BackNavigator(self.request)
         back.push_current("", ["page"])
+
+        has_mailing_list = campaign.mailing_list_id is not None
+        template = getattr(campaign, "template", None)
+        has_template = (
+            template is not None
+            and bool((template.subject or "").strip())
+            and bool((template.body or "").strip())
+        )
+        from django.utils import timezone
+        has_schedule = (
+            campaign.scheduled_at is not None
+            and campaign.scheduled_at > timezone.now()
+        )
+
+        missing_steps = []
+        if not has_mailing_list:
+            missing_steps.append("宛先リスト")
+        if not has_template:
+            missing_steps.append("メール内容")
+        if not has_schedule:
+            missing_steps.append("配信スケジュール")
+
+        can_schedule = len(missing_steps) == 0
+
         context.update(
             {
                 "template": campaign.template,
@@ -3689,39 +3873,27 @@ class CampaignDetailView(
                 "back": back,
                 "active_app": "mailings",
                 "active_menu": "mailings:campaign_list",
+                "has_mailing_list": has_mailing_list,
+                "has_template": has_template,
+                "has_schedule": has_schedule,
+                "missing_steps": missing_steps,
+                "can_schedule": can_schedule,
             }
         )
         return context
 
 
-class CampaignUpdateView(
+class _CampaignUpdateBaseView(
     LoginRequiredMixin, PermissionRequiredMixin, CampaignOwnerRequiredMixin, UpdateView
 ):
-    """Campaign 編集画面（基本情報のみ、URL一覧 rev19 No.49、(b) §5.3）。
-
-    draft のみ編集可。それ以外は詳細画面へ redirect + warning。
-    件名・本文は本画面では編集しない（(c) の EmailTemplateUpdateView で行う、
-    指示書 Q3 確定の動線 2 分割）。
-
-    認可（Phase 7 ⑤）：mailings.change_campaign ＋ 所有者判定（CampaignOwnerRequiredMixin）。
-    """
-
     model = Campaign
-    form_class = CampaignForm
-    template_name = "mailings/campaign_form.html"
     permission_required = "mailings.change_campaign"
+
     def _redirect_if_not_draft(self):
-        # draft 以外は編集不可。詳細画面へ warning 付きでリダイレクト。
-        # 認可（Login→Permission→Owner）を先に通すため dispatch ではなく get/post で
-        # 評価する（未認証・無権限・非所有者を status 判定より先に弾く）。
         campaign = self.get_object()
         if campaign.status != Campaign.Status.DRAFT:
             from django.contrib import messages
-
-            messages.warning(
-                self.request,
-                "下書き状態のキャンペーンのみ編集できます。",
-            )
+            messages.warning(self.request, "下書き状態のキャンペーンのみ編集できます。")
             return redirect("mailings:campaign_detail", pk=campaign.pk)
         return None
 
@@ -3736,22 +3908,53 @@ class CampaignUpdateView(
     def get_queryset(self):
         return Campaign.objects.filter(is_archived=False)
 
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update({
+            "is_create": False,
+            "back": BackNavigator(self.request),
+            "active_app": "mailings",
+            "active_menu": "mailings:campaign_list",
+        })
+        return context
+
+    def _get_next_incomplete_step_url(self, campaign):
+        """詳細画面（ハブ）の進捗表示と同じロジックで未完了項目を探し、その編集画面のURLを返す。
+        全て完了または残りが「宛先リスト」の場合はハブ画面を返す。"""
+        has_template = hasattr(campaign, "template") and bool(
+            campaign.template.subject and campaign.template.body
+        )
+        has_schedule = bool(campaign.scheduled_at)
+        
+        if not has_template:
+            return reverse("mailings:template_update", kwargs={"pk": campaign.template.pk})
+        if not has_schedule:
+            return reverse("mailings:campaign_update_schedule", kwargs={"pk": campaign.pk})
+        
+        return reverse("mailings:campaign_detail", kwargs={"pk": campaign.pk})
+
     def get_success_url(self):
+        if "next_step" in self.request.POST:
+            return self._get_next_incomplete_step_url(self.object)
         return reverse("mailings:campaign_detail", kwargs={"pk": self.object.pk})
 
-    def get_context_data(self, **kwargs):
-        # 編集画面はクエリパラメータを持たないので push_current は呼ばない。
-        # 詳細画面側の「基本情報を編集」リンクで append_back_url を使うことで戻り先を積む。
-        context = super().get_context_data(**kwargs)
-        context.update(
-            {
-                "is_create": False,
-                "back": BackNavigator(self.request),
-                "active_app": "mailings",
-                "active_menu": "mailings:campaign_list",
-            }
-        )
-        return context
+
+class CampaignNameUpdateView(_CampaignUpdateBaseView):
+    """Campaign 名称編集画面"""
+    form_class = CampaignNameForm
+    template_name = "mailings/campaign_form_name.html"
+
+
+class CampaignSenderUpdateView(_CampaignUpdateBaseView):
+    """Campaign 配信形式編集画面"""
+    form_class = CampaignSenderForm
+    template_name = "mailings/campaign_form_sender.html"
+
+
+class CampaignScheduleUpdateView(_CampaignUpdateBaseView):
+    """Campaign スケジュール編集画面"""
+    form_class = CampaignScheduleForm
+    template_name = "mailings/campaign_form_schedule.html"
 
 
 class _CampaignActionBaseView(

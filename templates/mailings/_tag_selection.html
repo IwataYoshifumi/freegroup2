@@ -46,7 +46,6 @@ JS フック予約：
       </div>
       <div class="app-action-area">
         <a href="{{ back_url }}" class="app-btn app-btn--secondary">戻る</a>
-        <a href="{{ cancel_url }}" class="app-btn app-btn--secondary">戻る</a>
       </div>
     </div>
 
@@ -108,7 +107,8 @@ JS フック予約：
     <form method="post" action="{{ post_url }}" id="js-tag-conditions-form">
       {% csrf_token %}
 
-      {% for cat_block in categories %}
+      <div class="app-form-wrapper">
+        {% for cat_block in categories %}
         {% with cat=cat_block.category cat_tags=cat_block.tags %}
           <details class="app-card js-category-block"
                    data-category-id="{{ cat.id }}"
@@ -218,6 +218,7 @@ JS フック予約：
           </div>
         </details>
       </div>
+      </div>
 
       {# プレビュー欄：JS が AJAX 結果を書き込む（id 等は JS フック） #}
       <div class="app-card" style="margin-top:16px; padding:16px;" id="js-preview-container">
@@ -232,18 +233,19 @@ JS フック予約：
         </div>
       </div>
 
+      <div class="app-form-wrapper">
       <div class="app-action-area" style="margin-top:16px;">
         {% if mode == 'create' %}
           <button type="submit" class="app-btn app-btn--primary js-tag-selection-submit">内容を確認</button>
         {% elif mode == 'add_by_tag' %}
           <button type="submit" class="app-btn app-btn--success js-tag-selection-submit">内容を確認</button>
         {% elif mode == 'remove_by_tag' %}
-          <button type="submit" class="app-btn app-btn--danger js-tag-selection-submit">内容を確認</button>
+          <button type="submit" class="app-btn app-btn--primary js-tag-selection-submit">内容を確認</button>
         {% endif %}
         {% if mode == 'create' %}
           <a href="{{ back_url }}" class="app-btn app-btn--secondary">戻る</a>
         {% endif %}
-        <a href="{{ cancel_url }}" class="app-btn app-btn--secondary">戻る</a>
+      </div>
       </div>
     </form>
   </section>

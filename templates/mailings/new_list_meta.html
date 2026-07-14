@@ -6,44 +6,90 @@
 {% block content %}
   <div class="app-page-header">
     <div>
-      <h1>リスト作成（1/3）リスト名・備考</h1>
-      <div style="margin-top:4px; color:#475569;">
+      <div class="app-breadcrumb">メール配信 / 配信リスト一覧 / 新規作成</div>
+      <h1 id="page-main-title">リスト作成（1/3）リスト名・備考</h1>
+      <div id="page-sub-title" style="margin-top:4px; color:#475569;">
         新規リストの名前と備考を入力してください。次の画面でタグから対象を選択します。
       </div>
     </div>
     <div class="app-action-area">
-      <a href="{{ list_url }}" class="app-btn app-btn--secondary">戻る</a>
+      <a href="{% if back.back_url %}{{ back.back_url }}{% elif campaign %}{% url 'mailings:campaign_detail' pk=campaign.pk %}{% else %}{{ list_url }}{% endif %}" class="app-btn app-btn--secondary">戻る</a>
     </div>
   </div>
 
   {% if messages %}
-    <section class="app-card">
+    <section class="app-card app-form-wrapper">
       {% for message in messages %}
         <div class="app-message{% if message.tags %} app-message--{{ message.tags }}{% endif %}">{{ message }}</div>
       {% endfor %}
     </section>
   {% endif %}
 
-  <section class="app-card">
-    <form method="post" action="{% url 'mailings:new_list_meta' %}" class="app-form-grid-edit">
-      {% csrf_token %}
-      <div class="app-form-grid" style="grid-template-columns: 1fr;">
-        {% for field in form %}
-          <div class="app-form__group">
-            <label class="app-form__label" for="{{ field.id_for_label }}">
-              {{ field.label }}{% if field.field.required %} <span style="color:#dc2626;">*</span>{% endif %}
-            </label>
-            {{ field }}
-            {% if field.errors %}
-              <div class="app-message app-message--error" style="margin-top:4px;">{{ field.errors|join:" / " }}</div>
-            {% endif %}
-          </div>
-        {% endfor %}
+  {# 新規作成フォームセクション #}
+  <div id="create-new-list-section">
+    <section class="app-card app-form-wrapper">
+      <form method="post" action="{% url 'mailings:new_list_meta' %}" class="app-form-grid-edit">
+        {% csrf_token %}
+        <div class="app-form-grid" style="grid-template-columns: 1fr;">
+          {% for field in form %}
+            <div class="app-form__group">
+              <label class="app-form__label" for="{{ field.id_for_label }}">
+                {{ field.label }}{% if field.field.required %} <span style="color:#dc2626;">*</span>{% endif %}
+              </label>
+              {{ field }}
+              {% if field.errors %}
+                <div class="app-message app-message--error" style="margin-top:4px;">{{ field.errors|join:" / " }}</div>
+              {% endif %}
+            </div>
+          {% endfor %}
+        </div>
+        <div class="app-action-area" style="margin-top:16px;">
+          <button type="submit" class="app-btn app-btn--primary">次へ：タグで対象を選ぶ</button>
+          <a href="{{ list_url }}" class="app-btn app-btn--secondary">戻る</a>
+        </div>
+      </form>
+    </section>
+  </div>
+
+
+
+  {# 自動モーダル起動用ダミーボタン #}
+  <button type="button" id="autoOpenModalBtn" data-action="open-modal" data-target="destinationSelectionModal" style="display: none;"></button>
+
+  {# 分岐モーダル #}
+  <div id="destinationSelectionModal" class="app-modal" hidden role="dialog" aria-modal="true" aria-labelledby="destinationSelectionModalTitle">
+    <div class="app-modal__panel" style="max-width: 500px;">
+      <header class="app-modal__header">
+        <h2 id="destinationSelectionModalTitle">宛先リストの設定</h2>
+        <button type="button" class="app-btn app-btn--sm" data-action="close-modal">閉じる</button>
+      </header>
+      <div class="app-modal__body">
+        <p style="margin-bottom: var(--app-space-md); color: var(--app-text);">宛先リストの設定方法を選択してください。</p>
+        <div style="display: flex; flex-direction: column; gap: var(--app-space-sm);">
+          <button type="button" class="app-btn app-btn--primary" data-action="close-modal" id="btn-create-new-list">
+            このままタグ抽出で新規作成
+          </button>
+          {% if campaign %}
+            <a href="{% append_back_url select_existing_url back %}" class="app-btn app-btn--secondary" style="text-decoration: none; text-align: center;">
+              既存のリストから選択
+            </a>
+          {% endif %}
+        </div>
       </div>
-      <div class="app-action-area" style="margin-top:16px;">
-        <button type="submit" class="app-btn app-btn--primary">次へ：タグで対象を選ぶ</button>
-        <a href="{{ list_url }}" class="app-btn app-btn--secondary">戻る</a>
-      </div>
-    </form>
-  </section>
+    </div>
+  </div>
+
+  <script>
+    document.addEventListener("DOMContentLoaded", function() {
+      // 自動的にモーダルを開く判定
+      {% if auto_open_modal %}
+        const autoBtn = document.getElementById("autoOpenModalBtn");
+        if (autoBtn) {
+          autoBtn.click();
+        }
+      {% endif %}
+
+
+    });
+  </script>
 {% endblock %}

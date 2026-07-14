@@ -1831,6 +1831,23 @@ class NewListMetaViewTests(_NewListWizardTestBase):
         self.assertEqual(resp.status_code, 302)
         self.assertEqual(self._session()["name"], "L1")
 
+    def test_back_link_fallback_to_list_url(self):
+        resp = self.client.get(self.url_meta)
+        self.assertContains(resp, 'href="/mailings/lists/" class="app-btn app-btn--secondary">戻る</a>')
+
+    def test_back_link_fallback_to_campaign_detail(self):
+        tpl = EmailTemplate.objects.create(name="T1", subject="s", body="b", created_by=self.user)
+        camp = Campaign.objects.create(name="C1", template=tpl, created_by=self.user, status=Campaign.Status.DRAFT)
+        resp = self.client.get(self.url_meta + f"?campaign={camp.pk}")
+        self.assertContains(resp, f'href="/mailings/campaigns/{camp.pk}/" class="app-btn app-btn--secondary">戻る</a>')
+
+    def test_back_link_with_back_stack(self):
+        import base64, json
+        stack = [{"url": "/mailings/dummy/", "title": "Dummy"}]
+        encoded = base64.urlsafe_b64encode(json.dumps(stack).encode()).decode().rstrip("=")
+        resp = self.client.get(self.url_meta + f"?back_stack={encoded}")
+        self.assertContains(resp, 'href="/mailings/dummy/" class="app-btn app-btn--secondary">戻る</a>')
+
 
 class NewListTagSelectionViewTests(_NewListWizardTestBase):
     def test_get_without_name_redirects_to_meta(self):
@@ -1934,6 +1951,14 @@ class NewListTagSelectionViewTests(_NewListWizardTestBase):
         self.assertEqual(resp.status_code, 302)
         snapshot = self._session()["snapshot_person_ids"]
         self.assertIn(str(p_unsub.pk), snapshot)
+    def test_buttons_only_one_back_no_cancel(self):
+        self._put_session(name="L1", description="memo", step="tags")
+        resp = self.client.get(self.url_tags)
+        self.assertEqual(resp.status_code, 200)
+        content = resp.content.decode("utf-8")
+        # create モードの場合、ヘッダーとフッターに各1つの「戻る」があるため計2回出現
+        self.assertEqual(content.count('>戻る</a>'), 2)
+        self.assertNotIn('>キャンセル</a>', content)
 
 
 class NewListConfirmViewTests(_NewListWizardTestBase):
@@ -1974,8 +1999,8 @@ class NewListConfirmViewTests(_NewListWizardTestBase):
         resp = self.client.post(self.url_confirm)
         self.assertEqual(resp.status_code, 405)
 
-    def test_renders_only_count_no_person_list(self):
-        """1-D は Person 列を表示しない（§4.5.4 / §9.2-42）。"""
+    def test_renders_person_list(self):
+        """リスト作成3/3確認画面は対象パーソン一覧を表示する（8d94807 で追加）"""
         p = self._make_person("VisibleName")
         self._put_session(
             name="L1",
@@ -1987,11 +2012,20 @@ class NewListConfirmViewTests(_NewListWizardTestBase):
         body = resp.content.decode("utf-8")
         # 件数バッジは出る
         self.assertIn("対象 1 件でリストを作成します", body)
-        # Person 名は出さない（一覧テーブルがない）
-        self.assertNotIn("VisibleName", body)
+        # Person の氏名が一覧テーブルに表示される
+        self.assertIn("VisibleName", body)
         # 説明文は業務語（対象パーソン）で、英字 Person を出さない（HIG v1.4 原則4）
         self.assertIn("対象パーソン", body)
         self.assertNotIn("対象 Person", body)
+    def test_buttons_only_one_back_no_cancel(self):
+        import uuid
+        self._put_session(name="L1", step="confirm", snapshot_person_ids=[str(uuid.uuid4())])
+        resp = self.client.get(self.url_confirm)
+        self.assertEqual(resp.status_code, 200)
+        content = resp.content.decode("utf-8")
+        # ヘッダーとフッターに各1つの「戻る」があるため計2回出現
+        self.assertEqual(content.count('>戻る</a>'), 2)
+        self.assertNotIn('>キャンセル</a>', content)
 
 
 class NewListCommitViewTests(_NewListWizardTestBase):
@@ -2560,7 +2594,7 @@ class DetailViewAddByTagButtonTests(_AddByTagTestBase):
         self.assertIn(add_by_tag_url, body)
         # 追加系 = success カラーのリンク
         self.assertIn(">タグで追加</a>", body)
-        self.assertIn("app-btn--success", body)
+        self.assertIn("app-btn--primary", body)
 
     def test_detail_frozen_disables_add_by_tag_button(self):
         self.mailing_list.members_frozen_at = timezone.now()
@@ -7225,7 +7259,7 @@ class CampaignPreviewViewTests(_PhaseCTestBase):
 # ======================================================================
 
 
-from mailings.forms import CampaignForm
+from mailings.forms import CampaignNameForm, CampaignSenderForm, CampaignScheduleForm
 from mailings.services.campaign_actions import (
     archive_campaign,
     cancel_scheduled_campaign,
@@ -7327,6 +7361,15 @@ class CampaignCleanTests(_PhaseBTestBase):
             c.clean()
         self.assertIn("sender_email", ctx.exception.message_dict)
 
+    def test_creator_normalizes_sender_fields(self):
+        c = self.campaign
+        c.sender_mode = Campaign.SenderMode.CREATOR
+        c.sender_email = "dirty@example.com"
+        c.sender_name = "Dirty Name"
+        c.clean()
+        self.assertEqual(c.sender_email, "")
+        self.assertEqual(c.sender_name, "")
+
     def test_scheduled_with_past_at_raises(self):
         c = self.campaign
         c.status = Campaign.Status.SCHEDULED
@@ -7373,6 +7416,45 @@ class CampaignCleanTests(_PhaseBTestBase):
         c.mailing_list = None
         c.clean()  # raise しないこと
 
+    def test_scheduled_without_subject_raises(self):
+        c = self.campaign
+        c.status = Campaign.Status.SCHEDULED
+        c.scheduled_at = timezone.now() + timedelta(hours=1)
+        c.template.subject = ""
+        c.template.save()
+        with self.assertRaises(ValidationError) as ctx:
+            c.clean()
+        self.assertIn("subject", ctx.exception.message_dict)
+
+    def test_scheduled_without_body_raises(self):
+        c = self.campaign
+        c.status = Campaign.Status.SCHEDULED
+        c.scheduled_at = timezone.now() + timedelta(hours=1)
+        c.template.body = ""
+        c.template.save()
+        with self.assertRaises(ValidationError) as ctx:
+            c.clean()
+        self.assertIn("body", ctx.exception.message_dict)
+
+    def test_draft_without_subject_and_body_passes(self):
+        # draft 保存時は件名・本文が空でもバリデーションを通過する
+        c = self.campaign
+        c.status = Campaign.Status.DRAFT
+        c.template.subject = ""
+        c.template.body = ""
+        c.template.save()
+        c.clean()  # raise しないこと
+
+    def test_scheduled_with_all_required_passes(self):
+        # 件名・本文・宛先・日時がすべて揃っていれば scheduled 遷移バリデーションを通過する
+        c = self.campaign
+        c.status = Campaign.Status.SCHEDULED
+        c.scheduled_at = timezone.now() + timedelta(hours=1)
+        c.template.subject = "テスト件名"
+        c.template.body = "テスト本文"
+        c.template.save()
+        c.clean()  # raise しないこと
+
 
 class CreateCampaignWithTemplateTests(_PhaseBTestBase):
     """create_campaign_with_template の atomic 性（(b) §5.1、Service 層）。"""
@@ -7382,15 +7464,9 @@ class CreateCampaignWithTemplateTests(_PhaseBTestBase):
 
         before_t = EmailTemplate.objects.count()
         before_c = Campaign.objects.count()
-        form = CampaignForm(
+        form = CampaignNameForm(
             data={
                 "name": "新規キャンペーン",
-                "mailing_list": self.mailing_list.pk,
-                "sender_mode": Campaign.SenderMode.CREATOR,
-                "sender_email": "",
-                "sender_name": "",
-                "apply_unsubscribe_filter": "on",
-                "scheduled_at": "",
             }
         )
         self.assertTrue(form.is_valid(), msg=form.errors)
@@ -7498,36 +7574,26 @@ class RunTestSendTests(_PhaseBTestBase):
             run_test_send(self.campaign, "tester@example.com")
 
 
-class CampaignFormTests(_PhaseBTestBase):
+class CampaignSenderFormTests(_PhaseBTestBase):
     def test_newsletter_with_filter_off_invalid(self):
-        form = CampaignForm(
+        form = CampaignSenderForm(
             data={
-                "name": "メルマガ",
-                "mailing_list": self.mailing_list.pk,
                 "sender_mode": Campaign.SenderMode.NEWSLETTER,
                 "sender_email": "news@example.com",
                 "sender_name": "メルマガ",
                 # apply_unsubscribe_filter を送らない = False 扱い
-                "scheduled_at": "",
             }
         )
-        # CampaignForm.is_valid() は full_clean() を呼ぶので Campaign.clean() のエラーが出る
-        # ただし new instance では PK 不要、Form.save(commit=False) で instance を組み立てる
-        # → form.is_valid() → form.full_clean() → instance.full_clean() ではなく
-        #   Form.full_clean() は cleaned_data 後に form._post_clean が instance.full_clean を呼ぶ。
         self.assertFalse(form.is_valid())
         self.assertIn("apply_unsubscribe_filter", form.errors)
 
     def test_creator_with_minimum_valid(self):
-        form = CampaignForm(
+        form = CampaignSenderForm(
             data={
-                "name": "最小",
-                "mailing_list": self.mailing_list.pk,
                 "sender_mode": Campaign.SenderMode.CREATOR,
                 "sender_email": "",
                 "sender_name": "",
                 "apply_unsubscribe_filter": "on",
-                "scheduled_at": "",
             }
         )
         self.assertTrue(form.is_valid(), msg=form.errors)
@@ -7584,16 +7650,19 @@ class CampaignDetailViewTests(_PhaseBTestBase):
         self.assertIn("基本情報", body)
         self.assertIn("メール内容", body)
         self.assertIn("宛先", body)
-        # draft なので「予約する」「削除」「基本情報を編集」が出る
+        # draft なので「予約する」「削除」「キャンペーンを編集(鉛筆アイコン)」が出る
         self.assertIn("予約する", body)
-        self.assertIn("基本情報を編集", body)
+        self.assertIn('aria-label="キャンペーンを編集"', body)
         self.assertIn("削除", body)
 
-    def test_archived_campaign_returns_404(self):
+    def test_archived_campaign_returns_200_and_readonly(self):
         self.campaign.is_archived = True
         self.campaign.save(update_fields=["is_archived"])
         response = self.client.get(self._detail_url())
-        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.status_code, 200)
+        body = response.content.decode("utf-8")
+        self.assertIn("アーカイブ済み", body)
+        self.assertIn("アーカイブ済みのため編集できません", body)
 
     def test_scheduled_status_shows_cancel_button_only(self):
         self.campaign.status = Campaign.Status.SCHEDULED
@@ -7604,40 +7673,131 @@ class CampaignDetailViewTests(_PhaseBTestBase):
         self.assertIn("予約を取り消す", body)
         self.assertNotIn("予約する", body)
 
+    def test_detail_view_progress_checklist_renders(self):
+        response = self.client.get(self._detail_url())
+        body = response.content.decode('utf-8')
+        self.assertIn('予約までの進捗', body)
+        self.assertIn('配信形式', body)
+        self.assertIn('テスト配信', body)
 
-class CampaignUpdateViewTests(_PhaseBTestBase):
-    def _update_url(self):
-        return f"/mailings/campaigns/{self.campaign.pk}/update/"
+    def test_detail_view_schedule_must_be_future(self):
+        self.campaign.mailing_list = self.mailing_list
+        # 過去のスケジュール
+        self.campaign.scheduled_at = timezone.now() - timedelta(hours=1)
+        self.campaign.save(update_fields=['mailing_list', 'scheduled_at'])
+        self.template.subject = '件名'
+        self.template.body = '本文'
+        self.template.save()
 
-    def test_get_draft_renders_form(self):
-        response = self.client.get(self._update_url())
+        response = self.client.get(self._detail_url())
+        body = response.content.decode('utf-8')
+        # 未来じゃないのでスケジュールが未になるはず
+        self.assertIn('あと『配信スケジュール』が未です', body)
+        self.assertIn('disabled', body)
+
+    def test_detail_view_template_needs_both_subject_and_body(self):
+        self.campaign.mailing_list = self.mailing_list
+        self.campaign.scheduled_at = timezone.now() + timedelta(hours=1)
+        self.campaign.save(update_fields=['mailing_list', 'scheduled_at'])
+        
+        # subjectのみ
+        self.template.subject = '件名のみ'
+        self.template.body = ''
+        self.template.save()
+        response = self.client.get(self._detail_url())
+        self.assertIn('あと『メール内容』が未です', response.content.decode('utf-8'))
+
+        # bodyのみ
+        self.template.subject = ''
+        self.template.body = '本文のみ'
+        self.template.save()
+        response = self.client.get(self._detail_url())
+        self.assertIn('あと『メール内容』が未です', response.content.decode('utf-8'))
+
+    def test_detail_view_progress_with_missing_items_renders_disabled_button_and_hints(self):
+        # 宛先リストなし、件名なし、スケジュールなしの状態で詳細画面を開く
+        self.campaign.mailing_list = None
+        self.campaign.scheduled_at = None
+        self.campaign.save(update_fields=["mailing_list", "scheduled_at"])
+        
+        self.template.subject = ""
+        self.template.body = "本文はある"
+        self.template.save()
+
+        response = self.client.get(self._detail_url())
         self.assertEqual(response.status_code, 200)
+        body = response.content.decode("utf-8")
+
+        # 宛先リスト、メール内容、配信スケジュールが未完了として検出されること
+        self.assertIn("宛先リスト", body)
+        self.assertIn("メール内容", body)
+        self.assertIn("配信スケジュール", body)
+        
+        # 予約ボタンは disabled であること
+        self.assertIn("disabled", body)
+        self.assertIn('style="background-color: #cbd5e1; color: #64748b; border: 1px solid #cbd5e1; cursor: not-allowed;"', body)
+
+    def test_detail_view_progress_complete_enables_button(self):
+        # すべての要件を満たす
+        self.campaign.mailing_list = self.mailing_list
+        self.campaign.scheduled_at = timezone.now() + timedelta(hours=1)
+        self.campaign.save(update_fields=["mailing_list", "scheduled_at"])
+        
+        self.template.subject = "テスト件名"
+        self.template.body = "テスト本文"
+        self.template.save()
+
+        response = self.client.get(self._detail_url())
+        self.assertEqual(response.status_code, 200)
+        body = response.content.decode("utf-8")
+
+        # disabled 属性やグレーアウトスタイルがボタンにないこと
+        self.assertNotIn("disabled", body)
+        self.assertNotIn('style="background-color: #cbd5e1; color: #64748b; border: 1px solid #cbd5e1; cursor: not-allowed;"', body)
+
+
+class CampaignUpdateSplitViewTests(_PhaseBTestBase):
+    def _name_url(self):
+        return f"/mailings/campaigns/{self.campaign.pk}/update/name/"
+
+    def _sender_url(self):
+        return f"/mailings/campaigns/{self.campaign.pk}/update/sender/"
+
+    def _schedule_url(self):
+        return f"/mailings/campaigns/{self.campaign.pk}/update/schedule/"
+
+    def test_get_draft_renders_forms(self):
+        for url in [self._name_url(), self._sender_url(), self._schedule_url()]:
+            response = self.client.get(url)
+            self.assertEqual(response.status_code, 200)
 
     def test_get_non_draft_redirects_to_detail(self):
         self.campaign.status = Campaign.Status.SCHEDULED
         self.campaign.scheduled_at = timezone.now() + timedelta(hours=1)
         self.campaign.save(update_fields=["status", "scheduled_at"])
-        response = self.client.get(self._update_url())
-        self.assertEqual(response.status_code, 302)
-        self.assertEqual(response.url, f"/mailings/campaigns/{self.campaign.pk}/")
+        for url in [self._name_url(), self._sender_url(), self._schedule_url()]:
+            response = self.client.get(url)
+            self.assertEqual(response.status_code, 302)
+            self.assertEqual(response.url, f"/mailings/campaigns/{self.campaign.pk}/")
 
-    def test_post_updates_and_redirects_to_detail(self):
-        response = self.client.post(
-            self._update_url(),
-            data={
-                "name": "改名後",
-                "mailing_list": self.mailing_list.pk,
-                "sender_mode": Campaign.SenderMode.CREATOR,
-                "sender_email": "",
-                "sender_name": "",
-                "apply_unsubscribe_filter": "on",
-                "scheduled_at": "",
-            },
-        )
+    def test_post_name_updates_and_redirects(self):
+        response = self.client.post(self._name_url(), data={"name": "改名後"})
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response.url, f"/mailings/campaigns/{self.campaign.pk}/")
         self.campaign.refresh_from_db()
         self.assertEqual(self.campaign.name, "改名後")
+
+    def test_post_sender_updates_and_redirects_next_step(self):
+        response = self.client.post(self._sender_url(), data={
+            "sender_mode": Campaign.SenderMode.CREATOR,
+            "sender_email": "",
+            "sender_name": "",
+            "apply_unsubscribe_filter": "on",
+            "next_step": "1"
+        })
+        self.assertEqual(response.status_code, 302)
+        self.campaign.refresh_from_db()
+        self.assertEqual(self.campaign.sender_mode, Campaign.SenderMode.CREATOR)
 
 
 class CampaignScheduleViewTests(_PhaseBTestBase):
@@ -7825,6 +7985,132 @@ class CampaignDetailNewListButtonTests(_PhaseBTestBase):
         self.assertNotIn("新規リストを作成して紐づける", body)
 
 
+class CampaignMailingListBranchModalTests(_PhaseBTestBase):
+    """宛先リスト選択の新規作成/既存選択の分岐モーダル機能に関するテスト。"""
+
+    def test_campaign_detail_with_null_mailing_list_links_to_wizard(self):
+        self.campaign.mailing_list = None
+        self.campaign.save()
+        
+        response = self.client.get(f"/mailings/campaigns/{self.campaign.pk}/")
+        self.assertEqual(response.status_code, 200)
+        body = response.content.decode("utf-8")
+        self.assertIn(f'href="/mailings/lists/new/?campaign={self.campaign.pk}"', body)
+
+    def test_new_list_meta_with_null_mailing_list_has_auto_open_modal_in_context(self):
+        self.campaign.mailing_list = None
+        self.campaign.save()
+        
+        response = self.client.get(f"/mailings/lists/new/?campaign={self.campaign.pk}")
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context["auto_open_modal"])
+        self.assertEqual(response.context["campaign"], self.campaign)
+        
+        body = response.content.decode("utf-8")
+        self.assertIn('id="destinationSelectionModal"', body)
+        self.assertIn('id="autoOpenModalBtn"', body)
+
+    def test_new_list_meta_without_campaign_or_with_non_null_mailing_list_does_not_auto_open_modal(self):
+        # 1. campaign なしの場合
+        response = self.client.get("/mailings/lists/new/")
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.context["auto_open_modal"])
+        
+        # 2. campaign の mailing_list が既に設定されている場合
+        self.campaign.mailing_list = self.mailing_list
+        self.campaign.save()
+        
+        response = self.client.get(f"/mailings/lists/new/?campaign={self.campaign.pk}")
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.context["auto_open_modal"])
+
+    def test_link_existing_mailing_list_success(self):
+        self.campaign.mailing_list = None
+        self.campaign.save()
+        
+        response = self.client.post(
+            f"/mailings/lists/{self.mailing_list.pk}/?select_for_campaign={self.campaign.pk}",
+            {
+                "action": "link_existing",
+            }
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, f"/mailings/campaigns/{self.campaign.pk}/")
+        
+        self.campaign.refresh_from_db()
+        self.assertEqual(self.campaign.mailing_list, self.mailing_list)
+
+    def test_link_existing_mailing_list_invalid_campaign(self):
+        self.campaign.mailing_list = None
+        self.campaign.save()
+        
+        import uuid
+        invalid_uuid = uuid.uuid4()
+        response = self.client.post(
+            f"/mailings/lists/{self.mailing_list.pk}/?select_for_campaign={invalid_uuid}",
+            {
+                "action": "link_existing",
+            }
+        )
+        self.assertEqual(response.status_code, 302) # Redirects to campaign list
+        self.campaign.refresh_from_db()
+        self.assertIsNone(self.campaign.mailing_list)
+
+    def test_selection_mode_shows_link_button_on_detail(self):
+        self.campaign.mailing_list = None
+        self.campaign.save()
+        
+        response = self.client.get(f"/mailings/lists/{self.mailing_list.pk}/?select_for_campaign={self.campaign.pk}")
+        self.assertEqual(response.status_code, 200)
+        body = response.content.decode("utf-8")
+        self.assertIn('このリストを紐づける', body)
+        self.assertIn('value="link_existing"', body)
+
+    def test_normal_mode_does_not_show_link_button_on_detail(self):
+        response = self.client.get(f"/mailings/lists/{self.mailing_list.pk}/")
+        self.assertEqual(response.status_code, 200)
+        body = response.content.decode("utf-8")
+        self.assertNotIn('このリストを紐づける', body)
+        self.assertNotIn('value="link_existing"', body)
+
+    def test_selection_mode_shows_link_button_even_if_frozen(self):
+        self.campaign.mailing_list = None
+        self.campaign.save()
+        
+        from django.utils import timezone
+        self.mailing_list.members_frozen_at = timezone.now()
+        self.mailing_list.save()
+        
+        response = self.client.get(f"/mailings/lists/{self.mailing_list.pk}/?select_for_campaign={self.campaign.pk}")
+        self.assertEqual(response.status_code, 200)
+        body = response.content.decode("utf-8")
+        self.assertIn('このリストを紐づける', body)
+
+    def test_selection_mode_hides_member_management_buttons(self):
+        self.campaign.mailing_list = None
+        self.campaign.save()
+        
+        response = self.client.get(f"/mailings/lists/{self.mailing_list.pk}/?select_for_campaign={self.campaign.pk}")
+        self.assertEqual(response.status_code, 200)
+        body = response.content.decode("utf-8")
+        self.assertNotIn('メンバーを追加', body)
+        self.assertNotIn('タグで追加', body)
+        self.assertNotIn('メンバーを削除', body)
+        self.assertNotIn('タグで除外', body)
+
+    def test_selection_mode_hides_edit_and_archive_icons(self):
+        self.campaign.mailing_list = None
+        self.campaign.save()
+        
+        response = self.client.get(f"/mailings/lists/{self.mailing_list.pk}/?select_for_campaign={self.campaign.pk}")
+        self.assertEqual(response.status_code, 200)
+        body = response.content.decode("utf-8")
+        
+        self.assertNotIn('aria-label="配信リストを編集"', body)
+        self.assertNotIn('title="アーカイブ"', body)
+        self.assertNotIn('title="非アーカイブ化"', body)
+
+
 class Phase7ViewAuthorizationTests(TestCase):
     """Phase 7 ⑤：mailings / tags View の認可（粗い Permission ＋所有者 Mixin）。
 
@@ -7900,13 +8186,13 @@ class Phase7ViewAuthorizationTests(TestCase):
     # ---- Update（change_campaign + owner）----
     def test_update_owner_200(self):
         r = self._client(self.owner).get(
-            reverse("mailings:campaign_update", args=[self.campaign.pk])
+            reverse("mailings:campaign_update_name", args=[self.campaign.pk])
         )
         self.assertEqual(r.status_code, 200)
 
     def test_update_other_403(self):
         r = self._client(self.other).get(
-            reverse("mailings:campaign_update", args=[self.campaign.pk])
+            reverse("mailings:campaign_update_name", args=[self.campaign.pk])
         )
         self.assertEqual(r.status_code, 403)
 
@@ -8296,8 +8582,11 @@ class V16ListSearchAndSidebarSmokeTests(TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertContains(r, "春キャンペーン")          # draft
         self.assertContains(r, "完了キャンペーン")          # done も既定で出る（全件）
-        # 状態トグルは初期で1つもチェックされない（事前選択しない）。
-        self.assertEqual(r.context["selected_statuses"], [])
+        # 初回アクセス時は「アーカイブ済み」以外の全通常ステータスがデフォルトで選択状態になる。
+        self.assertEqual(
+            set(r.context["selected_statuses"]),
+            {"draft", "scheduled", "sending", "done", "failed"}
+        )
 
     def test_campaign_list_filter_by_delivery_date_range(self):
         # 配信日（scheduled_at）の期間検索。両側・片側（開始のみ／終了のみ）が効く（§7）。
@@ -8500,7 +8789,7 @@ class V16ListSearchAndSidebarSmokeTests(TestCase):
             reverse("mailings:campaign_detail", args=[self.camp_spring.pk])
         )
         self.assertEqual(r.status_code, 200)
-        self.assertContains(r, "<h1>配信キャンペーン詳細</h1>", html=False)
+        self.assertContains(r, "<h1>キャンペーン詳細</h1>", html=False)
 
     def test_campaign_detail_overview_card(self):
         r = self.client.get(
@@ -8508,7 +8797,6 @@ class V16ListSearchAndSidebarSmokeTests(TestCase):
         )
         self.assertEqual(r.status_code, 200)
         for label in (
-            "キャンペーン概要",
             "予約配信日時",
             "宛先リスト",
             "送信元",
@@ -8538,3 +8826,75 @@ class V16ListSearchAndSidebarSmokeTests(TestCase):
         self.assertContains(
             r2, reverse("mailings:campaign_report", args=[done.pk])
         )
+
+class MailingListListViewSelectModeTests(TestCase):
+    def setUp(self):
+        from django.contrib.auth.models import Permission
+        self.user = User.objects.create_user(username="testuser", password="x")
+        self.user.user_permissions.add(Permission.objects.get(codename="view_mailinglist"))
+        self.client.force_login(self.user)
+        self.campaign = Campaign.objects.create(
+            name="C1",
+            template=EmailTemplate.objects.create(name="T1", subject="s", body="b", created_by=self.user),
+            created_by=self.user,
+            status=Campaign.Status.DRAFT
+        )
+
+    def test_back_link_in_select_mode(self):
+        import base64, json
+        # 実装(CampaignDetailView等)に合わせてtitleを空文字にする
+        stack = [{"url": f"/mailings/campaigns/{self.campaign.pk}/", "title": ""}]
+        encoded = base64.urlsafe_b64encode(json.dumps(stack).encode()).decode().rstrip("=")
+        url = reverse("mailings:mailing_list_list") + f"?select_for_campaign={self.campaign.pk}&back_stack={encoded}"
+        
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 200)
+        
+        # 戻るボタンのhrefがキャンペーン詳細ページであることを確認
+        self.assertContains(resp, f'href="/mailings/campaigns/{self.campaign.pk}/"')
+        self.assertContains(resp, '戻る')
+
+class CampaignListViewStatusFilterTests(TestCase):
+    def setUp(self):
+        from django.contrib.auth.models import Permission
+        self.user = User.objects.create_user(username="testuser", password="x")
+        self.user.user_permissions.add(Permission.objects.get(codename="view_campaign"))
+        self.client.force_login(self.user)
+        
+        tpl1 = EmailTemplate.objects.create(name="T1", subject="s", body="b", created_by=self.user)
+        tpl2 = EmailTemplate.objects.create(name="T2", subject="s", body="b", created_by=self.user)
+        tpl3 = EmailTemplate.objects.create(name="T3", subject="s", body="b", created_by=self.user)
+        
+        self.draft_active = Campaign.objects.create(name="Draft Active", template=tpl1, created_by=self.user, status=Campaign.Status.DRAFT, is_archived=False)
+        self.draft_archived = Campaign.objects.create(name="Draft Archived", template=tpl2, created_by=self.user, status=Campaign.Status.DRAFT, is_archived=True)
+        self.done_active = Campaign.objects.create(name="Done Active", template=tpl3, created_by=self.user, status=Campaign.Status.DONE, is_archived=False)
+        
+        self.url = reverse("mailings:campaign_list")
+
+    def test_default_shows_only_active(self):
+        resp = self.client.get(self.url)
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Draft Active")
+        self.assertContains(resp, "Done Active")
+        self.assertNotContains(resp, "Draft Archived")
+
+    def test_select_archived_only(self):
+        resp = self.client.get(self.url, {"searched": "1", "status": "archived"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, "Draft Active")
+        self.assertNotContains(resp, "Done Active")
+        self.assertContains(resp, "Draft Archived")
+
+    def test_select_draft_and_archived(self):
+        resp = self.client.get(self.url, {"searched": "1", "status": ["draft", "archived"]})
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Draft Active")
+        self.assertNotContains(resp, "Done Active")
+        self.assertContains(resp, "Draft Archived")
+
+    def test_select_none_shows_only_active(self):
+        resp = self.client.get(self.url, {"searched": "1"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Draft Active")
+        self.assertContains(resp, "Done Active")
+        self.assertNotContains(resp, "Draft Archived")

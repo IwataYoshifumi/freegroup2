@@ -7,10 +7,11 @@
   <div class="app-page-header">
     <div>
       <h1>タグカテゴリ一覧</h1>
-    </div>
-    <div class="app-action-area">
       {% url 'tags:tag_category_create' as create_url %}
-      <a href="{% append_back_url create_url back %}" class="app-btn app-btn--primary">＋ 新規カテゴリ作成</a>
+      <div class="app-action-area" style="margin-top:12px; justify-content:flex-start;">
+        <a href="{% url 'tags:tag_list' %}" class="app-btn app-btn--secondary">タグ一覧</a>
+        <a href="{% append_back_url create_url back %}" class="app-btn app-btn--primary">新規タグカテゴリ追加</a>
+      </div>
     </div>
   </div>
 

@@ -260,4 +260,4 @@ EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
 EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "")
 
-SESSION_COOKIE_NAME = "freegroup2_session_8000"
+SESSION_COOKIE_NAME = os.getenv("SESSION_COOKIE_NAME", "freegroup2_session_8001")

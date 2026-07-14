@@ -153,6 +153,11 @@ urlpatterns = [
         views.MailingListUnarchiveView.as_view(),
         name="mailing_list_unarchive",
     ),
+    path(
+        "mailings/lists/<uuid:pk>/copy/",
+        views.MailingListCopyView.as_view(),
+        name="mailing_list_copy",
+    ),
     # AJAX エンドポイント
     path(
         "mailings/lists/freeze/",
@@ -308,9 +313,19 @@ urlpatterns = [
         name="campaign_detail",
     ),
     path(
-        "mailings/campaigns/<uuid:pk>/update/",
-        views.CampaignUpdateView.as_view(),
-        name="campaign_update",
+        "mailings/campaigns/<uuid:pk>/update/name/",
+        views.CampaignNameUpdateView.as_view(),
+        name="campaign_update_name",
+    ),
+    path(
+        "mailings/campaigns/<uuid:pk>/update/sender/",
+        views.CampaignSenderUpdateView.as_view(),
+        name="campaign_update_sender",
+    ),
+    path(
+        "mailings/campaigns/<uuid:pk>/update/schedule/",
+        views.CampaignScheduleUpdateView.as_view(),
+        name="campaign_update_schedule",
     ),
     path(
         "mailings/campaigns/<uuid:pk>/schedule/",

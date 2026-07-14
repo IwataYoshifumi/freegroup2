@@ -37,9 +37,9 @@
         </div>
       </div>
 
-      <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:flex-start;">
+      <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:flex-start; margin-top:16px;">
         {# 状態の絞り込み（トグル・複数選択）。初期閉・幅は中身に合わせる。 #}
-        <div class="app-collapsible app-person-filter-collapsible" style="flex:0 1 auto;">
+        <div class="app-collapsible app-person-filter-collapsible" style="flex:1 1 320px; min-width:280px;">
           <button type="button" class="app-collapsible__header" data-action="toggle-collapsible"
                   aria-expanded="false">
             <span>状態</span>
@@ -117,25 +117,21 @@
               {% url 'mailings:mailing_list_delete' pk=ml.id as delete_url %}
               <tr>
                 <td class="app-table__col--action">
-                  <a href="{% append_back_url detail_url back %}" class="app-btn app-btn--outline-secondary app-btn--sm">詳細</a>
-                  {% if not ml.is_archived %}
-                    <a href="{% append_back_url update_url back %}" class="app-btn app-btn--success app-btn--sm">編集</a>
-                    <button type="button" class="app-btn app-btn--outline-secondary app-btn--sm js-row-archive-toggle"
-                            data-target="js-row-archive-{{ ml.id }}"
-                            aria-haspopup="true" aria-expanded="false">
-                      <i class="bi bi-caret-down-fill"></i>
-                    </button>
-                    <span id="js-row-archive-{{ ml.id }}" style="display:none;">
-                      <a href="{% append_back_url delete_url back %}" class="app-btn app-btn--warning app-btn--sm">アーカイブ化</a>
-                    </span>
+                  {% if select_for_campaign %}
+                    <a href="{% append_back_url detail_url back %}{% if back %}&{% else %}?{% endif %}select_for_campaign={{ select_for_campaign }}" class="app-btn app-btn--outline-secondary app-btn--sm">詳細</a>
+                  {% else %}
+                    <a href="{% append_back_url detail_url back %}" class="app-btn app-btn--outline-secondary app-btn--sm">詳細</a>
+                    {% if not ml.is_archived %}
+                      <a href="{% append_back_url update_url back %}" class="app-btn app-btn--success app-btn--sm">編集</a>
+                    {% endif %}
                   {% endif %}
                 </td>
                 <td>
+                  <span class="app-ellipsis" style="max-width: 150px; vertical-align: middle;">{{ ml.name }}</span>
                   {% if ml.members_frozen_at %}
-                    <i class="bi bi-lock-fill" style="color:#64748b; margin-right:4px;"
+                    <i class="bi bi-lock-fill" style="color:#64748b; margin-left:4px; vertical-align: middle;"
                        title="凍結: {{ ml.members_frozen_at|date:'Y/m/d H:i' }}"></i>
                   {% endif %}
-                  {{ ml.name }}
                 </td>
                 <td data-col-key="description">
                   {% if ml.description %}
@@ -146,8 +142,6 @@
                 <td data-col-key="status">
                   {% if ml.is_archived %}
                     <span class="app-status-badge app-status-badge--muted">アーカイブ済み</span>
-                  {% else %}
-                    <span class="app-status-badge app-status-badge--success">アクティブ</span>
                   {% endif %}
                 </td>
                 <td data-col-key="created_by">{{ ml.created_by.username|default:"-" }}</td>
@@ -167,18 +161,4 @@
       </p>
     {% endif %}
   </section>
-
-  <script>
-    (function () {
-      document.querySelectorAll('.js-row-archive-toggle').forEach(function (btn) {
-        btn.addEventListener('click', function () {
-          var target = document.getElementById(btn.dataset.target);
-          if (!target) return;
-          var opening = target.style.display === 'none' || target.style.display === '';
-          target.style.display = opening ? 'inline' : 'none';
-          btn.setAttribute('aria-expanded', opening ? 'true' : 'false');
-        });
-      });
-    })();
-  </script>
 {% endblock %}

@@ -14,10 +14,10 @@
     </div>
   </div>
 
-  <section class="app-card" style="max-width: 720px; margin: 0 auto;">
-    <form method="post" class="app-form-grid-edit">
-      {% csrf_token %}
+  <form method="post" class="app-form-grid-edit app-form-wrapper">
+    {% csrf_token %}
 
+    <section class="app-card" style="margin-bottom: var(--app-space-md);">
       <div class="app-form-grid" style="grid-template-columns: 1fr;">
         {% for field in form %}
           <div class="app-form__group">
@@ -29,13 +29,13 @@
           </div>
         {% endfor %}
       </div>
+    </section>
 
-      {# 確定アクション：左から「最初に戻る」「戻る」「作成/保存」（HIG 8章。新規=青/編集=緑）。 #}
-      <div class="app-action-area">
-        {% back_all_link back %}
-        {% back_link back %}
-        <button type="submit" class="app-btn {% if is_create %}app-btn--primary{% else %}app-btn--success{% endif %}">{% if is_create %}作成{% else %}保存{% endif %}</button>
-      </div>
-    </form>
-  </section>
+    {# 確定アクション：左から「最初に戻る」「戻る」「作成/保存」（HIG 8章。新規=青/編集=緑）。 #}
+    <div class="app-action-area">
+      {% back_all_link back %}
+      {% back_link back %}
+      <button type="submit" class="app-btn {% if is_create %}app-btn--primary{% else %}app-btn--success{% endif %}">{% if is_create %}作成{% else %}保存{% endif %}</button>
+    </div>
+  </form>
 {% endblock %}

@@ -159,77 +159,79 @@ class EmailTemplateForm(_AppInputMixin, forms.ModelForm):
         self._apply_widget_classes()
 
 
-class CampaignForm(_AppInputMixin, forms.ModelForm):
-    """Campaign 新規作成・編集共通フォーム。
+class CampaignNameForm(_AppInputMixin, forms.ModelForm):
+    """Campaign 新規作成・名称変更フォーム。"""
 
-    新規作成（is_create=True）はキャンペーン名のみを表示する。宛先リスト・送信元方式・
-    差出人・配信停止フィルタ・予約日時は詳細画面の「基本情報を編集」から設定する運用。
-    Campaign.clean() がメルマガ系必須・DKIM ドメイン・scheduled_at 未来日時・宛先リスト
-    必須（scheduled 遷移時）の業務バリデーションを担う。本フォームは widget と Form 層の
-    必須/任意制御のみ。
-    """
+    class Meta:
+        model = Campaign
+        fields = ["name"]
+        labels = {"name": "キャンペーン名"}
 
-    CREATE_VISIBLE_FIELDS = ("name",)
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["name"].required = True
+        self._apply_widget_classes()
+
+
+class CampaignSenderForm(_AppInputMixin, forms.ModelForm):
+    """Campaign 配信形式（送信元方式・差出人・配信停止フィルタ）編集フォーム。"""
 
     class Meta:
         model = Campaign
         fields = [
-            "name",
-            "mailing_list",
             "sender_mode",
             "sender_email",
             "sender_name",
             "apply_unsubscribe_filter",
-            "scheduled_at",
         ]
         labels = {
-            "name": "キャンペーン名",
-            "mailing_list": "宛先リスト",
             "sender_mode": "送信元方式",
             "sender_email": "差出人アドレス",
             "sender_name": "差出人名",
             "apply_unsubscribe_filter": "配信停止フィルタを適用する",
-            "scheduled_at": "予約配信日時",
         }
         widgets = {
             "sender_mode": forms.RadioSelect(attrs={"class": "app-radio-toggle"}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["sender_mode"].choices = [
+            ("creator", "メール作成者"),
+            ("newsletter", "メルマガ"),
+        ]
+        
+        self.fields["apply_unsubscribe_filter"].widget = forms.RadioSelect(
+            choices=[(True, "適用する"), (False, "適用しない")],
+            attrs={"class": "app-radio-toggle"},
+        )
+        self.fields["apply_unsubscribe_filter"].required = False
+
+        self.fields["sender_email"].required = False
+        self.fields["sender_name"].required = False
+
+        config = MailingConfig.objects.first()
+        if config:
+            if not self.instance.sender_email and config.default_newsletter_sender_email:
+                self.initial["sender_email"] = config.default_newsletter_sender_email
+            if not self.instance.sender_name and config.default_newsletter_sender_name:
+                self.initial["sender_name"] = config.default_newsletter_sender_name
+
+        self._apply_widget_classes()
+
+
+class CampaignScheduleForm(_AppInputMixin, forms.ModelForm):
+    """Campaign スケジュール編集フォーム。"""
+
+    class Meta:
+        model = Campaign
+        fields = ["scheduled_at"]
+        labels = {"scheduled_at": "予約配信日時"}
+        widgets = {
             "scheduled_at": forms.DateTimeInput(attrs={"type": "datetime-local"}),
         }
 
-    def __init__(self, *args, is_create=False, **kwargs):
+    def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # 新規作成時はキャンペーン名のみ表示。残りは詳細→基本情報編集で埋める運用。
-        if is_create:
-            for fname in list(self.fields.keys()):
-                if fname not in self.CREATE_VISIBLE_FIELDS:
-                    del self.fields[fname]
-        if "mailing_list" in self.fields:
-            # アーカイブ済みリストは選択肢から除外。
-            self.fields["mailing_list"].queryset = MailingList.objects.filter(
-                is_archived=False
-            )
-            # mailing_list は draft の間は空のままで OK（Model.clean が scheduled 遷移時に必須化）
-            self.fields["mailing_list"].required = False
-        if "sender_mode" in self.fields:
-            # トグル UI に合わせて表示ラベルを簡潔化（モデル定義の choices は維持）。
-            self.fields["sender_mode"].choices = [
-                ("creator", "メール作成者"),
-                ("newsletter", "メルマガ"),
-            ]
-        if "apply_unsubscribe_filter" in self.fields:
-            # チェックボックス → 2 値トグル（適用する／適用しない）に置き換え。
-            # BooleanField のまま widget だけ RadioSelect に差し替えれば、to_python が
-            # 'True' / 'False' 文字列を bool に変換するため値の型は維持される。
-            self.fields["apply_unsubscribe_filter"].widget = forms.RadioSelect(
-                choices=[(True, "適用する"), (False, "適用しない")],
-                attrs={"class": "app-radio-toggle"},
-            )
-            self.fields["apply_unsubscribe_filter"].required = False
-        # name は常に必須。
-        if "name" in self.fields:
-            self.fields["name"].required = True
-        # newsletter 時の sender_* 必須は Model.clean が業務制約として検証する。
-        for fname in ("sender_email", "sender_name", "scheduled_at"):
-            if fname in self.fields:
-                self.fields[fname].required = False
+        self.fields["scheduled_at"].required = False
         self._apply_widget_classes()

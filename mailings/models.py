@@ -363,6 +363,11 @@ class Campaign(models.Model):
 
         errors = {}
 
+        # creator方式保存時は、差出人情報を空に正規化（画面上で隠れていてもゴミが残らないようにする）
+        if self.sender_mode == self.SenderMode.CREATOR:
+            self.sender_email = ""
+            self.sender_name = ""
+
         # (1) 構造的禁止：メルマガ方式 × Unsubscribe フィルタ OFF
         if (
             self.sender_mode == self.SenderMode.NEWSLETTER
@@ -387,7 +392,7 @@ class Campaign(models.Model):
                 except ValidationError as e:
                     errors["sender_email"] = e.messages[0] if e.messages else str(e)
 
-        # (5) scheduled 遷移時：scheduled_at 必須・未来日時 + 宛先リスト必須
+        # (5) scheduled 遷移時：scheduled_at 必須・未来日時 + 宛先リスト必須 + 件名・本文必須
         if self.status == self.Status.SCHEDULED:
             if self.scheduled_at is None:
                 errors["scheduled_at"] = "予約配信日時は必須です。"
@@ -399,6 +404,19 @@ class Campaign(models.Model):
             # 遷移時に移管した）
             if self.mailing_list_id is None:
                 errors["mailing_list"] = "宛先リストを選択してください。"
+
+            try:
+                template = self.template
+            except Exception:
+                template = None
+
+            if template is None:
+                errors["template"] = "メールテンプレートが見つかりません。"
+            else:
+                if not (template.subject or "").strip():
+                    errors["subject"] = "件名を入力してください。"
+                if not (template.body or "").strip():
+                    errors["body"] = "本文を入力してください。"
 
         if errors:
             raise ValidationError(errors)

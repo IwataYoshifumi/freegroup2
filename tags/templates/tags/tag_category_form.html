@@ -4,8 +4,7 @@
 {% block title %}{% if is_create %}タグカテゴリ作成{% else %}タグカテゴリ編集{% endif %} — FreeGroup2{% endblock %}
 
 {% block content %}
-  {# HIG v1.3 §2.1：外側のカード枠ごと中央寄せ。視覚的に揃えるためヘッダーも同じ max-width に揃える。 #}
-  <div class="app-page-header" style="max-width: 720px; margin: 0 auto;">
+  <div class="app-page-header">
     <div>
       <h1>{% if is_create %}タグカテゴリ作成{% else %}タグカテゴリ編集：{{ object.name }}{% endif %}</h1>
     </div>
@@ -15,19 +14,19 @@
     </div>
   </div>
 
-  <section class="app-card" style="max-width: 720px; margin: 0 auto;">
-    {% if object and object.is_archived %}
-      <p class="app-muted" style="margin-bottom:12px;">
-        <span class="app-status-badge app-status-badge--muted">アーカイブ済み</span>
-        このカテゴリは現在アーカイブ済みのため、一覧画面に表示されません
-        （「アーカイブ済みを含める」チェックで一覧表示可）。
-        非アーカイブ化はタグカテゴリ詳細画面から行ってください。
-      </p>
-    {% endif %}
+  <form method="post" class="app-form-grid-edit app-form-wrapper">
+    {% csrf_token %}
+    {{ hidden_back_field }}
 
-    <form method="post" class="app-form-grid-edit">
-      {% csrf_token %}
-      {{ hidden_back_field }}
+    <section class="app-card" style="margin-bottom: var(--app-space-md);">
+      {% if object and object.is_archived %}
+        <p class="app-muted" style="margin-bottom:12px;">
+          <span class="app-status-badge app-status-badge--muted">アーカイブ済み</span>
+          このカテゴリは現在アーカイブ済みのため、一覧画面に表示されません
+          （「アーカイブ済みを含める」チェックで一覧表示可）。
+          非アーカイブ化はタグカテゴリ詳細画面から行ってください。
+        </p>
+      {% endif %}
 
       <div class="app-form-grid" style="grid-template-columns: 1fr;">
         {% for field in form %}
@@ -40,12 +39,12 @@
           </div>
         {% endfor %}
       </div>
+    </section>
 
-      <div class="app-action-area">
-        {% url 'tags:tag_category_list' as cancel_url %}
-        <a href="{% append_back_url cancel_url back %}" class="app-btn app-btn--secondary">戻る</a>
-        <button type="submit" class="app-btn app-btn--success">保存</button>
-      </div>
-    </form>
-  </section>
+    <div class="app-action-area">
+      {% url 'tags:tag_category_list' as cancel_url %}
+      <a href="{% append_back_url cancel_url back %}" class="app-btn app-btn--secondary">戻る</a>
+      <button type="submit" class="app-btn app-btn--success">保存</button>
+    </div>
+  </form>
 {% endblock %}

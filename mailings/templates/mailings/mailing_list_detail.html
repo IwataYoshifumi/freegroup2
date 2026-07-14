@@ -6,27 +6,73 @@
 {% block content %}
   <div class="app-page-header">
     <div>
-      <h1 style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+      <div class="app-breadcrumb">メール配信 / 配信リスト一覧 / 詳細</div>
+      <h1>リスト詳細</h1>
+    </div>
+    {# HIG 3.2・原則7：ヘッダ右上は戻る導線のみ。編集・遷移導線はタイトル直下の app-card へ集約（§7.3）。 #}
+    <div class="app-action-area">
+      {% back_all_link back %}
+      {% back_link back %}
+    </div>
+  </div>
+
+  {# 対象情報カード #}
+  <section class="app-card">
+    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; position:relative; width:100%;">
+      <h2 style="margin:0; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
         {% if mailing_list.members_frozen_at %}
-          <i class="bi bi-lock-fill" style="color:#64748b;"
+          <i class="bi bi-lock-fill" style="color:var(--app-text); font-size:18px;"
              title="凍結: {{ mailing_list.members_frozen_at|date:'Y/m/d H:i' }}"></i>
         {% endif %}
         <span>{{ mailing_list.name }}</span>
+        {% if not mailing_list.is_archived and not select_for_campaign %}
+          {% url 'mailings:mailing_list_update' pk=mailing_list.id as update_url %}
+          <a href="{% append_back_url update_url back %}"
+             aria-label="配信リストを編集"
+             style="color:var(--app-text); font-size:18px; display:inline-flex; align-items:center; justify-content:center; text-decoration:none;">
+            <i class="bi bi-pencil"></i>
+          </a>
+        {% endif %}
         <button type="button" class="js-info-toggle"
                 aria-haspopup="true" aria-expanded="false" aria-controls="js-info-popover"
                 aria-label="詳細情報"
-                style="background:none; border:none; cursor:pointer; padding:0; color:#64748b; font-size:0.85em;">
+                style="background:none; border:none; cursor:pointer; padding:0; color:var(--app-text); font-size:18px; display:inline-flex; align-items:center; justify-content:center;">
           <i class="bi bi-info-circle"></i>
         </button>
+
         {% if mailing_list.is_archived %}
           <span class="app-status-badge app-status-badge--muted">アーカイブ済み</span>
         {% endif %}
-      </h1>
-      <div style="margin-top:4px; color:#475569;">{{ mailing_list.description|default:"-" }}</div>
+      </h2>
+      <div style="display:flex; gap:var(--app-space-sm); flex-wrap:wrap; align-items:center;">
+        {% if not select_for_campaign %}
+          <form method="post" action="{% url 'mailings:mailing_list_copy' pk=mailing_list.id %}" style="display:inline;"
+                onsubmit="return confirm('このリストをコピーして新しいリストを作成しますか？');">
+            {% csrf_token %}
+            {{ back.hidden_fields }}
+            <button type="submit" class="app-btn app-btn--primary">リスト複製</button>
+          </form>
+          {% if mailing_list.is_archived %}
+            <form method="post" action="{% url 'mailings:mailing_list_unarchive' pk=mailing_list.id %}" style="display:inline;"
+                  onsubmit="return confirm('「{{ mailing_list.name }}」を非アーカイブ化します。よろしいですか？');">
+              {% csrf_token %}
+              {{ back.hidden_fields }}
+              <button type="submit" title="非アーカイブ化" style="background:none; border:none; cursor:pointer; padding:0; color:var(--app-text); font-size:18px; display:inline-flex; align-items:center; justify-content:center;">
+                <i class="bi bi-box-arrow-up"></i>
+              </button>
+            </form>
+          {% else %}
+            {% url 'mailings:mailing_list_delete' pk=mailing_list.id as delete_url %}
+            <a href="{% append_back_url delete_url back %}" title="アーカイブ" style="color:var(--app-text); font-size:18px; display:inline-flex; align-items:center; justify-content:center; text-decoration:none;">
+              <i class="bi bi-box-seam"></i>
+            </a>
+          {% endif %}
+        {% endif %}
+      </div>
 
       {# ⓘ ポップオーバー：状態・作成者・作成日時・更新日時 #}
       <div id="js-info-popover" hidden
-           style="position:absolute; z-index:1000; margin-top:4px; padding:12px 16px;
+           style="position:absolute; z-index:1000; top:100%; right:0; margin-top:4px; padding:12px 16px;
                   background:#fff; border:1px solid #cbd5e1; border-radius:6px;
                   box-shadow:0 4px 12px rgba(0,0,0,0.12); min-width:280px;">
         <dl style="margin:0; display:grid; grid-template-columns:auto 1fr; gap:4px 12px;">
@@ -47,43 +93,23 @@
         </dl>
       </div>
     </div>
-    <div class="app-action-area">
-      {% back_all_link back %}
-      {% back_link back %}
-      {% url 'mailings:mailing_list_update' pk=mailing_list.id as update_url %}
-      {% url 'mailings:mailing_list_delete' pk=mailing_list.id as delete_url %}
-      {% if mailing_list.is_archived %}
-        <span class="app-btn app-btn--success" style="opacity:0.5; pointer-events:none;" aria-disabled="true">編集</span>
-        <button type="button" class="app-btn app-btn--outline-secondary js-archive-toggle"
-                aria-haspopup="true" aria-expanded="false" aria-controls="js-archive-form">
-          <i class="bi bi-caret-down-fill"></i>
-        </button>
-        <form id="js-archive-form" method="post" action="{% url 'mailings:mailing_list_unarchive' pk=mailing_list.id %}"
-              style="display:none;"
-              onsubmit="return confirm('「{{ mailing_list.name }}」を非アーカイブ化します。よろしいですか？');">
+    <div style="margin-top:8px; color:#475569;">{{ mailing_list.description|default:"-" }}</div>
+    
+    {% if select_for_campaign %}
+      <div style="margin-top:16px;">
+        <form method="post" action="?select_for_campaign={{ select_for_campaign.pk }}" style="display:inline;">
           {% csrf_token %}
-          {{ back.hidden_fields }}
-          <button type="submit" class="app-btn app-btn--warning">非アーカイブ化</button>
+          <input type="hidden" name="action" value="link_existing">
+          <button type="submit" class="app-btn app-btn--primary">このリストを紐づける</button>
         </form>
-      {% else %}
-        <a href="{% append_back_url update_url back %}" class="app-btn app-btn--success">編集</a>
-        <button type="button" class="app-btn app-btn--outline-secondary js-archive-toggle"
-                aria-haspopup="true" aria-expanded="false" aria-controls="js-archive-form">
-          <i class="bi bi-caret-down-fill"></i>
-        </button>
-        <span id="js-archive-form" style="display:none;">
-          <a href="{% append_back_url delete_url back %}" class="app-btn app-btn--warning">アーカイブ化</a>
-        </span>
-      {% endif %}
-    </div>
-  </div>
+      </div>
+    {% endif %}
+  </section>
 
   {% if messages %}
-    <section class="app-card">
-      {% for message in messages %}
-        <div class="app-message{% if message.tags %} app-message--{{ message.tags }}{% endif %}">{{ message }}</div>
-      {% endfor %}
-    </section>
+    {% for message in messages %}
+      <div class="app-message{% if message.tags %} app-message--{{ message.tags }}{% endif %}">{{ message }}</div>
+    {% endfor %}
   {% endif %}
 
   <section class="app-card">
@@ -93,52 +119,53 @@
       {% if members|length > 50 %}
         <span class="app-status-badge app-status-badge--muted">先頭 50 件を表示</span>
       {% endif %}
-      <div style="margin-left:auto; display:flex; flex-direction:column; gap:6px; align-items:flex-end;">
+
+      {% url 'mailings:list_member_add' pk=mailing_list.id as member_add_url %}
+      {% url 'mailings:list_member_add_by_tag' pk=mailing_list.id as member_add_by_tag_url %}
+      {% url 'mailings:list_member_remove' pk=mailing_list.id as member_remove_url %}
+      {% url 'mailings:list_member_remove_by_tag' pk=mailing_list.id as member_remove_by_tag_url %}
+      
+      <div style="display:flex; gap:16px; align-items:center; flex-wrap:wrap;">
+        {% if not select_for_campaign %}
+          {# 追加系グループ（個別:緑 / タグ:青） #}
+          <div style="display:flex; gap:8px; align-items:center;">
+            {% if mailing_list.is_archived %}
+              <span class="app-btn app-btn--success" style="opacity:0.5; pointer-events:none;" aria-disabled="true"
+                    title="アーカイブ済みのため編集できません">メンバーを追加</span>
+              <span class="app-btn app-btn--success" style="opacity:0.5; pointer-events:none;" aria-disabled="true"
+                    title="アーカイブ済みのため編集できません">タグで追加</span>
+            {% elif is_frozen %}
+              <span class="app-btn app-btn--success" style="opacity:0.5; pointer-events:none;" aria-disabled="true"
+                    title="凍結中のため編集できません">メンバーを追加</span>
+              <span class="app-btn app-btn--success" style="opacity:0.5; pointer-events:none;" aria-disabled="true"
+                    title="凍結中のため編集できません">タグで追加</span>
+            {% else %}
+              <a href="{% append_back_url member_add_url back %}" class="app-btn app-btn--primary">メンバーを追加</a>
+              <a href="{% append_back_url member_add_by_tag_url back %}" class="app-btn app-btn--success">タグで追加</a>
+            {% endif %}
+          </div>
+          {# 削除系グループ（黄：warning） #}
+          <div style="display:flex; gap:8px; align-items:center;">
+            {% if mailing_list.is_archived %}
+              <span class="app-btn app-btn--warning" style="opacity:0.5; pointer-events:none;" aria-disabled="true"
+                    title="アーカイブ済みのため編集できません">メンバーを削除</span>
+              <span class="app-btn app-btn--warning" style="opacity:0.5; pointer-events:none;" aria-disabled="true"
+                    title="アーカイブ済みのため編集できません">タグで除外</span>
+            {% elif is_frozen %}
+              <span class="app-btn app-btn--warning" style="opacity:0.5; pointer-events:none;" aria-disabled="true"
+                    title="凍結中のため編集できません">メンバーを削除</span>
+              <span class="app-btn app-btn--warning" style="opacity:0.5; pointer-events:none;" aria-disabled="true"
+                    title="凍結中のため編集できません">タグで除外</span>
+            {% else %}
+              <a href="{% append_back_url member_remove_url back %}" class="app-btn app-btn--warning">メンバーを削除</a>
+              <a href="{% append_back_url member_remove_by_tag_url back %}" class="app-btn app-btn--warning">タグで除外</a>
+            {% endif %}
+          </div>
+        {% endif %}
+      </div>
+
+      <div style="margin-left:auto; display:flex; flex-direction:column; gap:8px; align-items:flex-end;">
         {% include "mailings/_column_toggle.html" with storage_key="mailing_list_visible_columns_detail" %}
-        {% comment %}
-          追加系の行（緑系）：Phase 1c-α 個別追加 + Phase 1c-β-3a タグで追加。
-          凍結時は disabled + ツールチップ（§6.4 / §6.6）
-        {% endcomment %}
-        {% url 'mailings:list_member_add' pk=mailing_list.id as member_add_url %}
-        {% url 'mailings:list_member_add_by_tag' pk=mailing_list.id as member_add_by_tag_url %}
-        <div style="display:flex; gap:8px; align-items:center;">
-          {% if mailing_list.is_archived %}
-            <span class="app-btn app-btn--primary" style="opacity:0.5; pointer-events:none;" aria-disabled="true"
-                  title="アーカイブ済みのため編集できません">メンバーを追加</span>
-            <span class="app-btn app-btn--success" style="opacity:0.5; pointer-events:none;" aria-disabled="true"
-                  title="アーカイブ済みのため編集できません">タグで追加</span>
-          {% elif is_frozen %}
-            <span class="app-btn app-btn--primary" style="opacity:0.5; pointer-events:none;" aria-disabled="true"
-                  title="凍結中のため編集できません">メンバーを追加</span>
-            <span class="app-btn app-btn--success" style="opacity:0.5; pointer-events:none;" aria-disabled="true"
-                  title="凍結中のため編集できません">タグで追加</span>
-          {% else %}
-            <a href="{% append_back_url member_add_url back %}" class="app-btn app-btn--primary">メンバーを追加</a>
-            <a href="{% append_back_url member_add_by_tag_url back %}" class="app-btn app-btn--success">タグで追加</a>
-          {% endif %}
-        </div>
-        {% comment %}
-          削除系の行（danger）：個別削除 + Phase 1c-β-3b タグで除外。
-          凍結時は disabled + ツールチップ（§6.4 / §6.6）
-        {% endcomment %}
-        {% url 'mailings:list_member_remove' pk=mailing_list.id as member_remove_url %}
-        {% url 'mailings:list_member_remove_by_tag' pk=mailing_list.id as member_remove_by_tag_url %}
-        <div style="display:flex; gap:8px; align-items:center;">
-          {% if mailing_list.is_archived %}
-            <span class="app-btn app-btn--warning" style="opacity:0.5; pointer-events:none;" aria-disabled="true"
-                  title="アーカイブ済みのため編集できません">メンバーを削除</span>
-            <span class="app-btn app-btn--warning" style="opacity:0.5; pointer-events:none;" aria-disabled="true"
-                  title="アーカイブ済みのため編集できません">タグで除外</span>
-          {% elif is_frozen %}
-            <span class="app-btn app-btn--warning" style="opacity:0.5; pointer-events:none;" aria-disabled="true"
-                  title="凍結中のため編集できません">メンバーを削除</span>
-            <span class="app-btn app-btn--warning" style="opacity:0.5; pointer-events:none;" aria-disabled="true"
-                  title="凍結中のため編集できません">タグで除外</span>
-          {% else %}
-            <a href="{% append_back_url member_remove_url back %}" class="app-btn app-btn--warning">メンバーを削除</a>
-            <a href="{% append_back_url member_remove_by_tag_url back %}" class="app-btn app-btn--warning">タグで除外</a>
-          {% endif %}
-        </div>
       </div>
     </div>
     {% if members %}
@@ -197,16 +224,6 @@
 
   <script>
     (function () {
-      // ▼ アーカイブ化展開トグル
-      var toggle = document.querySelector('.js-archive-toggle');
-      var box = document.getElementById('js-archive-form');
-      if (toggle && box) {
-        toggle.addEventListener('click', function () {
-          var opening = box.style.display === 'none' || box.style.display === '';
-          box.style.display = opening ? 'inline' : 'none';
-          toggle.setAttribute('aria-expanded', opening ? 'true' : 'false');
-        });
-      }
       // ⓘ ポップオーバー
       var infoBtn = document.querySelector('.js-info-toggle');
       var infoPop = document.getElementById('js-info-popover');

@@ -179,7 +179,7 @@ class BulkTaggingViewTests(TestCase):
         """アクティブなタグ詳細には「このタグを人に付与」導線（固定モード URL）が出る。"""
         resp = self.client.get(reverse("tags:tag_detail", kwargs={"pk": self.tag.id}))
         self.assertContains(resp, self.fixed_url)
-        self.assertContains(resp, "このタグを人に付与")
+        self.assertContains(resp, "タグ付けするパーソンを追加・編集する")
 
     def test_tag_detail_hides_assign_button_for_archived_tag(self):
         """アーカイブ済みタグには付与導線を出さない（active 運用）。"""

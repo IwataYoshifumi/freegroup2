@@ -47,11 +47,44 @@
   </section>
 
   <section class="app-card">
+    <div class="app-section__header">
+      <h2>対象パーソン一覧（{{ snapshot_count }} 件）</h2>
+    </div>
+    {% if persons %}
+      <div class="app-table-wrapper">
+        <table class="app-table app-table--nowrap">
+          <thead>
+            <tr>
+              <th>会社名</th>
+              <th>氏名</th>
+              <th>役職</th>
+              <th>メールアドレス</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for person in persons %}
+              <tr>
+                <td>{{ person.primary_contact.organization|default:"-" }}</td>
+                <td>
+                  {{ person.primary_contact.full_name|default:"(氏名なし)" }}
+                </td>
+                <td>{{ person.primary_contact.title|default:"-" }}</td>
+                <td>{{ person.primary_contact.email|default:"-" }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="app-muted">対象パーソンはありません。</p>
+    {% endif %}
+  </section>
+
+  <section class="app-card">
     <form method="post" action="{{ commit_url }}">
       {% csrf_token %}
       <div class="app-action-area">
         <a href="{{ back_url }}" class="app-btn app-btn--secondary">戻る</a>
-        <a href="{{ cancel_url }}" class="app-btn app-btn--secondary">キャンセル</a>
         <button type="submit" class="app-btn app-btn--primary">リスト作成を確定</button>
       </div>
     </form>

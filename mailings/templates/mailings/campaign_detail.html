@@ -15,7 +15,8 @@
 
   <div class="app-page-header">
     <div>
-      <h1>配信キャンペーン詳細</h1>
+      <div class="app-breadcrumb">メール配信 / キャンペーン / 詳細</div>
+      <h1>キャンペーン詳細</h1>
     </div>
     <div class="app-page-header__actions">
       {% back_all_link back %}
@@ -40,17 +41,30 @@
   {% endcomment %}
   <section class="app-card">
     {% if campaign.status == 'draft' %}
-      {% url 'mailings:campaign_update' pk=campaign.pk as update_url %}
-      {% url 'mailings:campaign_archive' pk=campaign.pk as archive_url %}
-      <div class="app-action-area" style="justify-content: space-between;">
-        <div style="display:flex; gap:var(--app-space-sm); flex-wrap:wrap;">
-          <a class="app-btn app-btn--success" href="{% append_back_url update_url back %}">基本情報を編集</a>
-          <a class="app-btn app-btn--secondary" href="{% url 'mailings:new_list_meta' %}?campaign={{ campaign.pk }}">新規リストを作成して紐づける</a>
-          <button type="button" class="app-btn app-btn--secondary" data-action="open-modal" data-target="testSendConfirmModal">テスト送信</button>
-          <button type="button" class="app-btn app-btn--primary" data-action="open-modal" data-target="scheduleConfirmModal">予約する</button>
+      {% if campaign.is_archived %}
+        <div class="app-action-area" style="justify-content: space-between; align-items: center;">
+          <div style="display:flex; gap:var(--app-space-sm); flex-wrap:wrap; align-items:center;">
+            <span class="app-btn app-btn--secondary" style="opacity:0.5; pointer-events:none;" aria-disabled="true" title="アーカイブ済みのため編集できません">新規リストを作成して紐づける</span>
+            <button type="button" class="app-btn app-btn--secondary" disabled style="background-color: #cbd5e1; color: #64748b; border: 1px solid #cbd5e1; cursor: not-allowed;" title="アーカイブ済みのため編集できません">テスト送信</button>
+            <button type="button" class="app-btn app-btn--primary" disabled style="background-color: #cbd5e1; color: #64748b; border: 1px solid #cbd5e1; cursor: not-allowed;" title="アーカイブ済みのため編集できません">予約する</button>
+          </div>
+          <span style="color: var(--app-text); font-size: 18px; display: inline-flex; align-items: center; text-decoration: none; opacity:0.5; cursor:not-allowed;" title="アーカイブ済みのため削除できません">
+            <i class="bi bi-trash"></i>
+          </span>
         </div>
-        <a class="app-btn-trash" href="{% append_back_url archive_url back %}" title="削除">🗑 削除</a>
-      </div>
+      {% else %}
+        {% url 'mailings:campaign_archive' pk=campaign.pk as archive_url %}
+        <div class="app-action-area" style="justify-content: space-between; align-items: center;">
+          <div style="display:flex; gap:var(--app-space-sm); flex-wrap:wrap; align-items:center;">
+            <a class="app-btn app-btn--secondary" href="{% url 'mailings:new_list_meta' %}?campaign={{ campaign.pk }}">新規リストを作成して紐づける</a>
+            <button type="button" class="app-btn app-btn--secondary" data-action="open-modal" data-target="testSendConfirmModal" {% if not has_template %}disabled style="background-color: #cbd5e1; color: #64748b; border: 1px solid #cbd5e1; cursor: not-allowed;" title="メール内容を設定してください"{% endif %}>テスト送信</button>
+            <button type="button" class="app-btn {% if can_schedule %}app-btn--primary{% endif %}" data-action="open-modal" data-target="scheduleConfirmModal" {% if not can_schedule %}disabled style="background-color: #cbd5e1; color: #64748b; border: 1px solid #cbd5e1; cursor: not-allowed;" title="あと『{{ missing_steps|join:"、" }}』が未です"{% endif %}>予約する</button>
+          </div>
+          <a href="{% append_back_url archive_url back %}" aria-label="削除" title="削除" style="color: var(--app-text); font-size: 18px; display: inline-flex; align-items: center; text-decoration: none;">
+            <i class="bi bi-trash"></i>
+          </a>
+        </div>
+      {% endif %}
     {% elif campaign.status == 'scheduled' %}
       <div class="app-action-area">
         <button type="button" class="app-btn app-btn--secondary" data-action="open-modal" data-target="testSendConfirmModal">テスト送信</button>
@@ -65,17 +79,69 @@
     {% endif %}
   </section>
 
+  {% if campaign.status == 'draft' and not campaign.is_archived %}
+  <section class="app-card">
+    <h2>予約までの進捗</h2>
+    <ul style="list-style: none; padding: 0; margin-top: 12px; display: flex; flex-direction: column; gap: 8px;">
+      <li style="display: flex; align-items: center; gap: 12px; padding: 8px; border: 1px solid var(--app-border); border-radius: 4px;">
+        <span style="flex: 0 0 40px; text-align: center;">✅</span>
+        <span style="flex: 1;">配信形式（{{ campaign.get_sender_mode_display }}）</span>
+        <span style="flex: 0 0 60px; text-align: center;" class="app-muted">完了</span>
+        {% url 'mailings:campaign_update_sender' pk=campaign.pk as update_sender_url %}
+        <a href="{% append_back_url update_sender_url back %}" class="app-btn app-btn--sm">編集</a>
+      </li>
+      <li style="display: flex; align-items: center; gap: 12px; padding: 8px; border: 1px solid var(--app-border); border-radius: 4px;">
+        <span style="flex: 0 0 40px; text-align: center;">{% if has_mailing_list %}✅{% else %}⬜{% endif %}</span>
+        <span style="flex: 1;">宛先リスト</span>
+        <span style="flex: 0 0 60px; text-align: center;" class="{% if not has_mailing_list %}app-text-danger{% else %}app-muted{% endif %}">{% if has_mailing_list %}完了{% else %}未{% endif %}</span>
+        <a href="{% url 'mailings:new_list_meta' %}?campaign={{ campaign.pk }}" class="app-btn app-btn--sm">設定</a>
+      </li>
+      <li style="display: flex; align-items: center; gap: 12px; padding: 8px; border: 1px solid var(--app-border); border-radius: 4px;">
+        <span style="flex: 0 0 40px; text-align: center;">{% if has_template %}✅{% else %}⬜{% endif %}</span>
+        <span style="flex: 1;">メール内容</span>
+        <span style="flex: 0 0 60px; text-align: center;" class="{% if not has_template %}app-text-danger{% else %}app-muted{% endif %}">{% if has_template %}完了{% else %}未{% endif %}</span>
+        {% url 'mailings:template_update' pk=template.pk as template_update_url %}
+        <a href="{% append_back_url template_update_url back %}" class="app-btn app-btn--sm">編集</a>
+      </li>
+      <li style="display: flex; align-items: center; gap: 12px; padding: 8px; border: 1px solid var(--app-border); border-radius: 4px;">
+        <span style="flex: 0 0 40px; text-align: center;">{% if has_schedule %}✅{% else %}⬜{% endif %}</span>
+        <span style="flex: 1;">配信スケジュール</span>
+        <span style="flex: 0 0 60px; text-align: center;" class="{% if not has_schedule %}app-text-danger{% else %}app-muted{% endif %}">{% if has_schedule %}完了{% else %}未{% endif %}</span>
+        {% url 'mailings:campaign_update_schedule' pk=campaign.pk as update_schedule_url %}
+        <a href="{% append_back_url update_schedule_url back %}" class="app-btn app-btn--sm">設定</a>
+      </li>
+      <li style="display: flex; align-items: center; gap: 12px; padding: 8px; border: 1px solid var(--app-border); border-radius: 4px;">
+        <span style="flex: 0 0 40px; text-align: center;">‐</span>
+        <span style="flex: 1;">テスト配信</span>
+        <span style="flex: 0 0 60px; text-align: center;" class="app-muted">任意</span>
+        <button type="button" data-action="open-modal" data-target="testSendConfirmModal" class="app-btn app-btn--sm" {% if not has_template %}disabled{% endif %}>送信</button>
+      </li>
+    </ul>
+  </section>
+  {% endif %}
+
   {# ====== キャンペーン概要（§3-3） ====== #}
   {# ラベル:値を2列で表示（app-detail-grid は 900px 以下で1列に折り返す）。件名は載せない（メール内容にある）。 #}
   <section class="app-card">
-    <h2>キャンペーン概要</h2>
+    <h2 style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+      <span>{{ campaign.name }}</span>
+      {% status_badge campaign %}
+      {% if campaign.is_archived %}
+        <span class="app-status-badge app-status-badge--warning" title="アーカイブ済みのため編集できません">アーカイブ済み</span>
+      {% endif %}
+      {% if campaign.status == 'draft' and not campaign.is_archived %}
+        {% url 'mailings:campaign_update_name' pk=campaign.pk as update_url %}
+        <a href="{% append_back_url update_url back %}"
+           aria-label="キャンペーンを編集"
+           style="color:var(--app-text); font-size:18px; display:inline-flex; align-items:center; justify-content:center; text-decoration:none;">
+          <i class="bi bi-pencil"></i>
+        </a>
+      {% endif %}
+    </h2>
+
+
+
     <div class="app-detail-grid" style="margin-top:12px;">
-      <div class="app-detail-item">
-        <span class="app-detail-label">キャンペーン名</span>
-        <span class="app-detail-value" style="display:inline-flex; align-items:center; gap:8px; flex-wrap:wrap;">
-          {{ campaign.name }} {% status_badge campaign %}
-        </span>
-      </div>
       <div class="app-detail-item">
         <span class="app-detail-label">予約配信日時</span>
         <span class="app-detail-value">{{ campaign.scheduled_at|date:"Y-m-d H:i"|default:"—" }}</span>
@@ -108,8 +174,12 @@
     <div style="display:flex; justify-content:space-between; align-items:center;">
       <h2>メール内容</h2>
       {% if campaign.status == 'draft' %}
-        {% url 'mailings:template_update' pk=template.pk as template_update_url %}
-        <a class="app-btn app-btn--success" href="{% append_back_url template_update_url back %}">件名・本文を編集</a>
+        {% if campaign.is_archived %}
+          <span class="app-btn app-btn--success" style="opacity:0.5; pointer-events:none;" aria-disabled="true" title="アーカイブ済みのため編集できません">件名・本文を編集</span>
+        {% else %}
+          {% url 'mailings:template_update' pk=template.pk as template_update_url %}
+          <a class="app-btn app-btn--success" href="{% append_back_url template_update_url back %}">件名・本文を編集</a>
+        {% endif %}
       {% endif %}
     </div>
     <div class="app-form__group" style="margin-top:8px;">
@@ -157,7 +227,7 @@
       {% endif %}
     {% else %}
       <p class="app-muted">
-        宛先リストが未設定です。「基本情報を編集」から宛先リストを選ぶか、「新規リストを作成して紐づける」から作成してください。
+        宛先リストが未設定です。上の「宛先リスト」から設定してください。
       </p>
     {% endif %}
   </section>

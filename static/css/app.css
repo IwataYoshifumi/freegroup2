@@ -337,6 +337,13 @@ a { color: inherit; text-decoration: none; }
 
 /* ========== Components / Form ========== */
 
+/* フォームラッパ（左寄せ、最大幅600px制限） */
+.app-form-wrapper {
+  max-width: 600px;
+  margin-left: 0;
+  margin-right: auto;
+}
+
 .app-form-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(180px, 1fr));

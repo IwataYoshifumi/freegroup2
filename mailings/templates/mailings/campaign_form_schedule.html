@@ -1,0 +1,51 @@
+{% extends "mailings/app_base.html" %}
+{% load back_tags %}
+
+{% block title %}キャンペーンスケジュール編集 — FreeGroup2{% endblock %}
+
+{% block content %}
+  <div class="app-page-header">
+    <div>
+      <div class="app-breadcrumb">メール配信 / キャンペーン / スケジュール編集</div>
+      <h1>スケジュール編集：{{ campaign.name }}</h1>
+    </div>
+  </div>
+
+  {% if messages %}
+    {% for message in messages %}
+      <section class="app-card app-form-wrapper">
+        <div class="app-message">{{ message }}</div>
+      </section>
+    {% endfor %}
+  {% endif %}
+
+  <form method="post" class="app-form-grid-edit app-form-wrapper">
+    {% csrf_token %}
+    {% hidden_back_field back %}
+
+    <section class="app-card" style="margin-bottom: var(--app-space-md);">
+      {% if form.non_field_errors %}
+        <div class="app-message app-message--error">{{ form.non_field_errors }}</div>
+      {% endif %}
+
+      <div class="app-form-grid" style="grid-template-columns: 1fr;">
+        {% for field in form %}
+          <div class="app-form__group" id="group_{{ field.name }}">
+            <label class="app-form__label" for="{{ field.id_for_label }}">
+              {{ field.label }}{% if field.help_text %}<span class="app-help-icon" data-tooltip="{{ field.help_text }}" tabindex="0">?</span>{% endif %}
+            </label>
+            {{ field }}
+            {% if field.errors %}<div class="app-message app-message--error">{{ field.errors }}</div>{% endif %}
+          </div>
+        {% endfor %}
+      </div>
+    </section>
+
+    <div class="app-action-area">
+      {% back_all_link back %}
+      {% back_link back %}
+      <button type="submit" name="next_step" value="1" class="app-btn app-btn--primary">保存して次の未完了へ</button>
+      <button type="submit" class="app-btn app-btn--success">保存して詳細へ</button>
+    </div>
+  </form>
+{% endblock %}

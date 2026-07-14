@@ -33,30 +33,43 @@
   <section class="app-card">
     <form method="get" class="app-form-grid-edit">
       <input type="hidden" name="searched" value="1">
-      <div class="app-form-grid app-search-grid">
-        <div class="app-form__group">
-          <label class="app-form__label" for="id_name">キャンペーン名</label>
-          <input type="text" id="id_name" name="name" value="{{ search_name }}" class="app-input">
-        </div>
-        <div class="app-form__group">
-          <label class="app-form__label" for="id_creator">作成者</label>
-          <input type="text" id="id_creator" name="creator" value="{{ search_creator }}" class="app-input">
-        </div>
-        {# 配信日（scheduled_at）の期間検索。片側のみ指定も可（§7）。折りたたみの外＝常時表示。 #}
-        <div class="app-form__group">
-          <label class="app-form__label" for="id_date_from">配信日（開始）</label>
-          <input type="date" id="id_date_from" name="date_from" value="{{ search_date_from }}" class="app-input">
-        </div>
-        <div class="app-form__group">
-          <label class="app-form__label" for="id_date_to">配信日（終了）</label>
-          <input type="date" id="id_date_to" name="date_to" value="{{ search_date_to }}" class="app-input">
+      <div class="js-date-range">
+        <div class="app-form-grid app-search-grid">
+          <div class="app-form__group">
+            <label class="app-form__label" for="id_name">キャンペーン名</label>
+            <input type="text" id="id_name" name="name" value="{{ search_name }}" class="app-input">
+          </div>
+          <div class="app-form__group">
+            <label class="app-form__label" for="id_creator">作成者</label>
+            <input type="text" id="id_creator" name="creator" value="{{ search_creator }}" class="app-input">
+          </div>
+          {# 配信日（scheduled_at）の期間検索。片側のみ指定も可（§7）。折りたたみの外＝常時表示。 #}
+          <div class="app-form__group">
+            <label class="app-form__label" for="id_date_from">配信日（開始）</label>
+            <input type="date" id="id_date_from" name="date_from" value="{{ search_date_from }}" class="app-input js-date-from">
+          </div>
+          <div class="app-form__group">
+            <label class="app-form__label" for="id_date_to">配信日（終了）</label>
+            <input type="date" id="id_date_to" name="date_to" value="{{ search_date_to }}" class="app-input js-date-to">
+          </div>
+          <div style="grid-column: 3 / 5; display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:8px;">
+            <button type="button" class="app-btn app-btn--secondary app-btn--sm js-date-quick" data-range="today">今日</button>
+            <button type="button" class="app-btn app-btn--secondary app-btn--sm js-date-quick" data-range="week">今週</button>
+            <button type="button" class="app-btn app-btn--secondary app-btn--sm js-date-quick" data-range="lastweek">先週</button>
+            <button type="button" class="app-btn app-btn--secondary app-btn--sm js-date-quick" data-range="month">今月</button>
+            <button type="button" class="app-btn app-btn--secondary app-btn--sm js-date-quick" data-range="lastmonth">先月</button>
+            <button type="button" class="app-btn app-btn--secondary app-btn--sm js-date-quick" data-range="twomonths">2か月</button>
+            <button type="button" class="app-btn app-btn--secondary app-btn--sm js-date-quick" data-range="thisyear">今年</button>
+            <span style="width:1px; height:20px; background:var(--app-border); margin:0 4px;"></span>
+            <button type="button" class="app-btn app-btn--secondary app-btn--sm js-date-clear">クリア</button>
+          </div>
         </div>
       </div>
 
       {# 「状態で絞り込み」と「ソート」の折りたたみを横並びに（HIG 第6章・縦積みで横長にしない）。 #}
-      <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:flex-start;">
+      <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:flex-start; margin-top: var(--app-space-md);">
         {# 状態の絞り込み（トグル・複数選択、HIG 4.1）。ラベルは体言「状態」。幅は中身に合わせる（§7）。 #}
-        <div class="app-collapsible app-person-filter-collapsible" style="flex:0 1 auto;">
+        <div class="app-collapsible app-person-filter-collapsible" style="flex: 1 1 0px; min-width: 280px;">
           <button type="button" class="app-collapsible__header" data-action="toggle-collapsible"
                   aria-expanded="false">
             <span>状態</span>
@@ -81,7 +94,7 @@
         </div>
 
         {# 多段ソート（折りたたみ、絞り込みと同一フォーム送信）。 #}
-        <div style="flex:1 1 320px; min-width:280px;">
+        <div style="flex: 1 1 0px; min-width: 280px;">
           {% include "mailings/_sort_control.html" %}
         </div>
       </div>
@@ -158,4 +171,67 @@
       {% include "persons/_pagination.html" %}
     {% endif %}
   </section>
+
+<script>
+  (function () {
+    function init() {
+      var wrap = document.querySelector('.js-date-range');
+      if (!wrap) return;
+      var fromEl = wrap.querySelector('.js-date-from');
+      var toEl = wrap.querySelector('.js-date-to');
+      if (!fromEl || !toEl) return;
+      function fmt(d) {
+        return d.getFullYear() + '-' +
+          String(d.getMonth() + 1).padStart(2, '0') + '-' +
+          String(d.getDate()).padStart(2, '0');
+      }
+      function setRange(from, to) { fromEl.value = fmt(from); toEl.value = fmt(to); }
+      Array.prototype.slice.call(wrap.querySelectorAll('.js-date-quick')).forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var now = new Date();
+          var y = now.getFullYear(), m = now.getMonth(), d = now.getDate();
+          switch (btn.getAttribute('data-range')) {
+            case 'today':
+              setRange(new Date(y, m, d), new Date(y, m, d));
+              break;
+            case 'week': {
+              var offset = (now.getDay() + 6) % 7;
+              var mon = new Date(y, m, d - offset);
+              setRange(mon, new Date(mon.getFullYear(), mon.getMonth(), mon.getDate() + 6));
+              break;
+            }
+            case 'lastweek': {
+              var offsetL = (now.getDay() + 6) % 7;
+              var lastMon = new Date(y, m, d - offsetL - 7);
+              setRange(lastMon, new Date(lastMon.getFullYear(), lastMon.getMonth(), lastMon.getDate() + 6));
+              break;
+            }
+            case 'month':
+              setRange(new Date(y, m, 1), new Date(y, m + 1, 0));
+              break;
+            case 'lastmonth':
+              setRange(new Date(y, m - 1, 1), new Date(y, m, 0));
+              break;
+            case 'twomonths':
+              setRange(new Date(y, m - 1, 1), new Date(y, m + 1, 0));
+              break;
+            case 'thisyear':
+              setRange(new Date(y, 0, 1), new Date(y, 11, 31));
+              break;
+          }
+        });
+      });
+      var clearBtn = wrap.querySelector('.js-date-clear');
+      if (clearBtn) clearBtn.addEventListener('click', function () {
+        fromEl.value = '';
+        toEl.value = '';
+      });
+    }
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', init);
+    } else {
+      init();
+    }
+  })();
+</script>
 {% endblock %}

@@ -17,12 +17,12 @@
 
   {# 遷移導線（新規作成・カテゴリ一覧）はタイトル直下・左寄せに集約（HIG 3.1 / 7.3、「＋」除去）。 #}
   <div class="app-action-area" style="justify-content:flex-start; margin-bottom:16px;">
+    {% url 'tags:tag_category_list' as cat_url %}
+    <a href="{% append_back_url cat_url back %}" class="app-btn app-btn--secondary">タグカテゴリ一覧</a>
     {% if categories %}
       {% url 'tags:tag_create' as create_url %}
       <a href="{% append_back_url create_url back %}" class="app-btn app-btn--primary">新規タグ作成</a>
     {% endif %}
-    {% url 'tags:tag_category_list' as cat_url %}
-    <a href="{% append_back_url cat_url back %}" class="app-btn app-btn--secondary">タグカテゴリ一覧</a>
   </div>
 
   {% if not categories %}
@@ -53,9 +53,9 @@
           </div>
         </div>
 
-        <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:flex-start;">
+        <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:flex-start; margin-top: var(--app-space-md);">
           {# 絞り込み（トグル群：タグカテゴリ＋状態）。初期閉・幅は中身に合わせる。 #}
-          <div class="app-collapsible app-person-filter-collapsible" style="flex:0 1 auto;">
+          <div class="app-collapsible app-person-filter-collapsible" style="flex: 1 1 0px; min-width: 280px;">
             <button type="button" class="app-collapsible__header" data-action="toggle-collapsible"
                     aria-expanded="false">
               <span>絞り込み</span>
@@ -66,7 +66,7 @@
                 {# ラベルは体言「タグカテゴリ」。トグルは2列折り返し＋枠を詰める。 #}
                 <div class="app-form__group">
                   <span class="app-form__label">タグカテゴリ</span>
-                  <ul class="app-radio-toggle" style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                  <ul class="app-radio-toggle" style="display:flex; flex-wrap:wrap; gap:8px;">
                     {% for cat in categories %}
                       <li>
                         <label style="padding:5px 12px; min-height:32px;">
@@ -81,7 +81,7 @@
 
                 <div class="app-form__group" style="margin-top:var(--app-space-sm);">
                   <span class="app-form__label">状態</span>
-                  <ul class="app-radio-toggle" style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                  <ul class="app-radio-toggle" style="display:flex; flex-wrap:wrap; gap:8px;">
                     <li>
                       <label style="padding:5px 12px; min-height:32px;">
                         <input type="checkbox" name="status" value="active"
@@ -103,7 +103,7 @@
           </div>
 
           {# ソート（折りたたみ・指定があれば開く）。 #}
-          <div style="flex:1 1 320px; min-width:280px;">
+          <div style="flex: 1 1 0px; min-width: 280px;">
             {% include "tags/_sort_control.html" %}
           </div>
         </div>
