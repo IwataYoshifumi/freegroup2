@@ -981,14 +981,17 @@ class ManualCropView(LoginRequiredMixin, PermissionRequiredMixin, View):
         if business_card is None:
             return JsonResponse({"error": "名刺の作成に失敗しました。"}, status=500)
 
+        back = BackNavigator(request)
+        card_detail_url = back.append_url(
+            reverse("cards:card_detail", kwargs={"pk": business_card.id})
+        )
+
         return JsonResponse(
             {
                 "success": True,
                 "business_card_id": str(business_card.id),
                 "card_index": business_card.card_index,
-                "card_detail_url": reverse(
-                    "cards:card_detail", kwargs={"pk": business_card.id}
-                ),
+                "card_detail_url": card_detail_url,
             },
             status=201,
         )
