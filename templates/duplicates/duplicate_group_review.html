@@ -211,24 +211,17 @@
         {% if form.has_confirm_checkboxes %}
           <div class="app-section--executes-merge">
             <div class="app-section__header" style="margin-top:var(--app-space-xs);"><h2>確認チェック</h2></div>
-            {% for field in form %}
-              {% if field.name|slice:":10" == "confirmed_" %}
-                <div class="app-form__group" style="margin-bottom:var(--app-space-xs);">
-                  <div>
-                    <label class="app-confirm-toggle__btn">
-                      {{ field }}
-                      <span>{{ field.label }}</span>
-                    </label>
-                  </div>
-                  {% if field.help_text %}
-                    <div class="app-text-muted" style="font-size:12px; font-weight:normal; margin-top:2px; color:#d97706;">
-                      {{ field.help_text }}
-                    </div>
-                  {% endif %}
+            <div class="app-confirm-toggle-group">
+              {% for field in form %}
+                {% if field.name|slice:":10" == "confirmed_" %}
+                  <label class="app-confirm-toggle__btn">
+                    {{ field }}
+                    <span>{{ field.label }}</span>
+                  </label>
                   {{ field.errors }}
-                </div>
-              {% endif %}
-            {% endfor %}
+                {% endif %}
+              {% endfor %}
+            </div>
           </div>
         {% endif %}
 

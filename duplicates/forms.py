@@ -178,7 +178,7 @@ class MergeForm(ContactBaseForm):
                 self.fields[f"confirmed_{field_name}"] = forms.BooleanField(
                     required=False,
                     initial=False,
-                    label=f"『{label_name}』を確認済みにする",
+                    label=label_name,
                     widget=forms.CheckboxInput(
                         attrs={"class": "app-confirm-checkbox"},
                     ),
