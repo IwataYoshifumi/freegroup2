@@ -2160,7 +2160,7 @@ form:has(.js-decision-additional_role:checked) .app-merge-survivor__label--prima
     border: 1px solid var(--app-border);
     border-radius: var(--app-radius-lg);
     box-shadow: 0 4px 20px rgba(15, 23, 42, 0.1);
-    max-height: calc(100vh - var(--app-topbar-height) - 32px);
+    max-height: calc(100vh - var(--app-topbar-height) - 80px);
     overflow: hidden;
   }
 
@@ -2171,6 +2171,17 @@ form:has(.js-decision-additional_role:checked) .app-merge-survivor__label--prima
     display: flex;
     flex-direction: column;
     gap: var(--app-space-md);
+  }
+
+  .app-review-layout__sidebar-body .app-action-area {
+    display: flex;
+    gap: var(--app-space-sm);
+  }
+
+  .app-review-layout__sidebar-body .app-action-area .app-btn {
+    flex: 1 1 0%;
+    text-align: center;
+    justify-content: center;
   }
 
   /* 右パネル内の判定ボタン 3 つの折り返しとはみ出し防止 */

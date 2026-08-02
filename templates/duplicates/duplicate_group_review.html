@@ -134,7 +134,7 @@
           <span class="app-review-layout__drag-icon" title="ドラッグして移動">⋮⋮</span>
           <span class="app-review-layout__sidebar-title">レビュー操作</span>
         </div>
-        <a href="{% url 'duplicates:duplicate_group_detail' group_id=group_id %}" class="app-btn app-btn--secondary" style="padding:2px 8px; font-size:12px; font-weight:normal;">← 戻る</a>
+        {% back_link back %}
       </div>
 
       <div class="app-review-layout__sidebar-body">
@@ -237,8 +237,9 @@
           {{ form.note.errors }}
         </div>
 
-        <div class="app-action-area" style="margin-top:var(--app-space-sm);">
-          <button type="submit" class="app-btn app-btn--primary" style="width:100%;">決定</button>
+        <div class="app-action-area" style="margin-top:var(--app-space-sm); display:flex; gap:var(--app-space-sm);">
+          {% back_link back %}
+          <button type="submit" class="app-btn app-btn--primary" style="flex:1;">決定</button>
         </div>
       </div>
     </div>
