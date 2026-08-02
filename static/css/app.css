@@ -219,6 +219,11 @@ a { color: inherit; text-decoration: none; }
   border-right: 1px solid var(--app-border);
   padding: var(--app-space-md);
   flex-shrink: 0;
+  position: sticky;
+  top: var(--app-topbar-height);
+  align-self: flex-start;
+  height: calc(100vh - var(--app-topbar-height));
+  overflow-y: auto;
 }
 
 .app-sidebar__section-title,
@@ -566,7 +571,12 @@ a { color: inherit; text-decoration: none; }
   .app-sidebar { display: none; }
   /* ドロワー内に複製したサイドバーは隠さず表示を戻す（メインレイアウト側のみ非表示を維持）。
      .app-drawer .app-sidebar（0,2,0）が上の .app-sidebar（0,1,0）に特異度で勝つ。 */
-  .app-drawer .app-sidebar { display: block; }
+  .app-drawer .app-sidebar {
+    display: block;
+    position: static;
+    height: auto;
+    overflow-y: visible;
+  }
   .app-main { padding: var(--app-space-md); }
   .app-page-header {
     align-items: stretch;
