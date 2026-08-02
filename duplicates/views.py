@@ -32,9 +32,16 @@ from django.shortcuts import redirect, render
 from django.views.generic import ListView, View
 
 from back_navigator.back_navigator import BackNavigator
-from config.constants import DifferentPersonReason, DuplicateMergeReason
+from config.constants import (
+    DUPLICATE_CHECK_FIELDS,
+    DifferentPersonReason,
+    DuplicateMergeReason,
+)
 from contacts.models import Contact, ContactSns
-from contacts.services.normalization import format_postal_by_country
+from contacts.services.normalization import (
+    format_phone_number_display,
+    format_postal_by_country,
+)
 
 from persons.models import Person
 
@@ -62,6 +69,20 @@ MATCHED_FIELD_LABEL_JA = {
     "mobile_phone": "携帯",
     "address": "住所",
 }
+
+# 重複候補グループ一覧の「一致フィールド」バッジ表示順（スコア基準固定順）
+# 1. 氏名（最優先） 2. 携帯 3. メール 4. 会社 5. 部署 6. 住所 7. 役職 8. 電話 9. 支店
+MATCHED_FIELDS_SCORE_ORDER = [
+    "full_name",
+    "mobile_phone",
+    "email",
+    "organization",
+    "department",
+    "address",
+    "title",
+    "personal_phone",
+    "branch",
+]
 
 
 # 17 番マージレビュー画面の Contact フィールド表示用ラベル（仕様書 §11.5.5、D-4d）。
@@ -175,6 +196,7 @@ DUP_SORT_FIELD_MAP = {
     "rank": "rank_order",       # 昇順＝完全一致→高→中→低（rank_order=0..3）
     "detected": "detected_at",  # 検出日時（候補作成日時の集約）
     "pair_count": "pair_count", # グループ内ペア件数
+    "name": "lead_full_name",   # 氏名（主役Personのfull_name順）
 }
 DUP_SORT_MAX_KEYS = 3
 DUP_PER_PAGE_CHOICES = (50, 100, 200)
@@ -327,6 +349,7 @@ class DuplicateCandidateGroupListView(
                 ),
             ),
             detected_at=Min("created_at"),
+            lead_full_name=Min("person_a__primary_contact__full_name"),
         )
 
         # progress フィルタ：annotate 後の has_pending で絞り込み
@@ -343,12 +366,19 @@ class DuplicateCandidateGroupListView(
             default=Value(99),
             output_field=IntegerField(),
         )
-        groups = groups.annotate(rank_order=rank_order)
+        has_pending = Case(
+            When(pending_count__gt=0, then=Value(1)),
+            default=Value(0),
+            output_field=IntegerField(),
+        )
+        groups = groups.annotate(
+            rank_order=rank_order, has_pending=has_pending
+        )
 
-        # 多段ソート（?sort=）。既定は rank 優先（完全一致が上）。group_id を安定タイブレークに付ける。
+        # 多段ソート（?sort=）。既定は未レビュー優先→rank順→氏名順。group_id を安定タイブレークに付ける。
         order = _dup_sort_order_fields(_parse_dup_sort(self.request.GET))
         if not order:
-            order = ["rank_order"]
+            order = ["-has_pending", "rank_order", "lead_full_name"]
         order.append("group_id")
         return groups.order_by(*order)
 
@@ -374,7 +404,7 @@ class DuplicateCandidateGroupListView(
         context = super().get_context_data(**kwargs)
 
         # 表示中の group_id 群について、各 group の代表 candidate を 1 件ずつ取得
-        # （N+1 回避、テンプレートで person_a / person_b の氏名を表示するため）。
+        # （一致フィールド・スコアは「グループ内で最もスコアが低いペア」を代表とする方針、score 昇順）。
         object_list = context.get(self.context_object_name) or []
         visible_group_ids = [g["group_id"] for g in object_list]
         rep_qs = (
@@ -383,7 +413,7 @@ class DuplicateCandidateGroupListView(
                 "person_a__primary_contact",
                 "person_b__primary_contact",
             )
-            .order_by("group_id", "id")
+            .order_by("group_id", "score", "id")
         )
         rep_by_group = {}
         for c in rep_qs:
@@ -403,34 +433,57 @@ class DuplicateCandidateGroupListView(
         for g in object_list:
             rep = rep_by_group.get(g["group_id"])
             lead_name = ""
+            lead_organization = ""
+            lead_title = ""
             lead_person_id = None
-            matched_field_labels = []
+            matched_field_items = []
             rep_rank = None
+            rep_score = None
             if rep is not None:
                 rep_rank = rep.rank
+                rep_score = rep.score
                 lead = self._select_lead_person(rep)
                 lead_person_id = lead.id
                 lead_pc = lead.primary_contact
-                lead_name = lead_pc.full_name if lead_pc is not None else ""
+                if lead_pc is not None:
+                    lead_name = lead_pc.full_name or ""
+                    lead_organization = lead_pc.organization or ""
+                    lead_title = lead_pc.title or ""
 
                 pc_a = rep.person_a.primary_contact
                 pc_b = rep.person_b.primary_contact
+                matched_set = set()
                 if pc_a is not None and pc_b is not None:
-                    matched = get_matched_fields(
-                        pc_a, pc_b,
-                        high_map.get(pc_a.id, set()),
-                        high_map.get(pc_b.id, set()),
+                    matched_set = set(
+                        get_matched_fields(
+                            pc_a,
+                            pc_b,
+                            high_map.get(pc_a.id, set()),
+                            high_map.get(pc_b.id, set()),
+                        )
                     )
-                    matched_field_labels = [
-                        MATCHED_FIELD_LABEL_JA[f] for f in matched
-                    ]
+                for f in MATCHED_FIELDS_SCORE_ORDER:
+                    matched_field_items.append(
+                        {
+                            "field_name": f,
+                            "label": MATCHED_FIELD_LABEL_JA[f],
+                            "is_matched": f in matched_set,
+                        }
+                    )
+            pair_count = g.get("pair_count", 0)
+            pending_count = g.get("pending_count", 0)
+            completed_count = max(0, pair_count - pending_count)
             enriched.append({
                 **dict(g),
                 "rep_candidate": rep,
                 "lead_name": lead_name,
+                "lead_organization": lead_organization,
+                "lead_title": lead_title,
+                "completed_count": completed_count,
                 "lead_person_id": lead_person_id,
-                "matched_field_labels": matched_field_labels,
+                "matched_field_items": matched_field_items,
                 "rep_rank": rep_rank,
+                "rep_score": rep_score,
             })
         context["enriched_groups"] = enriched
 
@@ -665,11 +718,28 @@ class DuplicateCandidateGroupUpdateView(
                 peer_value = getattr(peer_contact, fname)
                 if not self_value and not peer_value:
                     continue
-                # postal_code は表示のみ国別整形（Phase D2 話2）。is_diff は生値比較のまま。
+                # postal_code / 電話番号 / 法人格の位置 / 氏名順序は表示専用整形。is_diff は生値比較のまま。
                 display_value = self_value
                 if fname == "postal_code":
                     display_value = format_postal_by_country(
                         self_value, contact.country
+                    )
+                elif fname in (
+                    "mobile_phone",
+                    "personal_phone",
+                    "personal_fax",
+                    "org_phone",
+                    "org_fax",
+                ):
+                    display_value = format_phone_number_display(self_value)
+                elif fname == "legal_entity_type_position":
+                    display_value = (
+                        contact.get_legal_entity_type_position_display()
+                        or self_value
+                    )
+                elif fname == "name_order":
+                    display_value = (
+                        contact.get_name_order_display() or self_value
                     )
                 fields.append(
                     {

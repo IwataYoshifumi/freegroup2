@@ -92,6 +92,7 @@
                   <select class="app-input js-dup-sort-key" style="max-width:180px;">
                     <option value="">指定なし</option>
                     <option value="rank"{% if row.key == "rank" %} selected{% endif %}>確信度（rank）</option>
+                    <option value="name"{% if row.key == "name" %} selected{% endif %}>氏名</option>
                     <option value="detected"{% if row.key == "detected" %} selected{% endif %}>検出日時</option>
                     <option value="pair_count"{% if row.key == "pair_count" %} selected{% endif %}>ペア件数</option>
                   </select>
@@ -238,11 +239,15 @@
       <table class="app-table app-table--nowrap">
         <thead>
           <tr>
-            <th class="app-table__col--action">操作</th>
-            <th>rank</th>
-            <th>主役 Person / 一致フィールド</th>
-            <th>ペア件数</th>
-            <th>進捗</th>
+            <th class="app-table__col--action" style="width:80px;">操作</th>
+            <th style="width:90px;">rank</th>
+            <th style="width:65px; text-align:center;">スコア</th>
+            <th style="width:130px;">氏名</th>
+            <th style="min-width:160px; max-width:240px;">会社</th>
+            <th style="width:110px;">役職</th>
+            <th style="min-width:220px;">一致フィールド</th>
+            <th style="width:75px; text-align:center;">ペア件数</th>
+            <th style="width:170px;">進捗</th>
           </tr>
         </thead>
         <tbody>
@@ -271,32 +276,43 @@
                   {{ group.rep_rank }}
                 {% endif %}
               </td>
+              <td style="text-align:center;">{{ group.rep_score|default_if_none:"-" }}</td>
               <td>
                 {% if group.rep_candidate %}
                   {% url 'persons:person_detail' pk=group.lead_person_id as lead_url %}
                   <a href="{% append_back_url lead_url back %}">{{ group.lead_name|default:"(氏名なし)" }}</a>
-                  {% if group.matched_field_labels %}
-                    <div style="margin-top:4px; display:flex; flex-wrap:wrap; gap:4px;">
-                      {% for label in group.matched_field_labels %}
-                        <span class="app-status-badge app-status-badge--muted">{{ label }}</span>
-                      {% endfor %}
-                    </div>
-                  {% endif %}
                 {% else %}
                   -
                 {% endif %}
               </td>
-              <td>{{ group.pair_count }}</td>
+              <td style="max-width:240px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="{{ group.lead_organization|default:'' }}">{{ group.lead_organization|default:"-" }}</td>
+              <td>{{ group.lead_title|default:"-" }}</td>
+              <td style="white-space:normal;">
+                {% if group.matched_field_items %}
+                  <div style="display:flex; flex-wrap:wrap; gap:4px;">
+                    {% for item in group.matched_field_items %}
+                      {% if item.is_matched %}
+                        <span class="app-status-badge app-status-badge--info">{{ item.label }}</span>
+                      {% else %}
+                        <span class="app-status-badge app-status-badge--muted">{{ item.label }}</span>
+                      {% endif %}
+                    {% endfor %}
+                  </div>
+                {% else %}
+                  -
+                {% endif %}
+              </td>
+              <td style="text-align:center;">{{ group.pair_count }}</td>
               <td>
                 {% if group.pending_count > 0 %}
-                  <span class="app-status-badge app-status-badge--warning">未レビュー {{ group.pending_count }} 件</span>
+                  <span class="app-status-badge app-status-badge--warning">未レビュー {{ group.pending_count }} 件 / 完了 {{ group.completed_count }} 件</span>
                 {% else %}
-                  <span class="app-status-badge app-status-badge--success">完了</span>
+                  <span class="app-status-badge app-status-badge--success">完了 {{ group.completed_count }} 件</span>
                 {% endif %}
               </td>
             </tr>
           {% empty %}
-            <tr><td colspan="5" class="app-muted">該当するグループがありません。</td></tr>
+            <tr><td colspan="9" class="app-muted">該当するグループがありません。</td></tr>
           {% endfor %}
         </tbody>
       </table>
@@ -327,18 +343,30 @@
             {% elif group.rep_rank == "possible_low" %}
               <span class="app-status-badge app-status-badge--muted">低確信度</span>
             {% endif %}
+            {% if group.rep_score is not None %}
+              <span class="app-status-badge app-status-badge--outline-secondary" style="margin-left:4px;">スコア {{ group.rep_score }}</span>
+            {% endif %}
           </div>
-          {% if group.matched_field_labels %}
+          {% if group.lead_organization or group.lead_title %}
+            <div class="app-muted" style="font-size:12px; margin-top:2px;">
+              {{ group.lead_organization|default:"" }}{% if group.lead_organization and group.lead_title %} / {% endif %}{{ group.lead_title|default:"" }}
+            </div>
+          {% endif %}
+          {% if group.matched_field_items %}
             <div style="margin-top:4px; display:flex; flex-wrap:wrap; gap:4px;">
-              {% for label in group.matched_field_labels %}
-                <span class="app-status-badge app-status-badge--muted">{{ label }}</span>
+              {% for item in group.matched_field_items %}
+                {% if item.is_matched %}
+                  <span class="app-status-badge app-status-badge--info">{{ item.label }}</span>
+                {% else %}
+                  <span class="app-status-badge app-status-badge--muted">{{ item.label }}</span>
+                {% endif %}
               {% endfor %}
             </div>
           {% endif %}
           <div class="app-list-card__sub">
             <span>ペア件数 {{ group.pair_count }}</span>
             <span>
-              {% if group.pending_count > 0 %}未レビュー {{ group.pending_count }} 件{% else %}完了{% endif %}
+              {% if group.pending_count > 0 %}未レビュー {{ group.pending_count }} 件 / 完了 {{ group.completed_count }} 件{% else %}完了 {{ group.completed_count }} 件{% endif %}
             </span>
           </div>
         </a>
