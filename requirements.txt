@@ -12,3 +12,4 @@ pytesseract
 onnxruntime==1.26.0
 pytest
 pytest-django
+phonenumbers

@@ -119,67 +119,76 @@
             </div>
           {% endif %}
 
-          {% if contact.full_name or contact.salutation_name or contact.last_name or contact.first_name %}
+          {% if contact.full_name or contact.salutation_name or contact.last_name or contact.first_name or contact.phonetic_name %}
             <div class="app-section__header"><h2>氏名</h2></div>
             {% if contact.full_name %}
-              {% include "contacts/_contact_field.html" with field_name="full_name" label="氏名" value=contact.full_name %}
+              {% include "contacts/_contact_field.html" with field_name="full_name" label="氏名" value=contact.full_name full_width=True %}
             {% endif %}
             {% if contact.last_name %}
-              {% include "contacts/_contact_field.html" with field_name="last_name" label="姓" value=contact.last_name %}
+              {% include "contacts/_contact_field.html" with field_name="last_name" label="姓" value=contact.last_name full_width=True %}
             {% endif %}
             {% if contact.first_name %}
-              {% include "contacts/_contact_field.html" with field_name="first_name" label="名" value=contact.first_name %}
+              {% include "contacts/_contact_field.html" with field_name="first_name" label="名" value=contact.first_name full_width=True %}
+            {% endif %}
+            {% if contact.phonetic_name %}
+              {% include "contacts/_contact_field.html" with field_name="phonetic_name" label="読みカナ" value=contact.phonetic_name full_width=True %}
             {% endif %}
             {% if contact.salutation_name %}
-              {% include "contacts/_contact_field.html" with field_name="salutation_name" label="敬称付き氏名（メール宛名）" value=contact.salutation_name %}
+              {% include "contacts/_contact_field.html" with field_name="salutation_name" label="敬称付き氏名（メール宛名）" value=contact.salutation_name full_width=True %}
             {% endif %}
           {% endif %}
 
           {% if contact.organization or contact.branch or contact.department or contact.title or contact.qualification or contact.catchphrase %}
             <div class="app-section__header" style="margin-top: var(--app-space-md);"><h2>所属</h2></div>
             {% if contact.organization %}
-              {% include "contacts/_contact_field.html" with field_name="organization" label="会社" value=contact.organization %}
+              {% include "contacts/_contact_field.html" with field_name="organization" label="会社" value=contact.organization full_width=True %}
             {% endif %}
             {% if contact.branch %}
-              {% include "contacts/_contact_field.html" with field_name="branch" label="支店・店舗" value=contact.branch %}
+              {% include "contacts/_contact_field.html" with field_name="branch" label="支店・店舗" value=contact.branch full_width=True %}
             {% endif %}
             {% if contact.department %}
-              {% include "contacts/_contact_field.html" with field_name="department" label="部署" value=contact.department %}
+              {% include "contacts/_contact_field.html" with field_name="department" label="部署" value=contact.department full_width=True %}
             {% endif %}
             {% if contact.title %}
-              {% include "contacts/_contact_field.html" with field_name="title" label="役職" value=contact.title %}
+              {% include "contacts/_contact_field.html" with field_name="title" label="役職" value=contact.title full_width=True %}
             {% endif %}
             {% if contact.qualification %}
-              {% include "contacts/_contact_field.html" with field_name="qualification" label="資格" value=contact.qualification %}
+              {% include "contacts/_contact_field.html" with field_name="qualification" label="資格" value=contact.qualification full_width=True %}
             {% endif %}
             {% if contact.catchphrase %}
               {% include "contacts/_contact_field.html" with field_name="catchphrase" label="キャッチコピー" value=contact.catchphrase %}
             {% endif %}
           {% endif %}
 
-          {% if contact.email or contact.mobile_phone or contact.personal_phone or contact.personal_fax or contact.website %}
+          {% if contact.email or contact.mobile_phone or contact.personal_phone or contact.personal_fax or contact.org_phone or contact.org_fax or contact.website %}
             <div class="app-section__header" style="margin-top: var(--app-space-md);"><h2>連絡先</h2></div>
             {% if contact.email %}
-              {% include "contacts/_contact_field.html" with field_name="email" label="メール" value=contact.email %}
+              {% include "contacts/_contact_field.html" with field_name="email" label="メール" value=contact.email full_width=True %}
             {% endif %}
             {% if contact.mobile_phone %}
-              {% include "contacts/_contact_field.html" with field_name="mobile_phone" label="携帯" value=contact.mobile_phone %}
+              {% include "contacts/_contact_field.html" with field_name="mobile_phone" label="携帯" value=contact.mobile_phone full_width=True %}
             {% endif %}
             {% if contact.personal_phone %}
-              {% include "contacts/_contact_field.html" with field_name="personal_phone" label="電話" value=contact.personal_phone %}
+              {% include "contacts/_contact_field.html" with field_name="personal_phone" label="電話" value=contact.personal_phone full_width=True %}
             {% endif %}
             {% if contact.personal_fax %}
-              {% include "contacts/_contact_field.html" with field_name="personal_fax" label="FAX" value=contact.personal_fax %}
+              {% include "contacts/_contact_field.html" with field_name="personal_fax" label="FAX" value=contact.personal_fax full_width=True %}
+            {% endif %}
+            {% if contact.org_phone %}
+              {% include "contacts/_contact_field.html" with field_name="org_phone" label="会社電話" value=contact.org_phone full_width=True %}
+            {% endif %}
+            {% if contact.org_fax %}
+              {% include "contacts/_contact_field.html" with field_name="org_fax" label="会社FAX" value=contact.org_fax full_width=True %}
             {% endif %}
             {% if contact.website %}
-              {% include "contacts/_contact_field.html" with field_name="website" label="ウェブサイト" value=contact.website %}
+              {% include "contacts/_contact_field.html" with field_name="website" label="ウェブサイト" value=contact.website full_width=True %}
             {% endif %}
           {% endif %}
 
           {% if contact.postal_code or contact.address %}
             <div class="app-section__header" style="margin-top: var(--app-space-md);"><h2>住所</h2></div>
             {% if contact.postal_code %}
-              {% include "contacts/_contact_field.html" with field_name="postal_code" label="郵便番号" value=contact.postal_code %}
+              {% include "contacts/_contact_field.html" with field_name="postal_code" label="郵便番号" value=contact.postal_code full_width=True %}
             {% endif %}
             {% if contact.address %}
               {% include "contacts/_contact_field.html" with field_name="address" label="住所" value=contact.address %}
@@ -192,7 +201,7 @@
               {% include "contacts/_contact_field.html" with field_name="notes" label="メモ" value=contact.notes %}
             {% endif %}
             {% if contact.lang %}
-              {% include "contacts/_contact_field.html" with field_name="lang" label="言語" value=contact.lang %}
+              {% include "contacts/_contact_field.html" with field_name="lang" label="言語" value=contact.lang full_width=True %}
             {% endif %}
           {% endif %}
         {% else %}

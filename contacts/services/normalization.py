@@ -14,6 +14,7 @@ Contact インスタンスを引数で受けるが、属性アクセス（duck t
 import logging
 import re
 
+import phonenumbers
 from django.core.exceptions import ValidationError
 
 from contacts.constants import COUNTRY_CALLING_CODES
@@ -832,3 +833,40 @@ def validate_phone_against_country(phone_e164, country):
     if not digits:
         return True
     return digits.startswith(str(calling_code))
+
+
+# ----------------------------------------------------------------------
+# 表示整形：電話番号の国際対応フォーマット化
+# ----------------------------------------------------------------------
+
+
+def format_phone_number_display(raw_phone):
+    """E.164 形式の電話番号を国に応じた表示形式に整形して返す（画面表示専用・純関数）。
+
+    [性質] 純関数（DB 非接触・副作用なし・例外を送出しない）
+    [ルール]
+      - 日本の番号 (国番号 81) -> 国内形式（例: "0565-35-6826" / "080-3610-3605"）
+      - 日本以外の番号         -> 国際形式（例: "+1 206-555-0100"）
+      - パース不能・空値等     -> 生データをそのまま返却（フォールバック）
+    """
+    if not raw_phone or not isinstance(raw_phone, str):
+        return raw_phone or ""
+    val = raw_phone.strip()
+    if not val:
+        return ""
+    num_str = val if val.startswith("+") else "+" + val
+    try:
+        parsed = phonenumbers.parse(num_str, None)
+        if not phonenumbers.is_valid_number(parsed):
+            return val
+        if parsed.country_code == 81:
+            return phonenumbers.format_number(
+                parsed, phonenumbers.PhoneNumberFormat.NATIONAL
+            )
+        else:
+            return phonenumbers.format_number(
+                parsed, phonenumbers.PhoneNumberFormat.INTERNATIONAL
+            )
+    except Exception:
+        return val
+

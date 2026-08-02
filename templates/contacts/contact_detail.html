@@ -65,31 +65,43 @@
       {# 紐付け UI・マージボタンはアクション帯へ移動済み（§B）。 #}
       <div class="app-cd-section">
         <div class="app-cd-section__name">氏名</div>
-        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-          <strong>{{ contact.full_name|default:"(氏名なし)" }}</strong>
-          {% status_badge contact %}
-          {% if contact.person.status != "active" %}{% status_badge contact.person %}{% endif %}
-          {% if pending_duplicates %}
-            <span class="app-status-badge app-status-badge--warning">マージ候補 {{ pending_duplicates|length }} 件</span>
-          {% endif %}
-          {% if contact.last_name or contact.first_name or contact.salutation_name %}
-            {% with name_tip="姓："|add:contact.last_name|add:" ／ 名："|add:contact.first_name|add:" ／ 敬称付き氏名（メール宛名）："|add:contact.salutation_name %}
-              <span class="app-help-icon" data-tooltip="{{ name_tip }}" aria-label="氏名の内訳" role="img">i</span>
-            {% endwith %}
-          {% endif %}
-          <span style="margin-left:auto; display:inline-flex; align-items:center; gap:8px;">
-            {% if is_editable %}
-              {% if is_primary %}{% url 'contacts:contact_update_primary' contact.id as edit_url %}{% elif is_active %}{% url 'contacts:contact_update_active' contact.id as edit_url %}{% endif %}
-              {% if edit_url %}
-                <a href="{% append_back_url edit_url back %}"
-                   class="app-btn--icon"
-                   title="主コンタクトを修正" aria-label="主コンタクトを修正"
-                   style="color:inherit; border:none; background:none; text-decoration:none; line-height:1; font-size:1.2rem;"><i class="bi bi-pencil"></i></a>
-              {% endif %}
-            {% else %}
-              <span class="app-muted">表示のみモード（編集不可）</span>
+        <div style="display:flex; flex-direction:column; gap:4px; width:100%;">
+          <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+            <strong>{{ contact.full_name|default:"(氏名なし)" }}</strong>
+            {% status_badge contact %}
+            {% if contact.person.status != "active" %}{% status_badge contact.person %}{% endif %}
+            {% if pending_duplicates %}
+              <span class="app-status-badge app-status-badge--warning">マージ候補 {{ pending_duplicates|length }} 件</span>
             {% endif %}
-          </span>
+            {% if contact.last_name or contact.first_name or contact.phonetic_name or contact.salutation_name %}
+              {% with name_tip="姓："|add:contact.last_name|add:" ／ 名："|add:contact.first_name|add:" ／ 読みカナ："|add:contact.phonetic_name|add:" ／ 敬称付き氏名（メール宛名）："|add:contact.salutation_name %}
+                <span class="app-help-icon" data-tooltip="{{ name_tip }}" aria-label="氏名の内訳" role="img">i</span>
+              {% endwith %}
+            {% endif %}
+            <span style="margin-left:auto; display:inline-flex; align-items:center; gap:8px;">
+              {% if is_editable %}
+                {% if is_primary %}{% url 'contacts:contact_update_primary' contact.id as edit_url %}{% elif is_active %}{% url 'contacts:contact_update_active' contact.id as edit_url %}{% endif %}
+                {% if edit_url %}
+                  <a href="{% append_back_url edit_url back %}"
+                     class="app-btn--icon"
+                     title="主コンタクトを修正" aria-label="主コンタクトを修正"
+                     style="color:inherit; border:none; background:none; text-decoration:none; line-height:1; font-size:1.2rem;"><i class="bi bi-pencil"></i></a>
+                {% endif %}
+              {% else %}
+                <span class="app-muted">表示のみモード（編集不可）</span>
+              {% endif %}
+            </span>
+          </div>
+          {% if contact.phonetic_name or contact.salutation_name %}
+            <div class="app-detail-list app-contact-detail-fields" style="margin-top:4px;">
+              {% if contact.phonetic_name %}
+                {% include "contacts/_contact_field.html" with field_name="phonetic_name" label="読みカナ" value=contact.phonetic_name full_width=True %}
+              {% endif %}
+              {% if contact.salutation_name %}
+                {% include "contacts/_contact_field.html" with field_name="salutation_name" label="敬称付き氏名（メール宛名）" value=contact.salutation_name full_width=True %}
+              {% endif %}
+            </div>
+          {% endif %}
         </div>
       </div>
 
@@ -99,26 +111,26 @@
           <div class="app-cd-section__name">所属</div>
           <div class="app-detail-list app-contact-detail-fields">
             {% if contact.organization %}
-              {% include "contacts/_contact_field.html" with field_name="organization" label="会社" value=contact.organization %}
+              {% include "contacts/_contact_field.html" with field_name="organization" label="会社" value=contact.organization full_width=True %}
             {% endif %}
             {% if contact.branch %}
-              {% include "contacts/_contact_field.html" with field_name="branch" label="支店・店舗" value=contact.branch %}
+              {% include "contacts/_contact_field.html" with field_name="branch" label="支店・店舗" value=contact.branch full_width=True %}
             {% endif %}
             {% if contact.department %}
-              {% include "contacts/_contact_field.html" with field_name="department" label="部署" value=contact.department %}
+              {% include "contacts/_contact_field.html" with field_name="department" label="部署" value=contact.department full_width=True %}
             {% endif %}
             {% if contact.title %}
-              {% include "contacts/_contact_field.html" with field_name="title" label="役職" value=contact.title %}
+              {% include "contacts/_contact_field.html" with field_name="title" label="役職" value=contact.title full_width=True %}
             {% endif %}
             {% if contact.qualification %}
-              {% include "contacts/_contact_field.html" with field_name="qualification" label="資格" value=contact.qualification %}
+              {% include "contacts/_contact_field.html" with field_name="qualification" label="資格" value=contact.qualification full_width=True %}
             {% endif %}
           </div>
         </div>
       {% endif %}
 
       {# 連絡先 #}
-      {% if contact.email or contact.mobile_phone or contact.personal_phone or contact.personal_fax or contact.website %}
+      {% if contact.email or contact.mobile_phone or contact.personal_phone or contact.personal_fax or contact.org_phone or contact.org_fax or contact.website %}
         <div class="app-cd-section">
           <div class="app-cd-section__name">連絡先</div>
           <div class="app-detail-list app-contact-detail-fields">
@@ -127,13 +139,19 @@
               {% include "contacts/_contact_field.html" with field_name="email" label="メール" value=contact.email full_width=True %}
             {% endif %}
             {% if contact.mobile_phone %}
-              {% include "contacts/_contact_field.html" with field_name="mobile_phone" label="携帯" value=contact.mobile_phone %}
+              {% include "contacts/_contact_field.html" with field_name="mobile_phone" label="携帯" value=contact.mobile_phone full_width=True %}
             {% endif %}
             {% if contact.personal_phone %}
-              {% include "contacts/_contact_field.html" with field_name="personal_phone" label="電話" value=contact.personal_phone %}
+              {% include "contacts/_contact_field.html" with field_name="personal_phone" label="電話" value=contact.personal_phone full_width=True %}
             {% endif %}
             {% if contact.personal_fax %}
-              {% include "contacts/_contact_field.html" with field_name="personal_fax" label="FAX" value=contact.personal_fax %}
+              {% include "contacts/_contact_field.html" with field_name="personal_fax" label="FAX" value=contact.personal_fax full_width=True %}
+            {% endif %}
+            {% if contact.org_phone %}
+              {% include "contacts/_contact_field.html" with field_name="org_phone" label="会社電話" value=contact.org_phone full_width=True %}
+            {% endif %}
+            {% if contact.org_fax %}
+              {% include "contacts/_contact_field.html" with field_name="org_fax" label="会社FAX" value=contact.org_fax full_width=True %}
             {% endif %}
             {% if contact.website %}
               {# ウェブサイトは全幅 #}
@@ -149,7 +167,7 @@
           <div class="app-cd-section__name">住所</div>
           <div class="app-detail-list app-contact-detail-fields">
             {% if contact.postal_code %}
-              {% include "contacts/_contact_field.html" with field_name="postal_code" label="郵便番号" value=contact.postal_code %}
+              {% include "contacts/_contact_field.html" with field_name="postal_code" label="郵便番号" value=contact.postal_code full_width=True %}
             {% endif %}
             {% if contact.address %}
               {# Phase E：address は自動 compose の完成形。読み取り専用表示（全幅）。 #}
@@ -174,7 +192,7 @@
               {% include "contacts/_contact_field.html" with field_name="notes" label="メモ" value=contact.notes full_width=True %}
             {% endif %}
             {% if contact.lang %}
-              {% include "contacts/_contact_field.html" with field_name="lang" label="言語" value=contact.lang %}
+              {% include "contacts/_contact_field.html" with field_name="lang" label="言語" value=contact.lang full_width=True %}
             {% endif %}
           </div>
         </div>

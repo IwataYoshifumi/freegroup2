@@ -1,4 +1,4 @@
-{% load ui_tags postal_tags back_tags %}
+{% load ui_tags postal_tags phone_tags back_tags %}
 {% comment %}
 Contact 詳細画面のフィールド 1 行を表示するパーツ（D-3b / D-3d 準備）。
 
@@ -24,8 +24,12 @@ dict[field_name -> ContactFieldConfidence]）と is_editable（編集可能モ�
   - 値とバッジのみ表示、JS フックなし、修正 UI なし
 {% endcomment %}
 
-{# postal_code は画面表示のみ国別整形（Phase D2 話2）。編集 input は DB 生値のまま。 #}
-{% if field_name == "postal_code" %}{% format_postal value contact.country as field_display %}{% endif %}
+{# postal_code / 電話系 5 フィールドは画面表示のみ国別・国際整形。編集 input は DB 生値のまま。 #}
+{% if field_name == "postal_code" %}
+  {% format_postal value contact.country as field_display %}
+{% elif field_name in "mobile_phone personal_phone personal_fax org_phone org_fax" %}
+  {% format_phone value as field_display %}
+{% endif %}
 
 {% if is_editable %}
   {% confidence_state field_confidences field_name as cfc_state %}
@@ -35,7 +39,7 @@ dict[field_name -> ContactFieldConfidence]）と is_editable（編集可能モ�
        data-confidence-state="{{ cfc_state }}"{% if full_width %} style="grid-column:1 / -1;"{% endif %}>
     <div class="app-detail-label">{{ label }}</div>
     <div class="app-detail-value">
-      <span class="js-contact-field-value">{% if field_name == "postal_code" %}{{ field_display }}{% else %}{{ value }}{% endif %}</span>
+      <span class="js-contact-field-value">{% if field_name == "postal_code" or field_name in "mobile_phone personal_phone personal_fax org_phone org_fax" %}{{ field_display }}{% else %}{{ value }}{% endif %}</span>
       <span class="js-contact-field-badge-slot">{% confidence field_confidences field_name 'badge' %}</span>
       {% if info_tooltip %}<span class="app-help-icon" data-tooltip="{{ info_tooltip }}" aria-label="{{ label }}の内訳" role="img">i</span>{% endif %}
     </div>
@@ -99,7 +103,7 @@ dict[field_name -> ContactFieldConfidence]）と is_editable（編集可能モ�
   <div class="app-detail-item{% if field_name == "address" %} js-contact-field-row{% endif %}{% if not full_width %} app-cd-stacked{% endif %}"{% if field_name == "address" %} data-field-name="{{ field_name }}" data-contact-id="{{ contact.id }}" data-confidence-state="{{ cfc_state }}"{% endif %}{% if full_width %} style="grid-column:1 / -1;"{% endif %}>
     <div class="app-detail-label">{{ label }}</div>
     <div class="app-detail-value">
-      {% if field_name == "postal_code" %}{{ field_display }}{% else %}{{ value }}{% endif %}
+      {% if field_name == "postal_code" or field_name in "mobile_phone personal_phone personal_fax org_phone org_fax" %}{{ field_display }}{% else %}{{ value }}{% endif %}
       <span class="js-contact-field-badge-slot">{% confidence field_confidences field_name 'badge' %}</span>
       {% if info_tooltip %}<span class="app-help-icon" data-tooltip="{{ info_tooltip }}" aria-label="{{ label }}の内訳" role="img">i</span>{% endif %}
     </div>
