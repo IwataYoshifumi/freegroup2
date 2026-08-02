@@ -154,11 +154,11 @@ class MergeForm(ContactBaseForm):
                 self._value_diff_fields.append(field_name)
 
     def _add_dynamic_confirm_checkboxes(self):
-        """[性質] 副作用あり（self.fields に confirmed_<field> BooleanField を追加）
+        """[性質] 副作用あり（self.fields に confirmed_<field> ChoiceField を追加）
 
         surviving 側 primary_contact の DUPLICATE_CHECK_FIELDS のうち、ContactFieldConfidence
-        が low/mid かつ未確認のものに対して動的にチェックボックスを追加する
-        （仕様書 §11.6.2、ContactUpdateForm L121-129 のパターン踏襲）。
+        が low/mid かつ未確認、かつ現在値が空でないものに対して動的に ChoiceField を追加する。
+        選択肢は「ok」（確認OK）と「needs_fix」（誤記あり。後から修正）の 2 択。
         """
         confidences = (
             self.surviving_person.primary_contact.get_field_confidences()
@@ -175,12 +175,16 @@ class MergeForm(ContactBaseForm):
             ):
                 label_name = FIELD_LABEL_JA.get(field_name, field_name)
 
-                self.fields[f"confirmed_{field_name}"] = forms.BooleanField(
+                self.fields[f"confirmed_{field_name}"] = forms.ChoiceField(
+                    choices=[
+                        ("ok", "確認OK"),
+                        ("needs_fix", "誤記あり。後から修正"),
+                    ],
                     required=False,
-                    initial=False,
+                    initial=None,
                     label=label_name,
-                    widget=forms.CheckboxInput(
-                        attrs={"class": "app-confirm-checkbox"},
+                    widget=forms.RadioSelect(
+                        attrs={"class": "app-confirm-radio"},
                     ),
                 )
 
@@ -204,7 +208,7 @@ class MergeForm(ContactBaseForm):
             surviving_person_choice の選択を必須化（D-4d-1 第 7 弾 §2-1-B：
             未選択時 / 別人判定時はテンプレ側でサバイブ選択 UI が disabled 化）
           - review_decision が merged または additional_role のときのみ、
-            surviving 側 low/mid 未確認 CB の全 ON を要求（D-4d-1 第 5 弾 §2-1：
+            surviving 側 low/mid 未確認 CB の選択（ok または needs_fix）を要求（D-4d-1 第 5 弾 §2-1：
             別人判定では確認 CB ブロックがテンプレ側で動的非表示のため、
             バリデーションも走らせない）
         """
@@ -280,10 +284,10 @@ class MergeForm(ContactBaseForm):
                 "「その他」を選択した場合は備考の入力が必要です",
             )
 
-        # 4: surviving 側 low/mid 未確認の動的 CB が全 ON
+        # 4: surviving 側 low/mid 未確認の動的 CB が選択（ok または needs_fix）済みか検証
         # 別人判定（review_decision='different'）では確認チェックブロックが
         # テンプレ側 app-section--executes-merge ラッパーで動的非表示になっており
-        # ユーザが CB を ON にできない。バリデーションも走らせない（D-4d-1 第 5 弾 §2-1）。
+        # ユーザが CB を操作できない。バリデーションも走らせない（D-4d-1 第 5 弾 §2-1）。
         if review_decision in ("merged", "additional_role"):
             confidences = (
                 self.surviving_person.primary_contact.get_field_confidences()
@@ -292,12 +296,15 @@ class MergeForm(ContactBaseForm):
                 conf = confidences.get(field_name)
                 if conf is None:
                     continue
+                val = getattr(self.surviving_person.primary_contact, field_name, "")
                 if (
                     conf.confidence in ("low", "mid")
                     and conf.confirmed_at is None
+                    and bool(val and str(val).strip())
                 ):
                     chk_name = f"confirmed_{field_name}"
-                    if not cleaned.get(chk_name):
+                    choice = cleaned.get(chk_name)
+                    if choice not in ("ok", "needs_fix"):
                         label_name = FIELD_LABEL_JA.get(field_name, field_name)
                         self.add_error(
                             chk_name,
@@ -305,6 +312,43 @@ class MergeForm(ContactBaseForm):
                         )
 
         return cleaned
+
+    def get_confirmed_ok_field_names(self):
+        """cleaned_data から『確認OK』（"ok"）が選択された field_name のリストを取り出す純関数。
+
+        [性質] 純関数（self.cleaned_data から導出、DB 操作なし・副作用なし）
+        [入力] なし
+        [出力] list[str]（field_name のリスト）
+        """
+        if not hasattr(self, "cleaned_data") or not self.cleaned_data:
+            return []
+        ok_fields = []
+        for field_name in DUPLICATE_CHECK_FIELDS:
+            chk_name = f"confirmed_{field_name}"
+            if self.cleaned_data.get(chk_name) == "ok":
+                ok_fields.append(field_name)
+        return ok_fields
+
+    def get_confirm_fields_info(self):
+        """テンプレート表示用の要確認フィールド情報リストを返すヘルパー。
+
+        [性質] 純関数
+        [出力] list[tuple[str, dict]]
+        """
+        info = []
+        for field_name in DUPLICATE_CHECK_FIELDS:
+            chk_name = f"confirmed_{field_name}"
+            if chk_name in self.fields:
+                label_name = FIELD_LABEL_JA.get(field_name, field_name)
+                info.append((
+                    field_name,
+                    {
+                        "field": self[chk_name],
+                        "label": label_name,
+                        "name": chk_name,
+                    },
+                ))
+        return info
 
     def get_merge_reason(self):
         """review_result からマージ系 value のリストを取り出す（D-4d-1 第 4 弾 §2-4-C）。

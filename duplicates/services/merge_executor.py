@@ -293,32 +293,19 @@ def Execute_Merge_Only(candidate, surviving_person, merged_person, form, user):
     # 化してから is_all_field_confidence_high を見る。merged 側 CFC は触らない
     # （additional_role のときの merged 側バリデーションは現状の挙動を維持）。
     with transaction.atomic():
-        # ---- 0. CFC 確定処理（confirm CB 全 ON 検証を DB に反映） ----
-        unconfirmed_field_names = list(
-            ContactFieldConfidence.objects.filter(
-                contact=surviving_primary,
-                confirmed_at__isnull=True,
-            ).values_list("field_name", flat=True)
-        )
-        if unconfirmed_field_names:
-            ContactFieldConfidence.mark_fields_as_confirmed(
-                surviving_primary, unconfirmed_field_names, user
+        # ---- 0. CFC 確定処理（「確認OK」選択済みのフィールドのみ DB に反映） ----
+        ok_field_names = form.get_confirmed_ok_field_names()
+        if ok_field_names:
+            unconfirmed_field_names = list(
+                ContactFieldConfidence.objects.filter(
+                    contact=surviving_primary,
+                    field_name__in=ok_field_names,
+                    confirmed_at__isnull=True,
+                ).values_list("field_name", flat=True)
             )
-
-        # ---- A. バリデーション（§9.3.1 手順 2） ----
-        if not surviving_primary.is_all_field_confidence_high(
-            DUPLICATE_CHECK_FIELDS
-        ):
-            raise ValidationError(
-                "surviving_person の primary_contact に全 high でないフィールドが残っています。"
-            )
-        if DuplicateMergeReason.ADDITIONAL_ROLE in merge_reason:
-            if not merged_person.primary_contact.is_all_field_confidence_high(
-                DUPLICATE_CHECK_FIELDS
-            ):
-                raise ValidationError(
-                    "additional_role でのマージでは merged_person の primary_contact も "
-                    "全 high が必要です。"
+            if unconfirmed_field_names:
+                ContactFieldConfidence.mark_fields_as_confirmed(
+                    surviving_primary, unconfirmed_field_names, user
                 )
 
         # ---- B. マージ実行（§9.3.1 手順 5〜10） ----

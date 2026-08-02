@@ -211,14 +211,23 @@
         {% if form.has_confirm_checkboxes %}
           <div class="app-section--executes-merge">
             <div class="app-section__header" style="margin-top:var(--app-space-xs);"><h2>確認チェック</h2></div>
-            <div class="app-confirm-toggle-group">
-              {% for field in form %}
-                {% if field.name|slice:":10" == "confirmed_" %}
-                  <label class="app-confirm-toggle__btn">
-                    {{ field }}
-                    <span>{{ field.label }}</span>
-                  </label>
-                {% endif %}
+            <div class="app-confirm-fields-container" style="display:flex; flex-direction:column; gap:var(--app-space-xs);">
+              {% for field_name, item in form.get_confirm_fields_info %}
+                <div class="app-confirm-field-item">
+                  <div class="app-confirm-field-label" style="font-size:12px; font-weight:600; margin-bottom:2px; color:var(--app-text);">
+                    {{ item.label }}
+                  </div>
+                  <div class="app-confirm-toggle-group" style="display:flex; flex-wrap:wrap; gap:var(--app-space-xs);">
+                    <label class="app-confirm-toggle__btn app-confirm-toggle__btn--ok">
+                      <input type="radio" name="{{ item.name }}" value="ok" {% if item.field.value == "ok" %}checked{% endif %}>
+                      <span>確認OK</span>
+                    </label>
+                    <label class="app-confirm-toggle__btn app-confirm-toggle__btn--needs-fix">
+                      <input type="radio" name="{{ item.name }}" value="needs_fix" {% if item.field.value == "needs_fix" %}checked{% endif %}>
+                      <span>誤記あり。後から修正</span>
+                    </label>
+                  </div>
+                </div>
               {% endfor %}
             </div>
             <ul class="errorlist app-form__error" style="margin-top:var(--app-space-xs); font-size:12px; list-style:none; padding-left:0; margin-bottom:0;">
