@@ -2191,15 +2191,13 @@ form:has(.js-decision-additional_role:checked) .app-merge-survivor__label--prima
     margin-top: var(--app-space-xs);
   }
 
-  /* 確認チェック単一トグルボタン（サイズ縮小＋選択時青塗りつぶし） */
+  /* 確認チェックトグルボタン（マージ理由ボタンと同サイズ・同スタイルに統一） */
   .app-confirm-toggle__btn {
     position: relative;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    padding: 4px 10px;
-    font-size: 12px;
-    font-weight: 500;
+    padding: var(--app-space-xs) var(--app-space-sm);
     border: 1px solid var(--app-border);
     border-radius: var(--app-radius-sm);
     background: var(--app-surface);
