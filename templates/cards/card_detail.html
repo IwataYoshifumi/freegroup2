@@ -9,6 +9,12 @@
     <div>
       <div style="display:flex; align-items:center; gap:12px;">
         <h1>名刺詳細</h1>
+        {% if card.original_image %}
+          <a href="{% url 'originals:original_detail' pk=card.original_image.id %}"
+             class="app-btn app-btn--secondary app-btn--sm">
+            元画像を見る
+          </a>
+        {% endif %}
         <a href="{% url 'cards:card_upload' %}"
            class="app-btn app-btn--secondary app-btn--sm">
           名刺画像アップロード
