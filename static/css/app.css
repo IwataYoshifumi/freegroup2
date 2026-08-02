@@ -1541,16 +1541,16 @@ select.app-input {
 .app-merge-decision__btn:has(input:checked),
 .app-merge-survivor__btn:has(input:checked),
 .app-merge-reason__btn:has(input:checked) {
-  border-color: var(--app-color-primary);
-  background: var(--app-color-primary);
-  color: #ffffff;
+  border-color: var(--app-color-primary) !important;
+  background: var(--app-color-primary) !important;
+  color: #ffffff !important;
   box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25);
 }
 
 .app-merge-decision__btn:has(input:checked) *,
 .app-merge-survivor__btn:has(input:checked) *,
 .app-merge-reason__btn:has(input:checked) * {
-  color: #ffffff;
+  color: #ffffff !important;
 }
 
 /* マージレビュー画面 第 2 段階判定理由（D-4d-1 続き §4） */

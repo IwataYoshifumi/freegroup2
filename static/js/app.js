@@ -1582,9 +1582,10 @@
       var newLeft = initialLeft + dx;
       var newTop = initialTop + dy;
 
+      var topBarHeight = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--app-topbar-height')) || 56;
       var minLeft = 10 - (panel.offsetWidth - 100);
       var maxLeft = window.innerWidth - 100;
-      var minTop = 10;
+      var minTop = topBarHeight + 8; // TopBar（56px）の下に潜り込まないよう制限
       var maxTop = window.innerHeight - 50;
 
       newLeft = Math.max(minLeft, Math.min(newLeft, maxLeft));

@@ -220,10 +220,9 @@
         </div>
       {% endif %}
 
-      <div class="app-section__header" style="margin-top:var(--app-space-xs);"><h2>備考</h2></div>
-      <div class="app-form__group">
+      <div class="app-form__group" style="margin-top:var(--app-space-xs);">
         <label for="{{ form.note.id_for_label }}">備考</label>
-        {{ form.note }}
+        <textarea name="note" id="{{ form.note.id_for_label }}" class="app-input" rows="2" style="min-height:60px;height:60px;">{{ form.note.value|default:"" }}</textarea>
         {{ form.note.errors }}
       </div>
 
