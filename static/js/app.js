@@ -1510,10 +1510,42 @@
       });
     });
   }
+  function initMergeReasonMutualExclusion() {
+    var checkboxes = document.querySelectorAll('input[name="review_result"]');
+    if (!checkboxes.length) return;
+
+    var sameCardCb = null;
+    for (var i = 0; i < checkboxes.length; i++) {
+      if (checkboxes[i].value === 'same_card') {
+        sameCardCb = checkboxes[i];
+        break;
+      }
+    }
+    if (!sameCardCb) return;
+
+    checkboxes.forEach(function (cb) {
+      cb.addEventListener('change', function () {
+        if (this.value === 'same_card' && this.checked) {
+          // 「同一名刺」が選択されたら、他の選択状態をすべて解除
+          checkboxes.forEach(function (other) {
+            if (other !== sameCardCb) {
+              other.checked = false;
+            }
+          });
+        } else if (this.value !== 'same_card' && this.checked) {
+          // 「同一名刺」以外のいずれかが選択されたら、「同一名刺」の選択を解除
+          sameCardCb.checked = false;
+        }
+      });
+    });
+  }
+
   function init() {
     // persons / contacts / tags / mailings 一覧の各テーブルに同じ現在ページ内DOMソートを適用する
     // （フック追加のみ・挙動は共通）。
     document.querySelectorAll('.js-person-page-sort, .js-contact-page-sort, .js-tag-page-sort, .js-mailings-page-sort').forEach(initTable);
+    // 重複候補レビュー画面のマージ理由相互排他制御
+    initMergeReasonMutualExclusion();
   }
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);

@@ -2012,7 +2012,7 @@ form:has(.js-decision-additional_role:checked) .app-merge-survivor__label--prima
     overflow-y: auto;
   }
 
-  /* 右パネル内の判定ボタン 3 つを折り返さず 1 行にフィットさせる */
+  /* 右パネル内の判定ボタン 3 つの折り返しとはみ出し防止 */
   .app-review-layout__sidebar .app-merge-decision {
     display: flex;
     flex-wrap: nowrap;
@@ -2022,10 +2022,16 @@ form:has(.js-decision-additional_role:checked) .app-merge-survivor__label--prima
   .app-review-layout__sidebar .app-merge-decision__btn {
     min-width: 0;
     flex: 1 1 0%;
-    padding: 10px 4px;
+    padding: 8px 4px;
     font-size: 13px;
     text-align: center;
-    white-space: nowrap;
+    white-space: normal;
+    word-break: break-word;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 52px;
+    line-height: 1.25;
   }
 }
 
