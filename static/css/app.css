@@ -2218,21 +2218,12 @@ form:has(.js-decision-additional_role:checked) .app-merge-survivor__label--prima
     border-color: var(--app-color-primary);
   }
 
-  /* 「確認OK」（ok）選択時：青塗りつぶし */
-  .app-confirm-toggle__btn:has(input[value="ok"]:checked),
-  .app-confirm-toggle__btn:has(input[type="checkbox"]:checked) {
+  /* 選択時（ok / needs_fix）：青塗りつぶしに統一 */
+  .app-confirm-toggle__btn:has(input:checked) {
     border-color: var(--app-color-primary) !important;
     background: var(--app-color-primary) !important;
     color: #ffffff !important;
     box-shadow: 0 2px 4px rgba(37, 99, 235, 0.2);
-  }
-
-  /* 「誤記あり。後から修正」（needs_fix）選択時：オレンジ/黄系塗りつぶし */
-  .app-confirm-toggle__btn:has(input[value="needs_fix"]:checked) {
-    border-color: var(--app-color-warning, #d97706) !important;
-    background: var(--app-color-warning, #d97706) !important;
-    color: #ffffff !important;
-    box-shadow: 0 2px 4px rgba(217, 119, 6, 0.2);
   }
 
   .app-confirm-toggle__btn:has(input:checked) * {
