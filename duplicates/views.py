@@ -285,6 +285,80 @@ class DuplicateCandidateGroupListView(
             return DUP_DEFAULT_PER_PAGE
         return n if n in DUP_PER_PAGE_CHOICES else DUP_DEFAULT_PER_PAGE
 
+    # rank 文字列 → r_order 数値（小さいほど高ランク）
+    _RANK_ORDER_MAP = {
+        DuplicateCandidate.Rank.EXACT_MATCH: 0,
+        DuplicateCandidate.Rank.POSSIBLE_HIGH: 1,
+        DuplicateCandidate.Rank.POSSIBLE_MID: 2,
+        DuplicateCandidate.Rank.POSSIBLE_LOW: 3,
+    }
+
+    @classmethod
+    def _build_name_max_rank_map(cls, all_groups):
+        """氏名 → その氏名を持つ全グループの中での最高ランク（最小 r_order 数値）を返す dict。
+
+        all_groups: get_queryset() を評価済みの全グループ dict のリスト。
+        Subquery を使わず Python 側の一括集計で算出する。
+
+        [性質] 純関数。外部クエリを一切発行しない。
+        """
+        name_best: dict = {}  # full_name -> min(r_order)
+        for g in all_groups:
+            name = g.get("lead_full_name")  # None の場合もある
+            r_order = cls._RANK_ORDER_MAP.get(g.get("rank"), 99)
+            if name is None:
+                continue
+            if name not in name_best or r_order < name_best[name]:
+                name_best[name] = r_order
+        return name_best
+
+    def paginate_queryset(self, queryset, page_size):
+        """デフォルトソート時のみ Python 側で氏名グループ化ソートを適用してからページ分割する。
+
+        ?sort= 明示指定時は Django 標準の paginate_queryset に委譲する。
+        """
+        use_name_grouping = getattr(queryset, "_use_name_grouping", False)
+        if not use_name_grouping:
+            return super().paginate_queryset(queryset, page_size)
+
+        # --- デフォルトソート：Python 側ソート + 手動ページ分割 ---
+        # 1. QS を全件リスト化（SQL の暫定ソートが有効な状態で評価）
+        all_groups = list(queryset)
+
+        # 2. 氏名 → 最高ランク(最小r_order)の対応表を一括生成（クエリなし）
+        name_max_rank = self._build_name_max_rank_map(all_groups)
+
+        # 3. Python ソートキー：
+        #    未レビュー優先(-has_pending) → 氏名グループ最高ランク →
+        #    氏名辞書順 → 各グループのrank_order → group_id タイブレーク
+        def sort_key(g):
+            name = g.get("lead_full_name") or ""
+            # has_pending は 0/1; 未レビュー優先なので符号反転
+            hp = g.get("has_pending", 0)
+            nmr = name_max_rank.get(name, 99) if name else 99
+            ro = g.get("rank_order", 99)
+            gid = str(g.get("group_id") or "")
+            return (-hp, nmr, name, ro, gid)
+
+        all_groups.sort(key=sort_key)
+
+        # 4. Django の Paginator を list に適用してページ分割
+        from django.core.paginator import InvalidPage, Paginator
+        paginator = Paginator(all_groups, page_size)
+        page_kwarg = self.page_kwarg
+        page_num = self.kwargs.get(page_kwarg) or self.request.GET.get(page_kwarg) or 1
+        try:
+            page_num = int(page_num)
+        except (TypeError, ValueError):
+            page_num = 1
+        try:
+            page = paginator.page(page_num)
+        except InvalidPage:
+            page = paginator.page(1)
+        return (paginator, page, page.object_list, paginator.num_pages > 1)
+
+
+
     _VALID_RANKS = (
         DuplicateCandidate.Rank.EXACT_MATCH,
         DuplicateCandidate.Rank.POSSIBLE_HIGH,
@@ -372,15 +446,27 @@ class DuplicateCandidateGroupListView(
             output_field=IntegerField(),
         )
         groups = groups.annotate(
-            rank_order=rank_order, has_pending=has_pending
+            rank_order=rank_order,
+            has_pending=has_pending,
         )
 
-        # 多段ソート（?sort=）。既定は未レビュー優先→rank順→氏名順。group_id を安定タイブレークに付ける。
-        order = _dup_sort_order_fields(_parse_dup_sort(self.request.GET))
-        if not order:
-            order = ["-has_pending", "rank_order", "lead_full_name"]
-        order.append("group_id")
-        return groups.order_by(*order)
+        # 多段ソート（?sort=）。
+        # ・?sort= 明示指定時：SQL の order_by のみで完結する。
+        # ・?sort= 未指定時（デフォルト）：Python 側で氏名グループ化ソートを行う。
+        #   SQL では安定タイブレーク用の仮ソートのみかける。
+        #   Python 側ソートは get_context_data が担う（is_default_sort フラグで判定）。
+        sort_tokens = _parse_dup_sort(self.request.GET)
+        if sort_tokens:
+            order = _dup_sort_order_fields(sort_tokens)
+            order.append("group_id")
+            qs = groups.order_by(*order)
+            qs._use_name_grouping = False  # type: ignore[attr-defined]
+        else:
+            # デフォルトソート：SQL は暫定（has_pending 優先 + rank_order + 氏名 + id）
+            # 実際の name_max_rank グループ化は get_context_data で Python ソートする
+            qs = groups.order_by("-has_pending", "rank_order", "lead_full_name", "group_id")
+            qs._use_name_grouping = True  # type: ignore[attr-defined]
+        return qs
 
     @staticmethod
     def _select_lead_person(rep):

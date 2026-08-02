@@ -299,22 +299,165 @@ class DuplicateCandidateGroupListViewTests(_DuplicatesTestBase):
         return gid
 
     def test_sort_default_is_rank_priority(self):
-        """既定ソートは rank 優先（完全一致→高→中→低）。"""
-        g_low = self._make_ranked_group("low", DuplicateCandidate.Rank.POSSIBLE_LOW)
-        g_exact = self._make_ranked_group("exact", DuplicateCandidate.Rank.EXACT_MATCH)
-        g_mid = self._make_ranked_group("mid", DuplicateCandidate.Rank.POSSIBLE_MID)
-        g_high = self._make_ranked_group("high", DuplicateCandidate.Rank.POSSIBLE_HIGH)
+        """既定ソート: 氏名グループ化（同一氏名グループを隣接化しつつ、
+        氏名グループ内最高ランクで氏名グループ自体を先に出す）。
+
+        以下の6グループでテストする:
+          - 氏名「Tanaka」: g_tanaka_exact (exact_match), g_tanaka_high (possible_high)
+          - 氏名「Suzuki」: g_suzuki_mid (possible_mid), g_suzuki_low (possible_low)
+          - 氏名「Aoyama」: g_aoyama_low (possible_low)  ← 氏名辞書順は先だがrankは低
+          - 氏名「Kimura」: g_kimura_exact (exact_match)
+
+        期待する表示順:
+          1. g_tanaka_exact  (氏名グループ最高rank=exact=0, 氏名="Tanaka", rank_order=0)
+          2. g_tanaka_high   (氏名グループ最高rank=exact=0, 氏名="Tanaka", rank_order=1)
+          3. g_kimura_exact  (氏名グループ最高rank=exact=0, 氏名="Kimura", rank_order=0)
+          -- ↑ exact グループ(name_max_rank=0)が全員先 --
+          4. g_suzuki_mid    (氏名グループ最高rank=mid=2,   氏名="Suzuki", rank_order=2)
+          5. g_suzuki_low    (氏名グループ最高rank=mid=2,   氏名="Suzuki", rank_order=3)
+          -- ↑ mid グループ(name_max_rank=2) --
+          6. g_aoyama_low    (氏名グループ最高rank=low=3,   氏名="Aoyama", rank_order=3)
+          -- ↑ low グループ(name_max_rank=3) --
+
+        注: "Kimura" < "Suzuki" < "Tanaka" (辞書順) だが、
+            "Tanaka" は name_max_rank=0 (exact) で "Kimura" も同じ。
+            同 name_max_rank 内で氏名辞書順なので Kimura < Tanaka。
+            "Aoyama" は辞書順最小だが name_max_rank=3 (low) なので最後。
+        """
+        ALL_RANKS = ["exact_match", "possible_high", "possible_mid", "possible_low"]
+
+        # 氏名「Tanaka」グループ: exact + high
+        p_ta1, _ = self._make_person_with_primary("Tanaka")
+        p_ta2, _ = self._make_person_with_primary("Tanaka-B1")
+        g_tanaka_exact = uuid.uuid4()
+        self._make_candidate(p_ta1, p_ta2, group_id=g_tanaka_exact,
+                             rank=DuplicateCandidate.Rank.EXACT_MATCH)
+
+        p_ta3, _ = self._make_person_with_primary("Tanaka")
+        p_ta4, _ = self._make_person_with_primary("Tanaka-B2")
+        g_tanaka_high = uuid.uuid4()
+        self._make_candidate(p_ta3, p_ta4, group_id=g_tanaka_high,
+                             rank=DuplicateCandidate.Rank.POSSIBLE_HIGH)
+
+        # 氏名「Suzuki」グループ: mid + low
+        p_su1, _ = self._make_person_with_primary("Suzuki")
+        p_su2, _ = self._make_person_with_primary("Suzuki-B1")
+        g_suzuki_mid = uuid.uuid4()
+        self._make_candidate(p_su1, p_su2, group_id=g_suzuki_mid,
+                             rank=DuplicateCandidate.Rank.POSSIBLE_MID)
+
+        p_su3, _ = self._make_person_with_primary("Suzuki")
+        p_su4, _ = self._make_person_with_primary("Suzuki-B2")
+        g_suzuki_low = uuid.uuid4()
+        self._make_candidate(p_su3, p_su4, group_id=g_suzuki_low,
+                             rank=DuplicateCandidate.Rank.POSSIBLE_LOW)
+
+        # 氏名「Aoyama」グループ: low のみ（辞書順最小だがrankが低い）
+        p_ao1, _ = self._make_person_with_primary("Aoyama")
+        p_ao2, _ = self._make_person_with_primary("Aoyama-B")
+        g_aoyama_low = uuid.uuid4()
+        self._make_candidate(p_ao1, p_ao2, group_id=g_aoyama_low,
+                             rank=DuplicateCandidate.Rank.POSSIBLE_LOW)
+
+        # 氏名「Kimura」グループ: exact のみ
+        p_ki1, _ = self._make_person_with_primary("Kimura")
+        p_ki2, _ = self._make_person_with_primary("Kimura-B")
+        g_kimura_exact = uuid.uuid4()
+        self._make_candidate(p_ki1, p_ki2, group_id=g_kimura_exact,
+                             rank=DuplicateCandidate.Rank.EXACT_MATCH)
 
         resp = self.client.get(
             self.url,
-            {"searched": "1", "rank": ["exact_match", "possible_high", "possible_mid", "possible_low"],
-             "progress": "pending"},
+            {"searched": "1", "rank": ALL_RANKS, "progress": "pending"},
         )
         ids = [g["group_id"] for g in resp.context["enriched_groups"]]
-        self.assertEqual(ids, [g_exact, g_high, g_mid, g_low])
+
+        # 今回作成した6グループが全て含まれることを確認
+        created = {g_tanaka_exact, g_tanaka_high, g_suzuki_mid,
+                   g_suzuki_low, g_aoyama_low, g_kimura_exact}
+        for gid in created:
+            self.assertIn(gid, ids, f"group {gid} が結果に存在しない")
+
+        # 6グループの相対順序を検証（setUpTestData の他グループが混在する可能性があるため
+        # 全体の ids ではなく created 内の相対順序で比較）
+        ids_created = [i for i in ids if i in created]
+
+        # name_max_rank=0 の2グループ（Kimura, Tanaka）が先行し、Kimura < Tanaka（辞書順）
+        kimura_pos = ids_created.index(g_kimura_exact)
+        tanaka_exact_pos = ids_created.index(g_tanaka_exact)
+        tanaka_high_pos = ids_created.index(g_tanaka_high)
+        suzuki_mid_pos = ids_created.index(g_suzuki_mid)
+        suzuki_low_pos = ids_created.index(g_suzuki_low)
+        aoyama_pos = ids_created.index(g_aoyama_low)
+
+        # name_max_rank=0 (exact) の氏名グループが name_max_rank=2 (mid) より先
+        self.assertLess(kimura_pos, suzuki_mid_pos,
+                        "Kimura(exact) は Suzuki(mid) より前であるべき")
+        self.assertLess(tanaka_exact_pos, suzuki_mid_pos,
+                        "Tanaka(exact) は Suzuki(mid) より前であるべき")
+
+        # Kimura < Tanaka （辞書順、同 name_max_rank=0 内）
+        self.assertLess(kimura_pos, tanaka_exact_pos,
+                        "Kimura は辞書順で Tanaka より前であるべき")
+
+        # 同一氏名「Tanaka」グループは隣接し、exact < high
+        self.assertLess(tanaka_exact_pos, tanaka_high_pos,
+                        "Tanaka exact は Tanaka high より前であるべき")
+        self.assertEqual(tanaka_high_pos - tanaka_exact_pos, 1,
+                         "Tanaka の2グループは隣接しているべき")
+
+        # 同一氏名「Suzuki」グループは隣接し、mid < low
+        self.assertLess(suzuki_mid_pos, suzuki_low_pos,
+                        "Suzuki mid は Suzuki low より前であるべき")
+        self.assertEqual(suzuki_low_pos - suzuki_mid_pos, 1,
+                         "Suzuki の2グループは隣接しているべき")
+
+        # Suzuki (name_max_rank=2/mid) は Aoyama (name_max_rank=3/low) より前
+        self.assertLess(suzuki_mid_pos, aoyama_pos,
+                        "Suzuki(mid) は Aoyama(low) より前であるべき")
+
+    def test_sort_explicit_disables_name_grouping(self):
+        """?sort= 明示指定時は氏名グループ化が適用されず、SQL の指定ソートが有効になる。
+
+        同一氏名「Tanaka」で exact + low の2グループを作成する。
+        - デフォルトソートなら Tanaka 2グループが隣接するが、
+        - ?sort=-rank（rank 降順）なら low が先、exact が後になる。
+          その間に別氏名グループが割り込む可能性がある（グループ化なし）。
+        ここでは ?sort=rank（rank 昇順）を指定して、
+        exact_match グループが possible_low グループより前に来ることを確認する。
+        """
+        ALL_RANKS = ["exact_match", "possible_high", "possible_mid", "possible_low"]
+
+        # 「山田」exact（氏名グループ内最高rank）
+        p1, _ = self._make_person_with_primary("山田太郎")
+        p2, _ = self._make_person_with_primary("山田太郎-B")
+        g_yamada_exact = uuid.uuid4()
+        self._make_candidate(p1, p2, group_id=g_yamada_exact,
+                             rank=DuplicateCandidate.Rank.EXACT_MATCH)
+
+        # 「鈴木」possible_high（氏名グループ内最高rank）
+        p3, _ = self._make_person_with_primary("鈴木花子")
+        p4, _ = self._make_person_with_primary("鈴木花子-B")
+        g_suzuki_high = uuid.uuid4()
+        self._make_candidate(p3, p4, group_id=g_suzuki_high,
+                             rank=DuplicateCandidate.Rank.POSSIBLE_HIGH)
+
+        # ?sort=rank（rank 昇順 = exact → high → mid → low）
+        resp = self.client.get(
+            self.url,
+            {"searched": "1", "rank": ALL_RANKS, "progress": "pending", "sort": "rank"},
+        )
+        ids = [g["group_id"] for g in resp.context["enriched_groups"]]
+
+        # rank 昇順ならば exact が high より前になる
+        yamada_pos = ids.index(g_yamada_exact)
+        suzuki_pos = ids.index(g_suzuki_high)
+        self.assertLess(yamada_pos, suzuki_pos,
+                        "?sort=rank 指定時は exact(山田) が high(鈴木) より前になるべき")
 
     def test_sort_rank_desc(self):
         """?sort=-rank で確信度の低い順（低→中→高→完全一致）になる。"""
+
         g_low = self._make_ranked_group("low", DuplicateCandidate.Rank.POSSIBLE_LOW)
         g_exact = self._make_ranked_group("exact", DuplicateCandidate.Rank.EXACT_MATCH)
         g_mid = self._make_ranked_group("mid", DuplicateCandidate.Rank.POSSIBLE_MID)
