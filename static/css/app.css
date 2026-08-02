@@ -1669,11 +1669,12 @@ form:has(.js-decision-additional_role:checked) .app-merge-survivor__label--prima
 }
 
 .app-review-layout__sidebar-header {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 12px;
-  margin: -16px -16px 8px -16px;
+  padding: 10px 14px;
+  margin: 0;
   background: #f1f5f9;
   border-bottom: 1px solid var(--app-border);
   border-top-left-radius: var(--app-radius-lg);
@@ -1681,7 +1682,7 @@ form:has(.js-decision-additional_role:checked) .app-merge-survivor__label--prima
   cursor: move;
   user-select: none;
   color: #475569;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 700;
 }
 
@@ -2154,14 +2155,22 @@ form:has(.js-decision-additional_role:checked) .app-merge-survivor__label--prima
     z-index: 40;
     display: flex;
     flex-direction: column;
-    gap: var(--app-space-md);
-    padding: var(--app-space-md);
+    padding: 0;
     background: var(--app-surface);
     border: 1px solid var(--app-border);
     border-radius: var(--app-radius-lg);
     box-shadow: 0 4px 20px rgba(15, 23, 42, 0.1);
-    max-height: calc(100vh - var(--app-topbar-height) - var(--app-space-md) * 2);
+    max-height: calc(100vh - var(--app-topbar-height) - 32px);
+    overflow: hidden;
+  }
+
+  .app-review-layout__sidebar-body {
+    flex: 1 1 auto;
     overflow-y: auto;
+    padding: var(--app-space-md);
+    display: flex;
+    flex-direction: column;
+    gap: var(--app-space-md);
   }
 
   /* 右パネル内の判定ボタン 3 つの折り返しとはみ出し防止 */

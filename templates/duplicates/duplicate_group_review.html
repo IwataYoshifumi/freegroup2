@@ -130,104 +130,116 @@
 
     <div class="app-review-layout__sidebar" id="reviewSidebarPanel">
       <div class="app-review-layout__sidebar-header js-panel-drag-handle">
-        <span class="app-review-layout__sidebar-title">レビュー操作</span>
-        <span class="app-review-layout__drag-icon" title="ドラッグして移動">⋮⋮ ドラッグ可</span>
+        <div style="display:flex; align-items:center; gap:6px;">
+          <span class="app-review-layout__drag-icon" title="ドラッグして移動">⋮⋮</span>
+          <span class="app-review-layout__sidebar-title">レビュー操作</span>
+        </div>
+        <a href="{% url 'duplicates:duplicate_group_detail' group_id=group_id %}" class="app-btn app-btn--secondary" style="padding:2px 8px; font-size:12px; font-weight:normal;">← 戻る</a>
       </div>
 
-      <div class="app-section__header" style="margin-top:var(--app-space-xs);"><h2>判定</h2></div>
-      <div class="app-merge-decision">
-        {% for value, label in decision_choices %}
-          <label class="app-merge-decision__btn">
-            <input type="radio" name="review_decision" value="{{ value }}" class="js-decision-{{ value }}"
-                   {% if form.review_decision.value == value %}checked{% endif %}>
-            <span>
-              {% if value == "additional_role" %}
-                同一パーソン<br>（別肩書追加）
-              {% else %}
-                {{ label }}
+      <div class="app-review-layout__sidebar-body">
+        <div class="app-section__header"><h2>判定</h2></div>
+        <div class="app-merge-decision">
+          {% for value, label in decision_choices %}
+            <label class="app-merge-decision__btn">
+              <input type="radio" name="review_decision" value="{{ value }}" class="js-decision-{{ value }}"
+                     {% if form.review_decision.value == value %}checked{% endif %}>
+              <span>
+                {% if value == "additional_role" %}
+                  同一パーソン<br>（別肩書追加）
+                {% else %}
+                  {{ label }}
+                {% endif %}
+              </span>
+            </label>
+          {% endfor %}
+          {{ form.review_decision.errors }}
+        </div>
+
+        <div class="app-section--merged-only">
+          <div class="app-section__header" style="margin-top:var(--app-space-xs);"><h2>マージ理由</h2></div>
+          <div class="app-merge-reason">
+            {% for value, label in merged_reason_choices %}
+              <label class="app-merge-reason__btn">
+                <input type="checkbox" name="review_result" value="{{ value }}"
+                       {% if value in form.review_result.value|default_if_none:"" %}checked{% endif %}>
+                <span>{{ label }}</span>
+              </label>
+            {% endfor %}
+          </div>
+        </div>
+
+        <div class="app-section--different-only">
+          <div class="app-section__header" style="margin-top:var(--app-space-xs);"><h2>別人理由</h2></div>
+          <div class="app-merge-reason">
+            {% for value, label in different_reason_choices %}
+              <label class="app-merge-reason__btn">
+                <input type="checkbox" name="review_result" value="{{ value }}"
+                       {% if value in form.review_result.value|default_if_none:"" %}checked{% endif %}>
+                <span>{{ label }}</span>
+              </label>
+            {% endfor %}
+          </div>
+        </div>
+
+        <div class="app-section--survivor-block">
+          <div class="app-section--merged-survivor-header">
+            <div class="app-section__header" style="margin-top:var(--app-space-xs);"><h2>残すパーソンを選択する</h2></div>
+            <div class="app-muted" style="margin-bottom:var(--app-space-xs);">選択しなかったパーソンは、マージ履歴に残ります</div>
+          </div>
+          <div class="app-section--additional-survivor-header">
+            <div class="app-section__header" style="margin-top:var(--app-space-xs);"><h2>主コンタクトにする方を選択する</h2></div>
+            <div class="app-muted" style="margin-bottom:var(--app-space-xs);">選択されなかった方は、別肩書としてマージされます</div>
+          </div>
+
+          <div class="app-merge-survivor-grid">
+            <label class="app-merge-survivor__btn">
+              <input type="radio" name="surviving_person_choice" value="person_a"
+                     {% if form.surviving_person_choice.value == "person_a" %}checked{% endif %}>
+              <span class="app-merge-survivor__label--survivor">左側パーソンにマージする</span>
+              <span class="app-merge-survivor__label--primary-role">左側を主コンタクトにする</span>
+            </label>
+            <label class="app-merge-survivor__btn">
+              <input type="radio" name="surviving_person_choice" value="person_b"
+                     {% if form.surviving_person_choice.value == "person_b" %}checked{% endif %}>
+              <span class="app-merge-survivor__label--survivor">右側パーソンにマージする</span>
+              <span class="app-merge-survivor__label--primary-role">右側を主コンタクトにする</span>
+            </label>
+          </div>
+          {{ form.surviving_person_choice.errors }}
+        </div>
+
+        {% if form.has_confirm_checkboxes %}
+          <div class="app-section--executes-merge">
+            <div class="app-section__header" style="margin-top:var(--app-space-xs);"><h2>確認チェック</h2></div>
+            {% for field in form %}
+              {% if field.name|slice:":10" == "confirmed_" %}
+                <div class="app-form__group">
+                  <div class="app-form__label">
+                    {{ field.label }}
+                    {% if field.help_text %}
+                      <div class="app-text-muted" style="font-size:12px; font-weight:normal; margin-top:2px; color:#d97706;">
+                        {{ field.help_text }}
+                      </div>
+                    {% endif %}
+                  </div>
+                  {{ field }}
+                  {{ field.errors }}
+                </div>
               {% endif %}
-            </span>
-          </label>
-        {% endfor %}
-        {{ form.review_decision.errors }}
-      </div>
+            {% endfor %}
+          </div>
+        {% endif %}
 
-      <div class="app-section--merged-only">
-        <div class="app-section__header" style="margin-top:var(--app-space-xs);"><h2>マージ理由</h2></div>
-        <div class="app-merge-reason">
-          {% for value, label in merged_reason_choices %}
-            <label class="app-merge-reason__btn">
-              <input type="checkbox" name="review_result" value="{{ value }}"
-                     {% if value in form.review_result.value|default_if_none:"" %}checked{% endif %}>
-              <span>{{ label }}</span>
-            </label>
-          {% endfor %}
-        </div>
-      </div>
-
-      <div class="app-section--different-only">
-        <div class="app-section__header" style="margin-top:var(--app-space-xs);"><h2>別人理由</h2></div>
-        <div class="app-merge-reason">
-          {% for value, label in different_reason_choices %}
-            <label class="app-merge-reason__btn">
-              <input type="checkbox" name="review_result" value="{{ value }}"
-                     {% if value in form.review_result.value|default_if_none:"" %}checked{% endif %}>
-              <span>{{ label }}</span>
-            </label>
-          {% endfor %}
-        </div>
-      </div>
-
-      <div class="app-section--survivor-block">
-        <div class="app-section--merged-survivor-header">
-          <div class="app-section__header" style="margin-top:var(--app-space-xs);"><h2>残すパーソンを選択する</h2></div>
-          <div class="app-muted" style="margin-bottom:var(--app-space-xs);">選択しなかったパーソンは、マージ履歴に残ります</div>
-        </div>
-        <div class="app-section--additional-survivor-header">
-          <div class="app-section__header" style="margin-top:var(--app-space-xs);"><h2>主コンタクトにする方を選択する</h2></div>
-          <div class="app-muted" style="margin-bottom:var(--app-space-xs);">選択されなかった方は、別肩書としてマージされます</div>
+        <div class="app-form__group" style="margin-top:var(--app-space-xs);">
+          <label for="{{ form.note.id_for_label }}">備考</label>
+          <textarea name="note" id="{{ form.note.id_for_label }}" class="app-input" rows="2" style="min-height:60px;height:60px;">{{ form.note.value|default:"" }}</textarea>
+          {{ form.note.errors }}
         </div>
 
-        <div class="app-merge-survivor-grid">
-          <label class="app-merge-survivor__btn">
-            <input type="radio" name="surviving_person_choice" value="person_a"
-                   {% if form.surviving_person_choice.value == "person_a" %}checked{% endif %}>
-            <span class="app-merge-survivor__label--survivor">左側パーソンにマージする</span>
-            <span class="app-merge-survivor__label--primary-role">左側を主コンタクトにする</span>
-          </label>
-          <label class="app-merge-survivor__btn">
-            <input type="radio" name="surviving_person_choice" value="person_b"
-                   {% if form.surviving_person_choice.value == "person_b" %}checked{% endif %}>
-            <span class="app-merge-survivor__label--survivor">右側パーソンにマージする</span>
-            <span class="app-merge-survivor__label--primary-role">右側を主コンタクトにする</span>
-          </label>
+        <div class="app-action-area" style="margin-top:var(--app-space-sm);">
+          <button type="submit" class="app-btn app-btn--primary" style="width:100%;">決定</button>
         </div>
-        {{ form.surviving_person_choice.errors }}
-      </div>
-
-      {% if form.has_confirm_checkboxes %}
-        <div class="app-section--executes-merge">
-          <div class="app-section__header" style="margin-top:var(--app-space-xs);"><h2>確認チェック</h2></div>
-          {% for field in form %}
-            {% if field.name|slice:":10" == "confirmed_" %}
-              <div class="app-form__group">
-                <div class="app-form__label">{{ field.label }}</div>
-                {{ field }}
-                {{ field.errors }}
-              </div>
-            {% endif %}
-          {% endfor %}
-        </div>
-      {% endif %}
-
-      <div class="app-form__group" style="margin-top:var(--app-space-xs);">
-        <label for="{{ form.note.id_for_label }}">備考</label>
-        <textarea name="note" id="{{ form.note.id_for_label }}" class="app-input" rows="2" style="min-height:60px;height:60px;">{{ form.note.value|default:"" }}</textarea>
-        {{ form.note.errors }}
-      </div>
-
-      <div class="app-action-area" style="margin-top:var(--app-space-sm);">
-        <button type="submit" class="app-btn app-btn--primary" style="width:100%;">決定</button>
       </div>
     </div>
   </form>

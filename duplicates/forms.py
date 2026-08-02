@@ -139,10 +139,15 @@ class MergeForm(ContactBaseForm):
                 # HIG v1.2 §4.1：widget 差し替え型のトグル化（contacts と同じ作法）。
                 # BooleanField のまま widget だけ RadioSelect に差し替え、to_python が
                 # 'True'/'False' を bool に変換するので clean() の判定はそのまま動く。
+                val = getattr(self.surviving_person.primary_contact, field_name, "")
+                is_empty = not val or not str(val).strip()
+                help_text = "（読み取り結果：空欄。元の名刺画像で本当に空欄か確認してください）" if is_empty else ""
+
                 self.fields[f"confirmed_{field_name}"] = forms.BooleanField(
                     required=False,
                     initial=False,
                     label=f"『{field_name}』フィールド",
+                    help_text=help_text,
                     widget=forms.RadioSelect(
                         choices=[(True, "確認しました"), (False, "未確認")],
                         attrs={"class": "app-radio-toggle"},
