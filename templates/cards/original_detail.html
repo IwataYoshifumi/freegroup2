@@ -767,8 +767,17 @@
         confirmBtn.addEventListener('click', function () {
           if (!window.appAjax || !submitUrl) return;
           confirmBtn.disabled = true;   // 二重投稿防止
+
+          var postUrl = submitUrl;
+          var urlParams = new URLSearchParams(window.location.search);
+          var backStack = urlParams.get('back_stack');
+          if (backStack) {
+            var sep = postUrl.indexOf('?') !== -1 ? '&' : '?';
+            postUrl += sep + 'back_stack=' + encodeURIComponent(backStack);
+          }
+
           window.appAjax
-            .postJson(submitUrl, { points: pointsPayload(), rotation: rotation })
+            .postJson(postUrl, { points: pointsPayload(), rotation: rotation })
             .then(function (result) {
               if (result.ok && result.data && result.data.card_detail_url) {
                 window.location = result.data.card_detail_url;   // 名刺詳細へ遷移
