@@ -23,6 +23,41 @@ from config.constants import (
 from contacts.forms import AppErrorList, ContactBaseForm
 from contacts.models import Contact
 
+FIELD_LABEL_JA = {
+    "full_name": "氏名",
+    "last_name": "姓",
+    "first_name": "名",
+    "salutation_name": "敬称付き氏名（メール宛名）",
+    "other_name_parts": "他の名前部分",
+    "name_order": "氏名の順序",
+    "display_name": "表示名",
+    "phonetic_name": "読みがな",
+    "alias_name": "通称・別名",
+    "organization": "会社",
+    "legal_entity_type": "法人格",
+    "legal_entity_type_position": "法人格の位置",
+    "branch": "支店・店舗",
+    "department": "部署",
+    "title": "役職",
+    "qualification": "資格",
+    "catchphrase": "キャッチコピー",
+    "email": "メール",
+    "mobile_phone": "携帯",
+    "personal_phone": "電話",
+    "personal_fax": "FAX",
+    "org_phone": "会社電話",
+    "org_fax": "会社 FAX",
+    "website": "ウェブサイト",
+    "postal_code": "郵便番号",
+    "country": "国",
+    "region": "都道府県",
+    "city": "市区町村",
+    "rest_of_address": "番地・建物名",
+    "address": "住所",
+    "notes": "メモ",
+    "lang": "言語",
+}
+
 
 class MergeForm(ContactBaseForm):
     """マージ画面用 Form（仕様書 §11.6.2 / §11.7.3、17 番）。
@@ -125,8 +160,6 @@ class MergeForm(ContactBaseForm):
         が low/mid かつ未確認のものに対して動的にチェックボックスを追加する
         （仕様書 §11.6.2、ContactUpdateForm L121-129 のパターン踏襲）。
         """
-        from .views import FIELD_LABEL_JA
-
         confidences = (
             self.surviving_person.primary_contact.get_field_confidences()
         )
