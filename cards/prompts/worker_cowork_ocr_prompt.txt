@@ -61,6 +61,7 @@ JSONファイルを出力フォルダに書き出してください。
 - 部長、課長などの役職の他、電気通信主任技術者・司法書士・公認会計士・土地建物取引士などの資格情報、その他キャッチコピー（「あなたの暮らしのパートナー」など）が含まれます。役職は可能な限りこれらと分離して正確に抽出してください
 - 画像の回転・傾きの補正：入力画像が横向き（90度回転）、逆さま（180度回転）、または傾いている場合があります。文字を読み取る前に、まず画像の向き（上下左右）を視覚的に補正し、正位置（人間が読める向き）を特定してください。特定した回転状態を、必ず `card_meta.orientation` に正しく反映させてください
 - 言語の自動判別：日本語、英語、中国語などの言語を自動判別し、`metadata.primary_lang` に反映させてください
+- **1枚の画像に複数枚の名刺が写り込んでいる場合**：画像内でより大きく写っている、または上側に位置する名刺を主カードとして構造化データ（本フォーマット全体）を出力する。副次的に写っているもう1枚の名刺の情報は、読み取れた範囲を `ai_analysis_notes` に記載する（構造化フィールドには含めない）
 - **派生・組み立てフィールドの null 取り扱い**：salutation_name / display_name / org_core_name / legal_entity_type / legal_entity_type_code / legal_entity_type_position / region / city / rest_of_address / language_composition / name_order などは、他のフィールドの情報から組み立てる派生フィールドです。これらは以下のルールで判断してください：
   - **材料となるフィールドが完全に null（読み取れない）の場合**：派生フィールドも `value: null` + `confidence: "high"`（「材料がないから組み立てられないことを確定した」という意味）
   - **材料はあるが組み立てが不能・不確実な場合**：最善の組み立てを行い、`confidence` を `mid` または `low` に下げる。null にはしない
@@ -99,7 +100,11 @@ JSONファイルを出力フォルダに書き出してください。
   - **アルファベット表記は title case（頭大文字、それ以外小文字）で揃える**（例：「JOHN SMITH」→「John Smith」、「john smith」→「John Smith」）
   - **ただし以下の接頭辞・接続辞は慣習に従う**：オランダ語の `van` / `van der` / `den` 等、フランス語の `de` / `du` / `la` 等、ドイツ語の `von` / `zu` 等、アイルランド系の `O'` / `Mc` / `Mac` 等、日本人ローマ字の長音記号（`Ō` 等）。例：「Vincent VAN GOGH」→「Vincent van Gogh」、「Otto VON BISMARCK」→「Otto von Bismarck」、「OBRIEN」→「O'Brien」
 - **欧州慣用シグナルの活用**：欧州の名刺では「姓を全大文字で表記」する慣習があります（例：「Jean DUPONT」「Klaus MÜLLER」「Taro YAMADA」）。この大文字パターンを `last_name` / `first_name` / `name_order` の判定の手がかりとして利用してよい。ただし `original_script` の出力時は上記の title case ルールに揃えること
-- `last_name` / `first_name`：ローマ字表記や英語表記がある場合、または明確に姓名が分かれる場合のみ分割して格納。判断がつかない場合は `null`。出力は title case で揃える
+- `last_name` / `first_name`：ローマ字表記や英語表記がある場合、または明確に姓名が分かれる場合のみ分割して格納。判断がつかない場合は `null`。**格納する値の文字体系は `original_script` に合わせること。**
+  - `original_script` が日本語の漢字・かなの場合：漢字・かなで分割する。名刺にローマ字表記が併記されていても、格納値は原文（漢字・かな）を優先する。ただし、原文だけでは姓名の境界が確定できない場合に限り、ローマ字表記の境界を参考にしてよい（格納する値自体は原文のまま）
+  - `original_script` がラテン文字のみの場合：ラテン文字で分割する（title case で揃える）
+  - `original_script` が中国語圏の漢字（`primary_lang: "zh"`）の場合：日本語と姓名慣習が異なるため分割せず、`last_name` / `first_name` は `null` とする
+  - `original_script` が上記いずれにも該当しない場合（ハングル・キリル文字・カタカナのみの人名等）：分割せず `null` とする
 - `other_name_parts`：ミドルネームや父称（bin 等）があれば格納
 - `name_order`：氏名の並び順を判定。値は次のいずれか：`last_first`（姓・名）/ `first_last`（名・姓）/ `single`（単一の単語）/ `other`
   - **判定不能時**：original_script が null の場合は `value: null` + `confidence: "high"`。original_script はあるが並び順が判定できない場合は `value: "other"` + `confidence: "low"`
@@ -140,6 +145,7 @@ JSONファイルを出力フォルダに書き出してください。
 - `legal_entity_type_code`：法人格の種類を以下の enum から選択
   - `CP`：株式会社・有限会社等一般企業 / `LLP`：有限責任事業組合等 / `GOV`：政府機関・自治体 / `NPO`：NPO・NGO / `REL`：宗教法人 / `EDU`：学校・教育機関 / `MED`：医療法人・病院 / `PRO`:士業法人 / `IND`：個人事業主 / `OTH`：その他
   - **該当なし時**：legal_entity_type が null の場合は `value: null` + `confidence: "high"`
+  - **enum のいずれにも明確に対応しない日本特有の法人格**（社会福祉法人・社団法人・財団法人等）の場合は `OTH` を選択する。`NPO` 等、意味が近いだけの他コードへの強引な当てはめはしない
 - `legal_entity_type_position`：法人格が社名に対してどこにあるか。値は次のいずれか：`Pre`（前）/ `Post`（後）/ `Mid`（中間）
   - **該当なし時**：legal_entity_type が null の場合は `value: null` + `confidence: "high"`
 - `org_domain_name`：メールアドレスが記載されている場合、その `@` 以降のドメイン部分のみを抽出（例：`example.com`）
@@ -148,7 +154,7 @@ JSONファイルを出力フォルダに書き出してください。
 
 ## 5. address（住所情報）
 
-- `full_address`：名刺に記載されている住所の全文をそのまま抽出
+- `full_address`：名刺に記載されている住所の全文を抽出。**ただし郵便番号（〒xxx-xxxx等）は含めない**（郵便番号は `postal_code` フィールドに別途格納するため、`full_address` は住所本体のみとする）
 - `postal_code`：郵便番号。**文字列（string）として抽出し、先頭ゼロや国別書式（ハイフン等)を維持すること（数値型に変換しない）**
 - `country`：国コード。ISO 3166-1 alpha-2（例：`JP`・`US`・`GB`・`CN`）の2文字大文字で格納。**判定不能時は `"ZZ"`**（規格内の予約コード。null は使わない）
   - **判定不能時**：full_address が null、または住所から国を判定できない場合は `value: "ZZ"` + `confidence: "high"`

@@ -43,7 +43,7 @@
           <h3>パーソン（左）</h3>
           {% if surviving_card_image_url %}
             <div class="app-review-thumb">
-              <button type="button" data-action="open-modal" data-target="review-img-modal-surviving" aria-label="名刺画像を拡大表示">
+              <button type="button" data-action="open-modal" data-target="review-img-modal-compare" aria-label="名刺画像を拡大表示">
                 <img class="app-review-thumb__img" src="{{ surviving_card_image_url }}" alt="名刺画像（左側）">
               </button>
             </div>
@@ -55,7 +55,7 @@
           <h3>パーソン（右）</h3>
           {% if merged_card_image_url %}
             <div class="app-review-thumb">
-              <button type="button" data-action="open-modal" data-target="review-img-modal-merged" aria-label="名刺画像を拡大表示">
+              <button type="button" data-action="open-modal" data-target="review-img-modal-compare" aria-label="名刺画像を拡大表示">
                 <img class="app-review-thumb__img" src="{{ merged_card_image_url }}" alt="名刺画像（右側）">
               </button>
             </div>
@@ -257,30 +257,233 @@
   </form>
 
   <div class="app-modal-backdrop" data-action="close-modal" hidden></div>
-  {% if surviving_card_image_url %}
-    <div class="app-modal" id="review-img-modal-surviving" hidden role="dialog" aria-modal="true">
-      <div class="app-modal__panel" style="width:min(900px,95vw);">
-        <div class="app-modal__header">
-          <h2>名刺画像（左側）</h2>
-          <button type="button" class="app-btn--icon" data-action="close-modal" aria-label="閉じる">×</button>
-        </div>
-        <div class="app-modal__body" style="text-align:center;">
-          <img src="{{ surviving_card_image_url }}" alt="名刺画像（左側）" style="max-width:100%;max-height:75vh;border-radius:4px;">
+  <div class="app-modal" id="review-img-modal-compare" hidden role="dialog" aria-modal="true">
+    <div class="app-modal__panel js-modal-panel" style="width:min(1100px, 95vw);">
+      <div class="app-modal__header js-modal-drag-handle" style="cursor:move; user-select:none; display:flex; align-items:center;">
+        <h2>名刺画像比較（拡大）</h2>
+        <span class="app-muted" style="font-size:12px; margin-left:var(--app-space-sm);">（ヘッダーで移動 / 画像でホイール拡大・ドラッグ移動・Wクリック初期化）</span>
+        <button type="button" class="app-btn--icon" data-action="close-modal" aria-label="閉じる" style="margin-left:auto;">×</button>
+      </div>
+      <div class="app-modal__body" style="padding:var(--app-space-md);">
+        <div class="app-form-grid" style="align-items:start;">
+          <div style="text-align:center;">
+            <h3 style="font-size:14px; font-weight:700; margin-bottom:var(--app-space-xs);">パーソン（左）</h3>
+            {% if surviving_card_image_url %}
+              <div class="js-image-zoom-container" style="overflow:hidden; position:relative; cursor:grab; user-select:none; border-radius:4px; border:1px solid var(--app-border); background:var(--app-bg-secondary, #f8fafc); min-height:200px;">
+                <img src="{{ surviving_card_image_url }}" alt="名刺画像（左側）" class="js-image-zoom-img" style="max-width:100%; max-height:65vh; object-fit:contain; transform-origin:center center; transition:transform 0.05s ease-out; will-change:transform; display:block; margin:0 auto;">
+              </div>
+            {% else %}
+              <div class="app-review-thumb__placeholder" style="height:200px;">画像なし</div>
+            {% endif %}
+          </div>
+          <div style="text-align:center;">
+            <h3 style="font-size:14px; font-weight:700; margin-bottom:var(--app-space-xs);">パーソン（右）</h3>
+            {% if merged_card_image_url %}
+              <div class="js-image-zoom-container" style="overflow:hidden; position:relative; cursor:grab; user-select:none; border-radius:4px; border:1px solid var(--app-border); background:var(--app-bg-secondary, #f8fafc); min-height:200px;">
+                <img src="{{ merged_card_image_url }}" alt="名刺画像（右側）" class="js-image-zoom-img" style="max-width:100%; max-height:65vh; object-fit:contain; transform-origin:center center; transition:transform 0.05s ease-out; will-change:transform; display:block; margin:0 auto;">
+              </div>
+            {% else %}
+              <div class="app-review-thumb__placeholder" style="height:200px;">画像なし</div>
+            {% endif %}
+          </div>
         </div>
       </div>
     </div>
-  {% endif %}
-  {% if merged_card_image_url %}
-    <div class="app-modal" id="review-img-modal-merged" hidden role="dialog" aria-modal="true">
-      <div class="app-modal__panel" style="width:min(900px,95vw);">
-        <div class="app-modal__header">
-          <h2>名刺画像（右側）</h2>
-          <button type="button" class="app-btn--icon" data-action="close-modal" aria-label="閉じる">×</button>
-        </div>
-        <div class="app-modal__body" style="text-align:center;">
-          <img src="{{ merged_card_image_url }}" alt="名刺画像（右側）" style="max-width:100%;max-height:75vh;border-radius:4px;">
-        </div>
-      </div>
-    </div>
-  {% endif %}
+  </div>
+
+  <script>
+  (function() {
+    // ------------------------------------------------------------------
+    // 対応2：モーダル自体のドラッグ移動機能
+    // ------------------------------------------------------------------
+    function initModalDrag() {
+      var modal = document.getElementById('review-img-modal-compare');
+      if (!modal) return;
+      var panel = modal.querySelector('.js-modal-panel');
+      var handle = modal.querySelector('.js-modal-drag-handle');
+      if (!panel || !handle) return;
+
+      var isDragging = false;
+      var startX = 0, startY = 0;
+      var initialLeft = 0, initialTop = 0;
+
+      function resetModalPosition() {
+        panel.style.position = '';
+        panel.style.left = '';
+        panel.style.top = '';
+        panel.style.transform = '';
+        panel.style.margin = '';
+      }
+
+      handle.addEventListener('pointerdown', function(e) {
+        if (e.target.closest('button, input, a, select, textarea')) return;
+        isDragging = true;
+        startX = e.clientX;
+        startY = e.clientY;
+
+        var rect = panel.getBoundingClientRect();
+        initialLeft = rect.left;
+        initialTop = rect.top;
+
+        panel.style.position = 'fixed';
+        panel.style.margin = '0';
+        panel.style.left = initialLeft + 'px';
+        panel.style.top = initialTop + 'px';
+
+        document.addEventListener('pointermove', onPointerMove);
+        document.addEventListener('pointerup', onPointerUp);
+        document.addEventListener('pointercancel', onPointerUp);
+
+        e.preventDefault();
+      });
+
+      function onPointerMove(e) {
+        if (!isDragging) return;
+        var dx = e.clientX - startX;
+        var dy = e.clientY - startY;
+
+        var newLeft = initialLeft + dx;
+        var newTop = initialTop + dy;
+
+        var topBarHeight = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--app-topbar-height')) || 56;
+        var maxLeft = window.innerWidth - 100;
+        var minLeft = 10 - (panel.offsetWidth - 100);
+        var minTop = topBarHeight + 4;
+        var maxTop = window.innerHeight - 60;
+
+        newLeft = Math.max(minLeft, Math.min(newLeft, maxLeft));
+        newTop = Math.max(minTop, Math.min(newTop, maxTop));
+
+        panel.style.left = newLeft + 'px';
+        panel.style.top = newTop + 'px';
+      }
+
+      function onPointerUp() {
+        isDragging = false;
+        document.removeEventListener('pointermove', onPointerMove);
+        document.removeEventListener('pointerup', onPointerUp);
+        document.removeEventListener('pointercancel', onPointerUp);
+      }
+
+      document.querySelectorAll('[data-action="open-modal"][data-target="review-img-modal-compare"]').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+          resetModalPosition();
+        });
+      });
+    }
+
+    // ------------------------------------------------------------------
+    // 対応1：画像の拡大縮小・パン移動・ダブルクリックリセット
+    // ------------------------------------------------------------------
+    function initImageZoomPan() {
+      var containers = document.querySelectorAll('.js-image-zoom-container');
+      containers.forEach(function(container) {
+        var img = container.querySelector('.js-image-zoom-img');
+        if (!img) return;
+
+        var scale = 1.0;
+        var translateX = 0;
+        var translateY = 0;
+        var isDragging = false;
+        var startX = 0, startY = 0;
+        var initialX = 0, initialY = 0;
+
+        function updateTransform(animate) {
+          if (animate) {
+            img.style.transition = 'transform 0.2s ease-out';
+            setTimeout(function() {
+              img.style.transition = 'transform 0.05s ease-out';
+            }, 200);
+          } else {
+            img.style.transition = 'transform 0.05s ease-out';
+          }
+          img.style.transform = 'translate(' + translateX + 'px, ' + translateY + 'px) scale(' + scale + ')';
+        }
+
+        function resetZoom() {
+          scale = 1.0;
+          translateX = 0;
+          translateY = 0;
+          container.style.cursor = 'grab';
+          updateTransform(true);
+        }
+
+        // ホイールでの拡大縮小
+        container.addEventListener('wheel', function(e) {
+          e.preventDefault();
+          var zoomFactor = e.deltaY < 0 ? 1.15 : 0.87;
+          var newScale = scale * zoomFactor;
+
+          if (newScale < 1.0) {
+            resetZoom();
+            return;
+          }
+          if (newScale > 5.0) {
+            newScale = 5.0;
+          }
+
+          scale = newScale;
+          updateTransform(false);
+        }, { passive: false });
+
+        // ドラッグでのパン移動
+        container.addEventListener('pointerdown', function(e) {
+          if (e.button !== 0) return;
+          isDragging = true;
+          startX = e.clientX;
+          startY = e.clientY;
+          initialX = translateX;
+          initialY = translateY;
+          container.style.cursor = 'grabbing';
+          container.setPointerCapture(e.pointerId);
+          e.preventDefault();
+        });
+
+        container.addEventListener('pointermove', function(e) {
+          if (!isDragging) return;
+          var dx = e.clientX - startX;
+          var dy = e.clientY - startY;
+          translateX = initialX + dx;
+          translateY = initialY + dy;
+          updateTransform(false);
+        });
+
+        function stopDrag(e) {
+          if (!isDragging) return;
+          isDragging = false;
+          container.style.cursor = 'grab';
+          if (e && e.pointerId) {
+            try { container.releasePointerCapture(e.pointerId); } catch(err) {}
+          }
+        }
+
+        container.addEventListener('pointerup', stopDrag);
+        container.addEventListener('pointercancel', stopDrag);
+
+        // ダブルクリックでリセット
+        container.addEventListener('dblclick', function(e) {
+          e.preventDefault();
+          resetZoom();
+        });
+
+        // モーダルオープン時にズーム・位置を初期化
+        document.querySelectorAll('[data-action="open-modal"][data-target="review-img-modal-compare"]').forEach(function(btn) {
+          btn.addEventListener('click', function() {
+            resetZoom();
+          });
+        });
+      });
+    }
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', function() {
+        initModalDrag();
+        initImageZoomPan();
+      });
+    } else {
+      initModalDrag();
+      initImageZoomPan();
+    }
+  })();
+  </script>
 {% endblock %}
