@@ -301,7 +301,7 @@ class MergeForm(ContactBaseForm):
                         label_name = FIELD_LABEL_JA.get(field_name, field_name)
                         self.add_error(
                             chk_name,
-                            f"『{label_name}』の確認チェックを ON にしてください",
+                            f"{label_name}を確認してください",
                         )
 
         return cleaned

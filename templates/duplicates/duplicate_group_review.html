@@ -214,10 +214,17 @@
             <div class="app-confirm-toggle-group">
               {% for field in form %}
                 {% if field.name|slice:":10" == "confirmed_" %}
-                  <label class="app-confirm-toggle__btn">
+                  <label class="app-confirm-toggle__btn{% if field.errors %} app-confirm-toggle__btn--error{% endif %}">
                     {{ field }}
                     <span>{{ field.label }}</span>
                   </label>
+                {% endif %}
+              {% endfor %}
+            </div>
+            <div class="app-error-list" style="margin-top:var(--app-space-xs); font-size:12px;">
+              {% for field in form %}
+                {% if field.name|slice:":10" == "confirmed_" %}
+                  {% for err in field.errors %}<div>{{ err }}</div>{% endfor %}
                 {% endif %}
               {% endfor %}
             </div>

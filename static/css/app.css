@@ -2228,6 +2228,15 @@ form:has(.js-decision-additional_role:checked) .app-merge-survivor__label--prima
     color: #ffffff !important;
   }
 
+  .app-confirm-toggle__btn--error {
+    border-color: var(--app-color-warning, #d97706) !important;
+  }
+
+  /* 確認チェックまとめエラー表示：エラーがない場合は空divを隠す */
+  .app-section--executes-merge .app-error-list:empty {
+    display: none;
+  }
+
   /* 右パネル内の判定ボタン 3 つの折り返しとはみ出し防止 */
   .app-review-layout__sidebar .app-merge-decision {
     display: flex;
