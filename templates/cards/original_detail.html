@@ -28,6 +28,7 @@
   <div class="app-manual-crop-controls"
        data-preview-url="{% url 'originals:manual_crop_preview' pk=original.id %}"
        data-submit-url="{% url 'originals:manual_crop' pk=original.id %}">
+    {% hidden_back_field back %}
     <button type="button" class="app-btn app-btn--primary app-btn--sm js-manual-crop-start">
       手動名刺切り出し
     </button>
@@ -769,8 +770,12 @@
           confirmBtn.disabled = true;   // 二重投稿防止
 
           var postUrl = submitUrl;
-          var urlParams = new URLSearchParams(window.location.search);
-          var backStack = urlParams.get('back_stack');
+          var backStackInput = document.querySelector('input[name="back_stack"]');
+          var backStack = backStackInput && backStackInput.value ? backStackInput.value : '';
+          if (!backStack) {
+            var urlParams = new URLSearchParams(window.location.search);
+            backStack = urlParams.get('back_stack');
+          }
           if (backStack) {
             var sep = postUrl.indexOf('?') !== -1 ? '&' : '?';
             postUrl += sep + 'back_stack=' + encodeURIComponent(backStack);
