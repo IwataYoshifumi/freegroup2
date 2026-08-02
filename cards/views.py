@@ -351,8 +351,9 @@ class OriginalDetailView(LoginRequiredMixin, PermissionRequiredMixin, DetailView
         # Django 標準の {% if debug %} は INTERNAL_IPS 依存で罠があるため View から明示的に渡す。
         context["recalc_debug_enabled"] = settings.DEBUG
         business_cards = self.object.businesscard_set.all().order_by("created_at")
-        context["business_cards"] = business_cards
-        context["back"] = BackNavigator(self.request)
+        back = BackNavigator(self.request)
+        back.push_current("元画像詳細", ["pk"])
+        context["back"] = back
 
         # v1.5.0: OriginalImage.raw_json の読み出しは廃止。OCR 結果は BC.raw_json_1/2 を参照。
         debug_json = self.object.debug_json
