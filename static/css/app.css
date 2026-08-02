@@ -1983,40 +1983,65 @@ form:has(.js-decision-additional_role:checked) .app-merge-survivor__label--prima
 
 
 
-/* 重複候補レビュー画面 2カラム & 右側stickyパネルレイアウト */
+/* 重複候補レビュー画面 2カラム & 右側 fixed floating パネルレイアウト */
 .app-review-layout {
-  display: grid;
-  grid-template-columns: 1fr minmax(320px, 420px);
-  gap: var(--app-space-lg);
-  align-items: start;
+  position: relative;
 }
 
-.app-review-layout__main {
-  min-width: 0;
-}
+@media (min-width: 901px) {
+  .app-review-layout__main {
+    padding-right: 504px; /* 右側 fixed パネル（幅480px + 間隔24px）のスペースを確保 */
+    min-width: 0;
+  }
 
-.app-review-layout__sidebar {
-  position: sticky;
-  top: calc(var(--app-topbar-height) + var(--app-space-md));
-  display: flex;
-  flex-direction: column;
-  gap: var(--app-space-md);
-  padding: var(--app-space-md);
-  background: var(--app-bg);
-  border: 1px solid var(--app-border);
-  border-radius: var(--app-radius);
-  max-height: calc(100vh - var(--app-topbar-height) - var(--app-space-md) * 2);
-  overflow-y: auto;
+  .app-review-layout__sidebar {
+    position: fixed;
+    top: calc(var(--app-topbar-height) + var(--app-space-md));
+    right: var(--app-space-lg);
+    width: 480px;
+    z-index: 40;
+    display: flex;
+    flex-direction: column;
+    gap: var(--app-space-md);
+    padding: var(--app-space-md);
+    background: var(--app-surface);
+    border: 1px solid var(--app-border);
+    border-radius: var(--app-radius-lg);
+    box-shadow: 0 4px 20px rgba(15, 23, 42, 0.1);
+    max-height: calc(100vh - var(--app-topbar-height) - var(--app-space-md) * 2);
+    overflow-y: auto;
+  }
+
+  /* 右パネル内の判定ボタン 3 つを折り返さず 1 行にフィットさせる */
+  .app-review-layout__sidebar .app-merge-decision {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 6px;
+  }
+
+  .app-review-layout__sidebar .app-merge-decision__btn {
+    min-width: 0;
+    flex: 1 1 0%;
+    padding: 10px 4px;
+    font-size: 13px;
+    text-align: center;
+    white-space: nowrap;
+  }
 }
 
 @media (max-width: 900px) {
-  .app-review-layout {
-    grid-template-columns: 1fr;
+  .app-review-layout__main {
+    padding-right: 0;
   }
+
   .app-review-layout__sidebar {
     position: static;
+    width: 100%;
     max-height: none;
     overflow-y: visible;
+    box-shadow: none;
+    background: var(--app-bg);
+    margin-top: var(--app-space-lg);
   }
 }
 

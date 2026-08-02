@@ -5,7 +5,7 @@
 {% block title %}重複候補レビュー — FreeGroup2{% endblock %}
 
 {% block content %}
-  <div class="app-page-header" style="max-width:1280px;">
+  <div class="app-page-header">
     <div>
       <h1>重複候補レビュー</h1>
     </div>
@@ -15,7 +15,7 @@
     </div>
   </div>
 
-  <form method="post" class="app-card app-review-layout" style="max-width:1280px;" novalidate>
+  <form method="post" class="app-card app-review-layout" novalidate>
     {% csrf_token %}
     {% hidden_back_field back %}
     <input type="hidden" name="pair_id" value="{{ candidate.pk }}">
@@ -68,7 +68,6 @@
       <div class="app-section__header" style="margin-top:var(--app-space-md);"><h2>フィールド比較</h2></div>
       <div class="app-form-grid">
         <div class="app-form__group">
-          <h3>パーソン（左）</h3>
           {% for group in surviving_field_groups %}
             <div class="app-review-field-group__title">{{ group.group_name }}</div>
             <dl class="app-detail-list">
@@ -82,7 +81,6 @@
           {% endfor %}
         </div>
         <div class="app-form__group">
-          <h3>パーソン（右）</h3>
           {% for group in merged_field_groups %}
             <div class="app-review-field-group__title">{{ group.group_name }}</div>
             <dl class="app-detail-list">
@@ -100,7 +98,6 @@
       <div class="app-section__header" style="margin-top:var(--app-space-md);"><h2>SNS 比較</h2></div>
       <div class="app-form-grid">
         <div class="app-form__group">
-          <h3>パーソン（左）</h3>
           {% for group in surviving_sns_groups %}
             <div class="app-review-field-group__title">{{ group.sns_type_label }}</div>
             <ul class="app-sns-compare__list">
@@ -115,7 +112,6 @@
           {% endfor %}
         </div>
         <div class="app-form__group">
-          <h3>パーソン（右）</h3>
           {% for group in merged_sns_groups %}
             <div class="app-review-field-group__title">{{ group.sns_type_label }}</div>
             <ul class="app-sns-compare__list">
