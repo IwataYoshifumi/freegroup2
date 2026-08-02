@@ -128,14 +128,25 @@
       </div>
     </div>
 
-    <div class="app-review-layout__sidebar">
-      <div class="app-section__header"><h2>判定</h2></div>
+    <div class="app-review-layout__sidebar" id="reviewSidebarPanel">
+      <div class="app-review-layout__sidebar-header js-panel-drag-handle">
+        <span class="app-review-layout__sidebar-title">レビュー操作</span>
+        <span class="app-review-layout__drag-icon" title="ドラッグして移動">⋮⋮ ドラッグ可</span>
+      </div>
+
+      <div class="app-section__header" style="margin-top:var(--app-space-xs);"><h2>判定</h2></div>
       <div class="app-merge-decision">
         {% for value, label in decision_choices %}
           <label class="app-merge-decision__btn">
             <input type="radio" name="review_decision" value="{{ value }}" class="js-decision-{{ value }}"
                    {% if form.review_decision.value == value %}checked{% endif %}>
-            <span>{{ label }}</span>
+            <span>
+              {% if value == "additional_role" %}
+                同一パーソン<br>（別肩書追加）
+              {% else %}
+                {{ label }}
+              {% endif %}
+            </span>
           </label>
         {% endfor %}
         {{ form.review_decision.errors }}
@@ -167,33 +178,30 @@
         </div>
       </div>
 
-      <div class="app-section__header" style="margin-top:var(--app-space-xs);"><h2>サバイブ選択</h2></div>
-      <div class="app-section--survivor-unselected-label">
-        <div class="app-muted" style="margin-bottom:var(--app-space-xs);">サバイブ側を選択（判定後に有効化）</div>
-      </div>
-      <div class="app-section--survivor-only">
-        <div class="app-muted" style="margin-bottom:var(--app-space-xs);">サバイブ側を選択</div>
-      </div>
-      <div class="app-section--primary-role-only">
-        <div class="app-muted" style="margin-bottom:var(--app-space-xs);">主コンタクトを選択</div>
-      </div>
-      <div class="app-section--survivor-disabled-label">
-        <div class="app-muted" style="margin-bottom:var(--app-space-xs);">マージ時のみ使用（無効）</div>
-      </div>
+      <div class="app-section--survivor-block">
+        <div class="app-section--merged-survivor-header">
+          <div class="app-section__header" style="margin-top:var(--app-space-xs);"><h2>残すパーソンを選択する</h2></div>
+          <div class="app-muted" style="margin-bottom:var(--app-space-xs);">選択しなかったパーソンは、マージ履歴に残ります</div>
+        </div>
+        <div class="app-section--additional-survivor-header">
+          <div class="app-section__header" style="margin-top:var(--app-space-xs);"><h2>主コンタクトにする方を選択する</h2></div>
+          <div class="app-muted" style="margin-bottom:var(--app-space-xs);">選択されなかった方は、別肩書としてマージされます</div>
+        </div>
 
-      <div class="app-form__group">
-        <label class="app-merge-survivor__btn">
-          <input type="radio" name="surviving_person_choice" value="person_a"
-                 {% if form.surviving_person_choice.value == "person_a" %}checked{% endif %}>
-          <span class="app-merge-survivor__label--survivor">左側パーソンにマージする</span>
-          <span class="app-merge-survivor__label--primary-role">左側を主コンタクトにする</span>
-        </label>
-        <label class="app-merge-survivor__btn" style="margin-top:var(--app-space-xs);">
-          <input type="radio" name="surviving_person_choice" value="person_b"
-                 {% if form.surviving_person_choice.value == "person_b" %}checked{% endif %}>
-          <span class="app-merge-survivor__label--survivor">右側パーソンにマージする</span>
-          <span class="app-merge-survivor__label--primary-role">右側を主コンタクトにする</span>
-        </label>
+        <div class="app-merge-survivor-grid">
+          <label class="app-merge-survivor__btn">
+            <input type="radio" name="surviving_person_choice" value="person_a"
+                   {% if form.surviving_person_choice.value == "person_a" %}checked{% endif %}>
+            <span class="app-merge-survivor__label--survivor">左側パーソンにマージする</span>
+            <span class="app-merge-survivor__label--primary-role">左側を主コンタクトにする</span>
+          </label>
+          <label class="app-merge-survivor__btn">
+            <input type="radio" name="surviving_person_choice" value="person_b"
+                   {% if form.surviving_person_choice.value == "person_b" %}checked{% endif %}>
+            <span class="app-merge-survivor__label--survivor">右側パーソンにマージする</span>
+            <span class="app-merge-survivor__label--primary-role">右側を主コンタクトにする</span>
+          </label>
+        </div>
         {{ form.surviving_person_choice.errors }}
       </div>
 

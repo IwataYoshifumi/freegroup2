@@ -1540,12 +1540,78 @@
     });
   }
 
+  function initPanelDrag() {
+    var panel = document.getElementById('reviewSidebarPanel');
+    if (!panel) return;
+    var handle = panel.querySelector('.js-panel-drag-handle');
+    if (!handle) return;
+
+    var isDragging = false;
+    var startX = 0, startY = 0;
+    var initialLeft = 0, initialTop = 0;
+
+    function onPointerDown(e) {
+      if (window.innerWidth <= 900) return;
+      // ボタン等の操作時はドラッグを開始しない
+      if (e.target.closest('button, input, select, textarea, a')) return;
+
+      isDragging = true;
+      startX = e.clientX;
+      startY = e.clientY;
+
+      var rect = panel.getBoundingClientRect();
+      initialLeft = rect.left;
+      initialTop = rect.top;
+
+      panel.style.right = 'auto';
+      panel.style.left = initialLeft + 'px';
+      panel.style.top = initialTop + 'px';
+
+      document.addEventListener('pointermove', onPointerMove);
+      document.addEventListener('pointerup', onPointerUp);
+      document.addEventListener('pointercancel', onPointerUp);
+
+      e.preventDefault();
+    }
+
+    function onPointerMove(e) {
+      if (!isDragging) return;
+      var dx = e.clientX - startX;
+      var dy = e.clientY - startY;
+
+      var newLeft = initialLeft + dx;
+      var newTop = initialTop + dy;
+
+      var minLeft = 10 - (panel.offsetWidth - 100);
+      var maxLeft = window.innerWidth - 100;
+      var minTop = 10;
+      var maxTop = window.innerHeight - 50;
+
+      newLeft = Math.max(minLeft, Math.min(newLeft, maxLeft));
+      newTop = Math.max(minTop, Math.min(newTop, maxTop));
+
+      panel.style.left = newLeft + 'px';
+      panel.style.top = newTop + 'px';
+    }
+
+    function onPointerUp() {
+      isDragging = false;
+      document.removeEventListener('pointermove', onPointerMove);
+      document.removeEventListener('pointerup', onPointerUp);
+      document.removeEventListener('pointercancel', onPointerUp);
+    }
+
+    handle.addEventListener('pointerdown', onPointerDown);
+  }
+
   function init() {
     // persons / contacts / tags / mailings 一覧の各テーブルに同じ現在ページ内DOMソートを適用する
     // （フック追加のみ・挙動は共通）。
     document.querySelectorAll('.js-person-page-sort, .js-contact-page-sort, .js-tag-page-sort, .js-mailings-page-sort').forEach(initTable);
     // 重複候補レビュー画面のマージ理由相互排他制御
     initMergeReasonMutualExclusion();
+    // 重複候補レビュー画面の右パネルドラッグ機能
+    initPanelDrag();
   }
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);

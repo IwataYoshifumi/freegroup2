@@ -1538,6 +1538,158 @@ select.app-input {
   background-repeat: no-repeat;
 }
 
+.app-merge-decision__btn:has(input:checked),
+.app-merge-survivor__btn:has(input:checked),
+.app-merge-reason__btn:has(input:checked) {
+  border-color: var(--app-color-primary);
+  background: var(--app-color-primary);
+  color: #ffffff;
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25);
+}
+
+.app-merge-decision__btn:has(input:checked) *,
+.app-merge-survivor__btn:has(input:checked) *,
+.app-merge-reason__btn:has(input:checked) * {
+  color: #ffffff;
+}
+
+/* マージレビュー画面 第 2 段階判定理由（D-4d-1 続き §4） */
+.app-merge-reason {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--app-space-sm);
+  margin-top: var(--app-space-sm);
+}
+
+.app-merge-reason__btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  padding: var(--app-space-xs) var(--app-space-sm);
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-sm);
+  background: var(--app-surface);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+
+.app-merge-reason__btn input[type="radio"],
+.app-merge-reason__btn input[type="checkbox"] {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.app-merge-reason__btn:hover {
+  border-color: var(--app-color-primary);
+}
+
+/* マージレビュー画面 セクション出し分け（純 CSS の :has() ベース） */
+.app-section--merged-only,
+.app-section--additional-role-only,
+.app-section--different-only,
+.app-section--survivor-block,
+.app-section--merged-survivor-header,
+.app-section--additional-survivor-header,
+.app-section--executes-merge {
+  display: none;
+}
+
+form:has(.js-decision-merged:checked) .app-section--merged-only,
+form:has(.js-decision-merged:checked) .app-section--survivor-block,
+form:has(.js-decision-merged:checked) .app-section--merged-survivor-header,
+form:has(.js-decision-merged:checked) .app-section--executes-merge {
+  display: block;
+}
+
+form:has(.js-decision-additional_role:checked) .app-section--additional-role-only,
+form:has(.js-decision-additional_role:checked) .app-section--survivor-block,
+form:has(.js-decision-additional_role:checked) .app-section--additional-survivor-header,
+form:has(.js-decision-additional_role:checked) .app-section--executes-merge {
+  display: block;
+}
+
+form:has(.js-decision-different:checked) .app-section--different-only {
+  display: block;
+}
+
+/* サバイブ選択ボタン（左右横並び） */
+.app-merge-survivor-grid {
+  display: flex;
+  gap: var(--app-space-sm);
+  margin-top: var(--app-space-xs);
+}
+
+.app-merge-survivor-grid .app-merge-survivor__btn {
+  flex: 1 1 0%;
+  min-width: 0;
+  margin-top: 0;
+  min-height: 48px;
+  padding: 8px 6px;
+  font-size: 13px;
+  text-align: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1.25;
+}
+
+/* サバイブボタンのラベル動的切替 */
+.app-merge-survivor__label--survivor,
+.app-merge-survivor__label--primary-role {
+  display: none;
+}
+
+form:not(:has(.js-decision-additional_role:checked)) .app-merge-survivor__label--survivor {
+  display: inline;
+}
+
+form:has(.js-decision-additional_role:checked) .app-merge-survivor__label--primary-role {
+  display: inline;
+}
+
+/* マージレビュー画面 エラーサマリ */
+.app-form__error-summary__title {
+  font-weight: 600;
+  margin-bottom: var(--app-space-xs);
+}
+
+.app-form__error-summary__list {
+  margin: 0;
+  padding-left: var(--app-space-lg);
+}
+
+.app-form__error-summary__list li {
+  margin-top: var(--app-space-xs);
+}
+
+/* 重複候補レビュー画面 2カラム & 右側 fixed floating パネルレイアウト */
+.app-review-layout {
+  position: relative;
+}
+
+.app-review-layout__sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  margin: -16px -16px 8px -16px;
+  background: #f1f5f9;
+  border-bottom: 1px solid var(--app-border);
+  border-top-left-radius: var(--app-radius-lg);
+  border-top-right-radius: var(--app-radius-lg);
+  cursor: move;
+  user-select: none;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.app-review-layout__drag-icon {
+  font-size: 11px;
+  color: #64748b;
+}
+
 /* ========== Components / Alert ========== */
 .app-alert {
   border: 1px solid var(--app-border);
