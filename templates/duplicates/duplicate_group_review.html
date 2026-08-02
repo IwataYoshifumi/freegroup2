@@ -214,7 +214,7 @@
             <div class="app-confirm-toggle-group">
               {% for field in form %}
                 {% if field.name|slice:":10" == "confirmed_" %}
-                  <label class="app-confirm-toggle__btn{% if field.errors %} app-confirm-toggle__btn--error{% endif %}">
+                  <label class="app-confirm-toggle__btn">
                     {{ field }}
                     <span>{{ field.label }}</span>
                   </label>
