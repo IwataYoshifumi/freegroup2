@@ -2228,6 +2228,23 @@ form:has(.js-decision-additional_role:checked) .app-merge-survivor__label--prima
     color: #ffffff !important;
   }
 
+  /* フォームフィールドエラー表示（赤系テキストスタイル） */
+  .app-form__error,
+  .errorlist,
+  .errorlist.app-form__error {
+    color: var(--app-color-danger, #dc2626);
+    font-size: 12px;
+    margin-top: 4px;
+    margin-bottom: 0;
+    padding-left: 0;
+    list-style: none;
+  }
+
+  .app-form__error li,
+  .errorlist li {
+    color: var(--app-color-danger, #dc2626);
+  }
+
   /* 右パネル内の判定ボタン 3 つの折り返しとはみ出し防止 */
   .app-review-layout__sidebar .app-merge-decision {
     display: flex;

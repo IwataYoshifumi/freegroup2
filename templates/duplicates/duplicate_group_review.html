@@ -221,13 +221,15 @@
                 {% endif %}
               {% endfor %}
             </div>
-            <div class="app-error-list" style="margin-top:var(--app-space-xs); font-size:12px;">
+            <ul class="errorlist app-form__error" style="margin-top:var(--app-space-xs); font-size:12px; list-style:none; padding-left:0; margin-bottom:0;">
               {% for field in form %}
                 {% if field.name|slice:":10" == "confirmed_" %}
-                  {% for err in field.errors %}<div>{{ err }}</div>{% endfor %}
+                  {% for err in field.errors %}
+                    <li>{{ err }}</li>
+                  {% endfor %}
                 {% endif %}
               {% endfor %}
-            </div>
+            </ul>
           </div>
         {% endif %}
 
