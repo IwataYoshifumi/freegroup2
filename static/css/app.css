@@ -2184,6 +2184,45 @@ form:has(.js-decision-additional_role:checked) .app-merge-survivor__label--prima
     justify-content: center;
   }
 
+  /* 確認チェック単一トグルボタン（サイズ縮小＋選択時青塗りつぶし） */
+  .app-confirm-toggle__btn {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px 10px;
+    font-size: 12px;
+    font-weight: 500;
+    border: 1px solid var(--app-border);
+    border-radius: var(--app-radius-sm);
+    background: var(--app-surface);
+    color: var(--app-text);
+    cursor: pointer;
+    user-select: none;
+    transition: border-color 0.15s, background 0.15s, color 0.15s;
+  }
+
+  .app-confirm-toggle__btn input[type="checkbox"] {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .app-confirm-toggle__btn:hover {
+    border-color: var(--app-color-primary);
+  }
+
+  .app-confirm-toggle__btn:has(input:checked) {
+    border-color: var(--app-color-primary) !important;
+    background: var(--app-color-primary) !important;
+    color: #ffffff !important;
+    box-shadow: 0 2px 4px rgba(37, 99, 235, 0.2);
+  }
+
+  .app-confirm-toggle__btn:has(input:checked) * {
+    color: #ffffff !important;
+  }
+
   /* 右パネル内の判定ボタン 3 つの折り返しとはみ出し防止 */
   .app-review-layout__sidebar .app-merge-decision {
     display: flex;

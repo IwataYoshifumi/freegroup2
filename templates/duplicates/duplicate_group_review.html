@@ -214,7 +214,7 @@
             <div class="app-section__header" style="margin-top:var(--app-space-xs);"><h2>確認チェック</h2></div>
             {% for field in form %}
               {% if field.name|slice:":10" == "confirmed_" %}
-                <div class="app-form__group">
+                <div class="app-form__group" style="margin-bottom:var(--app-space-xs);">
                   <div class="app-form__label">
                     {{ field.label }}
                     {% if field.help_text %}
@@ -223,7 +223,12 @@
                       </div>
                     {% endif %}
                   </div>
-                  {{ field }}
+                  <div style="margin-top:4px;">
+                    <label class="app-confirm-toggle__btn">
+                      {{ field }}
+                      <span>確認済みにする</span>
+                    </label>
+                  </div>
                   {{ field.errors }}
                 </div>
               {% endif %}
