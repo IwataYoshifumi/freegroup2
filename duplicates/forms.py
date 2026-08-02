@@ -167,20 +167,18 @@ class MergeForm(ContactBaseForm):
             conf = confidences.get(field_name)
             if conf is None:
                 continue
+            val = getattr(self.surviving_person.primary_contact, field_name, "")
             if (
                 conf.confidence in ("low", "mid")
                 and conf.confirmed_at is None
+                and bool(val and str(val).strip())
             ):
-                val = getattr(self.surviving_person.primary_contact, field_name, "")
-                is_empty = not val or not str(val).strip()
-                help_text = "（読み取り結果：空欄。元の名刺画像で本当に空欄か確認してください）" if is_empty else ""
                 label_name = FIELD_LABEL_JA.get(field_name, field_name)
 
                 self.fields[f"confirmed_{field_name}"] = forms.BooleanField(
                     required=False,
                     initial=False,
                     label=f"『{label_name}』を確認済みにする",
-                    help_text=help_text,
                     widget=forms.CheckboxInput(
                         attrs={"class": "app-confirm-checkbox"},
                     ),
