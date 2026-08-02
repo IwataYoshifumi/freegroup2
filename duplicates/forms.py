@@ -146,7 +146,7 @@ class MergeForm(ContactBaseForm):
                 self.fields[f"confirmed_{field_name}"] = forms.BooleanField(
                     required=False,
                     initial=False,
-                    label=f"『{label_name}』",
+                    label=f"『{label_name}』を確認済みにする",
                     help_text=help_text,
                     widget=forms.CheckboxInput(
                         attrs={"class": "app-confirm-checkbox"},
@@ -267,9 +267,10 @@ class MergeForm(ContactBaseForm):
                 ):
                     chk_name = f"confirmed_{field_name}"
                     if not cleaned.get(chk_name):
+                        label_name = FIELD_LABEL_JA.get(field_name, field_name)
                         self.add_error(
                             chk_name,
-                            f"『{field_name}』フィールドの確認チェックを ON にしてください",
+                            f"『{label_name}』の確認チェックを ON にしてください",
                         )
 
         return cleaned

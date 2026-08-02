@@ -215,20 +215,17 @@
             {% for field in form %}
               {% if field.name|slice:":10" == "confirmed_" %}
                 <div class="app-form__group" style="margin-bottom:var(--app-space-xs);">
-                  <div class="app-form__label">
-                    {{ field.label }}
-                    {% if field.help_text %}
-                      <div class="app-text-muted" style="font-size:12px; font-weight:normal; margin-top:2px; color:#d97706;">
-                        {{ field.help_text }}
-                      </div>
-                    {% endif %}
-                  </div>
-                  <div style="margin-top:4px;">
+                  <div>
                     <label class="app-confirm-toggle__btn">
                       {{ field }}
-                      <span>確認済みにする</span>
+                      <span>{{ field.label }}</span>
                     </label>
                   </div>
+                  {% if field.help_text %}
+                    <div class="app-text-muted" style="font-size:12px; font-weight:normal; margin-top:2px; color:#d97706;">
+                      {{ field.help_text }}
+                    </div>
+                  {% endif %}
                   {{ field.errors }}
                 </div>
               {% endif %}
