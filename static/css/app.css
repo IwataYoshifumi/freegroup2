@@ -1982,9 +1982,49 @@ form:has(.js-decision-additional_role:checked) .app-merge-survivor__label--prima
 }
 
 
+
+/* 重複候補レビュー画面 2カラム & 右側stickyパネルレイアウト */
+.app-review-layout {
+  display: grid;
+  grid-template-columns: 1fr minmax(320px, 420px);
+  gap: var(--app-space-lg);
+  align-items: start;
+}
+
+.app-review-layout__main {
+  min-width: 0;
+}
+
+.app-review-layout__sidebar {
+  position: sticky;
+  top: calc(var(--app-topbar-height) + var(--app-space-md));
+  display: flex;
+  flex-direction: column;
+  gap: var(--app-space-md);
+  padding: var(--app-space-md);
+  background: var(--app-bg);
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius);
+  max-height: calc(100vh - var(--app-topbar-height) - var(--app-space-md) * 2);
+  overflow-y: auto;
+}
+
+@media (max-width: 900px) {
+  .app-review-layout {
+    grid-template-columns: 1fr;
+  }
+  .app-review-layout__sidebar {
+    position: static;
+    max-height: none;
+    overflow-y: visible;
+  }
+}
+
+
 /* ============================================================ */
 /* v1.5.0 OpenCV debug 用クラス（B 側マージ、テーマ 6 で追加）   */
 /* ============================================================ */
+
 
 .app-original-overlay {
   position: relative;

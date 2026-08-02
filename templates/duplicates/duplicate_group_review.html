@@ -5,7 +5,7 @@
 {% block title %}重複候補レビュー — FreeGroup2{% endblock %}
 
 {% block content %}
-  <div class="app-page-header" style="max-width:1100px;">
+  <div class="app-page-header" style="max-width:1280px;">
     <div>
       <h1>重複候補レビュー</h1>
     </div>
@@ -15,211 +15,217 @@
     </div>
   </div>
 
-  <form method="post" class="app-card" style="max-width:1100px;" novalidate>
+  <form method="post" class="app-card app-review-layout" style="max-width:1280px;" novalidate>
     {% csrf_token %}
     {% hidden_back_field back %}
     <input type="hidden" name="pair_id" value="{{ candidate.pk }}">
 
-    {% if form.errors %}
-      <div class="app-alert app-alert--danger app-form__error-summary">
-        <div class="app-form__error-summary__title">入力エラーがあります</div>
-        <ul class="app-form__error-summary__list">
-          {% for err in form.non_field_errors %}
-            <li>{{ err }}</li>
-          {% endfor %}
-          {% for field in form %}
-            {% for err in field.errors %}
-              <li>{{ field.label }}: {{ err }}</li>
+    <div class="app-review-layout__main">
+      {% if form.errors %}
+        <div class="app-alert app-alert--danger app-form__error-summary">
+          <div class="app-form__error-summary__title">入力エラーがあります</div>
+          <ul class="app-form__error-summary__list">
+            {% for err in form.non_field_errors %}
+              <li>{{ err }}</li>
             {% endfor %}
-          {% endfor %}
-        </ul>
-      </div>
-    {% endif %}
-
-    <div class="app-section__header"><h2>名刺画像比較</h2></div>
-    <div class="app-form-grid">
-      <div class="app-form__group">
-        <h3>パーソン（左）</h3>
-        {% if surviving_card_image_url %}
-          <div class="app-review-thumb">
-            <button type="button" data-action="open-modal" data-target="review-img-modal-surviving" aria-label="名刺画像を拡大表示">
-              <img class="app-review-thumb__img" src="{{ surviving_card_image_url }}" alt="名刺画像（左側）">
-            </button>
-          </div>
-        {% else %}
-          <div class="app-review-thumb__placeholder">画像なし</div>
-        {% endif %}
-      </div>
-      <div class="app-form__group">
-        <h3>パーソン（右）</h3>
-        {% if merged_card_image_url %}
-          <div class="app-review-thumb">
-            <button type="button" data-action="open-modal" data-target="review-img-modal-merged" aria-label="名刺画像を拡大表示">
-              <img class="app-review-thumb__img" src="{{ merged_card_image_url }}" alt="名刺画像（右側）">
-            </button>
-          </div>
-        {% else %}
-          <div class="app-review-thumb__placeholder">画像なし</div>
-        {% endif %}
-      </div>
-    </div>
-
-    <div class="app-section__header" style="margin-top:var(--app-space-md);"><h2>フィールド比較</h2></div>
-    <div class="app-section--survivor-unselected-label">
-      <div class="app-muted" style="margin-bottom:var(--app-space-sm);">サバイブ側を選択（判定後に有効化）</div>
-    </div>
-    <div class="app-section--survivor-only">
-      <div class="app-muted" style="margin-bottom:var(--app-space-sm);">サバイブ側を選択</div>
-    </div>
-    <div class="app-section--primary-role-only">
-      <div class="app-muted" style="margin-bottom:var(--app-space-sm);">主コンタクトを選択</div>
-    </div>
-    <div class="app-section--survivor-disabled-label">
-      <div class="app-muted" style="margin-bottom:var(--app-space-sm);">マージ時のみ使用（無効）</div>
-    </div>
-    <div class="app-form-grid">
-      <div class="app-form__group">
-        <h3>パーソン（左）</h3>
-        {% for group in surviving_field_groups %}
-          <div class="app-review-field-group__title">{{ group.group_name }}</div>
-          <dl class="app-detail-list">
-            {% for field in group.fields %}
-              <div class="app-detail-item{% if field.is_diff %} app-detail-item--diff{% endif %}">
-                <dt class="app-detail-label">{{ field.label }} {% confidence surviving_confidences field.field_name "badge" %}</dt>
-                <dd class="app-detail-value">{{ field.value|default:"-" }}</dd>
-              </div>
+            {% for field in form %}
+              {% for err in field.errors %}
+                <li>{{ field.label }}: {{ err }}</li>
+              {% endfor %}
             {% endfor %}
-          </dl>
-        {% endfor %}
+          </ul>
+        </div>
+      {% endif %}
+
+      <div class="app-section__header"><h2>名刺画像比較</h2></div>
+      <div class="app-form-grid">
+        <div class="app-form__group">
+          <h3>パーソン（左）</h3>
+          {% if surviving_card_image_url %}
+            <div class="app-review-thumb">
+              <button type="button" data-action="open-modal" data-target="review-img-modal-surviving" aria-label="名刺画像を拡大表示">
+                <img class="app-review-thumb__img" src="{{ surviving_card_image_url }}" alt="名刺画像（左側）">
+              </button>
+            </div>
+          {% else %}
+            <div class="app-review-thumb__placeholder">画像なし</div>
+          {% endif %}
+        </div>
+        <div class="app-form__group">
+          <h3>パーソン（右）</h3>
+          {% if merged_card_image_url %}
+            <div class="app-review-thumb">
+              <button type="button" data-action="open-modal" data-target="review-img-modal-merged" aria-label="名刺画像を拡大表示">
+                <img class="app-review-thumb__img" src="{{ merged_card_image_url }}" alt="名刺画像（右側）">
+              </button>
+            </div>
+          {% else %}
+            <div class="app-review-thumb__placeholder">画像なし</div>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="app-section__header" style="margin-top:var(--app-space-md);"><h2>フィールド比較</h2></div>
+      <div class="app-form-grid">
+        <div class="app-form__group">
+          <h3>パーソン（左）</h3>
+          {% for group in surviving_field_groups %}
+            <div class="app-review-field-group__title">{{ group.group_name }}</div>
+            <dl class="app-detail-list">
+              {% for field in group.fields %}
+                <div class="app-detail-item{% if field.is_diff %} app-detail-item--diff{% endif %}">
+                  <dt class="app-detail-label">{{ field.label }} {% confidence surviving_confidences field.field_name "badge" %}</dt>
+                  <dd class="app-detail-value">{{ field.value|default:"-" }}</dd>
+                </div>
+              {% endfor %}
+            </dl>
+          {% endfor %}
+        </div>
+        <div class="app-form__group">
+          <h3>パーソン（右）</h3>
+          {% for group in merged_field_groups %}
+            <div class="app-review-field-group__title">{{ group.group_name }}</div>
+            <dl class="app-detail-list">
+              {% for field in group.fields %}
+                <div class="app-detail-item{% if field.is_diff %} app-detail-item--diff{% endif %}">
+                  <dt class="app-detail-label">{{ field.label }} {% confidence merged_confidences field.field_name "badge" %}</dt>
+                  <dd class="app-detail-value">{{ field.value|default:"-" }}</dd>
+                </div>
+              {% endfor %}
+            </dl>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="app-section__header" style="margin-top:var(--app-space-md);"><h2>SNS 比較</h2></div>
+      <div class="app-form-grid">
+        <div class="app-form__group">
+          <h3>パーソン（左）</h3>
+          {% for group in surviving_sns_groups %}
+            <div class="app-review-field-group__title">{{ group.sns_type_label }}</div>
+            <ul class="app-sns-compare__list">
+              {% for item in group.items %}
+                <li class="app-sns-compare__item{% if item.is_diff %} app-sns-compare__item--diff{% endif %}">{{ item.sns_id }}</li>
+              {% empty %}
+                <li class="app-sns-compare__empty">（なし）</li>
+              {% endfor %}
+            </ul>
+          {% empty %}
+            <div class="app-muted">SNS アカウントは登録されていません。</div>
+          {% endfor %}
+        </div>
+        <div class="app-form__group">
+          <h3>パーソン（右）</h3>
+          {% for group in merged_sns_groups %}
+            <div class="app-review-field-group__title">{{ group.sns_type_label }}</div>
+            <ul class="app-sns-compare__list">
+              {% for item in group.items %}
+                <li class="app-sns-compare__item{% if item.is_diff %} app-sns-compare__item--diff{% endif %}">{{ item.sns_id }}</li>
+              {% empty %}
+                <li class="app-sns-compare__empty">（なし）</li>
+              {% endfor %}
+            </ul>
+          {% empty %}
+            <div class="app-muted">SNS アカウントは登録されていません。</div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+
+    <div class="app-review-layout__sidebar">
+      <div class="app-section__header"><h2>サバイブ選択</h2></div>
+      <div class="app-section--survivor-unselected-label">
+        <div class="app-muted" style="margin-bottom:var(--app-space-xs);">サバイブ側を選択（判定後に有効化）</div>
+      </div>
+      <div class="app-section--survivor-only">
+        <div class="app-muted" style="margin-bottom:var(--app-space-xs);">サバイブ側を選択</div>
+      </div>
+      <div class="app-section--primary-role-only">
+        <div class="app-muted" style="margin-bottom:var(--app-space-xs);">主コンタクトを選択</div>
+      </div>
+      <div class="app-section--survivor-disabled-label">
+        <div class="app-muted" style="margin-bottom:var(--app-space-xs);">マージ時のみ使用（無効）</div>
+      </div>
+
+      <div class="app-form__group">
         <label class="app-merge-survivor__btn">
           <input type="radio" name="surviving_person_choice" value="person_a"
                  {% if form.surviving_person_choice.value == "person_a" %}checked{% endif %}>
           <span class="app-merge-survivor__label--survivor">これをサバイブ側にする</span>
           <span class="app-merge-survivor__label--primary-role">これを主コンタクトにする</span>
         </label>
-      </div>
-      <div class="app-form__group">
-        <h3>パーソン（右）</h3>
-        {% for group in merged_field_groups %}
-          <div class="app-review-field-group__title">{{ group.group_name }}</div>
-          <dl class="app-detail-list">
-            {% for field in group.fields %}
-              <div class="app-detail-item{% if field.is_diff %} app-detail-item--diff{% endif %}">
-                <dt class="app-detail-label">{{ field.label }} {% confidence merged_confidences field.field_name "badge" %}</dt>
-                <dd class="app-detail-value">{{ field.value|default:"-" }}</dd>
-              </div>
-            {% endfor %}
-          </dl>
-        {% endfor %}
-        <label class="app-merge-survivor__btn">
+        <label class="app-merge-survivor__btn" style="margin-top:var(--app-space-xs);">
           <input type="radio" name="surviving_person_choice" value="person_b"
                  {% if form.surviving_person_choice.value == "person_b" %}checked{% endif %}>
           <span class="app-merge-survivor__label--survivor">これをサバイブ側にする</span>
           <span class="app-merge-survivor__label--primary-role">これを主コンタクトにする</span>
         </label>
+        {{ form.surviving_person_choice.errors }}
       </div>
-    </div>
-    {{ form.surviving_person_choice.errors }}
 
-    <div class="app-section__header" style="margin-top:var(--app-space-md);"><h2>SNS 比較</h2></div>
-    <div class="app-form-grid">
-      <div class="app-form__group">
-        <h3>パーソン（左）</h3>
-        {% for group in surviving_sns_groups %}
-          <div class="app-review-field-group__title">{{ group.sns_type_label }}</div>
-          <ul class="app-sns-compare__list">
-            {% for item in group.items %}
-              <li class="app-sns-compare__item{% if item.is_diff %} app-sns-compare__item--diff{% endif %}">{{ item.sns_id }}</li>
-            {% empty %}
-              <li class="app-sns-compare__empty">（なし）</li>
-            {% endfor %}
-          </ul>
-        {% empty %}
-          <div class="app-muted">SNS アカウントは登録されていません。</div>
-        {% endfor %}
-      </div>
-      <div class="app-form__group">
-        <h3>パーソン（右）</h3>
-        {% for group in merged_sns_groups %}
-          <div class="app-review-field-group__title">{{ group.sns_type_label }}</div>
-          <ul class="app-sns-compare__list">
-            {% for item in group.items %}
-              <li class="app-sns-compare__item{% if item.is_diff %} app-sns-compare__item--diff{% endif %}">{{ item.sns_id }}</li>
-            {% empty %}
-              <li class="app-sns-compare__empty">（なし）</li>
-            {% endfor %}
-          </ul>
-        {% empty %}
-          <div class="app-muted">SNS アカウントは登録されていません。</div>
-        {% endfor %}
-      </div>
-    </div>
-
-    <div class="app-section__header" style="margin-top:var(--app-space-md);"><h2>判定</h2></div>
-    <div class="app-merge-decision">
-      {% for value, label in decision_choices %}
-        <label class="app-merge-decision__btn">
-          <input type="radio" name="review_decision" value="{{ value }}" class="js-decision-{{ value }}"
-                 {% if form.review_decision.value == value %}checked{% endif %}>
-          <span>{{ label }}</span>
-        </label>
-      {% endfor %}
-      {{ form.review_decision.errors }}
-    </div>
-
-    <div class="app-section--merged-only">
-      <div class="app-section__header" style="margin-top:var(--app-space-md);"><h2>マージ理由</h2></div>
-      <div class="app-merge-reason">
-        {% for value, label in merged_reason_choices %}
-          <label class="app-merge-reason__btn">
-            <input type="checkbox" name="review_result" value="{{ value }}"
-                   {% if value in form.review_result.value|default_if_none:"" %}checked{% endif %}>
+      <div class="app-section__header" style="margin-top:var(--app-space-xs);"><h2>判定</h2></div>
+      <div class="app-merge-decision">
+        {% for value, label in decision_choices %}
+          <label class="app-merge-decision__btn">
+            <input type="radio" name="review_decision" value="{{ value }}" class="js-decision-{{ value }}"
+                   {% if form.review_decision.value == value %}checked{% endif %}>
             <span>{{ label }}</span>
           </label>
         {% endfor %}
+        {{ form.review_decision.errors }}
       </div>
-    </div>
 
-    <div class="app-section--different-only">
-      <div class="app-section__header" style="margin-top:var(--app-space-md);"><h2>別人理由</h2></div>
-      <div class="app-merge-reason">
-        {% for value, label in different_reason_choices %}
-          <label class="app-merge-reason__btn">
-            <input type="checkbox" name="review_result" value="{{ value }}"
-                   {% if value in form.review_result.value|default_if_none:"" %}checked{% endif %}>
-            <span>{{ label }}</span>
-          </label>
-        {% endfor %}
+      <div class="app-section--merged-only">
+        <div class="app-section__header" style="margin-top:var(--app-space-xs);"><h2>マージ理由</h2></div>
+        <div class="app-merge-reason">
+          {% for value, label in merged_reason_choices %}
+            <label class="app-merge-reason__btn">
+              <input type="checkbox" name="review_result" value="{{ value }}"
+                     {% if value in form.review_result.value|default_if_none:"" %}checked{% endif %}>
+              <span>{{ label }}</span>
+            </label>
+          {% endfor %}
+        </div>
       </div>
-    </div>
 
-    {% if form.has_confirm_checkboxes %}
-      <div class="app-section--executes-merge">
-        <div class="app-section__header" style="margin-top:var(--app-space-md);"><h2>確認チェック</h2></div>
-        {% for field in form %}
-          {% if field.name|slice:":10" == "confirmed_" %}
-            <div class="app-form__group">
-              <div class="app-form__label">{{ field.label }}</div>
-              {{ field }}
-              {{ field.errors }}
-            </div>
-          {% endif %}
-        {% endfor %}
+      <div class="app-section--different-only">
+        <div class="app-section__header" style="margin-top:var(--app-space-xs);"><h2>別人理由</h2></div>
+        <div class="app-merge-reason">
+          {% for value, label in different_reason_choices %}
+            <label class="app-merge-reason__btn">
+              <input type="checkbox" name="review_result" value="{{ value }}"
+                     {% if value in form.review_result.value|default_if_none:"" %}checked{% endif %}>
+              <span>{{ label }}</span>
+            </label>
+          {% endfor %}
+        </div>
       </div>
-    {% endif %}
 
+      {% if form.has_confirm_checkboxes %}
+        <div class="app-section--executes-merge">
+          <div class="app-section__header" style="margin-top:var(--app-space-xs);"><h2>確認チェック</h2></div>
+          {% for field in form %}
+            {% if field.name|slice:":10" == "confirmed_" %}
+              <div class="app-form__group">
+                <div class="app-form__label">{{ field.label }}</div>
+                {{ field }}
+                {{ field.errors }}
+              </div>
+            {% endif %}
+          {% endfor %}
+        </div>
+      {% endif %}
 
-    <div class="app-section__header" style="margin-top:var(--app-space-md);"><h2>備考</h2></div>
-    <div class="app-form__group">
-      <label for="{{ form.note.id_for_label }}">備考</label>
-      {{ form.note }}
-      {{ form.note.errors }}
-    </div>
+      <div class="app-section__header" style="margin-top:var(--app-space-xs);"><h2>備考</h2></div>
+      <div class="app-form__group">
+        <label for="{{ form.note.id_for_label }}">備考</label>
+        {{ form.note }}
+        {{ form.note.errors }}
+      </div>
 
-    <div class="app-action-area" style="margin-top:24px;">
-      {% back_all_link back %}
-      {% back_link back %}
-      <button type="submit" class="app-btn app-btn--primary">決定</button>
+      <div class="app-action-area" style="margin-top:var(--app-space-sm);">
+        <button type="submit" class="app-btn app-btn--primary" style="width:100%;">決定</button>
+      </div>
     </div>
   </form>
 
