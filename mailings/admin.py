@@ -1,6 +1,13 @@
 from django.contrib import admin
 
-from .models import EmailTemplate, MailingConfig, MailingList, MailingListMember
+from .models import (
+    EmailTemplate,
+    MailingConfig,
+    MailingList,
+    MailingListMember,
+    SuppressedEmail,
+    Unsubscribe,
+)
 
 
 @admin.register(MailingList)
@@ -53,3 +60,34 @@ class MailingConfigAdmin(admin.ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):
         return False
+
+
+@admin.register(Unsubscribe)
+class UnsubscribeAdmin(admin.ModelAdmin):
+    """配信拒否履歴 (Unsubscribe) の Admin 表示。
+
+    [注意] 解除操作 (cancelled_at の更新) 等は本来サービス関数 (cancel_unsubscribe)
+    経由が正となります。Admin からの直接修正は緊急時・デバッグ用途限定。
+    """
+
+    list_display = ("person", "source", "source_email", "cancelled_at", "created_at")
+    list_filter = ("source", ("cancelled_at", admin.EmptyFieldListFilter))
+    search_fields = ("source_email", "person__primary_contact__full_name")
+    readonly_fields = ("id", "person", "source", "source_email", "created_at")
+    list_select_related = ("person", "person__primary_contact")
+    ordering = ("-created_at",)
+
+
+@admin.register(SuppressedEmail)
+class SuppressedEmailAdmin(admin.ModelAdmin):
+    """メール不達先リスト (SuppressedEmail) の Admin 表示。
+
+    [注意] 解除操作 (cancelled_at の更新) 等は本来サービス関数経由が正となります。
+    Admin からの直接修正は緊急時・デバッグ用途限定。
+    """
+
+    list_display = ("email", "source", "bounce_reason", "cancelled_at", "created_at")
+    list_filter = ("source", ("cancelled_at", admin.EmptyFieldListFilter))
+    search_fields = ("email", "bounce_reason", "note")
+    readonly_fields = ("id", "email", "source", "bounce_reason", "created_at")
+    ordering = ("-created_at",)

@@ -1,0 +1,147 @@
+{% extends "mailings/app_base.html" %}
+{% load back_tags %}
+
+{% block title %}配信拒否リスト — FreeGroup2{% endblock %}
+
+{% block content %}
+  <div class="app-page-header" style="max-width:1100px;">
+    <div>
+      <h1>配信拒否リスト</h1>
+    </div>
+    <div class="app-page-header__actions">
+      {% back_all_link back %}
+      {% back_link back %}
+    </div>
+  </div>
+
+  {% if messages %}
+    {% for message in messages %}
+      <section class="app-card" style="max-width:1100px;">
+        <div class="app-message">{{ message }}</div>
+      </section>
+    {% endfor %}
+  {% endif %}
+
+  <section class="app-card" style="margin-bottom:16px; max-width:1100px;">
+    <form method="get" class="app-form-grid-edit">
+      <div class="app-form-grid">
+        <div class="app-form__group app-form__group--full">
+          <label class="app-form__label" for="id_email">メアド</label>
+          <input type="text" id="id_email" name="email" value="{{ search_email }}" class="app-input">
+        </div>
+
+        <div class="app-collapsible app-person-filter-collapsible">
+          <button type="button" class="app-collapsible__header" data-action="toggle-collapsible"
+                  aria-expanded="false">
+            <span>状態</span>
+            <span class="app-collapsible__icon">▸</span>
+          </button>
+          <div class="app-collapsible-body">
+            <div class="app-person-filter-box" style="margin-top:var(--app-space-sm);">
+              <div class="app-form__group">
+                <ul class="app-radio-toggle" style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                  <li>
+                    <label style="padding:5px 12px; min-height:32px;">
+                      <input type="radio" name="status" value=""
+                             {% if search_status != "active" and search_status != "cancelled" %}checked{% endif %}>
+                      すべて
+                    </label>
+                  </li>
+                  <li>
+                    <label style="padding:5px 12px; min-height:32px;">
+                      <input type="radio" name="status" value="active"
+                             {% if search_status == "active" %}checked{% endif %}>
+                      有効
+                    </label>
+                  </li>
+                  <li>
+                    <label style="padding:5px 12px; min-height:32px;">
+                      <input type="radio" name="status" value="cancelled"
+                             {% if search_status == "cancelled" %}checked{% endif %}>
+                      解除済み
+                    </label>
+                  </li>
+                </ul>
+              </div>
+              <div class="app-form__group" style="margin-top:12px; border-top:1px solid #e5e7eb; padding-top:8px;">
+                <label style="display:inline-flex; align-items:center; gap:6px; cursor:pointer; font-size:0.9em;">
+                  <input type="checkbox" name="include_archived" value="1" {% if include_archived %}checked{% endif %}>
+                  アーカイブ済みPersonを含む
+                </label>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="app-action-area app-action-area--search">
+        <button type="submit" class="app-btn app-btn--primary">検索</button>
+        <a href="{% url 'mailings:unsubscribe_list' %}" class="app-btn app-btn--secondary">リセット</a>
+      </div>
+    </form>
+  </section>
+
+  <section class="app-card" style="max-width:1100px;">
+    <div class="app-table-wrapper">
+      <table class="app-table js-mailings-page-sort">
+        <thead>
+          <tr>
+            <th class="app-table__col--action" style="width:70px;">操作</th>
+            <th>対象 Person</th>
+            <th>会社</th>
+            <th>送信先メアド</th>
+            <th>発生源</th>
+            <th>登録日時</th>
+            <th>状態</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in unsubscribes %}
+            {% with surviving=item.person.get_surviving_person %}
+              {% url 'persons:person_detail' pk=surviving.pk as person_detail_url %}
+              <tr>
+                <td class="app-table__col--action" style="width:70px;">
+                  <div class="app-table__actions">
+                    <a class="app-btn app-btn--outline-secondary app-btn--sm" href="{% append_back_url person_detail_url back %}">詳細</a>
+                  </div>
+                </td>
+                <td>
+                  {{ surviving.primary_contact.full_name|default:"(氏名なし)" }}
+                  {% if surviving.status == "archived" %}
+                    <i class="bi bi-archive" style="color:#d97706; font-size:0.9em; margin-left:2px;" title="アーカイブ済み" aria-label="アーカイブ済み"></i>
+                  {% endif %}
+                </td>
+                <td>{{ surviving.primary_contact.organization|default:"-" }}</td>
+                <td style="font-weight:bold;">{{ item.source_email }}</td>
+                <td>{{ item.get_source_display }}</td>
+                <td>{{ item.created_at|date:"Y-m-d H:i" }}</td>
+                <td>
+                  {% if item.cancelled_at %}
+                    <span class="app-status-badge app-status-badge--muted">解除済み（{{ item.cancelled_at|date:"Y-m-d" }}）</span>
+                  {% else %}
+                    <span class="app-status-badge app-status-badge--warning">有効</span>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endwith %}
+          {% empty %}
+            <tr>
+              <td colspan="7" class="app-muted">
+                {% if search_email or search_status or include_archived %}
+                  条件に一致する配信拒否データはありません。
+                  <a href="{% url 'mailings:unsubscribe_list' %}">検索条件をリセット →</a>
+                {% else %}
+                  配信拒否データはまだありません。
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    {% if is_paginated %}
+      {% include "persons/_pagination.html" %}
+    {% endif %}
+  </section>
+{% endblock %}

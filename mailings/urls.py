@@ -58,6 +58,12 @@ urlpatterns = [
     # ==================================================================
     # /mailings/ 配下：通常の管理画面・AJAX エンドポイント
     # ==================================================================
+    # Unsubscribe 配信拒否リスト
+    path(
+        "mailings/unsubscribes/",
+        views.UnsubscribeListView.as_view(),
+        name="unsubscribe_list",
+    ),
     # Phase 5（仕様書 §5.1 No.17/18/19）：SuppressedEmail 管理
     path(
         "mailings/suppressed/",

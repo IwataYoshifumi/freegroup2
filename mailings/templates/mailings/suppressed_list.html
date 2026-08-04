@@ -1,12 +1,12 @@
 {% extends "mailings/app_base.html" %}
 {% load back_tags %}
 
-{% block title %}配信拒否リスト — FreeGroup2{% endblock %}
+{% block title %}メール不達先リスト — FreeGroup2{% endblock %}
 
 {% block content %}
-  <div class="app-page-header">
+  <div class="app-page-header" style="max-width:1100px;">
     <div>
-      <h1>配信拒否リスト</h1>
+      <h1>メール不達先リスト</h1>
     </div>
     <div class="app-page-header__actions">
       {% back_all_link back %}
@@ -15,13 +15,13 @@
   </div>
 
   {# 遷移導線はタイトル直下・左寄せ（HIG 3.1 / 7.3）。 #}
-  <div class="app-action-area" style="justify-content:flex-start; margin-bottom:16px;">
+  <div class="app-action-area" style="justify-content:flex-start; margin-bottom:16px; max-width:1100px;">
     <a class="app-btn app-btn--primary" href="{% url 'mailings:suppressed_create' %}">手動登録</a>
   </div>
 
   {% if messages %}
     {% for message in messages %}
-      <section class="app-card">
+      <section class="app-card" style="max-width:1100px;">
         <div class="app-message">{{ message }}</div>
       </section>
     {% endfor %}
@@ -32,18 +32,16 @@
     テキスト（メアド）は折りたたみの外＝常時表示。状態トグルは「状態」折りたたみの中。
     状態とソートの折りたたみは横並び・初期閉。
   {% endcomment %}
-  <section class="app-card" style="margin-bottom:16px;">
+  <section class="app-card" style="margin-bottom:16px; max-width:1100px;">
     <form method="get" class="app-form-grid-edit">
-      <div class="app-form-grid app-search-grid">
-        <div class="app-form__group">
+      <div class="app-form-grid">
+        <div class="app-form__group app-form__group--full">
           <label class="app-form__label" for="id_email">メアド</label>
           <input type="text" id="id_email" name="email" value="{{ search_email }}" class="app-input">
         </div>
-      </div>
 
-      <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:flex-start;">
         {# 状態の絞り込み（ラジオ）。初期閉・幅は中身に合わせる。 #}
-        <div class="app-collapsible app-person-filter-collapsible" style="flex:0 1 auto;">
+        <div class="app-collapsible app-person-filter-collapsible">
           <button type="button" class="app-collapsible__header" data-action="toggle-collapsible"
                   aria-expanded="false">
             <span>状態</span>
@@ -82,9 +80,7 @@
         </div>
 
         {# ソート（折りたたみ・指定があれば開く）。 #}
-        <div style="flex:1 1 320px; min-width:280px;">
-          {% include "mailings/_sort_control.html" %}
-        </div>
+        {% include "mailings/_sort_control.html" %}
       </div>
 
       <div class="app-action-area app-action-area--search">
@@ -94,7 +90,7 @@
     </form>
   </section>
 
-  <section class="app-card">
+  <section class="app-card" style="max-width:1100px;">
     {# 表示列選択は表の左上に置く（HIG 6.2）。 #}
     <div style="display:flex; justify-content:flex-start; margin-bottom:12px;">
       {% include "mailings/_column_toggle_list.html" with columns=column_defs storage_key=column_storage_key %}
@@ -104,16 +100,22 @@
     <table class="app-table js-mailings-page-sort">
       <thead>
         <tr>
+          <th class="app-table__col--action" style="width:70px;">操作</th>
           <th data-sort-col>メアド</th>
           <th data-col-key="source" data-sort-col>登録元</th>
           <th data-col-key="created_at" data-sort-col>登録日時</th>
           <th data-col-key="status" data-sort-col>状態</th>
-          <th></th>
         </tr>
       </thead>
       <tbody>
         {% for sup in suppressed_emails %}
+          {% url 'mailings:suppressed_detail' pk=sup.pk as detail_url %}
           <tr>
+            <td class="app-table__col--action" style="width:70px;">
+              <div class="app-table__actions">
+                <a class="app-btn app-btn--outline-secondary app-btn--sm" href="{% append_back_url detail_url back %}">詳細</a>
+              </div>
+            </td>
             <td>{{ sup.email }}</td>
             <td data-col-key="source">{{ sup.get_source_display }}</td>
             <td data-col-key="created_at">{{ sup.created_at|date:"Y-m-d H:i" }}</td>
@@ -124,15 +126,14 @@
                 <strong>有効</strong>
               {% endif %}
             </td>
-            <td><a class="app-btn app-btn--sm" href="{% url 'mailings:suppressed_detail' pk=sup.pk %}">詳細</a></td>
           </tr>
         {% empty %}
           <tr><td colspan="5">
             {% if search_email or search_status %}
-              条件に一致する配信拒否メアドはありません。
+              条件に一致するメール不達先メアドはありません。
               <a href="{% url 'mailings:suppressed_list' %}">検索条件をリセット →</a>
             {% else %}
-              配信拒否メアドはまだ登録されていません。バウンスや配信停止リンクから自動登録されます。
+              メール不達先メアドはまだ登録されていません。バウンス等から自動登録されます。
               <a href="{% url 'mailings:suppressed_create' %}">手動登録 →</a>
             {% endif %}
           </td></tr>

@@ -1,12 +1,12 @@
 {% extends "mailings/app_base.html" %}
 {% load back_tags %}
 
-{% block title %}配信拒否メアド 手動登録 — FreeGroup2{% endblock %}
+{% block title %}メール不達先メアド 手動登録 — FreeGroup2{% endblock %}
 
 {% block content %}
   <div class="app-page-header">
     <div>
-      <h1>配信拒否メアド 手動登録</h1>
+      <h1>メール不達先メアド 手動登録</h1>
     </div>
   </div>
 
@@ -18,18 +18,18 @@
     {% endfor %}
   {% endif %}
 
-  <section class="app-card" style="max-width: 720px; margin: 0 auto;">
-    <form method="post" action="{% url 'mailings:suppressed_create' %}" class="app-form-grid">
+  <section class="app-card" style="max-width: 720px;">
+    <form method="post" action="{% url 'mailings:suppressed_create' %}" style="display:flex; flex-direction:column; gap:16px;">
       {% csrf_token %}
       <div class="app-form__group">
-        <label for="email">メアド</label>
+        <label class="app-form__label" for="email">メアド</label>
         <input type="email" id="email" name="email" class="app-input" required>
       </div>
       <div class="app-form__group">
-        <label for="note">備考</label>
+        <label class="app-form__label" for="note">備考</label>
         <textarea id="note" name="note" class="app-input" rows="3"></textarea>
       </div>
-      <div>
+      <div style="display:flex; gap:8px; align-items:center; margin-top:8px;">
         <button type="submit" class="app-btn app-btn--primary">登録</button>
         <a class="app-btn app-btn--secondary" href="{% url 'mailings:suppressed_list' %}">戻る</a>
       </div>

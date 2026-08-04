@@ -338,7 +338,13 @@ class MailingListDetailView(LoginRequiredMixin, PermissionRequiredMixin, DetailV
         # back_stack に詳細 URL を追加することで実現する）。
         members_qs = (
             MailingListMember.objects.filter(mailing_list=self.object)
-            .select_related("person", "person__primary_contact", "added_by")
+            .select_related(
+                "person",
+                "person__primary_contact",
+                "person__merged_into",
+                "person__merged_into__primary_contact",
+                "added_by",
+            )
         )
         # ?sort=...&dir=... があれば適用、無ければ name asc がデフォルト（UI 改善 要望1）
         members_qs = _apply_sort_to_members(members_qs, self.request.GET)
@@ -3002,6 +3008,59 @@ class SuppressedEmailListView(LoginRequiredMixin, PermissionRequiredMixin, ListV
                 SUPPRESSED_LIST_SORT_COLUMNS,
             )
         )
+        return ctx
+
+
+class UnsubscribeListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
+    """GET /mailings/unsubscribes/：配信拒否リスト（Unsubscribe 履歴一覧）。
+
+    Person 単位の受信者意思による配信拒否の一覧（閲覧専用）。
+    認可：mailings.view_unsubscribe
+    """
+
+    template_name = "mailings/unsubscribe_list.html"
+    context_object_name = "unsubscribes"
+    paginate_by = 50
+    permission_required = "mailings.view_unsubscribe"
+
+    def get_queryset(self):
+        from .models import Unsubscribe
+        from persons.models import Person
+
+        qs = Unsubscribe.objects.select_related(
+            "person",
+            "person__primary_contact",
+            "person__merged_into",
+            "person__merged_into__primary_contact",
+        )
+        # 1. マージドPersonの除外（常に除外）
+        qs = qs.exclude(person__status=Person.Status.MERGED)
+
+        # 2. アーカイブ済みPersonのフィルタ（デフォルト除外）
+        include_archived = self.request.GET.get("include_archived", "").strip()
+        if include_archived != "1":
+            qs = qs.exclude(person__status=Person.Status.ARCHIVED)
+
+        email = self.request.GET.get("email", "").strip()
+        if email:
+            qs = qs.filter(source_email__icontains=email)
+        status = self.request.GET.get("status", "").strip()
+        if status == "active":
+            qs = qs.filter(cancelled_at__isnull=True)
+        elif status == "cancelled":
+            qs = qs.filter(cancelled_at__isnull=False)
+        return qs.order_by("cancelled_at", "-created_at")
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        back = BackNavigator(self.request)
+        back.push_current("", ["page", "email", "status", "include_archived"])
+        ctx["back"] = back
+        ctx["active_app"] = "mailings"
+        ctx["active_menu"] = "mailings:unsubscribe_list"
+        ctx["search_email"] = self.request.GET.get("email", "")
+        ctx["search_status"] = self.request.GET.get("status", "")
+        ctx["include_archived"] = self.request.GET.get("include_archived", "") == "1"
         return ctx
 
 

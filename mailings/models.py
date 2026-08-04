@@ -823,8 +823,6 @@ class Unsubscribe(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
-        verbose_name = "配信停止履歴"
-        verbose_name_plural = "配信停止履歴"
 
     def __str__(self):
         return f"{self.person} ({self.source})"
@@ -877,8 +875,6 @@ class SuppressedEmail(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
-        verbose_name = "配信拒否メアド"
-        verbose_name_plural = "配信拒否メアド"
         constraints = [
             UniqueConstraint(
                 fields=["email"],
