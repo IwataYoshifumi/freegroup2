@@ -4,7 +4,7 @@
 {% block title %}タグカテゴリ一覧 — FreeGroup2{% endblock %}
 
 {% block content %}
-  <div class="app-page-header">
+  <div class="app-page-header" style="max-width:1100px;">
     <div>
       <h1>タグカテゴリ一覧</h1>
     </div>
@@ -15,7 +15,7 @@
   </div>
 
   {% if categories %}
-    <section class="app-card">
+    <section class="app-card" style="max-width:1100px;">
       <form method="get" style="margin-bottom:8px;">
         <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
           <label for="id_archived_only"
@@ -38,7 +38,7 @@
           <thead>
             <tr>
               <th style="width:32px;"></th>
-              <th class="app-table__col--action">操作</th>
+              <th class="app-table__col--action" style="width:130px;">操作</th>
               <th>並び順</th>
               <th>カテゴリ名</th>
               <th>説明</th>
@@ -52,11 +52,13 @@
               {% url 'tags:tag_category_update' pk=cat.id as update_url %}
               <tr data-pk="{{ cat.id }}">
                 <td class="js-sort-handle" style="cursor:grab; text-align:center; user-select:none; color:#888;">⋮⋮</td>
-                <td class="app-table__col--action">
-                  <a href="{% append_back_url detail_url back %}" class="app-btn app-btn--outline-secondary app-btn--sm">詳細</a>
-                  {% if not cat.is_archived %}
-                    <a href="{% append_back_url update_url back %}" class="app-btn app-btn--success app-btn--sm">編集</a>
-                  {% endif %}
+                <td class="app-table__col--action" style="width:130px;">
+                  <div class="app-table__actions">
+                    <a href="{% append_back_url detail_url back %}" class="app-btn app-btn--outline-secondary app-btn--sm">詳細</a>
+                    {% if not cat.is_archived %}
+                      <a href="{% append_back_url update_url back %}" class="app-btn app-btn--success app-btn--sm">編集</a>
+                    {% endif %}
+                  </div>
                 </td>
                 <td class="js-sort-order-cell">{{ cat.sort_order }}</td>
                 <td>{{ cat.name }}</td>
@@ -131,7 +133,7 @@
       })();
     </script>
   {% else %}
-    <section class="app-card">
+    <section class="app-card" style="max-width:1100px;">
       <div style="padding:24px; text-align:center;">
         <h2 style="margin-bottom:12px;">初回セットアップ：まず最初のカテゴリを作成してください</h2>
         <p class="app-muted" style="margin-bottom:16px;">

@@ -4,23 +4,17 @@
 {% block title %}タグ詳細：{{ tag.name }} — FreeGroup2{% endblock %}
 
 {% block content %}
-  <div class="app-page-header">
+  <div class="app-page-header" style="max-width:1100px;">
     <div>
       <h1 style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-        <span>{{ tag.category.name }}</span>
-        <i class="bi bi-chevron-right" style="font-size:0.7em; color:#94a3b8;"></i>
-        <span>{{ tag.name }}</span>
+        <span>タグ詳細</span>
         <button type="button" class="js-info-toggle"
                 aria-haspopup="true" aria-expanded="false" aria-controls="js-info-popover"
                 aria-label="詳細情報"
                 style="background:none; border:none; cursor:pointer; padding:0; color:#64748b; font-size:0.85em;">
           <i class="bi bi-info-circle"></i>
         </button>
-        {% if tag.is_archived %}
-          <span class="app-status-badge app-status-badge--muted">アーカイブ済み</span>
-        {% endif %}
       </h1>
-      <div style="margin-top:4px; color:#475569;">{{ tag.description|default:"-" }}</div>
 
       {# ⓘ ポップオーバー：状態・作成者・作成日時・更新日時 #}
       <div id="js-info-popover" hidden
@@ -45,7 +39,7 @@
         </dl>
       </div>
     </div>
-    {# HIG 3.2・原則7：ヘッダ右上は戻る導線のみ。編集・遷移導線はタイトル直下の app-card へ集約（§7.3）。 #}
+    {# HIG 3.2・原則7：ヘッダ右上は戻る導線のみ。 #}
     <div class="app-action-area">
       {% back_all_link back %}
       {% back_link back %}
@@ -53,17 +47,30 @@
   </div>
 
   {% if messages %}
-    <section class="app-card">
+    <section class="app-card" style="max-width:1100px;">
       {% for message in messages %}
         <div class="app-message{% if message.tags %} app-message--{{ message.tags }}{% endif %}">{{ message }}</div>
       {% endfor %}
     </section>
   {% endif %}
 
-  {# タイトル直下：機能ボタン集約（HIG §7.3）。左に編集・遷移導線、右にアーカイブ系（破壊/状態変更は §3.1 で分離）。 #}
-  <section class="app-card">
+  <section class="app-card" style="max-width:1100px;">
+    {# パンくず表示（カテゴリ名 > タグ名） ＋ 説明文 #}
+    <div style="margin-bottom:16px;">
+      <h2 style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:0 0 6px;">
+        <span>{{ tag.category.name }}</span>
+        <i class="bi bi-chevron-right" style="font-size:0.7em; color:#94a3b8;"></i>
+        <span>{{ tag.name }}</span>
+        {% if tag.is_archived %}
+          <span class="app-status-badge app-status-badge--muted">アーカイブ済み</span>
+        {% endif %}
+      </h2>
+      <p class="app-muted" style="margin:0; font-size:14px;">{{ tag.description|default:"-" }}</p>
+    </div>
+
+    {# 機能ボタン群 #}
     {% url 'tags:tag_update' pk=tag.id as update_url %}
-    <div class="app-action-area" style="justify-content: space-between;">
+    <div class="app-action-area" style="justify-content: space-between; margin-bottom:16px;">
       <div style="display:flex; gap:var(--app-space-sm); flex-wrap:wrap;">
         {% if tag.is_archived %}
           <span class="app-btn app-btn--success" style="opacity:0.5; pointer-events:none;" aria-disabled="true">編集</span>
@@ -94,9 +101,9 @@
         {% endif %}
       </div>
     </div>
-  </section>
 
-  <section class="app-card">
+    <hr style="border:none; border-top:1px solid var(--app-border); margin:16px 0;">
+
     <div class="app-section__header">
       <h2>付与 Person 一覧（{{ person_total }} 件）</h2>
     </div>
