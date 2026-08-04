@@ -22,4 +22,6 @@ urlpatterns = [
         views.PersonAddAdditionalRoleView.as_view(),
         name="person_add_additional_role",
     ),
+    path("<uuid:pk>/archive/", views.PersonArchiveView.as_view(), name="person_archive"),
+    path("<uuid:pk>/unarchive/", views.PersonUnarchiveView.as_view(), name="person_unarchive"),
 ]

@@ -19,8 +19,9 @@ PersonAddAdditionalRoleView は書込系で LoginRequiredMixin のみ（権限�
 from django.contrib.auth.mixins import LoginRequiredMixin, PermissionRequiredMixin
 from django.db import transaction
 from django.http import Http404, HttpResponseRedirect
-from django.shortcuts import get_object_or_404, render
+from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.views import View
 from django.views.generic import DetailView, ListView
 from django.views.generic.edit import FormView
 
@@ -456,3 +457,37 @@ class PersonAddAdditionalRoleView(LoginRequiredMixin, PermissionRequiredMixin, F
             "contacts:contact_detail",
             kwargs={"pk": self.created_contact.pk},
         )
+
+
+class PersonArchiveView(LoginRequiredMixin, PermissionRequiredMixin, View):
+    """Person アーカイブ化（status='archived'）。POST 専用。
+
+    認可：persons.change_person（状態変更）
+    """
+
+    permission_required = "persons.change_person"
+
+    def post(self, request, pk):
+        person = get_object_or_404(Person, pk=pk)
+        person.mark_as_archived()
+        back = BackNavigator(request)
+        if back.back_exist:
+            return redirect(back.back_url)
+        return redirect("persons:person_detail", pk=person.pk)
+
+
+class PersonUnarchiveView(LoginRequiredMixin, PermissionRequiredMixin, View):
+    """Person 非アーカイブ化（status='active'）。POST 専用。
+
+    認可：persons.change_person（状態変更）
+    """
+
+    permission_required = "persons.change_person"
+
+    def post(self, request, pk):
+        person = get_object_or_404(Person, pk=pk)
+        person.mark_as_active()
+        back = BackNavigator(request)
+        if back.back_exist:
+            return redirect(back.back_url)
+        return redirect("persons:person_detail", pk=person.pk)

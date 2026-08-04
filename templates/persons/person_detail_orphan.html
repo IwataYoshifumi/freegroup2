@@ -14,6 +14,15 @@
     <div class="app-action-area">
       {% back_all_link back %}
       {% back_link back %}
+      {% if person.status == "active" %}
+        <form method="post" action="{% url 'persons:person_archive' pk=person.id %}" style="display:inline;" onsubmit="return confirm('「{{ person }}」をアーカイブ化します。よろしいですか？');">
+          {% csrf_token %}
+          {% hidden_back_field back %}
+          <button type="submit" class="app-btn app-btn--warning">
+            <i class="bi bi-archive"></i> アーカイブ化
+          </button>
+        </form>
+      {% endif %}
     </div>
   </div>
 

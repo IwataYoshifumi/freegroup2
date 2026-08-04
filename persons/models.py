@@ -95,6 +95,24 @@ class Person(models.Model):
                 update_fields=["status", "merged_into", "primary_contact", "updated_at"]
             )
 
+    def mark_as_archived(self):
+        """自身の状態遷移：archived 化（仕様書 §10.4.1）。
+
+        [性質] 副作用あり（自身のフィールド更新のみ）
+        [入力] なし
+        [出力] None
+        [例外] ValueError（self.status が 'active' でない場合）
+
+        Contact 側のフィールド（status / person FK）には一切触らない。
+        """
+        if self.status != self.Status.ACTIVE:
+            raise ValueError(
+                f"mark_as_archived() can only be called on active Person, "
+                f"but Person {self.id} has status='{self.status}'"
+            )
+        self.status = self.Status.ARCHIVED
+        self.save(update_fields=["status", "updated_at"])
+
     def mark_as_active(self):
         """自身の状態遷移：active 化（merged または archived からの復帰）。
 
@@ -127,6 +145,23 @@ class Person(models.Model):
         self.status = self.Status.ACTIVE
         self.merged_into = None
         self.save(update_fields=["status", "merged_into", "updated_at"])
+
+    def get_surviving_person(self):
+        """自身の統合先（surviving root）の Person を返す。
+
+        [性質] 純粋関数（DB 読み取りのみ）
+        [入力] なし
+        [出力] Person（merged_into を辿った root、マージされていなければ self）
+        [例外] ValueError（merged_into の循環参照を検出した場合）
+        """
+        visited = set()
+        root = self
+        while root.merged_into is not None:
+            if root.id in visited:
+                raise ValueError(f"merged_into cycle detected at {root.id}")
+            visited.add(root.id)
+            root = root.merged_into
+        return root
 
     def set_primary_contact(self, new_contact, old_primary_new_status="active"):
         """primary_contact 切り替え（派生情報の同期、仕様書 §10.4.3）。

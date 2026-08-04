@@ -44,11 +44,20 @@
       {% endif %}
     {% endif %}
 
-    {# 右寄せ：マージ（pending時のみ・準備中で控えめ）＋戻る #}
+    {# 右寄せ：マージ（pending時のみ・準備中で控えめ）＋アーカイブ化＋戻る #}
     <div style="margin-left:auto; display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
       {% if pending_duplicates %}
         <a href="#" class="app-btn app-btn--secondary app-btn--sm is-disabled" aria-disabled="true"
            title="準備中">マージ画面へ（準備中）</a>
+      {% endif %}
+      {% if additional_roles_mode and contact.person and contact.person.status == "active" %}
+        <form method="post" action="{% url 'persons:person_archive' pk=contact.person.id %}" style="display:inline;" onsubmit="return confirm('「{{ contact.person }}」をアーカイブ化します。よろしいですか？');">
+          {% csrf_token %}
+          {% hidden_back_field back %}
+          <button type="submit" class="app-btn app-btn--warning">
+            <i class="bi bi-archive"></i> アーカイブ化
+          </button>
+        </form>
       {% endif %}
       {% back_all_link back %}
       {% back_link back %}
