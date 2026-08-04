@@ -4,7 +4,7 @@
 {% block title %}配信設定 — FreeGroup2{% endblock %}
 
 {% block content %}
-  <div class="app-page-header">
+  <div class="app-page-header" style="max-width: 600px;">
     <div>
       <h1>配信設定（MailingConfig シングルトン）</h1>
     </div>
@@ -12,13 +12,13 @@
 
   {% if messages %}
     {% for message in messages %}
-      <section class="app-card">
+      <section class="app-card" style="max-width: 600px;">
         <div class="app-message app-message--success">{{ message }}</div>
       </section>
     {% endfor %}
   {% endif %}
 
-  <section class="app-card" style="max-width: 720px; margin: 0 auto;">
+  <section class="app-card app-form-wrapper" style="max-width: 600px;">
     <p class="app-muted" style="margin-bottom:12px;">
       特電法フッターで使用するシステム会社情報と DKIM 設定。シングルトン
       （id=1 のみ）。DKIM 系・メルマガ系は Phase 8 で本格運用、本フェーズでは空でも可。
@@ -39,7 +39,7 @@
         {% endfor %}
       </div>
 
-      <div class="app-action-area">
+      <div class="app-action-area" style="margin-top:16px;">
         <button type="submit" class="app-btn app-btn--primary">保存</button>
       </div>
     </form>

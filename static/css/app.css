@@ -2716,3 +2716,9 @@ ul.app-radio-list li label {
   user-select: none;
 }
 .app-help-icon:hover { background: #d1d5db; }
+
+/* 編集フォームラッパー（左寄せ・幅制限600px） */
+.app-form-wrapper {
+  max-width: 600px;
+}
+
