@@ -26,16 +26,16 @@ name を持たせず、方向ラジオは送信直前に disabled にして、UR
 
     {% for row in sort_rows %}
       <div class="js-person-sort-row"
-           style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom: var(--app-space-sm);">
-        <span class="app-form__label" style="min-width:5em; margin:0;">第{{ forloop.counter }}キー</span>
-        <select class="app-input js-person-sort-key" style="max-width:160px;">
+           style="display:flex; align-items:center; gap:8px; flex-wrap:nowrap; margin-bottom: var(--app-space-sm);">
+        <span class="app-form__label" style="min-width:4.5em; margin:0; white-space:nowrap; font-size:0.9em;">第{{ forloop.counter }}キー</span>
+        <select class="app-input js-person-sort-key" style="flex:1; min-width:100px; max-width:160px;">
           <option value="">指定なし</option>
           <option value="name"{% if row.key == "name" %} selected{% endif %}>氏名</option>
           <option value="company"{% if row.key == "company" %} selected{% endif %}>会社</option>
           <option value="title"{% if row.key == "title" %} selected{% endif %}>役職</option>
           <option value="email"{% if row.key == "email" %} selected{% endif %}>連絡先</option>
         </select>
-        <ul class="app-radio-toggle">
+        <ul class="app-radio-toggle" style="flex-shrink:0;">
           <li>
             <label>
               <input type="radio" name="_psortdir{{ forloop.counter }}"
@@ -56,8 +56,8 @@ name を持たせず、方向ラジオは送信直前に disabled にして、UR
       </div>
     {% endfor %}
 
-    <p class="app-muted" style="margin:0; font-size:0.85em;">
-      上の行ほど優先（第1キー→第2キー→第3キー）。「指定なし」の行は無視されます。
+    <p class="app-muted" style="margin:0; font-size:0.825em; line-height:1.4;">
+      上の行ほど優先（第1キー→第2キー→第3キー）。<br>「指定なし」の行は無視されます。
     </p>
    </div>
   </div>

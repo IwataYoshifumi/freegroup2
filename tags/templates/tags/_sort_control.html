@@ -29,9 +29,9 @@ name を持たせず、方向ラジオは送信直前に disabled にして、UR
 
     {% for row in sort_rows %}
       <div class="js-tag-sort-row"
-           style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom: var(--app-space-sm);">
-        <span class="app-form__label" style="min-width:5em; margin:0;">第{{ forloop.counter }}キー</span>
-        <select class="app-input js-tag-sort-key" style="max-width:180px;">
+           style="display:flex; align-items:center; gap:8px; flex-wrap:nowrap; margin-bottom: var(--app-space-sm);">
+        <span class="app-form__label" style="min-width:4.5em; margin:0; white-space:nowrap; font-size:0.9em;">第{{ forloop.counter }}キー</span>
+        <select class="app-input js-tag-sort-key" style="flex:1; min-width:100px; max-width:150px;">
           <option value="">指定なし</option>
           <option value="category"{% if row.key == "category" %} selected{% endif %}>カテゴリ</option>
           <option value="name"{% if row.key == "name" %} selected{% endif %}>タグ名</option>
@@ -39,7 +39,7 @@ name を持たせず、方向ラジオは送信直前に disabled にして、UR
           <option value="created_by"{% if row.key == "created_by" %} selected{% endif %}>作成者</option>
           <option value="updated_at"{% if row.key == "updated_at" %} selected{% endif %}>更新日時</option>
         </select>
-        <ul class="app-radio-toggle">
+        <ul class="app-radio-toggle" style="flex-shrink:0;">
           <li>
             <label>
               <input type="radio" name="_tsortdir{{ forloop.counter }}"
@@ -60,8 +60,8 @@ name を持たせず、方向ラジオは送信直前に disabled にして、UR
       </div>
     {% endfor %}
 
-    <p class="app-muted" style="margin:0 0 var(--app-space-sm); font-size:0.85em;">
-      上の行ほど優先（第1キー→第2キー→第3キー）。「指定なし」の行は無視されます。
+    <p class="app-muted" style="margin:0 0 var(--app-space-sm); font-size:0.825em; line-height:1.4;">
+      上の行ほど優先（第1キー→第2キー→第3キー）。<br>「指定なし」の行は無視されます。
     </p>
     {# 送信契機：このボタンでソート指定を適用（フォーム submit → 下の JS が sort を組み立てる）。 #}
     <button type="submit" class="app-btn app-btn--primary">並び替えを適用</button>
