@@ -29,11 +29,12 @@
     {% endfor %}
   {% endif %}
 
-  {# 検索フォーム（HIG 第6章）：名称・作成者の部分一致（常時露出）＋ 状態トグル・多段ソート（折りたたみ）。 #}
-  <section class="app-card">
+  {# 検索フォーム（HIG 第6章）：名称・作成者・配信日＋状態トグル・多段ソート（折りたたみ）。最大幅800px。 #}
+  <section class="app-card" style="max-width:800px; margin-bottom:16px;">
     <form method="get" class="app-form-grid-edit">
       <input type="hidden" name="searched" value="1">
-      <div class="app-form-grid app-search-grid">
+      {# 1行目: キャンペーン名/作成者、2行目: 配信日(開始)/配信日(終了)。2列グリッド＋適切な余白 #}
+      <div style="display:grid; grid-template-columns:repeat(2, 1fr); gap:16px; margin-bottom:16px;">
         <div class="app-form__group">
           <label class="app-form__label" for="id_name">キャンペーン名</label>
           <input type="text" id="id_name" name="name" value="{{ search_name }}" class="app-input">
@@ -54,7 +55,7 @@
       </div>
 
       {# 「状態で絞り込み」と「ソート」の折りたたみを横並びに（HIG 第6章・縦積みで横長にしない）。 #}
-      <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:flex-start;">
+      <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:flex-start; margin-bottom:16px;">
         {# 状態の絞り込み（トグル・複数選択、HIG 4.1）。ラベルは体言「状態」。左右のパネル幅を統一（flex:1 1 320px; min-width:280px;）。 #}
         <div class="app-collapsible app-person-filter-collapsible" style="flex:1 1 320px; min-width:280px;">
           <button type="button" class="app-collapsible__header" data-action="toggle-collapsible"
