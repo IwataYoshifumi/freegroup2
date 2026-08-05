@@ -43,11 +43,11 @@
       テキスト（タグ名）は折りたたみの外＝常時表示。トグル絞り込み（タグカテゴリ＋状態）は
       「絞り込み」折りたたみの中。絞り込みとソートの折りたたみは横並び・初期閉。
     {% endcomment %}
-    <section class="app-card" style="margin-bottom:16px;">
+    <section class="app-card" style="max-width:800px; margin-bottom:16px;">
       <form method="get" class="app-form-grid-edit">
         <input type="hidden" name="searched" value="1">
         <div class="app-form-grid app-search-grid">
-          <div class="app-form__group app-form__group--full">
+          <div class="app-form__group app-form__group--full" style="max-width:360px; margin-bottom:16px;">
             <label class="app-form__label" for="id_name">タグ名</label>
             <input type="text" id="id_name" name="name" value="{{ search_name }}" class="app-input">
           </div>
