@@ -49,9 +49,9 @@
           </button>
           <div class="app-collapsible-body">
             <div class="app-person-filter-box" style="margin-top:var(--app-space-sm);">
-              {# トグルは2列折り返し＋枠を詰める。 #}
+              {# トグルは横並び＋自動折り返し（flex-wrap）。 #}
               <div class="app-form__group">
-                <ul class="app-radio-toggle" style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                <ul class="app-radio-toggle" style="display:flex; flex-wrap:wrap; gap:8px;">
                   <li>
                     <label style="padding:5px 12px; min-height:32px;">
                       <input type="radio" name="status" value=""

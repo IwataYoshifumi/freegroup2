@@ -61,10 +61,10 @@
             </button>
             <div class="app-collapsible-body">
               <div class="app-person-filter-box" style="margin-top:var(--app-space-sm);">
-                {# ラベルは体言「タグカテゴリ」。トグルは2列折り返し＋枠を詰める。 #}
+                {# ラベルは体言「タグカテゴリ」。トグルは横並び＋自動折り返し（flex-wrap）。 #}
                 <div class="app-form__group">
                   <span class="app-form__label">タグカテゴリ</span>
-                  <ul class="app-radio-toggle" style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                  <ul class="app-radio-toggle" style="display:flex; flex-wrap:wrap; gap:8px;">
                     {% for cat in categories %}
                       <li>
                         <label style="padding:5px 12px; min-height:32px;">
@@ -79,7 +79,7 @@
 
                 <div class="app-form__group" style="margin-top:var(--app-space-sm);">
                   <span class="app-form__label">状態</span>
-                  <ul class="app-radio-toggle" style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                  <ul class="app-radio-toggle" style="display:flex; flex-wrap:wrap; gap:8px;">
                     <li>
                       <label style="padding:5px 12px; min-height:32px;">
                         <input type="checkbox" name="status" value="active"
