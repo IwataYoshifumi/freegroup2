@@ -24,7 +24,8 @@ from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin, PermissionRequiredMixin
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Q, Value
+from django.db.models.functions import Replace
 from django.http import Http404, HttpResponseRedirect, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -207,16 +208,53 @@ class ContactListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
             qs = qs.filter(person_id=person_id)
 
         p = self.request.GET
-        if p.get("name", "").strip():
-            qs = qs.filter(full_name__icontains=p["name"].strip())
-        if p.get("organization", "").strip():
-            qs = qs.filter(organization__icontains=p["organization"].strip())
-        if p.get("department", "").strip():
-            qs = qs.filter(department__icontains=p["department"].strip())
-        if p.get("title", "").strip():
-            qs = qs.filter(title__icontains=p["title"].strip())
+
+        def _clean_q(val):
+            return (val or "").replace("　", "").replace(" ", "").strip()
+
+        name_q = _clean_q(p.get("name"))
+        if name_q:
+            qs = qs.annotate(
+                _clean_full_name=Replace(
+                    Replace("full_name", Value("　"), Value("")),
+                    Value(" "),
+                    Value(""),
+                )
+            ).filter(_clean_full_name__icontains=name_q)
+
+        org_q = _clean_q(p.get("organization"))
+        if org_q:
+            qs = qs.annotate(
+                _clean_organization=Replace(
+                    Replace("organization", Value("　"), Value("")),
+                    Value(" "),
+                    Value(""),
+                )
+            ).filter(_clean_organization__icontains=org_q)
+
+        dept_q = _clean_q(p.get("department"))
+        if dept_q:
+            qs = qs.annotate(
+                _clean_department=Replace(
+                    Replace("department", Value("　"), Value("")),
+                    Value(" "),
+                    Value(""),
+                )
+            ).filter(_clean_department__icontains=dept_q)
+
+        title_q = _clean_q(p.get("title"))
+        if title_q:
+            qs = qs.annotate(
+                _clean_title=Replace(
+                    Replace("title", Value("　"), Value("")),
+                    Value(" "),
+                    Value(""),
+                )
+            ).filter(_clean_title__icontains=title_q)
+
         if p.get("email", "").strip():
             qs = qs.filter(email__icontains=p["email"].strip())
+
         if p.get("tel", "").strip():
             tel = p["tel"].strip()
             qs = qs.filter(
@@ -224,8 +262,16 @@ class ContactListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
                 | Q(mobile_phone__icontains=tel)
                 | Q(personal_fax__icontains=tel)
             )
-        if p.get("address", "").strip():
-            qs = qs.filter(address__icontains=p["address"].strip())
+
+        addr_q = _clean_q(p.get("address"))
+        if addr_q:
+            qs = qs.annotate(
+                _clean_address=Replace(
+                    Replace("address", Value("　"), Value("")),
+                    Value(" "),
+                    Value(""),
+                )
+            ).filter(_clean_address__icontains=addr_q)
 
         # 既定の並びは更新日時降順。?sort= があれば許可リスト経由で多段ソートに差し替える。
         qs = qs.order_by("-updated_at", "-created_at")
