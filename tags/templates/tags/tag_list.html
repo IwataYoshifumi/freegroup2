@@ -46,14 +46,15 @@
     <section class="app-card" style="max-width:800px; margin-bottom:16px;">
       <form method="get" class="app-form-grid-edit">
         <input type="hidden" name="searched" value="1">
-        <div class="app-form-grid app-search-grid">
-          <div class="app-form__group app-form__group--full" style="max-width:360px; margin-bottom:16px;">
-            <label class="app-form__label" for="id_name">タグ名</label>
-            <input type="text" id="id_name" name="name" value="{{ search_name }}" class="app-input">
-          </div>
+        <div class="app-form__group" style="max-width:360px; margin-bottom:16px;">
+          <label class="app-form__label" for="id_name">タグ名</label>
+          <input type="text" id="id_name" name="name" value="{{ search_name }}" class="app-input">
+        </div>
 
+        {# 「絞り込み」と「ソート」の折りたたみを横並びに（キャンペーン一覧と同構造、左右均等50%配分）。 #}
+        <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:flex-start; margin-bottom:16px;">
           {# 絞り込み（トグル群：タグカテゴリ＋状態）。初期閉。 #}
-          <div class="app-collapsible app-person-filter-collapsible">
+          <div class="app-collapsible app-person-filter-collapsible" style="flex:1 1 320px; min-width:280px;">
             <button type="button" class="app-collapsible__header" data-action="toggle-collapsible"
                     aria-expanded="false">
               <span>絞り込み</span>
@@ -101,7 +102,9 @@
           </div>
 
           {# ソート（折りたたみ・指定があれば開く）。 #}
-          {% include "tags/_sort_control.html" %}
+          <div style="flex:1 1 320px; min-width:280px;">
+            {% include "tags/_sort_control.html" %}
+          </div>
         </div>
 
         <div class="app-action-area app-action-area--search">
