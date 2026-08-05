@@ -15,7 +15,8 @@ from django.contrib.auth.decorators import login_required, permission_required
 from django.contrib.auth.mixins import LoginRequiredMixin, PermissionRequiredMixin
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Q, Value
+from django.db.models.functions import Replace
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse, reverse_lazy
@@ -883,8 +884,14 @@ def _apply_sort_to_members(qs, params):
     return qs.order_by(prefix + field, "pk")
 
 
+def _clean_search_query(val):
+    if not val:
+        return ""
+    return val.replace("　", "").replace(" ", "").strip()
+
+
 def _apply_person_text_filters(qs, params):
-    """SEARCH_PARAMS の 7 項目を Person QuerySet に icontains で適用する（status は触らない）。
+    """SEARCH_PARAMS の 7 項目を Person QuerySet に icontains で適用する（status は触らない、5 項目スペース正規化）。
 
     [性質] 純関数（QuerySet を加工して返すのみ、DB 操作なし）
     [入力] qs: QuerySet[Person]、params: QueryDict 様
@@ -894,21 +901,50 @@ def _apply_person_text_filters(qs, params):
     使わずに本ヘルパーで text 7 項目のみ絞り込む。search_persons は status を
     一緒に扱うため remove のセマンティクスと合わない。
     """
-    name = (params.get("name") or "").strip()
+    name = _clean_search_query(params.get("name"))
     if name:
-        qs = qs.filter(primary_contact__full_name__icontains=name)
-    organization = (params.get("organization") or "").strip()
+        qs = qs.annotate(
+            _clean_full_name=Replace(
+                Replace("primary_contact__full_name", Value("　"), Value("")),
+                Value(" "),
+                Value(""),
+            )
+        ).filter(_clean_full_name__icontains=name)
+
+    organization = _clean_search_query(params.get("organization"))
     if organization:
-        qs = qs.filter(primary_contact__organization__icontains=organization)
-    department = (params.get("department") or "").strip()
+        qs = qs.annotate(
+            _clean_organization=Replace(
+                Replace("primary_contact__organization", Value("　"), Value("")),
+                Value(" "),
+                Value(""),
+            )
+        ).filter(_clean_organization__icontains=organization)
+
+    department = _clean_search_query(params.get("department"))
     if department:
-        qs = qs.filter(primary_contact__department__icontains=department)
-    title = (params.get("title") or "").strip()
+        qs = qs.annotate(
+            _clean_department=Replace(
+                Replace("primary_contact__department", Value("　"), Value("")),
+                Value(" "),
+                Value(""),
+            )
+        ).filter(_clean_department__icontains=department)
+
+    title = _clean_search_query(params.get("title"))
     if title:
-        qs = qs.filter(primary_contact__title__icontains=title)
+        qs = qs.annotate(
+            _clean_title=Replace(
+                Replace("primary_contact__title", Value("　"), Value("")),
+                Value(" "),
+                Value(""),
+            )
+        ).filter(_clean_title__icontains=title)
+
     email = (params.get("email") or "").strip()
     if email:
         qs = qs.filter(primary_contact__email__icontains=email)
+
     tel = (params.get("tel") or "").strip()
     if tel:
         qs = qs.filter(
@@ -916,9 +952,17 @@ def _apply_person_text_filters(qs, params):
             | Q(primary_contact__mobile_phone__icontains=tel)
             | Q(primary_contact__personal_fax__icontains=tel)
         )
-    address = (params.get("address") or "").strip()
+
+    address = _clean_search_query(params.get("address"))
     if address:
-        qs = qs.filter(primary_contact__address__icontains=address)
+        qs = qs.annotate(
+            _clean_address=Replace(
+                Replace("primary_contact__address", Value("　"), Value("")),
+                Value(" "),
+                Value(""),
+            )
+        ).filter(_clean_address__icontains=address)
+
     return qs
 
 

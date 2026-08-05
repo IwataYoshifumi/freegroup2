@@ -19,7 +19,8 @@ from django.contrib.auth.mixins import LoginRequiredMixin, PermissionRequiredMix
 from django.core.exceptions import ValidationError
 from django.core.files.base import ContentFile
 from django.db import transaction
-from django.db.models import Count, Exists, Max, OuterRef, Q
+from django.db.models import Count, Exists, Max, OuterRef, Q, Value
+from django.db.models.functions import Replace
 from django.http import Http404, HttpResponse, HttpResponseRedirect, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -1310,16 +1311,53 @@ class CardListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
         )
 
         p = self.request.GET
-        if p.get("name", "").strip():
-            qs = qs.filter(contact__full_name__icontains=p["name"].strip())
-        if p.get("organization", "").strip():
-            qs = qs.filter(contact__organization__icontains=p["organization"].strip())
-        if p.get("department", "").strip():
-            qs = qs.filter(contact__department__icontains=p["department"].strip())
-        if p.get("title", "").strip():
-            qs = qs.filter(contact__title__icontains=p["title"].strip())
+
+        def _clean_q(val):
+            return (val or "").replace("　", "").replace(" ", "").strip()
+
+        name_q = _clean_q(p.get("name"))
+        if name_q:
+            qs = qs.annotate(
+                _clean_full_name=Replace(
+                    Replace("contact__full_name", Value("　"), Value("")),
+                    Value(" "),
+                    Value(""),
+                )
+            ).filter(_clean_full_name__icontains=name_q)
+
+        org_q = _clean_q(p.get("organization"))
+        if org_q:
+            qs = qs.annotate(
+                _clean_organization=Replace(
+                    Replace("contact__organization", Value("　"), Value("")),
+                    Value(" "),
+                    Value(""),
+                )
+            ).filter(_clean_organization__icontains=org_q)
+
+        dept_q = _clean_q(p.get("department"))
+        if dept_q:
+            qs = qs.annotate(
+                _clean_department=Replace(
+                    Replace("contact__department", Value("　"), Value("")),
+                    Value(" "),
+                    Value(""),
+                )
+            ).filter(_clean_department__icontains=dept_q)
+
+        title_q = _clean_q(p.get("title"))
+        if title_q:
+            qs = qs.annotate(
+                _clean_title=Replace(
+                    Replace("contact__title", Value("　"), Value("")),
+                    Value(" "),
+                    Value(""),
+                )
+            ).filter(_clean_title__icontains=title_q)
+
         if p.get("email", "").strip():
             qs = qs.filter(contact__email__icontains=p["email"].strip())
+
         if p.get("tel", "").strip():
             tel = p["tel"].strip()
             qs = qs.filter(
@@ -1327,8 +1365,16 @@ class CardListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
                 | Q(contact__mobile_phone__icontains=tel)
                 | Q(contact__personal_fax__icontains=tel)
             )
-        if p.get("address", "").strip():
-            qs = qs.filter(contact__address__icontains=p["address"].strip())
+
+        addr_q = _clean_q(p.get("address"))
+        if addr_q:
+            qs = qs.annotate(
+                _clean_address=Replace(
+                    Replace("contact__address", Value("　"), Value("")),
+                    Value(" "),
+                    Value(""),
+                )
+            ).filter(_clean_address__icontains=addr_q)
 
         # 取り込み期間フィルタ：元画像（OriginalImage）のアップロード日時 = created_at で範囲絞り。
         # 日付入力（YYYY-MM-DD）の日単位で両端含む。片側のみ・両方空（フィルタなし）も許容。
