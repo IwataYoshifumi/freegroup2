@@ -55,8 +55,8 @@
 
       {# 「状態で絞り込み」と「ソート」の折りたたみを横並びに（HIG 第6章・縦積みで横長にしない）。 #}
       <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:flex-start;">
-        {# 状態の絞り込み（トグル・複数選択、HIG 4.1）。ラベルは体言「状態」。幅は中身に合わせる（§7）。 #}
-        <div class="app-collapsible app-person-filter-collapsible" style="flex:0 1 auto;">
+        {# 状態の絞り込み（トグル・複数選択、HIG 4.1）。ラベルは体言「状態」。左右のパネル幅を統一（flex:1 1 320px; min-width:280px;）。 #}
+        <div class="app-collapsible app-person-filter-collapsible" style="flex:1 1 320px; min-width:280px;">
           <button type="button" class="app-collapsible__header" data-action="toggle-collapsible"
                   aria-expanded="false">
             <span>状態</span>
