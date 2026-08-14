@@ -1974,8 +1974,8 @@ class NewListConfirmViewTests(_NewListWizardTestBase):
         resp = self.client.post(self.url_confirm)
         self.assertEqual(resp.status_code, 405)
 
-    def test_renders_only_count_no_person_list(self):
-        """1-D は Person 列を表示しない（§4.5.4 / §9.2-42）。"""
+    def test_renders_count_and_person_list(self):
+        """1-D は対象者一覧テーブルを表示する（確認画面への対象者一覧追加により変更）。"""
         p = self._make_person("VisibleName")
         self._put_session(
             name="L1",
@@ -1987,8 +1987,8 @@ class NewListConfirmViewTests(_NewListWizardTestBase):
         body = resp.content.decode("utf-8")
         # 件数バッジは出る
         self.assertIn("対象 1 件でリストを作成します", body)
-        # Person 名は出さない（一覧テーブルがない）
-        self.assertNotIn("VisibleName", body)
+        # Person 名（VisibleName）が表示されること
+        self.assertIn("VisibleName", body)
         # 説明文は業務語（対象パーソン）で、英字 Person を出さない（HIG v1.4 原則4）
         self.assertIn("対象パーソン", body)
         self.assertNotIn("対象 Person", body)
@@ -7373,6 +7373,230 @@ class CampaignCleanTests(_PhaseBTestBase):
         c.mailing_list = None
         c.clean()  # raise しないこと
 
+    def test_scheduled_with_empty_subject_raises(self):
+        c = self.campaign
+        c.status = Campaign.Status.SCHEDULED
+        c.scheduled_at = timezone.now() + timedelta(hours=1)
+        c.template.subject = "   "
+        with self.assertRaises(ValidationError) as ctx:
+            c.clean()
+        self.assertIn("subject", ctx.exception.message_dict)
+        self.assertEqual(ctx.exception.message_dict["subject"], ["件名が未入力です"])
+        self.assertNotIn("body", ctx.exception.message_dict)
+
+    def test_scheduled_with_empty_body_raises(self):
+        c = self.campaign
+        c.status = Campaign.Status.SCHEDULED
+        c.scheduled_at = timezone.now() + timedelta(hours=1)
+        c.template.body = "　\n"
+        with self.assertRaises(ValidationError) as ctx:
+            c.clean()
+        self.assertIn("body", ctx.exception.message_dict)
+        self.assertEqual(ctx.exception.message_dict["body"], ["本文が未入力です"])
+        self.assertNotIn("subject", ctx.exception.message_dict)
+
+    def test_scheduled_with_both_subject_and_body_empty_raises(self):
+        c = self.campaign
+        c.status = Campaign.Status.SCHEDULED
+        c.scheduled_at = timezone.now() + timedelta(hours=1)
+        c.template.subject = ""
+        c.template.body = ""
+        with self.assertRaises(ValidationError) as ctx:
+            c.clean()
+        self.assertIn("subject", ctx.exception.message_dict)
+        self.assertIn("body", ctx.exception.message_dict)
+        self.assertEqual(ctx.exception.message_dict["subject"], ["件名が未入力です"])
+        self.assertEqual(ctx.exception.message_dict["body"], ["本文が未入力です"])
+
+    def test_scheduled_with_valid_subject_and_body_passes(self):
+        c = self.campaign
+        c.status = Campaign.Status.SCHEDULED
+        c.scheduled_at = timezone.now() + timedelta(hours=1)
+        c.template.subject = "テスト件名"
+        c.template.body = "テスト本文"
+        c.clean()  # raise しないこと
+
+
+class CampaignChecklistTests(_PhaseBTestBase):
+    """進捗チェックリストの完了判定プロパティおよび予約ボタン状態のテスト（フェーズ2）。"""
+
+    def test_all_required_steps_incomplete(self):
+        c = self.campaign
+        c.mailing_list = None
+        c.template.subject = ""
+        c.template.body = ""
+        c.scheduled_at = None
+
+        self.assertFalse(c.is_mailing_list_ready)
+        self.assertFalse(c.is_template_ready)
+        self.assertFalse(c.is_schedule_ready)
+        self.assertFalse(c.is_ready_to_schedule)
+        self.assertEqual(
+            c.missing_required_steps, ["宛先リスト", "メール内容", "配信スケジュール"]
+        )
+
+    def test_mailing_list_ready(self):
+        c = self.campaign
+        c.mailing_list = self.mailing_list
+        c.template.subject = ""
+        c.template.body = ""
+        c.scheduled_at = None
+
+        self.assertTrue(c.is_mailing_list_ready)
+        self.assertFalse(c.is_template_ready)
+        self.assertFalse(c.is_schedule_ready)
+        self.assertFalse(c.is_ready_to_schedule)
+        self.assertEqual(c.missing_required_steps, ["メール内容", "配信スケジュール"])
+
+    def test_template_ready(self):
+        c = self.campaign
+        c.mailing_list = None
+        c.template.subject = "件名あり"
+        c.template.body = "本文あり"
+        c.scheduled_at = None
+
+        self.assertFalse(c.is_mailing_list_ready)
+        self.assertTrue(c.is_template_ready)
+        self.assertFalse(c.is_schedule_ready)
+        self.assertFalse(c.is_ready_to_schedule)
+        self.assertEqual(c.missing_required_steps, ["宛先リスト", "配信スケジュール"])
+
+    def test_schedule_ready(self):
+        c = self.campaign
+        c.mailing_list = None
+        c.template.subject = ""
+        c.template.body = ""
+        c.scheduled_at = timezone.now() + timedelta(hours=1)
+
+        self.assertFalse(c.is_mailing_list_ready)
+        self.assertFalse(c.is_template_ready)
+        self.assertTrue(c.is_schedule_ready)
+        self.assertFalse(c.is_ready_to_schedule)
+        self.assertEqual(c.missing_required_steps, ["宛先リスト", "メール内容"])
+
+    def test_all_required_steps_complete(self):
+        c = self.campaign
+        c.mailing_list = self.mailing_list
+        c.template.subject = "件名あり"
+        c.template.body = "本文あり"
+        c.scheduled_at = timezone.now() + timedelta(hours=1)
+
+        self.assertTrue(c.is_mailing_list_ready)
+        self.assertTrue(c.is_template_ready)
+        self.assertTrue(c.is_schedule_ready)
+        self.assertTrue(c.is_ready_to_schedule)
+        self.assertEqual(c.missing_required_steps, [])
+
+    def test_past_scheduled_at_is_not_ready(self):
+        c = self.campaign
+        c.mailing_list = self.mailing_list
+        c.template.subject = "件名あり"
+        c.template.body = "本文あり"
+        c.scheduled_at = timezone.now() - timedelta(hours=1)
+
+        self.assertFalse(c.is_schedule_ready)
+        self.assertFalse(c.is_ready_to_schedule)
+        self.assertEqual(c.missing_required_steps, ["配信スケジュール"])
+
+    def test_detail_view_renders_checklist_and_disabled_schedule_button(self):
+        c = self.campaign
+        c.mailing_list = None
+        c.scheduled_at = None
+        c.save()
+
+        self.client.force_login(self.user)
+        response = self.client.get(reverse("mailings:campaign_detail", kwargs={"pk": c.pk}))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "作成進捗チェックリスト")
+        self.assertContains(response, 'disabled title="必須項目が未完了のため予約できません"')
+        self.assertContains(response, "『宛先リスト』")
+        self.assertContains(response, "『配信スケジュール』")
+
+    def test_detail_view_renders_enabled_schedule_button_when_complete(self):
+        c = self.campaign
+        c.mailing_list = self.mailing_list
+        c.template.subject = "件名"
+        c.template.body = "本文"
+        c.template.save()
+        c.scheduled_at = timezone.now() + timedelta(hours=1)
+        c.save()
+
+        self.client.force_login(self.user)
+        response = self.client.get(reverse("mailings:campaign_detail", kwargs={"pk": c.pk}))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "✅ 予約可能")
+        self.assertContains(response, 'data-target="scheduleConfirmModal"')
+        self.assertNotContains(response, 'disabled title="必須項目が未完了のため予約できません"')
+
+
+class SelectMailingListForCampaignTests(_PhaseBTestBase):
+    """既存リスト選択（select_for_campaign）フローの表示・紐づけPOSTテスト。"""
+
+    def test_list_view_select_for_campaign_mode(self):
+        self.client.force_login(self.user)
+        response = self.client.get(
+            reverse("mailings:mailing_list_list") + f"?select_for_campaign={self.campaign.pk}"
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            f"キャンペーン「{self.campaign.name}」に紐づけるリストを一覧から選択してください。",
+        )
+        self.assertNotContains(response, "新規リスト作成")
+        self.assertContains(response, f"select_for_campaign={self.campaign.pk}")
+
+    def test_detail_view_select_for_campaign_mode(self):
+        self.client.force_login(self.user)
+        response = self.client.get(
+            reverse("mailings:mailing_list_detail", kwargs={"pk": self.mailing_list.pk})
+            + f"?select_for_campaign={self.campaign.pk}"
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "このリストを紐づける")
+        self.assertNotContains(response, "メンバーを追加")
+
+    def test_link_existing_post_success(self):
+        self.client.force_login(self.user)
+        self.campaign.mailing_list = None
+        self.campaign.save()
+
+        url = (
+            reverse("mailings:mailing_list_detail", kwargs={"pk": self.mailing_list.pk})
+            + f"?select_for_campaign={self.campaign.pk}"
+        )
+        response = self.client.post(url, {"action": "link_existing"})
+        self.assertRedirects(
+            response,
+            reverse("mailings:campaign_detail", kwargs={"pk": self.campaign.pk}),
+        )
+        self.campaign.refresh_from_db()
+        self.assertEqual(self.campaign.mailing_list, self.mailing_list)
+
+    def test_link_existing_post_fails_when_campaign_not_draft(self):
+        self.client.force_login(self.user)
+        self.campaign.status = Campaign.Status.SCHEDULED
+        self.campaign.scheduled_at = timezone.now() + timedelta(hours=1)
+        self.campaign.save()
+
+        url = (
+            reverse("mailings:mailing_list_detail", kwargs={"pk": self.mailing_list.pk})
+            + f"?select_for_campaign={self.campaign.pk}"
+        )
+        response = self.client.post(url, {"action": "link_existing"})
+        self.assertRedirects(response, reverse("mailings:campaign_list"))
+
+    def test_link_existing_post_fails_when_mailing_list_archived(self):
+        self.client.force_login(self.user)
+        self.mailing_list.is_archived = True
+        self.mailing_list.save()
+
+        url = (
+            reverse("mailings:mailing_list_detail", kwargs={"pk": self.mailing_list.pk})
+            + f"?select_for_campaign={self.campaign.pk}"
+        )
+        response = self.client.post(url, {"action": "link_existing"})
+        self.assertRedirects(response, url)
+
 
 class CreateCampaignWithTemplateTests(_PhaseBTestBase):
     """create_campaign_with_template の atomic 性（(b) §5.1、Service 層）。"""
@@ -7584,16 +7808,18 @@ class CampaignDetailViewTests(_PhaseBTestBase):
         self.assertIn("基本情報", body)
         self.assertIn("メール内容", body)
         self.assertIn("宛先", body)
-        # draft なので「予約する」「削除」「基本情報を編集」が出る
+        # draft なので「予約する」「基本情報から編集」が出る
         self.assertIn("予約する", body)
-        self.assertIn("基本情報を編集", body)
-        self.assertIn("削除", body)
+        self.assertIn("基本情報から編集", body)
 
     def test_archived_campaign_returns_404(self):
         self.campaign.is_archived = True
         self.campaign.save(update_fields=["is_archived"])
         response = self.client.get(self._detail_url())
-        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.status_code, 200)
+        body = response.content.decode("utf-8")
+        self.assertIn("アーカイブ済み", body)
+        self.assertNotIn("基本情報から編集", body)
 
     def test_scheduled_status_shows_cancel_button_only(self):
         self.campaign.status = Campaign.Status.SCHEDULED
@@ -7680,7 +7906,7 @@ class CampaignArchiveViewTests(_PhaseBTestBase):
     def test_get_renders_confirm(self):
         response = self.client.get(self._url())
         self.assertEqual(response.status_code, 200)
-        self.assertIn("削除する", response.content.decode("utf-8"))
+        self.assertIn("アーカイブする", response.content.decode("utf-8"))
 
     def test_post_archives_and_redirects_to_list(self):
         response = self.client.post(self._url())
@@ -7808,12 +8034,12 @@ class NewListWizardCampaignLinkTests(_PhaseBTestBase):
 
 
 class CampaignDetailNewListButtonTests(_PhaseBTestBase):
-    """campaign_detail.html で draft のときだけ「新規リストを作成して紐づける」ボタンが出る。"""
+    """campaign_detail.html で draft のときだけ「新規作成」ボタンが出る。"""
 
     def test_draft_shows_button(self):
         response = self.client.get(f"/mailings/campaigns/{self.campaign.pk}/")
         body = response.content.decode("utf-8")
-        self.assertIn("新規リストを作成して紐づける", body)
+        self.assertIn("新規作成", body)
         self.assertIn(f"?campaign={self.campaign.pk}", body)
 
     def test_scheduled_hides_button(self):
@@ -7822,7 +8048,7 @@ class CampaignDetailNewListButtonTests(_PhaseBTestBase):
         self.campaign.save(update_fields=["status", "scheduled_at"])
         response = self.client.get(f"/mailings/campaigns/{self.campaign.pk}/")
         body = response.content.decode("utf-8")
-        self.assertNotIn("新規リストを作成して紐づける", body)
+        self.assertNotIn(f"new_list_meta?campaign={self.campaign.pk}", body)
 
 
 class Phase7ViewAuthorizationTests(TestCase):
@@ -8441,10 +8667,10 @@ class V16ListSearchAndSidebarSmokeTests(TestCase):
 
     # ---- 第3弾：用語統一・状態トグル ----
     def test_suppressed_list_title_renamed(self):
-        # 用語統一：ページタイトル・サイドバーとも「配信拒否リスト」（§5、HIG 3.8）。
+        # 用語統一：ページタイトル・サイドバーとも「メール不達先リスト」。
         r = self.client.get(reverse("mailings:suppressed_list"))
         self.assertEqual(r.status_code, 200)
-        self.assertContains(r, "配信拒否リスト")          # ページ見出し
+        self.assertContains(r, "メール不達先リスト")          # ページ見出し
         self.assertNotContains(r, "配信停止リスト")        # 旧称はサイドバー含め消える
 
     def test_mailing_list_status_frozen_filter(self):
@@ -8469,7 +8695,7 @@ class V16ListSearchAndSidebarSmokeTests(TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertContains(r, "js-msort-control")   # ソート折りたたみ
         # 第8弾：テキスト（リスト名）は折りたたみの外、状態トグルは「状態」折りたたみの中。
-        self.assertContains(r, "app-search-grid")    # テキスト欄は折りたたみの外
+        self.assertContains(r, "app-form-grid-edit")    # テキスト欄は折りたたみの外
         self.assertContains(r, 'value="frozen"')     # 状態トグル（凍結）
 
     # ---- 第8弾：一覧3画面の構造そろえ（テキスト外・トグル内の状態折りたたみ・初期閉・横並び） ----
@@ -8477,8 +8703,8 @@ class V16ListSearchAndSidebarSmokeTests(TestCase):
         r = self.client.get(reverse(url_name))
         self.assertEqual(r.status_code, 200)
         body = r.content.decode("utf-8")
-        # テキスト欄は折りたたみの外（app-search-grid 行）。
-        self.assertIn("app-search-grid", body)
+        # テキスト欄は折りたたみの外（app-form-grid-edit 行）。
+        self.assertIn("app-form-grid-edit", body)
         # トグル絞り込みの折りたたみは初期閉（aria-expanded="false" / ▸）。
         self.assertIn('aria-expanded="false"', body)
         self.assertNotIn("app-person-filter-collapsible is-open", body)
@@ -8509,11 +8735,10 @@ class V16ListSearchAndSidebarSmokeTests(TestCase):
         self.assertEqual(r.status_code, 200)
         for label in (
             "キャンペーン概要",
-            "予約配信日時",
             "宛先リスト",
-            "送信元",
             "配信件数",
             "作成者 / 作成日時",
+            "配信スケジュール",
         ):
             self.assertContains(r, label)
         self.assertContains(r, "春キャンペーン")   # キャンペーン名が概要に出る

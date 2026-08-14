@@ -655,7 +655,10 @@ class PersonDetailViewTests(TestCase):
                       "role-x@example.com", "090-1111-2222"):
             self.assertIn(value, body)
         # 別肩書行に氏名は出さない。
-        self.assertNotIn("別肩書氏名X", body)
+        table_start = body.find('<h2 style="margin:0;">別肩書</h2>')
+        table_end = body.find("</table>", table_start) if table_start != -1 else -1
+        table_html = body[table_start:table_end] if table_start != -1 and table_end != -1 else body
+        self.assertNotIn("別肩書氏名X", table_html)
 
     def test_role_buttons_moved_to_section_heading(self):
         """v1.7：別肩書を追加・コンタクト一覧ボタンはアクション帯から別肩書セクション

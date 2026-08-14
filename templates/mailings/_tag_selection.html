@@ -37,7 +37,7 @@ JS フック予約：
     mode 別ヘッダ：create はリスト名・備考表示、add_by_tag は緑バナー、remove_by_tag は β-3b で実装
   {% endcomment %}
   {% if mode == 'create' %}
-    <div class="app-page-header">
+    <div class="app-page-header" style="max-width: 1100px; margin-left: 0; margin-right: auto;">
       <div>
         <h1>リスト作成（2/3）タグで対象を選ぶ</h1>
         <div style="margin-top:4px; color:#475569;">
@@ -50,7 +50,7 @@ JS フック予約：
       </div>
     </div>
 
-    <section class="app-card">
+    <section class="app-card" style="max-width: 1100px; margin-left: 0; margin-right: auto;">
       <h2 style="margin-bottom:8px;">リスト本体</h2>
       <dl style="display:grid; grid-template-columns:auto 1fr; gap:4px 12px; margin:0;">
         <dt style="color:#64748b;">リスト名</dt>
@@ -60,7 +60,7 @@ JS フック予約：
       </dl>
     </section>
   {% elif mode == 'add_by_tag' %}
-    <div class="app-page-header">
+    <div class="app-page-header" style="max-width: 1100px; margin-left: 0; margin-right: auto;">
       <div>
         <h1>タグで追加：{{ mailing_list.name }}（現在 {{ current_member_count }} 件）</h1>
         <div class="app-message app-message--success" style="margin-top:8px;">
@@ -73,7 +73,7 @@ JS フック予約：
       </div>
     </div>
   {% elif mode == 'remove_by_tag' %}
-    <div class="app-page-header">
+    <div class="app-page-header" style="max-width: 1100px; margin-left: 0; margin-right: auto;">
       <div>
         <h1>タグで除外：{{ mailing_list.name }}（現在 {{ current_member_count }} 件）</h1>
         <div class="app-message app-message--error" style="margin-top:8px;">
@@ -88,7 +88,7 @@ JS フック予約：
   {% endif %}
 
   {% if messages %}
-    <section class="app-card">
+    <section class="app-card" style="max-width: 1100px; margin-left: 0; margin-right: auto;">
       {% for message in messages %}
         <div class="app-message{% if message.tags %} app-message--{{ message.tags }}{% endif %}">{{ message }}</div>
       {% endfor %}
@@ -99,6 +99,7 @@ JS フック予約：
     条件ビルダー本体（mode 共通の DOM 骨格、JS フック予約済み）
   {% endcomment %}
   <section class="app-card"
+           style="max-width: 1100px; margin-left: 0; margin-right: auto;"
            data-tag-selection-root
            data-mode="{{ mode }}"
            data-preview-url="{{ preview_url }}"

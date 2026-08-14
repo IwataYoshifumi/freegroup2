@@ -4,7 +4,7 @@
 {% block title %}リスト作成（1/3 リスト名・備考）— FreeGroup2{% endblock %}
 
 {% block content %}
-  <div class="app-page-header">
+  <div class="app-page-header" style="max-width: 720px; margin-left: 0; margin-right: auto;">
     <div>
       <h1>リスト作成（1/3）リスト名・備考</h1>
       <div style="margin-top:4px; color:#475569;">
@@ -17,14 +17,14 @@
   </div>
 
   {% if messages %}
-    <section class="app-card">
+    <section class="app-card" style="max-width: 720px; margin-left: 0; margin-right: auto;">
       {% for message in messages %}
         <div class="app-message{% if message.tags %} app-message--{{ message.tags }}{% endif %}">{{ message }}</div>
       {% endfor %}
     </section>
   {% endif %}
 
-  <section class="app-card">
+  <section class="app-card" style="max-width: 720px; margin-left: 0; margin-right: auto;">
     <form method="post" action="{% url 'mailings:new_list_meta' %}" class="app-form-grid-edit">
       {% csrf_token %}
       <div class="app-form-grid" style="grid-template-columns: 1fr;">

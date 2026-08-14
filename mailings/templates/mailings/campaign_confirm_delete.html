@@ -1,12 +1,12 @@
 {% extends "mailings/app_base.html" %}
 {% load back_tags %}
 
-{% block title %}キャンペーン削除確認 — {{ campaign.name }}{% endblock %}
+{% block title %}キャンペーンアーカイブ確認 — {{ campaign.name }}{% endblock %}
 
 {% block content %}
   <div class="app-page-header">
     <div>
-      <h1>キャンペーン削除：{{ campaign.name }}</h1>
+      <h1>キャンペーンアーカイブ：{{ campaign.name }}</h1>
     </div>
     <div class="app-page-header__actions">
       {% back_all_link back %}
@@ -14,15 +14,15 @@
     </div>
   </div>
 
-  <section class="app-card" style="max-width: 640px; margin: 0 auto;">
-    <p>このキャンペーンを削除します。<strong>元に戻すことはできません</strong>。紐づくメール本文も同時に削除扱いになります。</p>
+  <section class="app-card" style="max-width: 640px; margin-left: 0; margin-right: auto;">
+    <p>このキャンペーンをアーカイブします。紐づくメール本文も同時にアーカイブ扱いになります。</p>
 
     <form method="post" style="margin-top:16px;">
       {% csrf_token %}
       <div class="app-action-area">
         {% back_all_link back %}
         {% back_link back %}
-        <button type="submit" class="app-btn app-btn--danger">削除する</button>
+        <button type="submit" class="app-btn app-btn--warning">アーカイブする</button>
       </div>
     </form>
   </section>

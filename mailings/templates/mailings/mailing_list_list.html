@@ -1,12 +1,24 @@
 {% extends "mailings/app_base.html" %}
 {% load back_tags %}
 
-{% block title %}配信リスト一覧 — FreeGroup2{% endblock %}
+{% block title %}
+  {% if select_for_campaign %}
+    キャンペーン（配信リスト選択） — FreeGroup2
+  {% else %}
+    配信リスト一覧 — FreeGroup2
+  {% endif %}
+{% endblock %}
 
 {% block content %}
   <div class="app-page-header" style="max-width:1100px;">
     <div>
-      <h1>配信リスト一覧</h1>
+      <h1>
+        {% if select_for_campaign %}
+          キャンペーン（配信リスト選択）
+        {% else %}
+          配信リスト一覧
+        {% endif %}
+      </h1>
     </div>
     {# 戻る導線は右上（HIG 3.2 / 付録）。 #}
     <div class="app-page-header__actions">
@@ -16,11 +28,16 @@
   </div>
 
   {# 遷移導線（新規作成）はタイトル直下・左寄せに集約（HIG 3.1 / 7.3、「＋」除去）。 #}
-  <div class="app-action-area" style="justify-content:flex-start; margin-bottom:16px; max-width:1100px;">
-    {# 旧 mailing_list_create (単一画面 CreateView) は View/URL/テスト残置、リンクのみウィザード入口に張替 #}
-    {% url 'mailings:new_list_meta' as create_url %}
-    <a href="{% append_back_url create_url back %}" class="app-btn app-btn--primary">新規リスト作成</a>
-  </div>
+  {% if select_for_campaign %}
+    <div class="app-message app-message--info" style="margin-bottom:16px; max-width:1100px;">
+      キャンペーン「{{ select_for_campaign.name }}」に紐づけるリストを一覧から選択してください。
+    </div>
+  {% else %}
+    <div class="app-action-area" style="justify-content:flex-start; margin-bottom:16px; max-width:1100px;">
+      {% url 'mailings:new_list_meta' as create_url %}
+      <a href="{% append_back_url create_url back %}" class="app-btn app-btn--primary">新規リスト作成</a>
+    </div>
+  {% endif %}
 
   {% comment %}
     検索フォーム（HIG 第6章・キャンペーン一覧と同構造／§2）：
@@ -30,6 +47,9 @@
   <section class="app-card" style="margin-bottom:16px; max-width:1100px;">
     <form method="get" class="app-form-grid-edit">
       <input type="hidden" name="searched" value="1">
+      {% if select_for_campaign %}
+        <input type="hidden" name="select_for_campaign" value="{{ select_for_campaign.pk }}">
+      {% endif %}
       <div class="app-form-grid">
         <div class="app-form__group app-form__group--full">
           <label class="app-form__label" for="id_name">リスト名</label>
@@ -81,7 +101,7 @@
 
       <div class="app-action-area app-action-area--search">
         <button type="submit" class="app-btn app-btn--primary">検索</button>
-        <a href="{% url 'mailings:mailing_list_list' %}" class="app-btn app-btn--secondary">リセット</a>
+        <a href="{% url 'mailings:mailing_list_list' %}{% if select_for_campaign %}?select_for_campaign={{ select_for_campaign.pk }}{% endif %}" class="app-btn app-btn--secondary">リセット</a>
       </div>
     </form>
   </section>
@@ -113,9 +133,18 @@
               <tr>
                 <td class="app-table__col--action" style="width:130px;">
                   <div class="app-table__actions">
-                    <a href="{% append_back_url detail_url back %}" class="app-btn app-btn--outline-secondary app-btn--sm">詳細</a>
-                    {% if not ml.is_archived %}
-                      <a href="{% append_back_url update_url back %}" class="app-btn app-btn--success app-btn--sm">編集</a>
+                    {% if select_for_campaign %}
+                      {% append_back_url detail_url back as detail_back_url %}
+                      {% if "?" in detail_back_url %}
+                        <a href="{{ detail_back_url }}&select_for_campaign={{ select_for_campaign.pk }}" class="app-btn app-btn--primary app-btn--sm">選択</a>
+                      {% else %}
+                        <a href="{{ detail_back_url }}?select_for_campaign={{ select_for_campaign.pk }}" class="app-btn app-btn--primary app-btn--sm">選択</a>
+                      {% endif %}
+                    {% else %}
+                      <a href="{% append_back_url detail_url back %}" class="app-btn app-btn--outline-secondary app-btn--sm">詳細</a>
+                      {% if not ml.is_archived %}
+                        <a href="{% append_back_url update_url back %}" class="app-btn app-btn--success app-btn--sm">編集</a>
+                      {% endif %}
                     {% endif %}
                   </div>
                 </td>

@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% load back_tags %}
+
+{% block title %}署名の編集 — FreeGroup2{% endblock %}
+
+{% block app_content %}
+  <main class="app-main">
+    <div style="max-width: 800px; margin-inline: 0;">
+      <div class="app-page-header">
+        <div>
+          <h1>署名の編集</h1>
+        </div>
+        <div class="app-action-area">
+          {% back_all_link back %}
+          {% back_link back %}
+        </div>
+      </div>
+
+      {% if messages %}
+        {% for message in messages %}
+          <div class="app-alert app-alert--{% if message.tags == 'error' %}danger{% else %}info{% endif %}">
+            {{ message }}
+          </div>
+        {% endfor %}
+      {% endif %}
+
+      <section class="app-card">
+        <p class="app-muted" style="margin-bottom:16px;">
+          メール送信時の署名（プレーンテキスト、HTML タグ不可）を設定します。<br>
+          キャンペーンメールの末尾や差し込み変数 <code>{% verbatim %}{{差出人の署名}}{% endverbatim %}</code> として使用されます。
+        </p>
+
+        <form method="post" class="app-form-grid-edit">
+          {% csrf_token %}
+
+          <div class="app-form__group">
+            <label class="app-form__label" for="{{ form.signature.id_for_label }}">
+              {{ form.signature.label }}
+            </label>
+            {{ form.signature }}
+            {% if form.signature.help_text %}
+              <p class="app-muted" style="margin-top:4px; font-size:12px;">{{ form.signature.help_text }}</p>
+            {% endif %}
+            {% if form.signature.errors %}
+              <div class="app-message" style="color:var(--app-danger, #dc2626); font-size:13px; margin-top:4px;">{{ form.signature.errors }}</div>
+            {% endif %}
+          </div>
+
+          <div class="app-action-area" style="margin-top: 24px;">
+            {% back_all_link back %}
+            {% back_link back %}
+            <button type="submit" class="app-btn app-btn--primary">保存する</button>
+          </div>
+        </form>
+      </section>
+    </div>
+  </main>
+{% endblock %}
+
+{% block drawer_content %}
+  <nav>
+    <a href="{% url 'home' %}">ホーム</a>
+    <a href="{% url 'accounts:profile' %}">プロフィール</a>
+  </nav>
+{% endblock %}

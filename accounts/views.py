@@ -13,7 +13,7 @@ from back_navigator.back_navigator import BackNavigator
 from persons.models import Person
 
 from .constants import ADMIN_ROLE_CODE
-from .forms import RoleCreateForm, RoleUpdateForm
+from .forms import RoleCreateForm, RoleUpdateForm, UserSignatureForm
 from .models import CustomUser, Role
 from .services import (
     assign_role_to_user,
@@ -36,14 +36,39 @@ class ProfileView(LoginRequiredMixin, View):
     template_name = "accounts/profile.html"
 
     def get(self, request):
-        # 確認画面リンクに back_stack を引き継げるよう BackNavigator を渡す（push_current は呼ばない＝
-        # PersonDetailView 同型。プロフィールはルート画面でクエリ状態を持たないため push しない）。
-        ctx = {"back": BackNavigator(request)}
-        # 未紐付け時はホームと同一基準で候補状態を算出し、淡い青カード内の共通 partial で出し分ける。
-        # profile は 0 件状態（名刺アップロード誘導）も出すため show_no_candidate=True で include する。
+        back = BackNavigator(request)
+        back.push_current("プロフィール", ["page"])
+        ctx = {"back": back}
         if request.user.person is None:
             ctx.update(self_link_alert_context(request.user))
         return render(request, self.template_name, ctx)
+
+
+class SignatureUpdateView(LoginRequiredMixin, View):
+    """ログインユーザ自身の署名（CustomUser.signature）編集画面。"""
+
+    template_name = "accounts/signature_update.html"
+
+    def get(self, request):
+        form = UserSignatureForm(instance=request.user)
+        ctx = {
+            "form": form,
+            "back": BackNavigator(request),
+        }
+        return render(request, self.template_name, ctx)
+
+    def post(self, request):
+        form = UserSignatureForm(request.POST, instance=request.user)
+        if form.is_valid():
+            form.save()
+            messages.success(request, "署名を保存しました")
+            return redirect("accounts:profile")
+        ctx = {
+            "form": form,
+            "back": BackNavigator(request),
+        }
+        return render(request, self.template_name, ctx)
+
 
 
 class LinkUserPersonConfirmView(LoginRequiredMixin, View):

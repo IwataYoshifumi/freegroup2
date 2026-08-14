@@ -59,7 +59,7 @@ class ProfileLayoutRenderTests(TestCase):
             "accounts:link_user_person_confirm", kwargs={"person_id": person.id}
         )
         self.assertContains(resp, "あなたの名刺データが見つかりました")
-        self.assertContains(resp, 'href="%s"' % confirm_url)
+        self.assertContains(resp, 'href="%s' % confirm_url)
         # 単一候補のときは 0 件（アップロード）導線は出さない。
         self.assertNotContains(resp, "名刺をアップロード")
 

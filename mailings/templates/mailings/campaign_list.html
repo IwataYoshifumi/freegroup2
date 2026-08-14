@@ -66,6 +66,25 @@
           <div class="app-collapsible-body">
             {# ヘッダと中身の間に余白。トグルは横並び＋折り返し（flex-wrap）。 #}
             <div class="app-person-filter-box" style="margin-top:var(--app-space-sm);">
+              <div style="margin-bottom:6px; font-weight:bold; font-size:0.85em; color:var(--app-muted, #64748b);">アーカイブ状況</div>
+              <ul class="app-radio-toggle" style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px;">
+                <li>
+                  <label style="padding:5px 12px; min-height:32px;">
+                    <input type="checkbox" name="archive_status" value="active"
+                           {% if "active" in selected_archive_statuses %}checked{% endif %}>
+                    アクティブ
+                  </label>
+                </li>
+                <li>
+                  <label style="padding:5px 12px; min-height:32px;">
+                    <input type="checkbox" name="archive_status" value="archived"
+                           {% if "archived" in selected_archive_statuses %}checked{% endif %}>
+                    アーカイブ済み
+                  </label>
+                </li>
+              </ul>
+
+              <div style="margin-bottom:6px; font-weight:bold; font-size:0.85em; color:var(--app-muted, #64748b);">ステータス</div>
               <ul class="app-radio-toggle" style="display:flex; flex-wrap:wrap; gap:8px;">
                 {% for value, label in status_choices %}
                   <li>
@@ -130,7 +149,12 @@
                 {% endif %}
               </td>
               <td data-col-key="name"><a href="{% append_back_url detail_url back %}">{{ item.campaign.name }}</a></td>
-              <td data-col-key="status">{{ item.campaign.get_status_display }}</td>
+              <td data-col-key="status">
+                {{ item.campaign.get_status_display }}
+                {% if item.campaign.is_archived %}
+                  <span class="app-status-badge app-status-badge--muted" style="margin-left:4px;">アーカイブ済み</span>
+                {% endif %}
+              </td>
               <td data-col-key="total">{{ item.summary.total }}</td>
               <td data-col-key="sent">{{ item.summary.sent }}</td>
               <td data-col-key="bounced">{{ item.summary.bounced }}</td>

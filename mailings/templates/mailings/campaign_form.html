@@ -5,7 +5,7 @@
 
 {% block content %}
   {# HIG v1.3 §2.1：外側のカード枠ごと中央寄せ。視覚的に揃えるためヘッダー・メッセージも同じ max-width に揃える。 #}
-  <div class="app-page-header" style="max-width: 720px; margin: 0 auto;">
+  <div class="app-page-header" style="max-width: 720px; margin-left: 0; margin-right: auto;">
     <div>
       <h1>{% if is_create %}キャンペーン新規作成{% else %}キャンペーン編集：{{ campaign.name }}{% endif %}</h1>
     </div>
@@ -13,13 +13,13 @@
 
   {% if messages %}
     {% for message in messages %}
-      <section class="app-card" style="max-width: 720px; margin: 0 auto;">
+      <section class="app-card" style="max-width: 720px; margin-left: 0; margin-right: auto;">
         <div class="app-message">{{ message }}</div>
       </section>
     {% endfor %}
   {% endif %}
 
-  <section class="app-card" style="max-width: 720px; margin: 0 auto;">
+  <section class="app-card" style="max-width: 720px; margin-left: 0; margin-right: auto;">
     {% if is_create %}
       <p class="app-muted" style="margin-bottom:12px;">
         保存すると Campaign と空の EmailTemplate が同時に作成されます。件名・本文は詳細画面の「件名・本文を編集」から編集します。
@@ -50,7 +50,7 @@
         {% endfor %}
       </div>
 
-      <div class="app-action-area">
+      <div class="app-action-area" style="margin-top:24px;">
         {% back_all_link back %}
         {% back_link back %}
         {# HIG v1.3 §3.6：新規作成=primary(青)、既存編集の保存=success(緑) #}

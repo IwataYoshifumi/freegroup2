@@ -20,10 +20,11 @@
 
   <div class="app-user-menu" id="userMenu">
     <button type="button" class="app-topbar__user-btn" data-action="toggle-user-menu" aria-haspopup="true">
-      {{ user.username|default:"ゲスト" }}
+      {% if user.person %}{{ user.person }}{% else %}{{ user.username|default:"ゲスト" }}{% endif %}
     </button>
     <div class="app-user-dropdown" role="menu">
       <a href="{% url 'accounts:profile' %}" role="menuitem">プロフィール</a>
+      <a href="{% url 'accounts:signature_update' %}" role="menuitem">署名を編集</a>
       {% if user.is_staff %}
         <a href="{% url 'admin:index' %}" role="menuitem">管理画面</a>
       {% endif %}

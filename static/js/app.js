@@ -64,19 +64,130 @@
     if (icon) icon.textContent = isOpen ? '▾' : '▸';
   }
 
+  // モーダルウィンドウ自体の移動（ヘッダードラッグ）およびモーダル画像パン＆ズーム（内容ドラッグ・ホイール／ピンチ拡大縮小）制御
+  let modalPanX = 0;
+  let modalPanY = 0;
+  let isPanelDragging = false;
+  let panelStartX = 0;
+  let panelStartY = 0;
+
+  let zoomScale = 1.0;
+  let imagePanX = 0;
+  let imagePanY = 0;
+  let isImageDragging = false;
+  let imageStartX = 0;
+  let imageStartY = 0;
+  let initialPinchDist = 0;
+  let initialPinchScale = 1.0;
+
+  function resetModalTransforms(modalEl) {
+    modalPanX = 0;
+    modalPanY = 0;
+    isPanelDragging = false;
+
+    zoomScale = 1.0;
+    imagePanX = 0;
+    imagePanY = 0;
+    isImageDragging = false;
+
+    if (!modalEl) return;
+    const panel = modalEl.querySelector('.app-modal__panel');
+    if (panel) {
+      panel.style.transform = 'translate(0px, 0px)';
+    }
+
+    const imgs = modalEl.querySelectorAll('.app-modal__body img, .js-image-zoom-img');
+    imgs.forEach(function (img) {
+      img.style.transform = 'translate(0px, 0px) scale(1)';
+      img.style.cursor = 'grab';
+    });
+  }
+
+  function applyPanelTransform(panel) {
+    if (!panel) return;
+    panel.style.transform = 'translate(' + modalPanX + 'px, ' + modalPanY + 'px)';
+  }
+
+  function clampPanelPan(panel) {
+    if (!panel) return;
+    const maxMoveX = Math.max(50, (window.innerWidth - 100) / 2);
+    const maxMoveY = Math.max(50, (window.innerHeight - 100) / 2);
+    // Prevent the modal header from moving behind the topbar
+    const topBarHeight = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--app-topbar-height')) || 0;
+    const minY = -(maxMoveY - topBarHeight);
+    modalPanX = Math.min(Math.max(modalPanX, -maxMoveX), maxMoveX);
+    modalPanY = Math.min(Math.max(modalPanY, minY), maxMoveY);
+  }
+
+  function applyImageTransform(img) {
+    if (!img) return;
+    img.style.transform = 'translate(' + imagePanX + 'px, ' + imagePanY + 'px) scale(' + zoomScale + ')';
+    if (zoomScale > 1.0) {
+      img.style.cursor = isImageDragging ? 'grabbing' : 'grab';
+    } else {
+      img.style.cursor = 'grab';
+    }
+  }
+
+  function clampImagePan(img) {
+    if (!img || zoomScale <= 1.0) {
+      imagePanX = 0;
+      imagePanY = 0;
+      return;
+    }
+    const rect = img.getBoundingClientRect();
+    const parent = img.parentElement;
+    if (!parent) return;
+    const parentRect = parent.getBoundingClientRect();
+
+    const unscaledW = rect.width / zoomScale;
+    const unscaledH = rect.height / zoomScale;
+
+    const maxPanX = Math.max((unscaledW * (zoomScale - 1)) / 2, (unscaledW * zoomScale - parentRect.width) / 2);
+    const maxPanY = Math.max((unscaledH * (zoomScale - 1)) / 2, (unscaledH * zoomScale - parentRect.height) / 2);
+
+    imagePanX = Math.min(Math.max(imagePanX, -maxPanX), maxPanX);
+    imagePanY = Math.min(Math.max(imagePanY, -maxPanY), maxPanY);
+  }
+
+  function getActiveModalImage(event) {
+    if (!activeModal) return null;
+    if (event && event.target) {
+      const img = event.target.closest('.app-modal__body img, .js-image-zoom-img');
+      if (img) return img;
+    }
+    return activeModal.querySelector('.app-modal__body img, .js-image-zoom-img');
+  }
+
   function openModal(event, trigger) {
-    const targetId = trigger.getAttribute('data-target');
+    const targetId = trigger ? trigger.getAttribute('data-target') : null;
     const modal = targetId ? document.getElementById(targetId) : null;
     if (!modal || !modalBackdrop) return;
+
+    if (trigger) {
+      const imgUrl = trigger.getAttribute('data-image-url') || (trigger.tagName === 'IMG' ? trigger.getAttribute('src') : null);
+      if (imgUrl) {
+        const commonImg = modal.querySelector('#commonImageModalImg');
+        if (commonImg) {
+          commonImg.src = imgUrl;
+        }
+      }
+    }
+
     activeModal = modal;
     modalBackdrop.hidden = false;
     modal.hidden = false;
+    resetModalTransforms(modal);
+
     const firstFocus = modal.querySelector('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
     if (firstFocus) firstFocus.focus();
   }
 
   function closeModal() {
-    if (activeModal) activeModal.hidden = true;
+    if (activeModal) {
+      resetModalTransforms(activeModal);
+      activeModal.hidden = true;
+    }
     if (modalBackdrop) modalBackdrop.hidden = true;
     activeModal = null;
   }
@@ -183,6 +294,174 @@
       closeUserMenu();
       closeAppMenu();
       closeModal();
+    }
+  });
+
+  // ブラウザ標準の名刺画像ネイティブドラッグ＆ドロップ動作を無効化（ポインタードラッグ優先）
+  document.addEventListener('dragstart', function (e) {
+    if (e.target && e.target.closest && e.target.closest('.app-modal img, .js-image-zoom-img')) {
+      e.preventDefault();
+    }
+  });
+
+  // モーダルウィンドウドラッグ（ヘッダー指定）および画像パン（内容ポインタードラッグ）
+  document.addEventListener('pointerdown', function (e) {
+    if (!activeModal) return;
+
+ 
+    // 手動切り出しモーダルは除外（独自のドラッグロジックがあるため）
+    if (activeModal.id === 'manualCropModal') return;
+    // ヘッダー部分をクリック・ドラッグした場合：モーダルウィンドウ枠（.app-modal__panel）を移動
+    const header = e.target.closest('.app-modal__header');
+    if (header && activeModal.contains(header)) {
+      if (e.target.closest('button, a, input, select, textarea')) return;
+      const panel = activeModal.querySelector('.app-modal__panel');
+      if (panel) {
+        isPanelDragging = true;
+        panelStartX = e.clientX - modalPanX;
+        panelStartY = e.clientY - modalPanY;
+        try { panel.setPointerCapture(e.pointerId); } catch (err) {}
+        return;
+      }
+    }
+ 
+    // 画像部分をクリック・ドラッグした場合：画像の中身をパン（拡大時移動）
+    const img = e.target.closest('.app-modal__body img, .js-image-zoom-img');
+    if (img && activeModal.contains(img)) {
+      isImageDragging = true;
+      imageStartX = e.clientX - imagePanX;
+      imageStartY = e.clientY - imagePanY;
+      try { img.setPointerCapture(e.pointerId); } catch (err) {}
+    }
+  });
+
+  document.addEventListener('pointermove', function (e) {
+    if (!activeModal) return;
+
+    if (isPanelDragging) {
+      const panel = activeModal.querySelector('.app-modal__panel');
+      if (panel) {
+        modalPanX = e.clientX - panelStartX;
+        modalPanY = e.clientY - panelStartY;
+        clampPanelPan(panel);
+        applyPanelTransform(panel);
+      }
+      return;
+    }
+
+    if (isImageDragging) {
+      const img = activeModal.querySelector('.app-modal__body img, .js-image-zoom-img');
+      if (img) {
+        imagePanX = e.clientX - imageStartX;
+        imagePanY = e.clientY - imageStartY;
+        clampImagePan(img);
+        applyImageTransform(img);
+      }
+    }
+  });
+
+  document.addEventListener('pointerup', function (e) {
+    if (isPanelDragging && activeModal) {
+      isPanelDragging = false;
+      const panel = activeModal.querySelector('.app-modal__panel');
+      if (panel) {
+        try { panel.releasePointerCapture(e.pointerId); } catch (err) {}
+      }
+    }
+    if (isImageDragging && activeModal) {
+      isImageDragging = false;
+      const img = activeModal.querySelector('.app-modal__body img, .js-image-zoom-img');
+      if (img) {
+        try { img.releasePointerCapture(e.pointerId); } catch (err) {}
+        applyImageTransform(img);
+      }
+    }
+  });
+
+  document.addEventListener('pointercancel', function () {
+    isPanelDragging = false;
+    isImageDragging = false;
+  });
+
+  // マウスホイールズーム
+  document.addEventListener('wheel', function (e) {
+    if (!activeModal) return;
+    const img = e.target.closest('.app-modal__body img, .js-image-zoom-img');
+    if (!img) return;
+
+    e.preventDefault();
+    const zoomDelta = e.deltaY < 0 ? 0.25 : -0.25;
+    let newScale = zoomScale + zoomDelta;
+    newScale = Math.min(Math.max(newScale, 1.0), 5.0);
+
+    if (newScale === 1.0) {
+      imagePanX = 0;
+      imagePanY = 0;
+    }
+    zoomScale = newScale;
+    clampImagePan(img);
+    applyImageTransform(img);
+  }, { passive: false });
+
+  // ダブルクリック切替
+  document.addEventListener('dblclick', function (e) {
+    if (!activeModal) return;
+    const img = e.target.closest('.app-modal__body img, .js-image-zoom-img');
+    if (!img) return;
+
+    if (zoomScale > 1.0) {
+      zoomScale = 1.0;
+      imagePanX = 0;
+      imagePanY = 0;
+    } else {
+      zoomScale = 2.5;
+    }
+    applyImageTransform(img);
+  });
+
+  // ピンチズーム
+  document.addEventListener('touchstart', function (e) {
+    if (!activeModal) return;
+    const img = e.target.closest('.app-modal__body img, .js-image-zoom-img');
+    if (!img) return;
+
+    if (e.touches.length === 2) {
+      isImageDragging = false;
+      initialPinchDist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      initialPinchScale = zoomScale;
+    }
+  }, { passive: true });
+
+  document.addEventListener('touchmove', function (e) {
+    if (!activeModal) return;
+    const img = activeModal.querySelector('.app-modal__body img, .js-image-zoom-img');
+    if (!img) return;
+
+    if (e.touches.length === 2 && initialPinchDist > 0) {
+      const dist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      let newScale = initialPinchScale * (dist / initialPinchDist);
+      zoomScale = Math.min(Math.max(newScale, 1.0), 5.0);
+      if (zoomScale === 1.0) {
+        panX = 0;
+        panY = 0;
+      }
+      clampPan(img);
+      applyTransform(img);
+    }
+  }, { passive: true });
+
+  document.addEventListener('touchend', function () {
+    if (activeModal) {
+      isDragging = false;
+      initialPinchDist = 0;
+      const img = getActiveModalImage();
+      if (img) applyTransform(img);
     }
   });
 })();

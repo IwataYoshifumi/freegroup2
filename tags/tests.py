@@ -275,7 +275,7 @@ class TagListViewSortTests(TestCase):
         self.assertIn("js-tag-column-toggle", body)
         self.assertIn("tag_list_visible_columns", body)
         self.assertIn('name="sort"', body)
-        self.assertIn("並び替えを適用", body)
+        self.assertIn("検索", body)
         # ソート列ドロップダウンの5選択肢
         for label in ("カテゴリ", "タグ名", "付与Person数", "作成者", "更新日時"):
             self.assertIn(label, body)
@@ -504,7 +504,7 @@ class TagListFilterTests(TestCase):
         resp = self.client.get(self.url)
         self.assertEqual(resp.status_code, 200)
         body = resp.content.decode("utf-8")
-        self.assertIn("app-search-grid", body)              # テキスト欄は折りたたみの外
+        self.assertIn("app-form-grid-edit", body)              # テキスト欄は折りたたみの外
         self.assertIn('aria-expanded="false"', body)        # 絞り込み折りたたみは初期閉
         self.assertNotIn("app-person-filter-collapsible is-open", body)
         self.assertIn("js-tag-sort-control", body)          # ソート折りたたみと同フォーム

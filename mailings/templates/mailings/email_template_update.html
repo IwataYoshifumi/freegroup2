@@ -4,27 +4,63 @@
 {% block title %}テンプレート編集 — {{ campaign.name }}{% endblock %}
 
 {% block content %}
-  <div class="app-page-header">
+  <div class="app-page-header" style="max-width: 1100px; margin-left: 0; margin-right: auto;">
     <div>
       <h1>テンプレート編集：{{ campaign.name }}</h1>
+    </div>
+    <div class="app-action-area">
+      {% back_all_link back %}
+      {% back_link back %}
     </div>
   </div>
 
   {% if messages %}
     {% for message in messages %}
-      <section class="app-card">
+      <section class="app-card" style="max-width: 1100px; margin-left: 0; margin-right: auto;">
         <div class="app-message">{{ message }}</div>
       </section>
     {% endfor %}
   {% endif %}
 
-  <section class="app-card" style="max-width: 800px; margin: 0 auto;">
+  <section id="js-template-editor-card" class="app-card" style="max-width: 1100px; margin-left: 0; margin-right: auto;">
     <p class="app-muted" style="margin-bottom:12px;">
       件名・本文はプレーンテキストで入力します（HTML タグは書きません）。本文に置ける記法は
       差し込み変数 <code>{% verbatim %}{{会社名}}{% endverbatim %}</code> 等・
       <code>{% verbatim %}{% tracked_link %}…{% endtracked_link %}{% endverbatim %}</code>・
       <code>{% verbatim %}{% unsubscribe_link %}{% endverbatim %}</code> の 3 種です。
     </p>
+
+    <style>
+      .app-floating-insert-panel {
+        position: fixed;
+        top: 100px;
+        width: 320px;
+        z-index: 900;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+        max-height: calc(100vh - 140px);
+        overflow-y: auto;
+        padding: 14px;
+        border: 1px solid var(--app-border, #cbd5e1);
+        border-radius: 8px;
+        background: #ffffff;
+      }
+      #{{ form.body.id_for_label }},
+      #{{ form.body_text.id_for_label }} {
+        min-height: 700px;
+        line-height: 1.6;
+      }
+      @media (max-width: 992px) {
+        .app-floating-insert-panel {
+          top: auto;
+          bottom: 16px;
+          right: 16px;
+          left: auto !important;
+          width: calc(100vw - 32px);
+          max-width: 360px;
+          max-height: 50vh;
+        }
+      }
+    </style>
 
     <form method="post" class="app-form-grid-edit">
       {% csrf_token %}
@@ -46,66 +82,85 @@
           {% if form.body.errors %}{{ form.body.errors }}{% endif %}
         </div>
 
-        <fieldset class="app-form__group">
-          <legend>挿入支援</legend>
-          <p class="app-muted" style="margin:4px 0 8px;">
-            差し込み変数：クリックで本文のカーソル位置に挿入します。値が空の場合、配信時に記法がそのまま残ります（Sansan 互換）。
-          </p>
-          <div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px;">
-            <strong style="width:100%;">受信者情報</strong>
-            <button type="button" class="app-btn app-btn--sm js-insert-merge" data-tag="{% verbatim %}{{会社名}}{% endverbatim %}">{% verbatim %}{{会社名}}{% endverbatim %}</button>
-            <button type="button" class="app-btn app-btn--sm js-insert-merge" data-tag="{% verbatim %}{{部署}}{% endverbatim %}">{% verbatim %}{{部署}}{% endverbatim %}</button>
-            <button type="button" class="app-btn app-btn--sm js-insert-merge" data-tag="{% verbatim %}{{役職}}{% endverbatim %}">{% verbatim %}{{役職}}{% endverbatim %}</button>
-            <button type="button" class="app-btn app-btn--sm js-insert-merge" data-tag="{% verbatim %}{{支店}}{% endverbatim %}">{% verbatim %}{{支店}}{% endverbatim %}</button>
-            <button type="button" class="app-btn app-btn--sm js-insert-merge" data-tag="{% verbatim %}{{フルネーム}}{% endverbatim %}">{% verbatim %}{{フルネーム}}{% endverbatim %}</button>
-            <button type="button" class="app-btn app-btn--sm js-insert-merge" data-tag="{% verbatim %}{{姓}}{% endverbatim %}">{% verbatim %}{{姓}}{% endverbatim %}</button>
-            <button type="button" class="app-btn app-btn--sm js-insert-merge" data-tag="{% verbatim %}{{名}}{% endverbatim %}">{% verbatim %}{{名}}{% endverbatim %}</button>
-            <button type="button" class="app-btn app-btn--sm js-insert-merge" data-tag="{% verbatim %}{{宛名}}{% endverbatim %}">{% verbatim %}{{宛名}}{% endverbatim %}</button>
-            <button type="button" class="app-btn app-btn--sm js-insert-merge" data-tag="{% verbatim %}{{住所}}{% endverbatim %}">{% verbatim %}{{住所}}{% endverbatim %}</button>
-            <button type="button" class="app-btn app-btn--sm js-insert-merge" data-tag="{% verbatim %}{{郵便番号}}{% endverbatim %}">{% verbatim %}{{郵便番号}}{% endverbatim %}</button>
-            <button type="button" class="app-btn app-btn--sm js-insert-merge" data-tag="{% verbatim %}{{メール}}{% endverbatim %}">{% verbatim %}{{メール}}{% endverbatim %}</button>
-            <button type="button" class="app-btn app-btn--sm js-insert-merge" data-tag="{% verbatim %}{{個人電話}}{% endverbatim %}">{% verbatim %}{{個人電話}}{% endverbatim %}</button>
-            <button type="button" class="app-btn app-btn--sm js-insert-merge" data-tag="{% verbatim %}{{会社電話}}{% endverbatim %}">{% verbatim %}{{会社電話}}{% endverbatim %}</button>
-            <button type="button" class="app-btn app-btn--sm js-insert-merge" data-tag="{% verbatim %}{{携帯}}{% endverbatim %}">{% verbatim %}{{携帯}}{% endverbatim %}</button>
-            <button type="button" class="app-btn app-btn--sm js-insert-merge" data-tag="{% verbatim %}{{個人FAX}}{% endverbatim %}">{% verbatim %}{{個人FAX}}{% endverbatim %}</button>
-            <button type="button" class="app-btn app-btn--sm js-insert-merge" data-tag="{% verbatim %}{{会社FAX}}{% endverbatim %}">{% verbatim %}{{会社FAX}}{% endverbatim %}</button>
-          </div>
-          <div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px;">
-            <strong style="width:100%;">差出人情報</strong>
-            <button type="button" class="app-btn app-btn--sm js-insert-merge" data-tag="{% verbatim %}{{差出人の氏名}}{% endverbatim %}">{% verbatim %}{{差出人の氏名}}{% endverbatim %}</button>
-            <button type="button" class="app-btn app-btn--sm js-insert-merge" data-tag="{% verbatim %}{{差出人の署名}}{% endverbatim %}">{% verbatim %}{{差出人の署名}}{% endverbatim %}</button>
-          </div>
-          <div style="display:flex; flex-wrap:wrap; gap:6px;">
-            <strong style="width:100%;">カスタムタグ・フッター</strong>
-            <button type="button" class="app-btn app-btn--sm" id="js-insert-tracked-link">トラッキングリンク挿入</button>
-            <button type="button" class="app-btn app-btn--sm" id="js-insert-unsubscribe-link">配信停止リンク挿入</button>
-            <button type="button" class="app-btn app-btn--sm" id="js-insert-footer">フッター挿入</button>
-          </div>
-        </fieldset>
+        <div class="app-collapsible" style="margin-top: 16px;">
+          <button type="button" class="app-collapsible__header" data-action="toggle-collapsible" aria-expanded="false">
+            <span>代替テキスト（手動編集モード時のみ手動値を使う、§4.3）</span>
+            <span class="app-collapsible__icon">▸</span>
+          </button>
+          <div class="app-collapsible-body">
+            <div class="app-form__group">
+              <label class="app-form__label" for="{{ form.body_text.id_for_label }}">
+                {{ form.body_text.label }}
+              </label>
+              {{ form.body_text }}
+              {% if form.body_text.errors %}{{ form.body_text.errors }}{% endif %}
+            </div>
 
-        <div class="app-form__group">
-          <label class="app-form__label" for="{{ form.body_text.id_for_label }}">
-            {{ form.body_text.label }}
-          </label>
-          {{ form.body_text }}
-          {% if form.body_text.errors %}{{ form.body_text.errors }}{% endif %}
+            <div class="app-form__group">
+              <label>
+                {{ form.body_text_is_manual }}
+                {{ form.body_text_is_manual.label }}
+              </label>
+              {% if form.body_text_is_manual.errors %}{{ form.body_text_is_manual.errors }}{% endif %}
+            </div>
+          </div>
         </div>
 
-        <div class="app-form__group">
-          <label>
-            {{ form.body_text_is_manual }}
-            {{ form.body_text_is_manual.label }}
-          </label>
-          {% if form.body_text_is_manual.errors %}{{ form.body_text_is_manual.errors }}{% endif %}
+        <div class="app-action-area">
+          {% back_all_link back %}
+          {% back_link back %}
+          <button type="submit" name="action" value="save_return" class="app-btn app-btn--primary">保存して戻る</button>
+          <button type="submit" name="action" value="preview" class="app-btn app-btn--secondary">プレビュー</button>
         </div>
-      </div>
-
-      <div class="app-action-area">
-        <button type="submit" name="action" value="save_return" class="app-btn app-btn--primary">保存して戻る</button>
-        <button type="submit" name="action" value="preview" class="app-btn app-btn--secondary">プレビュー</button>
-        <a class="app-btn" href="{% url 'mailings:campaign_list' %}">戻る</a>
       </div>
     </form>
+
+    {# 右側独立フローティングパネル：挿入支援 #}
+    <div id="js-floating-insert-panel" class="app-floating-insert-panel">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; padding-bottom:6px; border-bottom:1px solid var(--app-border, #e2e8f0);">
+        <strong style="font-size:13px; color:var(--app-text, #1e293b); display:flex; align-items:center; gap:6px;">
+          <i class="bi bi-magic" style="color:#0284c7;"></i> 挿入支援
+        </strong>
+        <button type="button" id="js-toggle-insert-panel" class="app-icon-btn" style="color:var(--app-muted, #64748b); font-size:14px;" title="折りたたみ / 展開" aria-expanded="true">
+          <i class="bi bi-chevron-up"></i>
+        </button>
+      </div>
+      <div id="js-insert-panel-body">
+        <p class="app-muted" style="margin:0 0 10px; font-size:11px; line-height:1.4;">
+          クリックで本文のカーソル位置に挿入します。
+        </p>
+        <div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px;">
+          <strong style="width:100%; font-size:11px; color:var(--app-muted,#64748b);">受信者情報</strong>
+          <button type="button" class="app-btn app-btn--sm js-insert-merge" data-tag="{% verbatim %}{{会社名}}{% endverbatim %}">{% verbatim %}{{会社名}}{% endverbatim %}</button>
+          <button type="button" class="app-btn app-btn--sm js-insert-merge" data-tag="{% verbatim %}{{部署}}{% endverbatim %}">{% verbatim %}{{部署}}{% endverbatim %}</button>
+          <button type="button" class="app-btn app-btn--sm js-insert-merge" data-tag="{% verbatim %}{{役職}}{% endverbatim %}">{% verbatim %}{{役職}}{% endverbatim %}</button>
+          <button type="button" class="app-btn app-btn--sm js-insert-merge" data-tag="{% verbatim %}{{支店}}{% endverbatim %}">{% verbatim %}{{支店}}{% endverbatim %}</button>
+          <button type="button" class="app-btn app-btn--sm js-insert-merge" data-tag="{% verbatim %}{{フルネーム}}{% endverbatim %}">{% verbatim %}{{フルネーム}}{% endverbatim %}</button>
+          <button type="button" class="app-btn app-btn--sm js-insert-merge" data-tag="{% verbatim %}{{姓}}{% endverbatim %}">{% verbatim %}{{姓}}{% endverbatim %}</button>
+          <button type="button" class="app-btn app-btn--sm js-insert-merge" data-tag="{% verbatim %}{{名}}{% endverbatim %}">{% verbatim %}{{名}}{% endverbatim %}</button>
+          <button type="button" class="app-btn app-btn--sm js-insert-merge" data-tag="{% verbatim %}{{宛名}}{% endverbatim %}">{% verbatim %}{{宛名}}{% endverbatim %}</button>
+          <button type="button" class="app-btn app-btn--sm js-insert-merge" data-tag="{% verbatim %}{{住所}}{% endverbatim %}">{% verbatim %}{{住所}}{% endverbatim %}</button>
+          <button type="button" class="app-btn app-btn--sm js-insert-merge" data-tag="{% verbatim %}{{郵便番号}}{% endverbatim %}">{% verbatim %}{{郵便番号}}{% endverbatim %}</button>
+          <button type="button" class="app-btn app-btn--sm js-insert-merge" data-tag="{% verbatim %}{{メール}}{% endverbatim %}">{% verbatim %}{{メール}}{% endverbatim %}</button>
+          <button type="button" class="app-btn app-btn--sm js-insert-merge" data-tag="{% verbatim %}{{個人電話}}{% endverbatim %}">{% verbatim %}{{個人電話}}{% endverbatim %}</button>
+          <button type="button" class="app-btn app-btn--sm js-insert-merge" data-tag="{% verbatim %}{{会社電話}}{% endverbatim %}">{% verbatim %}{{会社電話}}{% endverbatim %}</button>
+          <button type="button" class="app-btn app-btn--sm js-insert-merge" data-tag="{% verbatim %}{{携帯}}{% endverbatim %}">{% verbatim %}{{携帯}}{% endverbatim %}</button>
+          <button type="button" class="app-btn app-btn--sm js-insert-merge" data-tag="{% verbatim %}{{個人FAX}}{% endverbatim %}">{% verbatim %}{{個人FAX}}{% endverbatim %}</button>
+          <button type="button" class="app-btn app-btn--sm js-insert-merge" data-tag="{% verbatim %}{{会社FAX}}{% endverbatim %}">{% verbatim %}{{会社FAX}}{% endverbatim %}</button>
+        </div>
+        <div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px;">
+          <strong style="width:100%; font-size:11px; color:var(--app-muted,#64748b);">差出人情報</strong>
+          <button type="button" class="app-btn app-btn--sm js-insert-merge" data-tag="{% verbatim %}{{差出人の氏名}}{% endverbatim %}">{% verbatim %}{{差出人の氏名}}{% endverbatim %}</button>
+          <button type="button" class="app-btn app-btn--sm js-insert-merge" data-tag="{% verbatim %}{{差出人の署名}}{% endverbatim %}">{% verbatim %}{{差出人の署名}}{% endverbatim %}</button>
+        </div>
+        <div style="display:flex; flex-wrap:wrap; gap:6px;">
+          <strong style="width:100%; font-size:11px; color:var(--app-muted,#64748b);">カスタムタグ・フッター</strong>
+          <button type="button" class="app-btn app-btn--sm" id="js-insert-tracked-link">トラッキングリンク挿入</button>
+          <button type="button" class="app-btn app-btn--sm" id="js-insert-unsubscribe-link">配信停止リンク挿入</button>
+          <button type="button" class="app-btn app-btn--sm" id="js-insert-footer">フッター挿入</button>
+        </div>
+      </div>
+    </div>
   </section>
 
   {# プレビューモーダル：既存 app.js の openPreviewModal 機構に対応（#previewModal ID 必須）。 #}
@@ -193,6 +248,46 @@
         // フッターは「本文末尾」に挿入（仕様書 §7.4.8.1）。カーソル位置ではない。
         textarea.value = textarea.value + FOOTER_TEXT;
         textarea.focus();
+      });
+    }
+
+    // 3) 独立フローティングパネル「挿入支援」の動的配置計算 & 折りたたみ・展開トグル
+    function updatePanelPosition() {
+      const panel = document.getElementById('js-floating-insert-panel');
+      const card = document.getElementById('js-template-editor-card');
+      if (!panel || !card) return;
+
+      if (window.innerWidth <= 992) {
+        panel.style.left = '';
+        return;
+      }
+
+      const rect = card.getBoundingClientRect();
+      const panelWidth = 320;
+      const margin = 24;
+      let targetLeft = rect.right + margin;
+
+      if (targetLeft + panelWidth + 16 > window.innerWidth) {
+        targetLeft = window.innerWidth - panelWidth - 16;
+      }
+
+      panel.style.left = targetLeft + 'px';
+    }
+
+    updatePanelPosition();
+    window.addEventListener('resize', updatePanelPosition);
+
+    const togglePanelBtn = document.getElementById('js-toggle-insert-panel');
+    const panelBody = document.getElementById('js-insert-panel-body');
+    if (togglePanelBtn && panelBody) {
+      togglePanelBtn.addEventListener('click', function () {
+        const isHidden = panelBody.style.display === 'none';
+        panelBody.style.display = isHidden ? 'block' : 'none';
+        togglePanelBtn.setAttribute('aria-expanded', isHidden ? 'true' : 'false');
+        const icon = togglePanelBtn.querySelector('i');
+        if (icon) {
+          icon.className = isHidden ? 'bi bi-chevron-up' : 'bi bi-chevron-down';
+        }
       });
     }
 

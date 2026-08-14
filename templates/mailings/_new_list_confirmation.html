@@ -6,13 +6,13 @@
 
 §9.2-42 により本テンプレは create 専用。_member_confirmation.html（add/remove）
 とは分離する（混在禁止）。
-表示はリスト名・備考 + 「対象 N 件でリストを作成します」のみ。Person 一覧は出さない。
+リスト名・備考・対象件数に加え、対象者一覧（Person 一覧）を表示する。
 {% endcomment %}
 
 {% block title %}リスト作成（3/3 確認）：{{ list_name }} — FreeGroup2{% endblock %}
 
 {% block content %}
-  <div class="app-page-header">
+  <div class="app-page-header" style="max-width: 720px; margin-left: 0; margin-right: auto;">
     <div>
       <h1>リスト作成（3/3）確認</h1>
       <div style="margin-top:4px; color:#475569;">
@@ -25,14 +25,14 @@
   </div>
 
   {% if messages %}
-    <section class="app-card">
+    <section class="app-card" style="max-width: 720px; margin-left: 0; margin-right: auto;">
       {% for message in messages %}
         <div class="app-message{% if message.tags %} app-message--{{ message.tags }}{% endif %}">{{ message }}</div>
       {% endfor %}
     </section>
   {% endif %}
 
-  <section class="app-card">
+  <section class="app-card" style="max-width: 720px; margin-left: 0; margin-right: auto;">
     <h2 style="margin-bottom:12px;">以下の内容でリストを作成します</h2>
     <dl style="display:grid; grid-template-columns:auto 1fr; gap:8px 16px; margin:0;">
       <dt style="color:#64748b;">リスト名</dt>
@@ -46,7 +46,34 @@
     </dl>
   </section>
 
-  <section class="app-card">
+  <section class="app-card" style="max-width: 720px; margin-left: 0; margin-right: auto;">
+    <h2 style="margin-bottom:12px;">対象者一覧</h2>
+    {% if page_obj.object_list %}
+      <table class="app-table" style="margin-top:8px;">
+        <thead>
+          <tr><th>会社名</th><th>氏名</th><th>メアド</th></tr>
+        </thead>
+        <tbody>
+          {% for person in page_obj.object_list %}
+            <tr>
+              <td>{{ person.primary_contact.organization|default:"—" }}</td>
+              <td>{{ person.primary_contact.full_name|default:person.id }}</td>
+              <td>{{ person.primary_contact.email|default:"—" }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% if is_paginated %}
+        <div style="margin-top:16px;">
+          {% include "persons/_pagination.html" %}
+        </div>
+      {% endif %}
+    {% else %}
+      <p class="app-muted">対象 Person がいません。</p>
+    {% endif %}
+  </section>
+
+  <section class="app-card" style="max-width: 720px; margin-left: 0; margin-right: auto;">
     <form method="post" action="{{ commit_url }}">
       {% csrf_token %}
       <div class="app-action-area">

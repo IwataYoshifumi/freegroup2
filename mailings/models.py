@@ -387,7 +387,7 @@ class Campaign(models.Model):
                 except ValidationError as e:
                     errors["sender_email"] = e.messages[0] if e.messages else str(e)
 
-        # (5) scheduled 遷移時：scheduled_at 必須・未来日時 + 宛先リスト必須
+        # (5) scheduled 遷移時：scheduled_at 必須・未来日時 + 宛先リスト必須 + 件名・本文必須
         if self.status == self.Status.SCHEDULED:
             if self.scheduled_at is None:
                 errors["scheduled_at"] = "予約配信日時は必須です。"
@@ -400,8 +400,68 @@ class Campaign(models.Model):
             if self.mailing_list_id is None:
                 errors["mailing_list"] = "宛先リストを選択してください。"
 
+            template = None
+            try:
+                if self.template_id is not None:
+                    template = self.template
+            except Exception:
+                template = None
+
+            if template is None:
+                errors["subject"] = "件名が未入力です"
+                errors["body"] = "本文が未入力です"
+            else:
+                if not (template.subject or "").strip():
+                    errors["subject"] = "件名が未入力です"
+                if not (template.body or "").strip():
+                    errors["body"] = "本文が未入力です"
+
         if errors:
             raise ValidationError(errors)
+
+    @property
+    def is_mailing_list_ready(self):
+        """宛先リストが設定されているか（仕様書 §7.8 / フェーズ2）。"""
+        return self.mailing_list_id is not None
+
+    @property
+    def is_template_ready(self):
+        """メール件名および本文が両方入力されているか（仕様書 §7.8 / フェーズ2）。"""
+        try:
+            if self.template_id is None:
+                return False
+            t = self.template
+            if t is None:
+                return False
+            subject_ok = bool((t.subject or "").strip())
+            body_ok = bool((t.body or "").strip())
+            return subject_ok and body_ok
+        except Exception:
+            return False
+
+    @property
+    def is_schedule_ready(self):
+        """予約配信日時が設定され、かつ未来日時か（仕様書 §7.8 / フェーズ2）。"""
+        from django.utils import timezone
+
+        return self.scheduled_at is not None and self.scheduled_at > timezone.now()
+
+    @property
+    def missing_required_steps(self):
+        """予約までに未完了の必須工程名リストを返す（仕様書 §7.8 / フェーズ2）。"""
+        missing = []
+        if not self.is_mailing_list_ready:
+            missing.append("宛先リスト")
+        if not self.is_template_ready:
+            missing.append("メール内容")
+        if not self.is_schedule_ready:
+            missing.append("配信スケジュール")
+        return missing
+
+    @property
+    def is_ready_to_schedule(self):
+        """予約に必要な全必須工程が完了しているか（仕様書 §7.8 / フェーズ2）。"""
+        return len(self.missing_required_steps) == 0
 
     @classmethod
     def get_pending_scheduled(cls):

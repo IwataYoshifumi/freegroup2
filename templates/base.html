@@ -32,5 +32,19 @@
 
   {# 共通 toast 要素（既存 app.js の showToast() が参照する DOM、D-3d 準備で追加） #}
   <div class="app-toast" hidden role="status" aria-live="polite"></div>
+
+  {# 共通名刺・画像拡大表示モーダル（HIG §11.8.3） #}
+  <div class="app-modal-backdrop" hidden></div>
+  <div class="app-modal" id="commonImageModal" hidden role="dialog" aria-modal="true">
+    <div class="app-modal__panel" style="width:min(900px,95vw);">
+      <div class="app-modal__header">
+        <h2>名刺画像</h2>
+        <button type="button" class="app-btn app-btn--sm" data-action="close-modal">閉じる</button>
+      </div>
+      <div class="app-modal__body" style="text-align:center; overflow:hidden; position:relative; user-select:none;">
+        <img id="commonImageModalImg" src="" alt="名刺画像" style="max-width:100%; max-height:65vh; object-fit:contain; border-radius:4px; transform-origin:center center; cursor:grab;">
+      </div>
+    </div>
+  </div>
 </body>
 </html>

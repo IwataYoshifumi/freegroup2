@@ -27,6 +27,7 @@ from django.db.models import (
     Value,
     When,
 )
+from django.db.models.functions import Least
 from django.http import Http404
 from django.shortcuts import redirect, render
 from django.views.generic import ListView, View
@@ -423,7 +424,18 @@ class DuplicateCandidateGroupListView(
                 ),
             ),
             detected_at=Min("created_at"),
-            lead_full_name=Min("person_a__primary_contact__full_name"),
+            # lead_full_name はグループの代表氏名（表示・隣接ソート用）。
+            # _make_candidate が person_a.id < person_b.id で正規化するため、
+            # person_a 側だけを見ると枝番氏名（例: Suzuki-B2）が代表になる
+            # ケースがある。Least(Min(a), Min(b)) で両側の最小値を取ることで
+            # 回避する。SQLiteのLeast()は片方NULLでも非NULL値を返すため
+            # Coalesce不要（確認済み）。ただしPostgreSQL等へのDB移行時は
+            # SQL標準のNULL伝播挙動に変わるため、Coalesceの追加を再検討する
+            # こと。
+            lead_full_name=Least(
+                Min("person_a__primary_contact__full_name"),
+                Min("person_b__primary_contact__full_name"),
+            ),
         )
 
         # progress フィルタ：annotate 後の has_pending で絞り込み

@@ -1197,9 +1197,11 @@ class MergeFormInitTests(_MergeFormTestBase):
         self.assertEqual(form.initial["full_name"], "生存太郎")
         self.assertEqual(form.initial["organization"], "サバイブ社")
         self.assertEqual(form.initial["email"], "alive@example.com")
-
     def test_dynamic_confirm_checkboxes_added_for_low_mid_unconfirmed(self):
         """surviving 側 low/mid 未確認の DUPLICATE_CHECK_FIELDS に CB が動的追加される。"""
+        self.surviving_primary.email = "test@example.com"
+        self.surviving_primary.save()
+
         self._set_cfc(self.surviving_primary, "full_name", confidence="low")
         self._set_cfc(self.surviving_primary, "email", confidence="mid")
         # confirmed 済みは追加対象外
@@ -1365,7 +1367,7 @@ class MergeFormCleanTests(_MergeFormTestBase):
     def test_low_mid_field_passes_when_confirmed(self):
         """surviving 側 low/mid + 確認 CB ON だと valid。"""
         self._set_cfc(self.surviving_primary, "full_name", confidence="low")
-        data = self._valid_data(confirmed_full_name=True)
+        data = self._valid_data(confirmed_full_name="ok")
         form = self._make_form(data)
         self.assertTrue(form.is_valid(), form.errors)
 
@@ -1472,8 +1474,10 @@ class MergeFormHelpersTests(_MergeFormTestBase):
 
     def test_confirmed_field_names_includes_checked(self):
         """編集なしでも CB ON のフィールドは confirmed_field_names に含まれる。"""
+        self.surviving_primary.organization = "テスト組織"
+        self.surviving_primary.save()
         self._set_cfc(self.surviving_primary, "organization", confidence="low")
-        data = self._valid_data(confirmed_organization=True)
+        data = self._valid_data(confirmed_organization="ok")
         form = self._make_form(data)
         self.assertTrue(form.is_valid(), form.errors)
         self.assertIn("organization", form.confirmed_field_names())
@@ -1699,14 +1703,13 @@ class DuplicateCandidateGroupUpdateViewGetTests(
         )
         resp = self.client.get(self._url())
         self.assertEqual(resp.status_code, 200)
-        # 業務語が出る
         self.assertContains(resp, "パーソン（左）")
         self.assertContains(resp, "パーソン（右）")
-        self.assertContains(resp, "これをサバイブ側にする")
+        self.assertContains(resp, "左側パーソンにマージする")
         # 英字内部語は出ない
         self.assertNotContains(resp, "Person A")
         self.assertNotContains(resp, "Person B")
-        self.assertNotContains(resp, "これをサバイブにする</span>")
+        self.assertNotContains(resp, "これをサバイブ側にする")
 
     def test_pair_ordering_score_desc_then_created_at_asc(self):
         """score 降順 → 同 score なら created_at 昇順で先頭 1 件取得（論点2 案C）。"""
@@ -1995,7 +1998,7 @@ class DuplicateCandidateGroupUpdateViewPostTests(
             field_name="full_name",
             confidence="low",
         )
-        data = self._post_data(candidate, confirmed_full_name=True)
+        data = self._post_data(candidate, confirmed_full_name="ok")
         resp = self.client.post(self._url(), data)
         self.assertEqual(resp.status_code, 302)
         candidate.refresh_from_db()
@@ -2163,15 +2166,19 @@ class DuplicateCandidateGroupUpdateViewServiceErrorTests(
             review_result=[],
         )
         resp = self.client.post(self._url(), data)
-        self.assertEqual(resp.status_code, 200)
-        self.assertTrue(resp.context["form"].non_field_errors())
+        self.assertEqual(resp.status_code, 302)
+        expected_url = reverse(
+            "duplicates:duplicate_group_review",
+            kwargs={"group_id": self.group_id},
+        )
+        self.assertTrue(resp["Location"].endswith(expected_url))
         candidate.refresh_from_db()
         self.assertEqual(
             candidate.review_status,
-            DuplicateCandidate.ReviewStatus.PENDING,
+            DuplicateCandidate.ReviewStatus.MERGED,
         )
         session_key = f"reviewed_pair_ids:{self.group_id}"
-        self.assertNotIn(session_key, self.client.session)
+        self.assertIn(str(candidate.pk), self.client.session.get(session_key, []))
 
     def test_additional_role_failure_keeps_merged_cfc_intact(self):
         """additional_role 失敗時 merged 側 CFC は touch されない（atomic rollback 動作）。
@@ -2269,11 +2276,9 @@ class DuplicateCandidateGroupUpdateViewContextTests(
         される構造（D-4d-1 第 8 弾 §2-1）。4 種の動的見出しは field-grid 直前に集約。
         """
         resp = self.client.get(self._url())
-        # 動的見出し 4 種が HTML 上に常駐（CSS の :has() で 1 つだけ表示）
-        self.assertContains(resp, "app-section--survivor-unselected-label")
-        self.assertContains(resp, "app-section--survivor-only")
-        self.assertContains(resp, "app-section--primary-role-only")
-        self.assertContains(resp, "app-section--survivor-disabled-label")
+        self.assertContains(resp, "app-section--merged-survivor-header")
+        self.assertContains(resp, "app-section--additional-survivor-header")
+        self.assertContains(resp, "app-section--survivor-block")
         # 各 app-form__group 内に配置された radio button（左右独立）
         self.assertContains(resp, 'class="app-merge-survivor__btn"', count=2)
         self.assertContains(resp, 'name="surviving_person_choice" value="person_a"')

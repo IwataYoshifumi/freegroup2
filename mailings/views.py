@@ -255,8 +255,16 @@ class MailingListListView(LoginRequiredMixin, PermissionRequiredMixin, ListView)
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         back = BackNavigator(self.request)
-        # 検索条件・ソート・ページも keys に含め「戻る」で一覧状態を復元する（HIG 6.1）。
-        back.push_current("", ["page", "status", "searched", "name", "sort"])
+        # 検索条件・ソート・ページ・選択モードも keys に含め「戻る」で一覧状態を復元する（HIG 6.1）。
+        back.push_current("", ["page", "status", "searched", "name", "sort", "select_for_campaign"])
+
+        select_for_campaign = None
+        campaign_id = self.request.GET.get("select_for_campaign", "").strip()
+        if campaign_id:
+            select_for_campaign = Campaign.objects.filter(
+                pk=campaign_id, is_archived=False, status=Campaign.Status.DRAFT
+            ).first()
+
         context.update(
             {
                 "back": back,
@@ -264,6 +272,7 @@ class MailingListListView(LoginRequiredMixin, PermissionRequiredMixin, ListView)
                 "active_menu": "mailings:mailing_list_list",
                 "selected_statuses": self._selected_statuses(),
                 "search_name": self.request.GET.get("name", ""),
+                "select_for_campaign": select_for_campaign,
                 "column_storage_key": "mailing_list_list_visible_columns",
                 "column_defs": [
                     {"key": "description", "label": "説明", "default": False},
@@ -350,6 +359,14 @@ class MailingListDetailView(LoginRequiredMixin, PermissionRequiredMixin, DetailV
         # ?sort=...&dir=... があれば適用、無ければ name asc がデフォルト（UI 改善 要望1）
         members_qs = _apply_sort_to_members(members_qs, self.request.GET)
         sort_key, sort_dir = _resolve_sort(self.request.GET)
+
+        select_for_campaign = None
+        campaign_id = self.request.GET.get("select_for_campaign", "").strip()
+        if campaign_id:
+            select_for_campaign = Campaign.objects.filter(
+                pk=campaign_id, is_archived=False, status=Campaign.Status.DRAFT
+            ).first()
+
         context.update(
             {
                 "back": BackNavigator(self.request),
@@ -359,9 +376,50 @@ class MailingListDetailView(LoginRequiredMixin, PermissionRequiredMixin, DetailV
                 "is_frozen": self.object.members_frozen_at is not None,
                 "current_sort": sort_key,
                 "current_dir": sort_dir,
+                "select_for_campaign": select_for_campaign,
             }
         )
         return context
+
+    def post(self, request, *args, **kwargs):
+        if request.POST.get("action") == "link_existing":
+            from django.contrib import messages
+            from django.db import transaction
+
+            self.object = self.get_object()
+            campaign_id = request.GET.get("select_for_campaign") or request.POST.get(
+                "select_for_campaign"
+            )
+            campaign = Campaign.objects.filter(
+                pk=campaign_id, is_archived=False, status=Campaign.Status.DRAFT
+            ).first()
+
+            if not campaign:
+                messages.error(
+                    request, "対象のキャンペーンが見つからないか、下書き状態ではありません。"
+                )
+                return redirect("mailings:campaign_list")
+
+            if self.object.is_archived:
+                messages.error(request, "アーカイブ済みの配信リストは選択できません。")
+                return redirect(
+                    reverse(
+                        "mailings:mailing_list_detail", kwargs={"pk": self.object.pk}
+                    )
+                    + f"?select_for_campaign={campaign.pk}"
+                )
+
+            with transaction.atomic():
+                campaign.mailing_list = self.object
+                campaign.save(update_fields=["mailing_list", "updated_at"])
+
+            messages.success(
+                request,
+                f"宛先リスト「{self.object.name}」をキャンペーンに紐づけました。",
+            )
+            return redirect("mailings:campaign_detail", pk=campaign.pk)
+
+        return super().get(request, *args, **kwargs)
 
 
 class MailingListUpdateView(LoginRequiredMixin, PermissionRequiredMixin, UpdateView):
@@ -2078,25 +2136,40 @@ class NewListConfirmView(LoginRequiredMixin, PermissionRequiredMixin, View):
     template_name = "mailings/_new_list_confirmation.html"
 
     def get(self, request):
+        from django.core.paginator import Paginator
+
         guard = _new_list_guard(
             request, required=("name", "snapshot_person_ids")
         )
         if guard is not None:
             return guard
         state = _new_list_state(request)
+        snapshot_ids = state.get("snapshot_person_ids") or []
+        person_qs = (
+            Person.objects.filter(pk__in=snapshot_ids)
+            .select_related("primary_contact")
+            .order_by("id")
+        )
+        paginator = Paginator(person_qs, 30)
+        page_number = request.GET.get("page") or 1
+        page_obj = paginator.get_page(page_number)
+
         return render(
             request,
             self.template_name,
             {
                 "list_name": state["name"],
                 "list_description": state.get("description", "") or "",
-                "snapshot_count": len(state.get("snapshot_person_ids") or []),
+                "snapshot_count": len(snapshot_ids),
                 "commit_url": reverse("mailings:new_list_commit"),
                 "back_url": reverse("mailings:new_list_tag_selection"),
                 "cancel_url": reverse("mailings:mailing_list_list"),
                 "back": BackNavigator(request),
                 "active_app": "mailings",
                 "active_menu": "mailings:mailing_list_list",
+                "page_obj": page_obj,
+                "paginator": paginator,
+                "is_paginated": page_obj.has_other_pages(),
             },
         )
 
@@ -3279,6 +3352,15 @@ class CampaignListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
         date_to = _parse_date(self.request.GET.get("date_to"))
         if date_to:
             qs = qs.filter(scheduled_at__date__lte=date_to)
+        # アーカイブ状態絞り込み（active / archived）。デフォルトは active のみ表示。
+        archive_statuses = self._selected_archive_statuses()
+        if "active" in archive_statuses and "archived" not in archive_statuses:
+            qs = qs.filter(is_archived=False)
+        elif "archived" in archive_statuses and "active" not in archive_statuses:
+            qs = qs.filter(is_archived=True)
+        elif not archive_statuses:
+            qs = qs.filter(is_archived=False)
+
         # 既定並び（-created_at）を温存しつつ、?sort= があれば多段ソートで差し替える（HIG 6.2）。
         return _apply_multi_sort(qs, self.request.GET, CAMPAIGN_LIST_SORT_FIELD_MAP)
 
@@ -3292,6 +3374,17 @@ class CampaignListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
 
         valid = {c for c, _ in Campaign.Status.choices}
         return [s for s in self.request.GET.getlist("status") if s in valid]
+
+    def _selected_archive_statuses(self):
+        """アーカイブ状態トグルの選択値（active, archived）。
+
+        既定値（パラメータ未指定時）は ['active']。
+        """
+        valid = {"active", "archived"}
+        if "archive_status" not in self.request.GET:
+            return ["active"]
+        raw = self.request.GET.getlist("archive_status")
+        return [s for s in raw if s in valid]
 
     def get_context_data(self, **kwargs):
         from .models import Campaign
@@ -3311,7 +3404,7 @@ class CampaignListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
         back.push_current(
             "",
             [
-                "page", "name", "creator", "status", "searched", "sort",
+                "page", "name", "creator", "status", "archive_status", "searched", "sort",
                 "date_from", "date_to",
             ],
         )
@@ -3325,6 +3418,7 @@ class CampaignListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
         ctx["search_date_to"] = self.request.GET.get("date_to", "")
         ctx["status_choices"] = Campaign.Status.choices
         ctx["selected_statuses"] = self._selected_statuses()
+        ctx["selected_archive_statuses"] = self._selected_archive_statuses()
         # 列表示切替（localStorage キー＋切替対象列）とソートコントロール（折りたたみ内）。
         ctx["column_storage_key"] = "campaign_list_visible_columns"
         ctx["column_defs"] = [
@@ -3758,10 +3852,10 @@ class CampaignDetailView(
     context_object_name = "campaign"
     permission_required = "mailings.view_campaign"
     def get_queryset(self):
-        # アーカイブ済み Campaign は詳細画面に出さない（is_archived=True は 404）
+        # アーカイブ済み Campaign も詳細閲覧は許可する（閲覧専用画面として表示）
         return Campaign.objects.select_related(
             "template", "mailing_list", "created_by"
-        ).filter(is_archived=False)
+        )
 
     def get_context_data(self, **kwargs):
         from mailings.services.recipient_extraction import extract_recipients
