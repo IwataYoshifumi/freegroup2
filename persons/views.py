@@ -258,6 +258,7 @@ class PersonDetailView(LoginRequiredMixin, PermissionRequiredMixin, DetailView):
             ).get(pk=person.primary_contact_id)
         )
         context = build_contact_detail_context(contact, request.user)
+        context["person"] = person
 
         # 別肩書セクション（パーソン単位データ＝共通部品には入れず人物詳細 View 側で組み立てる）。
         # primary を除く active コンタクト（get_active_contacts は status='active' のみ＝primary を含まない）を
@@ -298,6 +299,32 @@ class PersonDetailView(LoginRequiredMixin, PermissionRequiredMixin, DetailView):
             f"{back.append_url(list_base)}&status=primary&status=active"
         )
 
+        # v1.6 Phase 1b-β：タグ付与・解除 UI 用 context
+        from tags.models import TagAssignment, TagCategory
+
+        context["person_tag_assignments"] = (
+            TagAssignment.objects.filter(person=person)
+            .select_related("tag", "tag__category")
+            .order_by("tag__category__sort_order", "tag__name")
+        )
+        categories = (
+            TagCategory.objects.filter(is_archived=False)
+            .prefetch_related("tags")
+            .order_by("sort_order", "name")
+        )
+        context["tags_by_category"] = [
+            (cat, list(cat.tags.filter(is_archived=False).order_by("name")))
+            for cat in categories
+        ]
+
+        from mailings.models import MailingListMember
+
+        context["person_mailing_list_memberships"] = (
+            MailingListMember.objects.filter(person=person)
+            .select_related("mailing_list")
+            .order_by("-mailing_list__members_frozen_at", "mailing_list__name")
+        )
+
         context.update(
             {
                 "back": back,
@@ -306,7 +333,7 @@ class PersonDetailView(LoginRequiredMixin, PermissionRequiredMixin, DetailView):
                 "active_menu": "persons:person_list",
             }
         )
-        return render(request, "contacts/contact_detail.html", context)
+        return render(request, "persons/person_detail_active.html", context)
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -346,6 +373,14 @@ class PersonDetailView(LoginRequiredMixin, PermissionRequiredMixin, DetailView):
             (cat, list(cat.tags.filter(is_archived=False).order_by("name")))
             for cat in categories
         ]
+
+        from mailings.models import MailingListMember
+
+        context["person_mailing_list_memberships"] = (
+            MailingListMember.objects.filter(person=person)
+            .select_related("mailing_list")
+            .order_by("-mailing_list__members_frozen_at", "mailing_list__name")
+        )
 
         return context
 

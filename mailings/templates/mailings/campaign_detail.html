@@ -49,6 +49,14 @@
         <a href="{% append_back_url archive_url back %}" class="app-icon-btn" style="color:var(--app-text); margin-top:2px;" title="アーカイブ" aria-label="アーカイブ">
           <i class="bi bi-archive"></i>
         </a>
+      {% elif campaign.is_archived %}
+        <form method="post" action="{% url 'mailings:campaign_unarchive' pk=campaign.pk %}" style="margin:0;" onsubmit="return confirm('このキャンペーンを復元（非アーカイブ化）しますか？');">
+          {% csrf_token %}
+          {{ back.hidden_fields }}
+          <button type="submit" class="app-btn app-btn--warning" style="display:inline-flex; align-items:center; gap:6px;">
+            <i class="bi bi-archive"></i> 非アーカイブ化（復元）
+          </button>
+        </form>
       {% endif %}
     </div>
 

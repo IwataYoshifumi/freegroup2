@@ -38,6 +38,7 @@ from config.constants import (
     DifferentPersonReason,
     DuplicateMergeReason,
 )
+from mailings.services.unsubscribe import get_same_person_unit
 from contacts.models import Contact, ContactSns
 from contacts.services.normalization import (
     format_phone_number_display,
@@ -248,6 +249,31 @@ def _dup_sort_context(params):
         "sort_is_active": bool(tokens),
         "sort_value": ",".join(("-" + k if d == "desc" else k) for k, d in tokens),
     }
+
+
+def resolve_person_display_name(person, name_by_prev_person=None):
+    """Person の表示氏名を解決する（吸収側は get_same_person_unit / previous_person 経由で復元）。
+
+    [性質] 準関数（DB 読み取りあり / get_same_person_unit 経由）
+    [入力] person: Person | None / name_by_prev_person: dict[person_id -> full_name] | None
+    [出力] str（primary_contact があればその full_name、無ければ復元辞書や same_person_unit の値、
+           いずれも無ければ空文字 → テンプレ側で「(氏名なし)」にフォールバック）
+    """
+    if person is None:
+        return ""
+    primary = person.primary_contact
+    if primary is not None and primary.full_name:
+        return primary.full_name
+    if name_by_prev_person and person.id in name_by_prev_person:
+        return name_by_prev_person[person.id]
+    try:
+        unit = get_same_person_unit(person)
+        root = unit[0]
+        if root.primary_contact is not None and root.primary_contact.full_name:
+            return root.primary_contact.full_name
+    except ValueError:
+        pass
+    return ""
 
 
 class DuplicateCandidateGroupListView(
@@ -543,10 +569,20 @@ class DuplicateCandidateGroupListView(
                 lead = self._select_lead_person(rep)
                 lead_person_id = lead.id
                 lead_pc = lead.primary_contact
+                if lead_pc is None and lead.status == Person.Status.MERGED:
+                    try:
+                        unit = get_same_person_unit(lead)
+                        root = unit[0]
+                        if root.primary_contact is not None:
+                            lead_pc = root.primary_contact
+                    except ValueError:
+                        pass
                 if lead_pc is not None:
                     lead_name = lead_pc.full_name or ""
                     lead_organization = lead_pc.organization or ""
                     lead_title = lead_pc.title or ""
+                if not lead_name:
+                    lead_name = resolve_person_display_name(lead)
 
                 pc_a = rep.person_a.primary_contact
                 pc_b = rep.person_b.primary_contact
@@ -681,18 +717,9 @@ class DuplicateCandidateGroupDetailView(
         return render(request, self.template_name, context)
 
     @staticmethod
-    def _resolve_display_name(person, name_by_prev_person):
-        """Person の表示氏名を解決する（吸収側は previous_person 経由で復元）。
-
-        [性質] 純関数（引数の dict / 既ロード FK を読むだけ、DB 操作なし）
-        [入力] person: Person / name_by_prev_person: dict[person_id -> full_name]
-        [出力] str（primary_contact があればその full_name、無ければ復元辞書の値、
-               いずれも無ければ空文字 → テンプレ側で「(氏名なし)」にフォールバック）
-        """
-        primary = person.primary_contact
-        if primary is not None:
-            return primary.full_name
-        return name_by_prev_person.get(person.id, "")
+    def _resolve_display_name(person, name_by_prev_person=None):
+        """Person の表示氏名を解決する（共通ヘルパーへ委譲）。"""
+        return resolve_person_display_name(person, name_by_prev_person)
 
     def _enrich_reviewed_candidates(self, reviewed_candidates):
         """レビュー済み候補に復元可否・表示氏名を付与する（②③、N+1 回避）。

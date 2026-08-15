@@ -239,7 +239,7 @@
       <table class="app-table app-table--nowrap">
         <thead>
           <tr>
-            <th class="app-table__col--action" style="width:80px;">操作</th>
+            <th class="app-table__col--action" style="min-width:130px; width:135px;">操作</th>
             <th style="width:90px;">rank</th>
             <th style="width:65px; text-align:center;">スコア</th>
             <th style="width:130px;">氏名</th>
@@ -254,14 +254,15 @@
           {% for group in enriched_groups %}
             <tr>
               <td class="app-table__col--action">
-                {# 未レビュー残あり→「レビュー」（review・primary）、全件処理済み→「詳細」（detail・outline）。 #}
-                {% if group.pending_count > 0 %}
-                  {% url 'duplicates:duplicate_group_review' group_id=group.group_id as row_url %}
-                  <a href="{% append_back_url row_url back %}" class="app-btn app-btn--primary app-btn--sm">レビュー</a>
-                {% else %}
-                  {% url 'duplicates:duplicate_group_detail' group_id=group.group_id as row_url %}
-                  <a href="{% append_back_url row_url back %}" class="app-btn app-btn--outline-secondary app-btn--sm">詳細</a>
-                {% endif %}
+                {# 未レビュー残あり→「レビュー」（緑）＋「詳細」（枠線）、全件処理済み→「詳細」（枠線）のみ。 #}
+                <div style="display:flex; gap:4px; align-items:center;">
+                  {% if group.pending_count > 0 %}
+                    {% url 'duplicates:duplicate_group_review' group_id=group.group_id as review_url %}
+                    <a href="{% append_back_url review_url back %}" class="app-btn app-btn--success app-btn--sm">レビュー</a>
+                  {% endif %}
+                  {% url 'duplicates:duplicate_group_detail' group_id=group.group_id as detail_url %}
+                  <a href="{% append_back_url detail_url back %}" class="app-btn app-btn--outline-secondary app-btn--sm">詳細</a>
+                </div>
               </td>
               <td>
                 {% if group.rep_rank == "exact_match" %}

@@ -1176,9 +1176,9 @@ class ContactDetailViewTests(TestCase):
             review_result=[],
         )
         resp = self.client.get(self._url())
-        self.assertEqual(len(resp.context["pending_duplicates"]), 1)
-        # マージ画面ボタンプレースホルダが描画される
-        self.assertIn("マージ画面へ", resp.content.decode())
+        # マージ画面ボタンプレースホルダは撤去済み（マージ候補リンクボタンに置き換え）
+        self.assertNotIn("マージ画面へ", resp.content.decode())
+        self.assertIn("マージ候補", resp.content.decode())
 
     def test_n9_previous_person(self):
         """N9: previous_person がある → context に含まれる。"""

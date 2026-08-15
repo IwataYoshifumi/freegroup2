@@ -57,7 +57,8 @@
                alt="名刺画像"
                style="max-width:300px; width:100%; cursor:pointer; border-radius:8px;"
                data-action="open-modal"
-               data-target="cardImageModal">
+               data-target="commonImageModal"
+               data-image-url="{{ card.get_card_image_url_busted }}">
         {% else %}
           <p class="app-muted">画像なし</p>
         {% endif %}
@@ -385,18 +386,4 @@
     </script>
   {% endif %}
 
-  {% if card.card_image %}
-    <div class="app-modal-backdrop" hidden></div>
-    <div class="app-modal" id="cardImageModal" hidden>
-      <div class="app-modal__panel" style="width:min(800px,95vw);">
-        <div class="app-modal__header">
-          <h2>名刺画像</h2>
-          <button class="app-btn app-btn--sm" data-action="close-modal">閉じる</button>
-        </div>
-        <div class="app-modal__body" style="text-align:center;">
-          <img src="{{ card.get_card_image_url_busted }}" alt="名刺画像" style="max-width:100%; max-height:65vh; object-fit:contain;">
-        </div>
-      </div>
-    </div>
-  {% endif %}
 {% endblock %}

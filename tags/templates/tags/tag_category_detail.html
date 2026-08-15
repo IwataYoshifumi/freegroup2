@@ -71,7 +71,7 @@
       <div>
         {% if category.is_archived %}
           <form method="post" action="{% url 'tags:tag_category_unarchive' pk=category.id %}" style="display:inline;"
-                onsubmit="return confirm('「{{ category.name }}」を非アーカイブ化します。よろしいですか？');">
+                onsubmit="return confirm('「{{ category.name }}」を非アーカイブ化します（配下のタグも連動して非アーカイブ化されます）。よろしいですか？');">
             {% csrf_token %}
             {{ back.hidden_fields }}
             <button type="submit" class="app-btn app-btn--warning">非アーカイブ化</button>
@@ -83,7 +83,7 @@
           </button>
           <form id="js-archive-form" method="post" action="{% url 'tags:tag_category_delete' pk=category.id %}"
                 style="display:none;"
-                onsubmit="return confirm('「{{ category.name }}」をアーカイブ化します。よろしいですか？');">
+                onsubmit="return confirm('「{{ category.name }}」をアーカイブ化します（配下のタグも連動してアーカイブ化されます）。よろしいですか？');">
             {% csrf_token %}
             <button type="submit" class="app-btn app-btn--warning">アーカイブ化</button>
           </form>

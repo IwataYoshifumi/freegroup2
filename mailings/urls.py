@@ -334,6 +334,11 @@ urlpatterns = [
         name="campaign_archive",
     ),
     path(
+        "mailings/campaigns/<uuid:pk>/unarchive/",
+        views.CampaignUnarchiveView.as_view(),
+        name="campaign_unarchive",
+    ),
+    path(
         "mailings/campaigns/<uuid:pk>/test-send/",
         views.CampaignTestSendView.as_view(),
         name="campaign_test_send",

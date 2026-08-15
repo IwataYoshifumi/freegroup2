@@ -126,7 +126,16 @@
           }
           cbs.forEach(function (cb) { cb.addEventListener('change', refresh); });
           var selectAll = document.getElementById('js-member-select-all');
-          if (selectAll) selectAll.addEventListener('change', refresh);
+          if (selectAll) {
+            selectAll.addEventListener('change', function () {
+              cbs.forEach(function (cb) {
+                if (cb.closest('tr').style.display !== 'none') {
+                  cb.checked = selectAll.checked;
+                }
+              });
+              refresh();
+            });
+          }
           refresh();
         })();
       </script>
@@ -143,18 +152,4 @@
 
   {% include "mailings/_limited_list_script.html" %}
   {% include "mailings/_sort_script.html" %}
-
-  <script>
-    (function () {
-      var selectAll = document.getElementById('js-member-select-all');
-      if (!selectAll) return;
-      selectAll.addEventListener('change', function () {
-        document.querySelectorAll('.js-member-cb').forEach(function (cb) {
-          if (cb.closest('tr').style.display !== 'none') {
-            cb.checked = selectAll.checked;
-          }
-        });
-      });
-    })();
-  </script>
 {% endblock %}

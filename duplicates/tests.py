@@ -572,6 +572,29 @@ class DuplicateCandidateGroupListViewTests(_DuplicatesTestBase):
         self.assertContains(resp, "生存花子")
         self.assertNotContains(resp, "(氏名なし)")
 
+    def test_lead_name_resolved_via_same_person_unit_when_all_merged(self):
+        """グループ内の全 Person が merged の場合も get_same_person_unit 経由で存続 Person の氏名が復元表示される。"""
+        surviving, _ = self._make_person_with_primary("ルート存続者")
+        merged1, _ = self._make_person_with_primary("中間吸収者")
+        merged2, _ = self._make_person_with_primary("末端吸収者")
+
+        for m, target in [(merged1, surviving), (merged2, merged1)]:
+            m.primary_contact = None
+            m.status = Person.Status.MERGED
+            m.merged_into = target
+            m.save(update_fields=["primary_contact", "status", "merged_into", "updated_at"])
+
+        gid = uuid.uuid4()
+        self._make_candidate(
+            merged1, merged2, group_id=gid,
+            review_status=DuplicateCandidate.ReviewStatus.MERGED,
+        )
+        resp = self.client.get(
+            self.url, {**self._ALL_RANKS_QUERY, "progress": ["completed"]}
+        )
+        self.assertContains(resp, "ルート存続者")
+        self.assertNotContains(resp, "(氏名なし)")
+
     def test_matched_field_badges_japanese(self):
         """一致フィールドが日本語バッジ（氏名・会社・部署）で出る。"""
         p1, c1 = self._make_person_with_primary("同名")
@@ -978,7 +1001,28 @@ class DuplicateCandidateGroupDetailViewTests(_DuplicatesTestBase):
             resp = self.client.get(self._url(), REMOTE_ADDR="127.0.0.1")
         self.assertContains(resp, str(self.group_id))
         self.assertContains(resp, "bi-bug-fill")
-        self.assertContains(resp, "デバッグ表示")
+
+    def test_merged_person_display_name_resolved_via_same_person_unit(self):
+        """直近の previous_person 検索で名前が引けない場合も、get_same_person_unit 経由で存続 Person の氏名が復元表示される。"""
+        candidate, surviving, merged, log = self._make_merged_scenario(
+            log_status=PersonMergeLog.Status.UNDOABLE, recover_name=False
+        )
+        resp = self.client.get(self._url())
+        self.assertEqual(resp.status_code, 200)
+        c = resp.context["reviewed_candidates"][0]
+        # surviving 側の名前（「生存花子」）が解決されていること
+        self.assertEqual(c.person_b_display_name, "生存花子")
+        self.assertContains(resp, "生存花子")
+
+    def test_resolve_display_name_cycle_exception_handled_safely(self):
+        """循環参照などの例外が発生した場合も、_resolve_display_name は安全に例外をキャッチして空文字を返す。"""
+        from duplicates.views import DuplicateCandidateGroupDetailView
+        cycle_person = Person.objects.create(status=Person.Status.MERGED)
+        cycle_person.merged_into = cycle_person  # 自己参照の循環を作出
+        cycle_person.save()
+
+        name = DuplicateCandidateGroupDetailView._resolve_display_name(cycle_person, {})
+        self.assertEqual(name, "")
 
     def test_summary_heading_removed(self):
         """集計セクションの「集計」見出しは撤去され、1 行要約は残る。"""
@@ -1016,7 +1060,7 @@ class DuplicateCandidateGroupDetailViewTests(_DuplicatesTestBase):
         self.assertContains(resp, "別人")
 
     def test_person_name_recovered_for_merged_side(self):
-        """merged 行で吸収側の氏名が previous_person 経由で復元表示される。"""
+        """merged 行で吸収側の氏名が get_same_person_unit / previous_person 経由で復元表示される。"""
         self._make_merged_scenario(
             log_status=PersonMergeLog.Status.UNDOABLE,
             absorbed_name="復元できる太郎",
@@ -1027,12 +1071,15 @@ class DuplicateCandidateGroupDetailViewTests(_DuplicatesTestBase):
         self.assertNotContains(resp, "(氏名なし)")
 
     def test_person_name_falls_back_when_not_recoverable(self):
-        """previous_person が辿れない（連鎖マージ相当）なら (氏名なし)。"""
-        self._make_merged_scenario(
+        """surviving 側を含め氏名が辿れない場合は (氏名なし) にフォールバックする。"""
+        candidate, surviving, merged, log = self._make_merged_scenario(
             log_status=PersonMergeLog.Status.LOCKED,
             absorbed_name="辿れない次郎",
             recover_name=False,
         )
+        surviving.primary_contact = None
+        surviving.save(update_fields=["primary_contact", "updated_at"])
+
         resp = self.client.get(self._url())
         self.assertNotContains(resp, "辿れない次郎")
         self.assertContains(resp, "(氏名なし)")

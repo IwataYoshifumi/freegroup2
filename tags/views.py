@@ -302,8 +302,10 @@ class TagCategoryDeleteView(LoginRequiredMixin, PermissionRequiredMixin, View):
 
     def post(self, request, pk):
         category = get_object_or_404(TagCategory, pk=pk)
-        category.is_archived = True
-        category.save(update_fields=["is_archived", "updated_at"])
+        with transaction.atomic():
+            category.tags.filter(is_archived=False).update(is_archived=True)
+            category.is_archived = True
+            category.save(update_fields=["is_archived", "updated_at"])
         return redirect("tags:tag_category_list")
 
 
@@ -564,6 +566,18 @@ class TagUnarchiveView(LoginRequiredMixin, PermissionRequiredMixin, View):
 
     def post(self, request, pk):
         tag = get_object_or_404(Tag, pk=pk)
+        if tag.category.is_archived:
+            from django.contrib import messages
+
+            messages.error(
+                request,
+                f"親カテゴリ『{tag.category.name}』がアーカイブ済みのため、先にカテゴリを非アーカイブ化してください。",
+            )
+            back = BackNavigator(request)
+            if back.back_exist:
+                return redirect(back.back_url)
+            return redirect("tags:tag_detail", pk=tag.pk)
+
         tag.is_archived = False
         tag.save(update_fields=["is_archived", "updated_at"])
         back = BackNavigator(request)
@@ -582,8 +596,10 @@ class TagCategoryUnarchiveView(LoginRequiredMixin, PermissionRequiredMixin, View
 
     def post(self, request, pk):
         category = get_object_or_404(TagCategory, pk=pk)
-        category.is_archived = False
-        category.save(update_fields=["is_archived", "updated_at"])
+        with transaction.atomic():
+            category.tags.filter(is_archived=True).update(is_archived=False)
+            category.is_archived = False
+            category.save(update_fields=["is_archived", "updated_at"])
         back = BackNavigator(request)
         if back.back_exist:
             return redirect(back.back_url)
@@ -647,6 +663,85 @@ class TagUnassignView(PermissionRequiredMixin, View):
             return JsonResponse({"ok": False, "error": "missing_params"}, status=400)
         TagAssignment.objects.filter(person_id=person_id, tag_id=tag_id).delete()
         return JsonResponse({"ok": True, "tag_id": tag_id})
+
+
+@method_decorator(require_POST, name="dispatch")
+class TagBulkAssignView(PermissionRequiredMixin, View):
+    """タグ一括更新 AJAX。
+
+    POST: JSON {"person_id": uuid, "tag_ids": [uuid, ...]}
+    レスポンス: {"ok": true, "person_id": uuid, "assignments": [...]}
+    transaction.atomic で追加分と削除分を差分一括更新する。
+    """
+
+    permission_required = "tags.assign_tag"
+    raise_exception = True
+
+    def post(self, request):
+        if request.content_type and request.content_type.startswith("application/json"):
+            try:
+                payload = json.loads(request.body.decode("utf-8"))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                return JsonResponse({"ok": False, "error": "invalid_json"}, status=400)
+        else:
+            try:
+                payload = json.loads(request.body.decode("utf-8"))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                payload = {
+                    "person_id": request.POST.get("person_id"),
+                    "tag_ids": request.POST.getlist("tag_ids"),
+                }
+
+        person_id = payload.get("person_id")
+        tag_ids = payload.get("tag_ids")
+
+        if not person_id or tag_ids is None or not isinstance(tag_ids, list):
+            return JsonResponse({"ok": False, "error": "missing_params"}, status=400)
+
+        person = get_object_or_404(Person, pk=person_id)
+
+        requested_tag_str_set = set(str(tid) for tid in tag_ids)
+        valid_tags = list(Tag.objects.filter(id__in=requested_tag_str_set, is_archived=False).select_related("category"))
+        valid_tag_str_set = set(str(t.id) for t in valid_tags)
+
+        if len(requested_tag_str_set) != len(valid_tag_str_set):
+            return JsonResponse({"ok": False, "error": "invalid_tags"}, status=400)
+
+        with transaction.atomic():
+            current_assignments = list(TagAssignment.objects.filter(person=person))
+            current_tag_ids = set(str(asg.tag_id) for asg in current_assignments)
+
+            to_delete_ids = current_tag_ids - requested_tag_str_set
+            to_add_ids = requested_tag_str_set - current_tag_ids
+
+            if to_delete_ids:
+                TagAssignment.objects.filter(person=person, tag_id__in=to_delete_ids).delete()
+
+            if to_add_ids:
+                TagAssignment.objects.bulk_create([
+                    TagAssignment(person=person, tag_id=tid, assigned_by=request.user)
+                    for tid in to_add_ids
+                ])
+
+        updated_assignments = (
+            TagAssignment.objects.filter(person=person)
+            .select_related("tag", "tag__category")
+            .order_by("tag__category__sort_order", "tag__name")
+        )
+
+        return JsonResponse({
+            "ok": True,
+            "person_id": str(person.id),
+            "assignments": [
+                {
+                    "tag_id": str(asg.tag.id),
+                    "tag_name": asg.tag.name,
+                    "category_id": str(asg.tag.category.id),
+                    "category_name": asg.tag.category.name,
+                }
+                for asg in updated_assignments
+            ],
+        })
 
 
 def _parse_assign_payload(request):

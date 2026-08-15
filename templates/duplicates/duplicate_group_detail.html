@@ -14,7 +14,7 @@
       {% back_link back %}
       {% if has_pending %}
         {% url 'duplicates:duplicate_group_review' group_id=group_id as review_url %}
-        <a href="{% append_back_url review_url back %}" class="app-btn app-btn--primary">レビューを開始</a>
+        <a href="{% append_back_url review_url back %}" class="app-btn app-btn--success">レビューを開始</a>
       {% endif %}
     </div>
   </div>

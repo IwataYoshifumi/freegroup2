@@ -199,7 +199,7 @@
               <td>
                 <div style="display:flex;align-items:flex-start;gap:6px;">
                   {% if card.card_image %}
-                    <button type="button" data-action="open-modal" data-target="card-img-modal-{{ card.id }}"
+                    <button type="button" data-action="open-modal" data-target="commonImageModal" data-image-url="{{ card.get_card_image_url_busted }}"
                             style="background:none;border:none;padding:0;cursor:zoom-in;flex-shrink:0;">
                       <img src="{{ card.get_card_image_url_busted }}" alt="名刺" style="max-height:96px;max-width:200px;border-radius:4px;display:block;">
                     </button>
@@ -289,22 +289,7 @@
     {% endif %}
   </section>
 
-<div class="app-modal-backdrop" data-action="close-modal" hidden></div>
-{% for card in cards %}
-  {% if card.card_image %}
-    <div class="app-modal" id="card-img-modal-{{ card.id }}" hidden role="dialog" aria-modal="true">
-      <div class="app-modal__panel" style="width:min(900px,95vw);">
-        <div class="app-modal__header">
-          <h2>{{ card.contact.full_name|default:"名刺画像" }}</h2>
-          <button type="button" class="app-btn--icon" data-action="close-modal" aria-label="閉じる">×</button>
-        </div>
-        <div class="app-modal__body" style="text-align:center;">
-          <img src="{{ card.get_card_image_url_busted }}" alt="名刺画像" style="max-width:100%;max-height:65vh;object-fit:contain;border-radius:4px;">
-        </div>
-      </div>
-    </div>
-  {% endif %}
-{% endfor %}
+
 
 {% comment %}
 ステータス（OCR結果）ボタンUIの結線。送信は隠しチェックボックス（name=ocr_result）が担い、

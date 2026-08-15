@@ -511,3 +511,244 @@ class TagListFilterTests(TestCase):
         self.assertIn('name="category"', body)         # カテゴリトグル（checkbox）
         self.assertNotIn("アーカイブ済みのみを表示", body)  # 旧ボタンは廃止
         self.assertNotIn("＋ 新規タグ作成", body)          # ＋ 除去
+
+
+class TagCategoryCascadeArchiveTests(TestCase):
+    """TagCategory のアーカイブ化・非アーカイブ化に伴う配下 Tag 連動処理のテスト。"""
+
+    def setUp(self):
+        from django.contrib.auth.models import Permission
+
+        self.user = User.objects.create_user(
+            username="cascade_test_user", password="password"
+        )
+        self.user.user_permissions.add(
+            Permission.objects.get(codename="delete_tagcategory"),
+            Permission.objects.get(codename="change_tagcategory"),
+            Permission.objects.get(codename="change_tag"),
+            Permission.objects.get(codename="view_tag"),
+        )
+        self.client = Client()
+        self.client.force_login(self.user)
+
+        # 対象カテゴリ A
+        self.cat_a = TagCategory.objects.create(name="カテゴリA")
+        self.tag_a1 = Tag.objects.create(
+            name="タグA1(アクティブ)", category=self.cat_a, created_by=self.user, is_archived=False
+        )
+        self.tag_a2 = Tag.objects.create(
+            name="タグA2(事前アーカイブ)", category=self.cat_a, created_by=self.user, is_archived=True
+        )
+
+        # 別カテゴリ B
+        self.cat_b = TagCategory.objects.create(name="カテゴリB")
+        self.tag_b1 = Tag.objects.create(
+            name="タグB1(アクティブ)", category=self.cat_b, created_by=self.user, is_archived=False
+        )
+
+    def test_archive_category_archives_active_child_tags(self):
+        """TagCategory をアーカイブ化すると、配下のアクティブな Tag が全て is_archived=True になる。"""
+        url = reverse("tags:tag_category_delete", kwargs={"pk": self.cat_a.pk})
+        resp = self.client.post(url)
+        self.assertEqual(resp.status_code, 302)
+
+        self.cat_a.refresh_from_db()
+        self.tag_a1.refresh_from_db()
+        self.assertTrue(self.cat_a.is_archived)
+        self.assertTrue(self.tag_a1.is_archived)
+
+    def test_archive_category_keeps_already_archived_child_tags(self):
+        """TagCategory をアーカイブ化しても、既に個別アーカイブ済みだった Tag の状態は変わらない（is_archived=Trueのまま）。"""
+        url = reverse("tags:tag_category_delete", kwargs={"pk": self.cat_a.pk})
+        self.client.post(url)
+
+        self.tag_a2.refresh_from_db()
+        self.assertTrue(self.tag_a2.is_archived)
+
+    def test_unarchive_category_unarchives_all_child_tags(self):
+        """TagCategory を非アーカイブ化すると、配下のアーカイブ済み Tag（個別アーカイブ済みを含む）が全て is_archived=False になる。"""
+        # まずカテゴリAをアーカイブ化
+        self.cat_a.is_archived = True
+        self.cat_a.save()
+        self.tag_a1.is_archived = True
+        self.tag_a1.save()
+
+        # 非アーカイブ化実行
+        url = reverse("tags:tag_category_unarchive", kwargs={"pk": self.cat_a.pk})
+        resp = self.client.post(url)
+        self.assertEqual(resp.status_code, 302)
+
+        self.cat_a.refresh_from_db()
+        self.tag_a1.refresh_from_db()
+        self.tag_a2.refresh_from_db()
+
+        self.assertFalse(self.cat_a.is_archived)
+        self.assertFalse(self.tag_a1.is_archived)
+        self.assertFalse(self.tag_a2.is_archived)  # 個別アーカイブ済みだったタグも復元される（仕様通りの挙動）
+
+    def test_other_category_tags_unaffected(self):
+        """別カテゴリに属する Tag が、対象カテゴリのアーカイブ・非アーカイブ操作の影響を受けない。"""
+        # カテゴリAをアーカイブ化
+        url_archive = reverse("tags:tag_category_delete", kwargs={"pk": self.cat_a.pk})
+        self.client.post(url_archive)
+
+        self.tag_b1.refresh_from_db()
+        self.assertFalse(self.tag_b1.is_archived)
+
+        # カテゴリAを非アーカイブ化
+        url_unarchive = reverse("tags:tag_category_unarchive", kwargs={"pk": self.cat_a.pk})
+        self.client.post(url_unarchive)
+
+        self.tag_b1.refresh_from_db()
+        self.assertFalse(self.tag_b1.is_archived)
+
+    def test_individual_tag_unarchive_blocked_when_category_is_archived(self):
+        """親カテゴリがアーカイブ済みの状態で配下タグの個別の非アーカイブ化を試みるとブロックされる。"""
+        # 親カテゴリをアーカイブ状態にする
+        self.cat_a.is_archived = True
+        self.cat_a.save()
+        self.tag_a2.is_archived = True
+        self.tag_a2.save()
+
+        url = reverse("tags:tag_unarchive", kwargs={"pk": self.tag_a2.pk})
+        resp = self.client.post(url, follow=True)
+
+        self.tag_a2.refresh_from_db()
+        self.assertTrue(self.tag_a2.is_archived)  # ブロックされ is_archived=True のまま
+
+        msgs = [m.message for m in resp.context["messages"]]
+        self.assertTrue(any("先にカテゴリを非アーカイブ化してください" in m for m in msgs))
+
+    def test_individual_tag_unarchive_succeeds_when_category_is_active(self):
+        """親カテゴリがアクティブな状態では、タグの個別非アーカイブ化が成功する。"""
+        self.cat_a.is_archived = False
+        self.cat_a.save()
+        self.tag_a2.is_archived = True
+        self.tag_a2.save()
+
+        url = reverse("tags:tag_unarchive", kwargs={"pk": self.tag_a2.pk})
+        resp = self.client.post(url)
+        self.assertEqual(resp.status_code, 302)
+
+        self.tag_a2.refresh_from_db()
+        self.assertFalse(self.tag_a2.is_archived)  # 成功して is_archived=False になる
+
+
+class TagBulkAssignViewTests(TestCase):
+    """TagBulkAssignView の単体テスト。"""
+
+    def setUp(self):
+        from django.contrib.auth.models import Permission
+        self.user = get_user_model().objects.create_user(
+            username="tag_user", password="password"
+        )
+        assign_perm = Permission.objects.get(codename="assign_tag")
+        self.user.user_permissions.add(assign_perm)
+        self.client.login(username="tag_user", password="password")
+
+        self.person = Person.objects.create()
+        self.cat = TagCategory.objects.create(name="カテゴリ1", sort_order=1)
+        self.tag1 = Tag.objects.create(name="タグ1", category=self.cat, created_by=self.user)
+        self.tag2 = Tag.objects.create(name="タグ2", category=self.cat, created_by=self.user)
+        self.tag3 = Tag.objects.create(name="タグ3", category=self.cat, created_by=self.user)
+        self.url = reverse("tags:tag_bulk_assign")
+
+    def test_bulk_assign_add_and_remove(self):
+        """追加分・削除分が同時に正しく反映されること（差分計算の検証）。"""
+        TagAssignment.objects.create(tag=self.tag1, person=self.person, assigned_by=self.user)
+
+        payload = {
+            "person_id": str(self.person.id),
+            "tag_ids": [str(self.tag2.id), str(self.tag3.id)],
+        }
+        resp = self.client.post(self.url, data=payload, content_type="application/json")
+        self.assertEqual(resp.status_code, 200)
+
+        data = resp.json()
+        self.assertTrue(data["ok"])
+        assigned_tag_ids = set(
+            TagAssignment.objects.filter(person=self.person).values_list("tag_id", flat=True)
+        )
+        self.assertEqual(assigned_tag_ids, {self.tag2.id, self.tag3.id})
+        self.assertNotIn(self.tag1.id, assigned_tag_ids)
+
+    def test_bulk_assign_add_only(self):
+        """追加のみのケース。"""
+        TagAssignment.objects.create(tag=self.tag1, person=self.person, assigned_by=self.user)
+
+        payload = {
+            "person_id": str(self.person.id),
+            "tag_ids": [str(self.tag1.id), str(self.tag2.id)],
+        }
+        resp = self.client.post(self.url, data=payload, content_type="application/json")
+        self.assertEqual(resp.status_code, 200)
+
+        assigned_tag_ids = set(
+            TagAssignment.objects.filter(person=self.person).values_list("tag_id", flat=True)
+        )
+        self.assertEqual(assigned_tag_ids, {self.tag1.id, self.tag2.id})
+
+    def test_bulk_assign_remove_only(self):
+        """削除のみのケース。"""
+        TagAssignment.objects.create(tag=self.tag1, person=self.person, assigned_by=self.user)
+        TagAssignment.objects.create(tag=self.tag2, person=self.person, assigned_by=self.user)
+
+        payload = {
+            "person_id": str(self.person.id),
+            "tag_ids": [str(self.tag1.id)],
+        }
+        resp = self.client.post(self.url, data=payload, content_type="application/json")
+        self.assertEqual(resp.status_code, 200)
+
+        assigned_tag_ids = set(
+            TagAssignment.objects.filter(person=self.person).values_list("tag_id", flat=True)
+        )
+        self.assertEqual(assigned_tag_ids, {self.tag1.id})
+
+    def test_bulk_assign_no_change(self):
+        """変更なしの場合、TagAssignment の状態が変わらないこと。"""
+        asg = TagAssignment.objects.create(tag=self.tag1, person=self.person, assigned_by=self.user)
+
+        payload = {
+            "person_id": str(self.person.id),
+            "tag_ids": [str(self.tag1.id)],
+        }
+        resp = self.client.post(self.url, data=payload, content_type="application/json")
+        self.assertEqual(resp.status_code, 200)
+
+        current_asg = TagAssignment.objects.get(person=self.person)
+        self.assertEqual(current_asg.id, asg.id)
+
+    def test_bulk_assign_requires_permission(self):
+        """権限のないユーザーがブロックされること。"""
+        no_perm_user = get_user_model().objects.create_user(username="noperm", password="password")
+        self.client.login(username="noperm", password="password")
+
+        payload = {
+            "person_id": str(self.person.id),
+            "tag_ids": [str(self.tag1.id)],
+        }
+        resp = self.client.post(self.url, data=payload, content_type="application/json")
+        self.assertEqual(resp.status_code, 403)
+
+    def test_bulk_assign_invalid_tag_id_returns_400(self):
+        """存在しないまたはアーカイブ済みの tag_id でエラー（400）になること。"""
+        archived_tag = Tag.objects.create(name="アーカイブタグ", category=self.cat, created_by=self.user, is_archived=True)
+
+        payload = {
+            "person_id": str(self.person.id),
+            "tag_ids": [str(archived_tag.id)],
+        }
+        resp = self.client.post(self.url, data=payload, content_type="application/json")
+        self.assertEqual(resp.status_code, 400)
+        self.assertFalse(resp.json()["ok"])
+
+    def test_bulk_assign_missing_person_id_returns_400(self):
+        """person_id が欠損している場合 400 になること。"""
+        payload = {"tag_ids": [str(self.tag1.id)]}
+        resp = self.client.post(self.url, data=payload, content_type="application/json")
+        self.assertEqual(resp.status_code, 400)
+        self.assertFalse(resp.json()["ok"])
+
+
+

@@ -309,8 +309,8 @@
     if (!activeModal) return;
 
  
-    // 手動切り出しモーダルは除外（独自のドラッグロジックがあるため）
-    if (activeModal.id === 'manualCropModal') return;
+    // 手動切り出しモーダル・画像比較モーダルは除外（独自のドラッグロジックがあるため）
+    if (activeModal.id === 'manualCropModal' || activeModal.id === 'review-img-modal-compare') return;
     // ヘッダー部分をクリック・ドラッグした場合：モーダルウィンドウ枠（.app-modal__panel）を移動
     const header = e.target.closest('.app-modal__header');
     if (header && activeModal.contains(header)) {
@@ -337,6 +337,7 @@
 
   document.addEventListener('pointermove', function (e) {
     if (!activeModal) return;
+    if (activeModal.id === 'manualCropModal' || activeModal.id === 'review-img-modal-compare') return;
 
     if (isPanelDragging) {
       const panel = activeModal.querySelector('.app-modal__panel');
@@ -361,6 +362,9 @@
   });
 
   document.addEventListener('pointerup', function (e) {
+    if (!activeModal) return;
+    if (activeModal.id === 'manualCropModal' || activeModal.id === 'review-img-modal-compare') return;
+
     if (isPanelDragging && activeModal) {
       isPanelDragging = false;
       const panel = activeModal.querySelector('.app-modal__panel');
@@ -386,6 +390,8 @@
   // マウスホイールズーム
   document.addEventListener('wheel', function (e) {
     if (!activeModal) return;
+    if (activeModal.id === 'manualCropModal' || activeModal.id === 'review-img-modal-compare') return;
+
     const img = e.target.closest('.app-modal__body img, .js-image-zoom-img');
     if (!img) return;
 
@@ -406,6 +412,8 @@
   // ダブルクリック切替
   document.addEventListener('dblclick', function (e) {
     if (!activeModal) return;
+    if (activeModal.id === 'manualCropModal' || activeModal.id === 'review-img-modal-compare') return;
+
     const img = e.target.closest('.app-modal__body img, .js-image-zoom-img');
     if (!img) return;
 
@@ -422,6 +430,8 @@
   // ピンチズーム
   document.addEventListener('touchstart', function (e) {
     if (!activeModal) return;
+    if (activeModal.id === 'manualCropModal' || activeModal.id === 'review-img-modal-compare') return;
+
     const img = e.target.closest('.app-modal__body img, .js-image-zoom-img');
     if (!img) return;
 
@@ -437,6 +447,8 @@
 
   document.addEventListener('touchmove', function (e) {
     if (!activeModal) return;
+    if (activeModal.id === 'manualCropModal' || activeModal.id === 'review-img-modal-compare') return;
+
     const img = activeModal.querySelector('.app-modal__body img, .js-image-zoom-img');
     if (!img) return;
 

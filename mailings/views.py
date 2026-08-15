@@ -4066,6 +4066,27 @@ class CampaignArchiveView(
         return redirect("mailings:campaign_list")
 
 
+class CampaignUnarchiveView(
+    LoginRequiredMixin, PermissionRequiredMixin, CampaignOwnerRequiredMixin, View
+):
+    """キャンペーン非アーカイブ化（復元、is_archived=False）。POST 専用。
+
+    認可（Phase 7 ⑤）：mailings.delete_campaign ＋ 所有者判定（CampaignOwnerRequiredMixin）。
+    """
+
+    permission_required = "mailings.delete_campaign"
+
+    def post(self, request, pk):
+        from django.contrib import messages
+
+        from .services.campaign_actions import unarchive_campaign
+
+        campaign = get_object_or_404(Campaign, pk=pk, is_archived=True)
+        unarchive_campaign(campaign)
+        messages.success(request, "キャンペーンを非アーカイブ化（復元）しました。")
+        return redirect("mailings:campaign_detail", pk=pk)
+
+
 class CampaignTestSendView(_CampaignActionBaseView):
     """テスト送信（URL一覧 rev17 No.11、(b) §5.7、仕様書 §7.7）。
 

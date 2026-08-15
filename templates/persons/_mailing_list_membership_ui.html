@@ -1,0 +1,36 @@
+{% comment %}
+Person 所属配信リスト UI partial。
+
+person_detail_orphan / merged / archived / active から {% include %} で共通利用。
+{% if perms.mailings.view_mailinglist %} ガード付き。
+
+期待 context:
+  person_mailing_list_memberships: QuerySet[MailingListMember]（select_related("mailing_list") 済み）
+  back: BackNavigator
+{% endcomment %}
+{% load back_tags %}
+{% load badge_tags %}
+
+{% if perms.mailings.view_mailinglist %}
+<section class="app-card js-person-mailing-list-section" style="max-width:1100px; margin-top:var(--app-space-md);">
+  <div class="app-section__header"><h2 style="margin:0;">所属配信リスト</h2></div>
+
+  <div style="display:flex; flex-wrap:wrap; gap:8px; min-height:32px; align-items:center;">
+    {% for asg in person_mailing_list_memberships %}
+      {% url 'mailings:mailing_list_detail' pk=asg.mailing_list.id as list_url %}
+      <a href="{% append_back_url list_url back %}" class="app-btn app-btn--outline-secondary app-btn--sm js-person-mailing-list-chip" style="text-decoration:none;">
+        {% if asg.mailing_list.members_frozen_at %}
+          <i class="bi bi-lock-fill" style="color:#64748b; margin-right:4px;"
+             title="凍結: {{ asg.mailing_list.members_frozen_at|date:'Y/m/d H:i' }}"></i>
+        {% endif %}
+        {{ asg.mailing_list.name }}
+        {% if asg.mailing_list.is_archived %}
+          {% status_badge asg.mailing_list %}
+        {% endif %}
+      </a>
+    {% empty %}
+      <span class="app-muted js-person-mailing-list-empty">所属している配信リストはありません</span>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}

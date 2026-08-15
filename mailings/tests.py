@@ -7918,6 +7918,48 @@ class CampaignArchiveViewTests(_PhaseBTestBase):
         self.assertTrue(self.template.is_archived)
 
 
+class CampaignUnarchiveViewTests(_PhaseBTestBase):
+    def _url(self):
+        return f"/mailings/campaigns/{self.campaign.pk}/unarchive/"
+
+    def setUp(self):
+        super().setUp()
+        self.campaign.is_archived = True
+        self.campaign.save()
+        self.template.is_archived = True
+        self.template.save()
+
+    def test_get_method_not_allowed(self):
+        response = self.client.get(self._url())
+        self.assertEqual(response.status_code, 405)
+
+    def test_post_unarchives_and_redirects_to_detail(self):
+        response = self.client.post(self._url())
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, f"/mailings/campaigns/{self.campaign.pk}/")
+        self.campaign.refresh_from_db()
+        self.template.refresh_from_db()
+        self.assertFalse(self.campaign.is_archived)
+        self.assertFalse(self.template.is_archived)
+
+    def test_permission_required(self):
+        noperm_user = User.objects.create_user(
+            username="noperm_unarchive", email="noperm@example.com", password="x"
+        )
+        self.client.force_login(noperm_user)
+        response = self.client.post(self._url())
+        self.assertEqual(response.status_code, 403)
+
+    def test_owner_required(self):
+        other_user = User.objects.create_user(
+            username="other_unarchive", email="other@example.com", password="x"
+        )
+        other_user.user_permissions.add(Permission.objects.get(codename="delete_campaign"))
+        self.client.force_login(other_user)
+        response = self.client.post(self._url())
+        self.assertEqual(response.status_code, 403)
+
+
 class CampaignTestSendViewTests(_PhaseBTestBase):
     def _url(self):
         return f"/mailings/campaigns/{self.campaign.pk}/test-send/"

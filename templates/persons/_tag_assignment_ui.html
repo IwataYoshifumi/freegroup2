@@ -1,72 +1,126 @@
 {% comment %}
-Person タグ付与・解除 UI partial（v1.6 Phase 1b-β、仕様書 §5.2.3 / §5.1 No.25・No.26）。
+Person タグ付与・解除 UI partial（v1.8 タグUI刷新・表示/編集モード切替＋ボタン型チェックボックス）。
 
-person_detail_orphan / merged / archived から {% include %} で共通利用。
-{% if perms.tags.assign_tag %} ガード付き（Phase 1a で Meta.permissions 登録済み）。
+person_detail_orphan / merged / archived / active から {% include %} で共通利用。
+{% if perms.tags.assign_tag %} ガード付き。
 
 期待 context:
   person: Person（タグ付与対象）
   person_tag_assignments: list[TagAssignment]（現在付与中、tag/category prefetch 済み）
   tags_by_category: list[(TagCategory, list[Tag])]（選択可能タグ）
+  readonly: bool（True の場合は表示専用モード：編集ボタン・編集フォームを非表示）
 {% endcomment %}
+{% load back_tags %}
 {% if perms.tags.assign_tag %}
 <section class="app-card" style="max-width:1100px; margin-top:var(--app-space-md);">
-  <div class="app-section__header"><h2>タグ</h2></div>
+  <div class="app-section__header" style="display:flex; align-items:center; justify-content:space-between;">
+    <h2 style="margin:0;">タグ</h2>
+    {% if not readonly %}
+      <button type="button" class="app-btn--icon js-person-tag-edit-toggle"
+              aria-label="編集" title="タグの付与・解除を編集"
+              style="color:inherit; border:none; background:none; text-decoration:none; line-height:1; font-size:1.2rem; cursor:pointer;">
+        <i class="bi bi-pencil"></i>
+      </button>
+    {% endif %}
+  </div>
 
   <div class="js-person-tag-block" data-person-id="{{ person.id }}">
-    <div class="app-form__group">
-      <label class="app-form__label">付与中のタグ</label>
-      <div class="js-person-tag-current" style="display:flex; flex-wrap:wrap; gap:8px; min-height:32px;">
-        {% for asg in person_tag_assignments %}
-          <span class="app-status-badge js-person-tag-chip" data-tag-id="{{ asg.tag.id }}">
-            <span class="app-muted" style="margin-right:4px;">[{{ asg.tag.category.name }}]</span>
-            {{ asg.tag.name }}
-            <button type="button" class="app-btn--icon js-person-tag-remove"
-                    data-tag-id="{{ asg.tag.id }}"
-                    aria-label="このタグを解除"
-                    style="margin-left:6px;">×</button>
-          </span>
-        {% empty %}
-          <span class="app-muted js-person-tag-empty">付与されているタグはありません</span>
-        {% endfor %}
+    {# 表示モード #}
+    <div class="js-person-tag-view-mode">
+      <div class="app-form__group" style="margin:0;">
+        <div class="js-person-tag-current" style="display:flex; flex-wrap:wrap; gap:8px; min-height:32px; align-items:center;">
+          {% for asg in person_tag_assignments %}
+            {% url 'tags:tag_detail' pk=asg.tag.id as tag_url %}
+            <a href="{% append_back_url tag_url back %}" class="app-btn app-btn--outline-secondary app-btn--sm js-person-tag-chip" data-tag-id="{{ asg.tag.id }}" style="text-decoration:none;">
+              <span class="app-muted" style="margin-right:4px;">[{{ asg.tag.category.name }}]</span>
+              {{ asg.tag.name }}
+            </a>
+          {% empty %}
+            <span class="app-muted js-person-tag-empty">付与されているタグはありません</span>
+          {% endfor %}
+        </div>
       </div>
     </div>
 
-    {% if tags_by_category %}
-      <div class="app-form__group" style="margin-top:16px;">
-        <label class="app-form__label" for="js_person_tag_select">タグを追加</label>
-        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-          <select id="js_person_tag_select" class="app-input js-person-tag-select" style="min-width:280px;">
-            <option value="">-- タグを選択 --</option>
-            {% for cat, tags_in_cat in tags_by_category %}
-              {% if tags_in_cat %}
-                <optgroup label="{{ cat.name }}">
+    {# 編集モード #}
+    {% if not readonly %}
+      <style>
+        .js-person-tag-edit-mode .app-radio-toggle label {
+          padding: 4px 12px;
+          min-height: 30px;
+          font-size: 13px;
+          font-weight: 500;
+        }
+      </style>
+      <div class="js-person-tag-edit-mode" style="display:none; margin-top:var(--app-space-sm);">
+        {% if tags_by_category %}
+          {% for cat, tags_in_cat in tags_by_category %}
+            {% if tags_in_cat %}
+              <div style="margin-bottom:12px;">
+                <div style="font-weight:600; font-size:13px; color:var(--app-muted); margin-bottom:6px;">{{ cat.name }}</div>
+                <ul class="app-radio-toggle" style="display:flex; flex-wrap:wrap; gap:6px;">
                   {% for tag in tags_in_cat %}
-                    <option value="{{ tag.id }}" data-category="{{ cat.name }}" data-tag-name="{{ tag.name }}">{{ tag.name }}</option>
+                    <li>
+                      <label>
+                        <input type="checkbox" class="js-person-tag-checkbox" value="{{ tag.id }}" data-category="{{ cat.name }}" data-tag-name="{{ tag.name }}">
+                        {{ tag.name }}
+                      </label>
+                    </li>
                   {% endfor %}
-                </optgroup>
-              {% endif %}
-            {% endfor %}
-          </select>
-          <button type="button" class="app-btn app-btn--primary app-btn--sm js-person-tag-add">＋付与</button>
-        </div>
+                </ul>
+              </div>
+            {% endif %}
+          {% endfor %}
+          <div style="display:flex; gap:8px; margin-top:16px;">
+            <button type="button" class="app-btn app-btn--primary js-person-tag-save">保存</button>
+            <button type="button" class="app-btn app-btn--secondary js-person-tag-cancel">キャンセル</button>
+          </div>
+        {% else %}
+          <p class="app-muted">タグがまだ作成されていません。
+            <a href="{% url 'tags:tag_list' %}">タグ一覧画面</a>で作成してください。
+          </p>
+          <div style="display:flex; gap:8px; margin-top:16px;">
+            <button type="button" class="app-btn app-btn--secondary js-person-tag-cancel">キャンセル</button>
+          </div>
+        {% endif %}
       </div>
-    {% else %}
-      <p class="app-muted">タグがまだ作成されていません。
-        <a href="{% url 'tags:tag_list' %}">タグ一覧画面</a>で作成してください。
-      </p>
     {% endif %}
   </div>
 </section>
 
+{% if not readonly %}
 <script>
   (function () {
     var block = document.querySelector('.js-person-tag-block[data-person-id="{{ person.id }}"]');
     if (!block) return;
 
     var personId = block.dataset.personId;
+    var viewMode = block.querySelector('.js-person-tag-view-mode');
+    var editMode = block.querySelector('.js-person-tag-edit-mode');
     var current = block.querySelector('.js-person-tag-current');
-    var emptyLabel = block.querySelector('.js-person-tag-empty');
+    var editToggleBtn = block.ownerDocument.querySelector('.js-person-tag-edit-toggle');
+
+    var savedTagIds = new Set();
+
+    function initSavedTagIds() {
+      savedTagIds.clear();
+      var chips = current.querySelectorAll('.js-person-tag-chip');
+      chips.forEach(function (chip) {
+        if (chip.dataset.tagId) {
+          savedTagIds.add(chip.dataset.tagId);
+        }
+      });
+    }
+
+    initSavedTagIds();
+
+    function syncCheckboxesFromSaved() {
+      if (!editMode) return;
+      var checkboxes = editMode.querySelectorAll('.js-person-tag-checkbox');
+      checkboxes.forEach(function (cb) {
+        cb.checked = savedTagIds.has(cb.value);
+      });
+    }
 
     function getCsrf() {
       var input = document.querySelector('[name=csrfmiddlewaretoken]');
@@ -90,58 +144,89 @@ person_detail_orphan / merged / archived から {% include %} で共通利用。
       });
     }
 
-    function renderChip(tagId, tagName, categoryName) {
-      if (emptyLabel) { emptyLabel.remove(); }
-      var chip = document.createElement('span');
-      chip.className = 'app-status-badge js-person-tag-chip';
-      chip.dataset.tagId = tagId;
-      chip.innerHTML =
-        '<span class="app-muted" style="margin-right:4px;">[' + categoryName + ']</span>' +
-        tagName +
-        ' <button type="button" class="app-btn--icon js-person-tag-remove" data-tag-id="' + tagId +
-        '" aria-label="このタグを解除" style="margin-left:6px;">×</button>';
-      current.appendChild(chip);
+    function renderChips(assignments) {
+      current.innerHTML = '';
+      if (!assignments || assignments.length === 0) {
+        var span = document.createElement('span');
+        span.className = 'app-muted js-person-tag-empty';
+        span.textContent = '付与されているタグはありません';
+        current.appendChild(span);
+        return;
+      }
+      assignments.forEach(function (asg) {
+        var chip = document.createElement('a');
+        chip.className = 'app-btn app-btn--outline-secondary app-btn--sm js-person-tag-chip';
+        chip.style.textDecoration = 'none';
+        chip.href = '/tags/' + asg.tag_id + '/';
+        chip.dataset.tagId = asg.tag_id;
+        chip.innerHTML =
+          '<span class="app-muted" style="margin-right:4px;">[' + asg.category_name + ']</span>' +
+          asg.tag_name;
+        current.appendChild(chip);
+      });
+    }
+
+    if (editToggleBtn) {
+      editToggleBtn.addEventListener('click', function () {
+        if (!editMode) return;
+        if (editMode.style.display === 'none') {
+          syncCheckboxesFromSaved();
+          viewMode.style.display = 'none';
+          editMode.style.display = 'block';
+        } else {
+          viewMode.style.display = 'block';
+          editMode.style.display = 'none';
+        }
+      });
     }
 
     block.addEventListener('click', function (event) {
-      var add = event.target.closest('.js-person-tag-add');
-      if (add) {
-        var select = block.querySelector('.js-person-tag-select');
-        var tagId = select.value;
-        if (!tagId) return;
-        var opt = select.options[select.selectedIndex];
-        postJson("{% url 'tags:tag_assign' %}", { person_id: personId, tag_id: tagId })
-          .then(function (data) {
-            if (!data.ok) { alert('付与に失敗しました'); return; }
-            // 既存 chip があれば追加しない（重複防止）
-            if (current.querySelector('.js-person-tag-chip[data-tag-id="' + tagId + '"]')) return;
-            renderChip(tagId, data.tag_name, data.category_name);
-            select.value = '';
-          })
-          .catch(function () { alert('付与に失敗しました'); });
+      var cancelBtn = event.target.closest('.js-person-tag-cancel');
+      if (cancelBtn) {
+        if (viewMode && editMode) {
+          viewMode.style.display = 'block';
+          editMode.style.display = 'none';
+        }
         return;
       }
-      var remove = event.target.closest('.js-person-tag-remove');
-      if (remove) {
-        var tagId2 = remove.dataset.tagId;
-        if (!confirm('このタグを解除しますか？')) return;
-        postJson("{% url 'tags:tag_unassign' %}", { person_id: personId, tag_id: tagId2 })
+
+      var saveBtn = event.target.closest('.js-person-tag-save');
+      if (saveBtn) {
+        var checkedCbs = editMode.querySelectorAll('.js-person-tag-checkbox:checked');
+        var tagIds = [];
+        checkedCbs.forEach(function (cb) {
+          tagIds.push(cb.value);
+        });
+
+        saveBtn.disabled = true;
+        postJson("{% url 'tags:tag_bulk_assign' %}", { person_id: personId, tag_ids: tagIds })
           .then(function (data) {
-            if (!data.ok) { alert('解除に失敗しました'); return; }
-            var chip = current.querySelector('.js-person-tag-chip[data-tag-id="' + tagId2 + '"]');
-            if (chip) chip.remove();
-            if (current.children.length === 0) {
-              var span = document.createElement('span');
-              span.className = 'app-muted js-person-tag-empty';
-              span.textContent = '付与されているタグはありません';
-              current.appendChild(span);
+            saveBtn.disabled = false;
+            if (!data.ok) {
+              alert('タグの保存に失敗しました');
+              return;
+            }
+            savedTagIds.clear();
+            if (data.assignments) {
+              data.assignments.forEach(function (asg) {
+                savedTagIds.add(asg.tag_id);
+              });
+            }
+            renderChips(data.assignments);
+            if (viewMode && editMode) {
+              viewMode.style.display = 'block';
+              editMode.style.display = 'none';
             }
           })
-          .catch(function () { alert('解除に失敗しました'); });
+          .catch(function () {
+            saveBtn.disabled = false;
+            alert('タグの保存に失敗しました');
+          });
       }
     });
   })();
 </script>
 {% endif %}
-{# CSRF token form for JS to read（POST フォームが他にあれば省略可、ここはガード） #}
+{% endif %}
+{# CSRF token form for JS to read #}
 <form style="display:none;">{% csrf_token %}</form>

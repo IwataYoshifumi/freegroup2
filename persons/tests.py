@@ -538,15 +538,15 @@ class PersonDetailViewTests(TestCase):
         self.assertIn("change_reason=fix", html)
 
     def test_active_person_renders_person_detail(self):
-        """active + primary_contact あり → リダイレクトせず人物詳細を render（v1.7）。
+        """active + primary_contact あり → リダイレクトせず人物詳細を render。
 
-        主役 Contact（primary_contact）の情報で contact_detail.html を流用し、
-        タイトルは「人物詳細」。旧挙動（302 → ContactDetailView）は廃止。
+        主役 Contact（primary_contact）の情報で person_detail_active.html をレンダリングし、
+        タイトルは「パーソン詳細」。
         """
         person, contact = self._make_active_with_primary()
         resp = self.client.get(self._url(person))
         self.assertEqual(resp.status_code, 200)
-        self.assertTemplateUsed(resp, "contacts/contact_detail.html")
+        self.assertTemplateUsed(resp, "persons/person_detail_active.html")
         body = resp.content.decode()
         # タイトル（h1・タブ）が「パーソン詳細」、主コンタクトの氏名が出る。
         self.assertIn("パーソン詳細", body)
@@ -1309,3 +1309,247 @@ class Phase7PersonViewAuthTests(TestCase):
         adder = User.objects.create_user(username="pv_adder", password="x")
         _grant_add_contact(adder)
         self.assertEqual(self._client(adder).get(url).status_code, 200)
+
+
+class PersonTagUIReadonlyTests(TestCase):
+    """merged / archived 人物詳細画面のタグUI表示専用化のテスト。"""
+
+    def setUp(self):
+        from django.contrib.auth.models import Permission
+        from tags.models import Tag, TagAssignment, TagCategory
+
+        self.user = User.objects.create_user(username="tag_ui_user", password="x")
+        self.user.user_permissions.add(
+            Permission.objects.get(codename="view_person"),
+            Permission.objects.get(codename="assign_tag"),
+        )
+        self.client = Client()
+        self.client.force_login(self.user)
+
+        self.category = TagCategory.objects.create(name="業種")
+        self.tag = Tag.objects.create(
+            name="IT", category=self.category, created_by=self.user
+        )
+
+        # orphan Person (active + primary_contact NULL)
+        self.orphan_person = Person.objects.create()
+        TagAssignment.objects.create(
+            tag=self.tag, person=self.orphan_person, assigned_by=self.user
+        )
+
+        # merged Person
+        self.surviving_person = Person.objects.create()
+        self.merged_person = Person.objects.create(
+            status=Person.Status.MERGED, merged_into=self.surviving_person
+        )
+        TagAssignment.objects.create(
+            tag=self.tag, person=self.merged_person, assigned_by=self.user
+        )
+
+        # archived Person
+        self.archived_person = Person.objects.create(status=Person.Status.ARCHIVED)
+        TagAssignment.objects.create(
+            tag=self.tag, person=self.archived_person, assigned_by=self.user
+        )
+
+    def test_merged_person_tag_ui_is_readonly(self):
+        """merged Person の詳細画面では、タグチップ（閲覧・リンク付き）は表示されるが、編集ボタン・編集フォームは非表示。"""
+        url = reverse("persons:person_detail", kwargs={"pk": self.merged_person.pk})
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 200)
+
+        body = resp.content.decode("utf-8")
+        self.assertIn("IT", body)                                  # タグ名は表示される
+        self.assertIn(reverse("tags:tag_detail", kwargs={"pk": self.tag.pk}), body) # tag_detail へのリンクが含まれる
+        self.assertIn("app-btn--outline-secondary", body)          # ボタン形状クラスが含まれる
+        self.assertNotIn("js-person-tag-edit-toggle", body)        # 編集ボタン（鉛筆）は非表示
+        self.assertNotIn("js-person-tag-edit-mode", body)          # 編集モード枠は非表示
+        self.assertNotIn("js-person-tag-checkbox", body)           # チェックボックスは非表示
+
+    def test_archived_person_tag_ui_is_readonly(self):
+        """archived Person の詳細画面では、タグチップ（閲覧・リンク付き）は表示されるが、編集ボタン・編集フォームは非表示。"""
+        url = reverse("persons:person_detail", kwargs={"pk": self.archived_person.pk})
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 200)
+
+        body = resp.content.decode("utf-8")
+        self.assertIn("IT", body)                                  # タグ名は表示される
+        self.assertIn(reverse("tags:tag_detail", kwargs={"pk": self.tag.pk}), body) # tag_detail へのリンクが含まれる
+        self.assertIn("app-btn--outline-secondary", body)          # ボタン形状クラスが含まれる
+        self.assertNotIn("js-person-tag-edit-toggle", body)        # 編集ボタン（鉛筆）は非表示
+        self.assertNotIn("js-person-tag-edit-mode", body)          # 編集モード枠は非表示
+        self.assertNotIn("js-person-tag-checkbox", body)           # チェックボックスは非表示
+
+    def test_orphan_person_tag_ui_is_editable(self):
+        """orphan (active) Person の詳細画面では、編集ボタン・編集フォームが表示される。"""
+        url = reverse("persons:person_detail", kwargs={"pk": self.orphan_person.pk})
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 200)
+
+        body = resp.content.decode("utf-8")
+        self.assertIn("IT", body)                                  # タグ名が表示される
+        self.assertIn(reverse("tags:tag_detail", kwargs={"pk": self.tag.pk}), body) # tag_detail へのリンクが含まれる
+        self.assertIn("js-person-tag-edit-toggle", body)           # 編集ボタン（鉛筆）が表示される
+        self.assertIn("js-person-tag-edit-mode", body)             # 編集モード枠が表示される
+        self.assertIn("js-person-tag-checkbox", body)              # チェックボックスが表示される
+
+    def test_active_person_with_primary_tag_ui_is_editable(self):
+        """active かつ primary_contact ありの Person 詳細画面（person_detail_active.html）でも、編集ボタン・編集フォームが表示される。"""
+        from contacts.models import Contact
+        from tags.models import TagAssignment
+        active_person = Person.objects.create()
+        contact = Contact.objects.create(
+            person=active_person, full_name="アクティブ太郎", status=Contact.Status.PRIMARY
+        )
+        active_person.primary_contact = contact
+        active_person.save()
+
+        TagAssignment.objects.create(
+            tag=self.tag, person=active_person, assigned_by=self.user
+        )
+
+        url = reverse("persons:person_detail", kwargs={"pk": active_person.pk})
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 200)
+        self.assertTemplateUsed(resp, "persons/person_detail_active.html")
+
+        body = resp.content.decode("utf-8")
+        self.assertIn("IT", body)                                  # タグ名が表示される
+        self.assertIn(reverse("tags:tag_detail", kwargs={"pk": self.tag.pk}), body) # tag_detail へのリンクが含まれる
+        self.assertIn("js-person-tag-edit-toggle", body)           # 編集ボタン（鉛筆）が表示される
+        self.assertIn("js-person-tag-edit-mode", body)             # 編集モード枠が表示される
+        self.assertIn("js-person-tag-checkbox", body)              # チェックボックスが表示される
+        self.assertIn(f'data-person-id="{active_person.id}"', body) # person.id が正しく解決されている
+
+
+class PersonMailingListMembershipUITests(TestCase):
+    """パーソン詳細画面での所属配信リスト表示 UI の単体テスト。"""
+
+    def setUp(self):
+        from django.contrib.auth.models import Permission
+        from mailings.models import MailingList, MailingListMember
+
+        self.user = get_user_model().objects.create_user(
+            username="ml_viewer", password="password"
+        )
+        _grant_view_person(self.user)
+        view_ml_perm = Permission.objects.get(codename="view_mailinglist")
+        self.user.user_permissions.add(view_ml_perm)
+        self.client.login(username="ml_viewer", password="password")
+
+        # Person 状態各種
+        self.orphan_person = Person.objects.create(status=Person.Status.ACTIVE)
+        self.merged_person = Person.objects.create(status=Person.Status.MERGED)
+        self.archived_person = Person.objects.create(status=Person.Status.ARCHIVED)
+
+        from contacts.models import Contact
+        self.active_person = Person.objects.create(status=Person.Status.ACTIVE)
+        self.contact = Contact.objects.create(
+            person=self.active_person, full_name="アクティブ花子", status=Contact.Status.PRIMARY
+        )
+        self.active_person.primary_contact = self.contact
+        self.active_person.save()
+
+        # リストを作成
+        self.normal_list = MailingList.objects.create(name="一般配信リスト", created_by=self.user)
+        self.frozen_list = MailingList.objects.create(
+            name="凍結リスト", created_by=self.user, members_frozen_at=timezone.now()
+        )
+        self.archived_list = MailingList.objects.create(
+            name="アーカイブ済みリスト", created_by=self.user, is_archived=True
+        )
+
+        MailingListMember.objects.create(mailing_list=self.normal_list, person=self.orphan_person, added_by=self.user)
+        MailingListMember.objects.create(mailing_list=self.frozen_list, person=self.orphan_person, added_by=self.user)
+        MailingListMember.objects.create(mailing_list=self.archived_list, person=self.orphan_person, added_by=self.user)
+
+        MailingListMember.objects.create(mailing_list=self.normal_list, person=self.active_person, added_by=self.user)
+        MailingListMember.objects.create(mailing_list=self.normal_list, person=self.merged_person, added_by=self.user)
+        MailingListMember.objects.create(mailing_list=self.normal_list, person=self.archived_person, added_by=self.user)
+
+    def test_mailing_list_membership_rendered_in_all_person_detail_pages(self):
+        """orphan / merged / archived / active 各画面で所属配信リストが正しく表示されること。"""
+        for person in [self.orphan_person, self.merged_person, self.archived_person, self.active_person]:
+            url = reverse("persons:person_detail", kwargs={"pk": person.pk})
+            resp = self.client.get(url)
+            self.assertEqual(resp.status_code, 200)
+            body = resp.content.decode("utf-8")
+            self.assertIn("所属配信リスト", body)
+            self.assertIn("一般配信リスト", body)
+
+    def test_frozen_and_archived_mailing_lists_display_indicators(self):
+        """凍結済みリストに 🔒 アイコン（bi-lock-fill）、アーカイブ済みリストにバッジが表示されること。"""
+        url = reverse("persons:person_detail", kwargs={"pk": self.orphan_person.pk})
+        resp = self.client.get(url)
+        body = resp.content.decode("utf-8")
+
+        self.assertIn("凍結リスト", body)
+        self.assertIn("bi-lock-fill", body)  # 🔒 アイコン
+
+        self.assertIn("アーカイブ済みリスト", body)  # アーカイブ済みリストも表示される
+        self.assertIn("アーカイブ", body)           # アーカイブバッジ
+
+    def test_empty_mailing_list_memberships(self):
+        """所属している配信リストが 0 件の場合、空メッセージが表示されること。"""
+        empty_person = Person.objects.create(status=Person.Status.ACTIVE)
+        url = reverse("persons:person_detail", kwargs={"pk": empty_person.pk})
+        resp = self.client.get(url)
+        body = resp.content.decode("utf-8")
+
+        self.assertIn("所属配信リスト", body)
+        self.assertIn("所属している配信リストはありません", body)
+
+    def test_view_mailinglist_permission_guarded(self):
+        """mailings.view_mailinglist 権限がないユーザーには所属配信リストセクション自体が表示されないこと。"""
+        no_perm_user = get_user_model().objects.create_user(username="noperm_ml", password="password")
+        _grant_view_person(no_perm_user)
+        self.client.login(username="noperm_ml", password="password")
+
+        url = reverse("persons:person_detail", kwargs={"pk": self.orphan_person.pk})
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 200)
+        body = resp.content.decode("utf-8")
+
+        self.assertNotIn("js-person-mailing-list-section", body)
+        self.assertNotIn("所属配信リスト", body)
+
+    def test_pending_duplicates_badge_rendered_as_clickable_link(self):
+        """pending_duplicates がある場合、マージ候補バッジがリンクボタンとしてレンダリングされる。"""
+        import uuid
+        from duplicates.models import DuplicateCandidate
+
+        person_b = Person.objects.create(status=Person.Status.ACTIVE)
+        group_id = uuid.uuid4()
+        DuplicateCandidate.objects.create(
+            person_a=self.active_person,
+            person_b=person_b,
+            score=90,
+            rank=DuplicateCandidate.Rank.POSSIBLE_HIGH,
+            review_status=DuplicateCandidate.ReviewStatus.PENDING,
+            group_id=group_id,
+        )
+
+        url = reverse("persons:person_detail", kwargs={"pk": self.active_person.pk})
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 200)
+
+        body = resp.content.decode("utf-8")
+        self.assertIn("マージ候補 1 件", body)
+        self.assertNotIn("マージ画面へ", body)                      # プレースホルダボタンは除去済み
+        expected_url = reverse("duplicates:duplicate_group_detail", kwargs={"group_id": group_id})
+        self.assertIn(expected_url, body)
+        self.assertIn("app-btn--outline-secondary", body)
+
+    def test_pending_duplicates_badge_not_rendered_when_empty(self):
+        """pending_duplicates がない場合、マージ候補バッジが表示されない。"""
+        url = reverse("persons:person_detail", kwargs={"pk": self.active_person.pk})
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 200)
+
+        body = resp.content.decode("utf-8")
+        self.assertNotIn("マージ候補", body)
+
+
+
+
+

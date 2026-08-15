@@ -95,6 +95,9 @@
   {# ---- タグ付与・解除 UI（v1.6 Phase 1b-β、§5.2.3）---- #}
   {% include "persons/_tag_assignment_ui.html" %}
 
+  {# ---- 所属配信リスト UI ---- #}
+  {% include "persons/_mailing_list_membership_ui.html" %}
+
   {# ---- User-Person 紐付け UI ---- #}
   {# このボタンの遷移先 confirm は self-link 専用。未紐付けボタンは出口ガード（email_match＋ #}
   {# person_active）に揃え、押せる時だけ出す。perms 分岐は self-link 固定では無意味なため除去。 #}

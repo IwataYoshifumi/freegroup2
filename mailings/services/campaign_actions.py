@@ -107,6 +107,21 @@ def archive_campaign(campaign):
         template.save(update_fields=["is_archived", "updated_at"])
 
 
+def unarchive_campaign(campaign):
+    """Campaign + 紐付く EmailTemplate を同一 atomic で is_archived=False（復元）。
+
+    [性質] 副作用あり（DB 書込：Campaign.is_archived / EmailTemplate.is_archived を 1 atomic）
+    [入力] campaign: Campaign
+    """
+    with transaction.atomic():
+        template = campaign.template
+        campaign.is_archived = False
+        campaign.save(update_fields=["is_archived", "updated_at"])
+        template.is_archived = False
+        template.save(update_fields=["is_archived", "updated_at"])
+
+
+
 def run_test_send(campaign, recipient_email):
     """テスト送信（(b) §5.7、仕様書 §7.7）。
 

@@ -67,9 +67,10 @@ urlpatterns = [
         views.TagUnarchiveView.as_view(),
         name="tag_unarchive",
     ),
-    # AJAX タグ付与・解除（§5.1 No.25・No.26）
+    # AJAX タグ付与・解除（§5.1 No.25・No.26、一括更新）
     path("assign/", views.TagAssignView.as_view(), name="tag_assign"),
     path("unassign/", views.TagUnassignView.as_view(), name="tag_unassign"),
+    path("bulk-assign/", views.TagBulkAssignView.as_view(), name="tag_bulk_assign"),
     # 検索結果一括タグ付け（§6.2.6、URL 名はコード君A 判断）
     path("bulk-tagging/", views.BulkTaggingView.as_view(), name="bulk_tagging"),
     # タグ固定モード：タグ詳細から「このタグを人に付与」で遷移。tag をパスに乗せる
