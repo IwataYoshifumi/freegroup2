@@ -1,0 +1,7 @@
+# Docker 本番環境向け extras。
+# base（requirements.txt）を取り込み、PostgreSQL ドライバと本番用 WSGI サーバーを追加する。
+# requirements.txt / requirements-ldap.txt はこのファイルの追加とは独立に管理する
+# （Windows ローカル開発は base のみ、LDAP 環境は requirements-ldap.txt という既存運用ルールを崩さない）。
+-r requirements.txt
+psycopg[binary]
+gunicorn
