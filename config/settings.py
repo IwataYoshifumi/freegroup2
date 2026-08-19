@@ -48,6 +48,35 @@ else:
 
 INTERNAL_IPS = ["127.0.0.1", "192.168.3.135", "192.168.1.135"]
 
+# ============================================================
+# HTTPS / CSRF 設定（nginx SSL 終端 + Django プロキシ構成）
+# ============================================================
+# nginx が HTTPS を受けて HTTP で Django にプロキシする構成では、
+# CSRF_TRUSTED_ORIGINS と SECURE_PROXY_SSL_HEADER の両方が必要。
+#
+# CSRF_TRUSTED_ORIGINS: POST を受け付けるオリジン（スキーム付き）
+#   .env に CSRF_TRUSTED_ORIGINS=https://192.168.100.136,https://g.network-tokai.jp
+#   のように設定する。未設定時のフォールバックは LAN IP のみ。
+#
+# SECURE_PROXY_SSL_HEADER: nginx の X-Forwarded-Proto: https ヘッダを
+#   Django が信頼し、リクエストを HTTPS 扱いにする。
+#   これにより is_secure() が True になり CSRF クッキーが正しく検証される。
+
+_csrf_origins_env = os.getenv("CSRF_TRUSTED_ORIGINS")
+if _csrf_origins_env:
+    CSRF_TRUSTED_ORIGINS = [o.strip() for o in _csrf_origins_env.split(",") if o.strip()]
+else:
+    CSRF_TRUSTED_ORIGINS = [
+        "https://192.168.100.136",
+        "http://192.168.100.136",
+        "https://localhost",
+        "http://localhost",
+    ]
+
+# nginx → Django の X-Forwarded-Proto ヘッダを信頼する
+# （nginx.conf で proxy_set_header X-Forwarded-Proto $scheme; を設定済みであること）
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
 
 # Application definition
 
