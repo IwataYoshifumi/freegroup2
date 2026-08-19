@@ -10,6 +10,6 @@
 # 各ジョブに引き継がれる。
 
 */2 * * * * root cd /app && /usr/local/bin/python manage.py process_opencv >> /proc/1/fd/1 2>&1
-*/2 * * * * root cd /app && /usr/local/bin/python manage.py process_ocr >> /proc/1/fd/1 2>&1
+*/2 * * * * root cd /app && /usr/local/bin/python manage.py process_ocr --limit 300 >> /proc/1/fd/1 2>&1
 */5 * * * * root cd /app && /usr/local/bin/python manage.py check_duplicates >> /proc/1/fd/1 2>&1
 * * * * * root cd /app && /usr/local/bin/python manage.py send_scheduled_campaigns >> /proc/1/fd/1 2>&1
