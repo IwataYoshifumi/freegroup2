@@ -108,7 +108,9 @@ def Run_Generate_Duplicate_Candidates(limit=100):
         try:
             with transaction.atomic():
                 contact = (
-                    Contact.objects.select_for_update(skip_locked=True)
+                    Contact.objects.select_for_update(
+                        skip_locked=True, of=("self",)
+                    )
                     .select_related(
                         "person",
                         "business_card__original_image__user",
