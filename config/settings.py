@@ -34,13 +34,17 @@ SECRET_KEY = os.getenv(
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv("DEBUG", "True").lower() in ("1", "true", "yes", "on")
 
-ALLOWED_HOSTS = [
-    "127.0.0.1",
-    "localhost",
-    "192.168.3.135",
-    "192.168.1.135",
-    "192.168.100.136",
-]
+_allowed_hosts_env = os.getenv("ALLOWED_HOSTS")
+if _allowed_hosts_env:
+    ALLOWED_HOSTS = [h.strip() for h in _allowed_hosts_env.split(",") if h.strip()]
+else:
+    ALLOWED_HOSTS = [
+        "127.0.0.1",
+        "localhost",
+        "192.168.3.135",
+        "192.168.1.135",
+        "192.168.100.136",
+    ]
 
 INTERNAL_IPS = ["127.0.0.1", "192.168.3.135", "192.168.1.135"]
 
