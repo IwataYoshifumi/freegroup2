@@ -289,3 +289,102 @@ EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "")
 
 SESSION_COOKIE_NAME = "freegroup2_session_8000"
+
+# ============================================================
+# ロギング設定
+# ============================================================
+# LOG_LEVEL 環境変数（.env）でログ詳細度を制御する。
+# 本番でも DEBUG=True にせずに詳細ログを得るための安全な手段。
+#
+#   通常運用  : LOG_LEVEL=INFO（既定。アクセスログ・WARNING以上のみ）
+#   一時デバッグ: LOG_LEVEL=DEBUG  → docker compose logs -f web で詳細出力
+#   問題解決後 : LOG_LEVEL を INFO へ戻す（または行を削除）
+#
+# ※ DEBUG=True（Django デバッグモード）は本番で使用禁止。
+#   トレースバックがブラウザに露出し、設定・DB情報が漏洩するリスクがある。
+#   LOG_LEVEL=DEBUG はサーバー側のコンテナログに書くだけなのでリスクが低い。
+
+_log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "verbose": {
+            "format": "[{asctime}] {levelname} {name} {message}",
+            "style": "{",
+            "datefmt": "%Y-%m-%d %H:%M:%S",
+        },
+        "simple": {
+            "format": "{levelname} {message}",
+            "style": "{",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "verbose",
+        },
+    },
+    "loggers": {
+        # Django フレームワーク全体
+        "django": {
+            "handlers": ["console"],
+            "level": _log_level,
+            "propagate": False,
+        },
+        # DB クエリログ（DEBUG 時のみ有用。INFO では出力しない）
+        "django.db.backends": {
+            "handlers": ["console"],
+            "level": "DEBUG" if _log_level == "DEBUG" else "WARNING",
+            "propagate": False,
+        },
+        # リクエスト処理（500エラー等）
+        "django.request": {
+            "handlers": ["console"],
+            "level": _log_level,
+            "propagate": False,
+        },
+        # アプリケーション固有ロガー（各アプリで logger = logging.getLogger(__name__) を使用）
+        "cards": {
+            "handlers": ["console"],
+            "level": _log_level,
+            "propagate": False,
+        },
+        "duplicates": {
+            "handlers": ["console"],
+            "level": _log_level,
+            "propagate": False,
+        },
+        "contacts": {
+            "handlers": ["console"],
+            "level": _log_level,
+            "propagate": False,
+        },
+        "mailings": {
+            "handlers": ["console"],
+            "level": _log_level,
+            "propagate": False,
+        },
+        "persons": {
+            "handlers": ["console"],
+            "level": _log_level,
+            "propagate": False,
+        },
+        "actionlogs": {
+            "handlers": ["console"],
+            "level": _log_level,
+            "propagate": False,
+        },
+        "accounts": {
+            "handlers": ["console"],
+            "level": _log_level,
+            "propagate": False,
+        },
+    },
+    # root logger（上記に含まれない第三者ライブラリのログ）
+    "root": {
+        "handlers": ["console"],
+        "level": "WARNING",
+    },
+}
