@@ -9,3 +9,4 @@ staticfiles/
 .claude/
 _scratch/
 logs/
+nginx/certs/
