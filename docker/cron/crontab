@@ -1,0 +1,16 @@
+# FreeGroup2 本番 cron 定義（/etc/cron.d に配置する形式、user フィールド必須）。
+# 各コマンドの起動間隔は名刺画像取り込みOCR仕様書_v1_4_2統合最終版 §17（別表 B）/ §12.1、
+# および仕様書_v1_6_メール配信_クリックトラッキング §7.2.1 の cron 例に準拠。
+#
+# process_opencv / process_ocr : cron 起動間隔 1〜5 分（仕様書の推奨レンジ内で 2 分を採用）
+# check_duplicates             : cron 起動間隔 5 分（仕様書 §12.1 推奨どおり）
+# send_scheduled_campaigns     : cron 起動間隔 1 分（仕様書 §7.2.1 の crontab 例どおり）
+#
+# 環境変数は entrypoint.sh が /etc/environment に書き出し、Debian cron の PAM (pam_env) 経由で
+# 各ジョブに引き継がれる。
+
+*/2 * * * * root cd /app && /usr/local/bin/python manage.py process_opencv >> /proc/1/fd/1 2>&1
+*/2 * * * * root cd /app && /usr/local/bin/python manage.py process_ocr --limit 300 >> /proc/1/fd/1 2>&1
+*/5 * * * * root cd /app && /usr/local/bin/python manage.py check_duplicates >> /proc/1/fd/1 2>&1
+* * * * * root cd /app && /usr/local/bin/python manage.py send_scheduled_campaigns >> /proc/1/fd/1 2>&1
+

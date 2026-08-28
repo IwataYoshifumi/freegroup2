@@ -34,9 +34,48 @@ SECRET_KEY = os.getenv(
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv("DEBUG", "True").lower() in ("1", "true", "yes", "on")
 
-ALLOWED_HOSTS = ["127.0.0.1", "localhost", "192.168.3.135", "192.168.1.135"]
+_allowed_hosts_env = os.getenv("ALLOWED_HOSTS")
+if _allowed_hosts_env:
+    ALLOWED_HOSTS = [h.strip() for h in _allowed_hosts_env.split(",") if h.strip()]
+else:
+    ALLOWED_HOSTS = [
+        "127.0.0.1",
+        "localhost",
+        "192.168.3.135",
+        "192.168.1.135",
+        "192.168.100.136",
+    ]
 
 INTERNAL_IPS = ["127.0.0.1", "192.168.3.135", "192.168.1.135"]
+
+# ============================================================
+# HTTPS / CSRF 設定（nginx SSL 終端 + Django プロキシ構成）
+# ============================================================
+# nginx が HTTPS を受けて HTTP で Django にプロキシする構成では、
+# CSRF_TRUSTED_ORIGINS と SECURE_PROXY_SSL_HEADER の両方が必要。
+#
+# CSRF_TRUSTED_ORIGINS: POST を受け付けるオリジン（スキーム付き）
+#   .env に CSRF_TRUSTED_ORIGINS=https://192.168.100.136,https://g.network-tokai.jp
+#   のように設定する。未設定時のフォールバックは LAN IP のみ。
+#
+# SECURE_PROXY_SSL_HEADER: nginx の X-Forwarded-Proto: https ヘッダを
+#   Django が信頼し、リクエストを HTTPS 扱いにする。
+#   これにより is_secure() が True になり CSRF クッキーが正しく検証される。
+
+_csrf_origins_env = os.getenv("CSRF_TRUSTED_ORIGINS")
+if _csrf_origins_env:
+    CSRF_TRUSTED_ORIGINS = [o.strip() for o in _csrf_origins_env.split(",") if o.strip()]
+else:
+    CSRF_TRUSTED_ORIGINS = [
+        "https://192.168.100.136",
+        "http://192.168.100.136",
+        "https://localhost",
+        "http://localhost",
+    ]
+
+# nginx → Django の X-Forwarded-Proto ヘッダを信頼する
+# （nginx.conf で proxy_set_header X-Forwarded-Proto $scheme; を設定済みであること）
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 
 # Application definition
@@ -97,12 +136,26 @@ WSGI_APPLICATION = "config.wsgi.application"
 # Database
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
 
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
+# DB_ENGINE=postgresql のとき PostgreSQL、それ以外（未設定 / sqlite）は既存の SQLite を維持する
+# （Windows でのローカル開発を壊さないため）。
+if os.getenv("DB_ENGINE") == "postgresql":
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": os.getenv("DB_NAME", ""),
+            "USER": os.getenv("DB_USER", ""),
+            "PASSWORD": os.getenv("DB_PASSWORD", ""),
+            "HOST": os.getenv("DB_HOST", ""),
+            "PORT": os.getenv("DB_PORT", "5432"),
+        }
     }
-}
+else:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": BASE_DIR / "db.sqlite3",
+        }
+    }
 
 
 # Password validation
@@ -141,6 +194,10 @@ USE_TZ = True
 
 STATIC_URL = "/static/"
 STATICFILES_DIRS = [BASE_DIR / "static"]
+
+# collectstatic の出力先（アプリ側の静的ファイル配置ディレクトリ STATICFILES_DIRS とは
+# 別ディレクトリにする。Django admin 等アプリ内静的ファイルを含めて本番配信するため）。
+STATIC_ROOT = BASE_DIR / "staticfiles"
 
 # Media files
 MEDIA_URL = "/media/"
@@ -261,3 +318,102 @@ EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "")
 
 SESSION_COOKIE_NAME = "freegroup2_session_8000"
+
+# ============================================================
+# ロギング設定
+# ============================================================
+# LOG_LEVEL 環境変数（.env）でログ詳細度を制御する。
+# 本番でも DEBUG=True にせずに詳細ログを得るための安全な手段。
+#
+#   通常運用  : LOG_LEVEL=INFO（既定。アクセスログ・WARNING以上のみ）
+#   一時デバッグ: LOG_LEVEL=DEBUG  → docker compose logs -f web で詳細出力
+#   問題解決後 : LOG_LEVEL を INFO へ戻す（または行を削除）
+#
+# ※ DEBUG=True（Django デバッグモード）は本番で使用禁止。
+#   トレースバックがブラウザに露出し、設定・DB情報が漏洩するリスクがある。
+#   LOG_LEVEL=DEBUG はサーバー側のコンテナログに書くだけなのでリスクが低い。
+
+_log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "verbose": {
+            "format": "[{asctime}] {levelname} {name} {message}",
+            "style": "{",
+            "datefmt": "%Y-%m-%d %H:%M:%S",
+        },
+        "simple": {
+            "format": "{levelname} {message}",
+            "style": "{",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "verbose",
+        },
+    },
+    "loggers": {
+        # Django フレームワーク全体
+        "django": {
+            "handlers": ["console"],
+            "level": _log_level,
+            "propagate": False,
+        },
+        # DB クエリログ（DEBUG 時のみ有用。INFO では出力しない）
+        "django.db.backends": {
+            "handlers": ["console"],
+            "level": "DEBUG" if _log_level == "DEBUG" else "WARNING",
+            "propagate": False,
+        },
+        # リクエスト処理（500エラー等）
+        "django.request": {
+            "handlers": ["console"],
+            "level": _log_level,
+            "propagate": False,
+        },
+        # アプリケーション固有ロガー（各アプリで logger = logging.getLogger(__name__) を使用）
+        "cards": {
+            "handlers": ["console"],
+            "level": _log_level,
+            "propagate": False,
+        },
+        "duplicates": {
+            "handlers": ["console"],
+            "level": _log_level,
+            "propagate": False,
+        },
+        "contacts": {
+            "handlers": ["console"],
+            "level": _log_level,
+            "propagate": False,
+        },
+        "mailings": {
+            "handlers": ["console"],
+            "level": _log_level,
+            "propagate": False,
+        },
+        "persons": {
+            "handlers": ["console"],
+            "level": _log_level,
+            "propagate": False,
+        },
+        "actionlogs": {
+            "handlers": ["console"],
+            "level": _log_level,
+            "propagate": False,
+        },
+        "accounts": {
+            "handlers": ["console"],
+            "level": _log_level,
+            "propagate": False,
+        },
+    },
+    # root logger（上記に含まれない第三者ライブラリのログ）
+    "root": {
+        "handlers": ["console"],
+        "level": "WARNING",
+    },
+}

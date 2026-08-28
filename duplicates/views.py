@@ -27,7 +27,7 @@ from django.db.models import (
     Value,
     When,
 )
-from django.db.models.functions import Least
+from django.db.models.functions import Coalesce, Least
 from django.http import Http404
 from django.shortcuts import redirect, render
 from django.views.generic import ListView, View
@@ -454,11 +454,16 @@ class DuplicateCandidateGroupListView(
             # _make_candidate が person_a.id < person_b.id で正規化するため、
             # person_a 側だけを見ると枝番氏名（例: Suzuki-B2）が代表になる
             # ケースがある。Least(Min(a), Min(b)) で両側の最小値を取ることで
-            # 回避する。SQLiteのLeast()は片方NULLでも非NULL値を返すため
-            # Coalesce不要（確認済み）。ただしPostgreSQL等へのDB移行時は
-            # SQL標準のNULL伝播挙動に変わるため、Coalesceの追加を再検討する
-            # こと。
-            lead_full_name=Least(
+            # 回避する。SQLite の Least() は片方 NULL でも非 NULL 値を返すが、
+            # PostgreSQL の LEAST() は SQL 標準どおり片方 NULL なら NULL を返す
+            # （DB 間で挙動が割れる）。Coalesce で Least() の結果が NULL のときに
+            # Min(a) → Min(b) の順にフォールバックし、両 DB で「非 NULL 値があれば
+            # それを優先し、両方非 NULL なら小さい方を採用」という同一の挙動にする。
+            lead_full_name=Coalesce(
+                Least(
+                    Min("person_a__primary_contact__full_name"),
+                    Min("person_b__primary_contact__full_name"),
+                ),
                 Min("person_a__primary_contact__full_name"),
                 Min("person_b__primary_contact__full_name"),
             ),

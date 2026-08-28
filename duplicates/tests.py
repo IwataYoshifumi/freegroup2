@@ -2267,9 +2267,18 @@ class DuplicateCandidateGroupUpdateViewContextTests(
         )
 
     def _fill_all_fields(self, contact, prefix="filled-"):
-        """contact の UPDATABLE_FIELDS を全て埋める（両側空除外を回避するためのヘルパー）。"""
+        """contact の UPDATABLE_FIELDS を全て埋める（両側空除外を回避するためのヘルパー）。
+
+        値は各フィールドの max_length に収まるよう切り詰める。SQLite は CharField の
+        長さ制限を DB レベルで強制しないが、PostgreSQL は varchar(N) として強制するため、
+        max_length の短いフィールド（lang 等）で切り詰めないと DataError になる。
+        """
         for field_name in Contact.UPDATABLE_FIELDS:
-            setattr(contact, field_name, f"{prefix}{field_name}")
+            value = f"{prefix}{field_name}"
+            max_length = Contact._meta.get_field(field_name).max_length
+            if max_length is not None:
+                value = value[:max_length]
+            setattr(contact, field_name, value)
         contact.save()
 
     def test_context_includes_six_new_keys(self):
