@@ -64,8 +64,32 @@ def search_persons(params, *, default_statuses=("active",)):
         )
     )
 
+    qs = _apply_freeword_filter(qs, _get(params, "q"))
     qs = _apply_text_filters(qs, params)
     return qs.order_by("-updated_at", "-created_at")
+
+
+def _apply_freeword_filter(qs, q_val):
+    """[性質] 準関数。フリーワード（q）の空白区切り AND 条件を QuerySet に適用して返す。"""
+    if not q_val:
+        return qs
+    keywords = [k.strip() for k in q_val.replace("　", " ").split() if k.strip()]
+    for kw in keywords:
+        kw_q = (
+            Q(primary_contact__full_name__icontains=kw)
+            | Q(primary_contact__organization__icontains=kw)
+            | Q(primary_contact__department__icontains=kw)
+            | Q(primary_contact__title__icontains=kw)
+            | Q(primary_contact__email__icontains=kw)
+            | Q(primary_contact__mobile_phone__icontains=kw)
+            | Q(primary_contact__personal_phone__icontains=kw)
+            | Q(primary_contact__personal_fax__icontains=kw)
+            | Q(primary_contact__org_phone__icontains=kw)
+            | Q(primary_contact__org_fax__icontains=kw)
+            | Q(primary_contact__address__icontains=kw)
+        )
+        qs = qs.filter(kw_q)
+    return qs
 
 
 def _resolve_statuses(params, *, default_statuses):

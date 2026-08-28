@@ -18,34 +18,50 @@ contact_list.html からインライン直書きを切り出したもの。検�
   {# パーソン詳細「コンタクト一覧」導線の Person 絞り込みを、再検索・ソート時も保持する。 #}
   {% if person_filter %}<input type="hidden" name="person" value="{{ person_filter }}">{% endif %}
   <div class="app-form-grid app-search-grid">
-    <div class="app-form__group">
-      <label class="app-form__label" for="id_name">氏名</label>
-      <input type="text" id="id_name" name="name" value="{{ name }}" class="app-input">
-    </div>
-    <div class="app-form__group">
-      <label class="app-form__label" for="id_organization">会社名</label>
-      <input type="text" id="id_organization" name="organization" value="{{ organization }}" class="app-input">
-    </div>
-    <div class="app-form__group">
-      <label class="app-form__label" for="id_department">部署名</label>
-      <input type="text" id="id_department" name="department" value="{{ department }}" class="app-input">
-    </div>
-    <div class="app-form__group">
-      <label class="app-form__label" for="id_title">役職</label>
-      <input type="text" id="id_title" name="title" value="{{ title }}" class="app-input">
+    <div class="app-form__group" style="grid-column: 1 / -1;">
+      <label class="app-form__label" for="id_q">フリーワード検索</label>
+      <input type="text" id="id_q" name="q" value="{{ q }}" class="app-input" placeholder="氏名、会社名、部署名、役職、メール、電話、住所">
     </div>
 
-    <div class="app-form__group">
-      <label class="app-form__label" for="id_email">メール</label>
-      <input type="text" id="id_email" name="email" value="{{ email }}" class="app-input">
-    </div>
-    <div class="app-form__group">
-      <label class="app-form__label" for="id_tel">電話</label>
-      <input type="text" id="id_tel" name="tel" value="{{ tel }}" class="app-input">
-    </div>
-    <div class="app-form__group" style="grid-column: span 2;">
-      <label class="app-form__label" for="id_address">住所</label>
-      <input type="text" id="id_address" name="address" value="{{ address }}" class="app-input">
+    <div class="app-collapsible app-person-filter-collapsible" style="grid-column: 1 / -1;">
+      <button type="button" class="app-collapsible__header" data-action="toggle-collapsible"
+              aria-expanded="false">
+        <span>詳細検索</span>
+        <span class="app-collapsible__icon">▸</span>
+      </button>
+      <div class="app-collapsible-body" style="margin-top: 12px;">
+        <div class="app-form-grid app-search-grid">
+          <div class="app-form__group">
+            <label class="app-form__label" for="id_name">氏名</label>
+            <input type="text" id="id_name" name="name" value="{{ name }}" class="app-input">
+          </div>
+          <div class="app-form__group">
+            <label class="app-form__label" for="id_organization">会社名</label>
+            <input type="text" id="id_organization" name="organization" value="{{ organization }}" class="app-input">
+          </div>
+          <div class="app-form__group">
+            <label class="app-form__label" for="id_department">部署名</label>
+            <input type="text" id="id_department" name="department" value="{{ department }}" class="app-input">
+          </div>
+          <div class="app-form__group">
+            <label class="app-form__label" for="id_title">役職</label>
+            <input type="text" id="id_title" name="title" value="{{ title }}" class="app-input">
+          </div>
+
+          <div class="app-form__group">
+            <label class="app-form__label" for="id_email">メール</label>
+            <input type="text" id="id_email" name="email" value="{{ email }}" class="app-input">
+          </div>
+          <div class="app-form__group">
+            <label class="app-form__label" for="id_tel">電話</label>
+            <input type="text" id="id_tel" name="tel" value="{{ tel }}" class="app-input">
+          </div>
+          <div class="app-form__group" style="grid-column: span 2;">
+            <label class="app-form__label" for="id_address">住所</label>
+            <input type="text" id="id_address" name="address" value="{{ address }}" class="app-input">
+          </div>
+        </div>
+      </div>
     </div>
 
     {# ステータスフィルタ：persons と同じ app-collapsible 折りたたみ・初期閉（HIG 原則7）。業務語ラベルのみ、内部値/name/複数選択は不変。 #}

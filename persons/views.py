@@ -169,6 +169,7 @@ class PersonListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
         back.push_current(
             "",
             [
+                "q",
                 "name",
                 "organization",
                 "department",
@@ -190,6 +191,7 @@ class PersonListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
 
         context["active_app"] = "persons"
         context["active_menu"] = "persons:person_list"
+        context["q"] = self.request.GET.get("q", "")
         for key in SEARCH_PARAMS:
             context[key] = self.request.GET.get(key, "")
         # _search_form.html partial と既存テンプレ両方で利用するチェック状態。

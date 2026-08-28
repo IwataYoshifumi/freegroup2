@@ -2070,6 +2070,54 @@ class ContactListViewTests(TestCase):
         self.assertNotIn(self.contact_a.id, ids)
         self.assertNotIn(c_mobile_phone.id, ids)
 
+    def test_freeword_search_single_keyword(self):
+        """フリーワード検索（q）単一キーワードで氏名・会社・電話・住所等にヒットする。"""
+        c_company = self._make_primary(
+            full_name="Taro Yamada", organization="UniqueTech"
+        )
+        c_tel = self._make_primary(
+            full_name="Jiro Sato", mobile_phone="080-9999-7777"
+        )
+
+        resp = self.client.get(self.url, {"q": "UniqueTech"})
+        ids = [c.id for c in resp.context["contacts"]]
+        self.assertIn(c_company.id, ids)
+        self.assertNotIn(c_tel.id, ids)
+
+        resp = self.client.get(self.url, {"q": "9999"})
+        ids = [c.id for c in resp.context["contacts"]]
+        self.assertIn(c_tel.id, ids)
+        self.assertNotIn(c_company.id, ids)
+
+    def test_freeword_search_multiple_keywords_and(self):
+        """フリーワード検索（q）半角・全角スペース分割の複数キーワードで AND 検索になる。"""
+        c1 = self._make_primary(
+            full_name="Hanako Suzuki", organization="Global Corp", department="Sales"
+        )
+        c2 = self._make_primary(
+            full_name="Hanako Tanaka", organization="Global Corp", department="Engineering"
+        )
+
+        # 半角・全角スペース交じり
+        resp = self.client.get(self.url, {"q": "Hanako　Global  Sales"})
+        ids = [c.id for c in resp.context["contacts"]]
+        self.assertIn(c1.id, ids)
+        self.assertNotIn(c2.id, ids)
+
+    def test_freeword_search_and_detail_search_combined(self):
+        """フリーワード検索（q）と詳細検索（name等）の併用で AND 検索になる。"""
+        c1 = self._make_primary(
+            full_name="Ken Sato", organization="Next Innovation"
+        )
+        c2 = self._make_primary(
+            full_name="Ken Kondo", organization="Next Innovation"
+        )
+
+        resp = self.client.get(self.url, {"q": "Next", "name": "Sato"})
+        ids = [c.id for c in resp.context["contacts"]]
+        self.assertIn(c1.id, ids)
+        self.assertNotIn(c2.id, ids)
+
     def test_order_by_updated_at_desc(self):
         """並び順は updated_at 降順。timing fragility を避けるため update() で明示設定。"""
         from datetime import timedelta

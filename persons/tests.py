@@ -214,6 +214,54 @@ class PersonListViewTests(TestCase):
         self.assertIn(p_both.id, ids)
         self.assertEqual(len(ids), 2)
 
+    def test_freeword_search_single_keyword(self):
+        """フリーワード検索（q）単一キーワードで氏名・会社・電話・住所等にヒットする。"""
+        p_company, _ = self._make_active_with_primary(
+            full_name="Taro Yamada", organization="UniqueTech"
+        )
+        p_tel, _ = self._make_active_with_primary(
+            full_name="Jiro Sato", mobile_phone="080-9999-7777"
+        )
+
+        resp = self.client.get(self.url, {"q": "UniqueTech"})
+        ids = [p.id for p in resp.context["persons"]]
+        self.assertIn(p_company.id, ids)
+        self.assertNotIn(p_tel.id, ids)
+
+        resp = self.client.get(self.url, {"q": "9999"})
+        ids = [p.id for p in resp.context["persons"]]
+        self.assertIn(p_tel.id, ids)
+        self.assertNotIn(p_company.id, ids)
+
+    def test_freeword_search_multiple_keywords_and(self):
+        """フリーワード検索（q）半角・全角スペース分割の複数キーワードで AND 検索になる。"""
+        p1, _ = self._make_active_with_primary(
+            full_name="Hanako Suzuki", organization="Global Corp", department="Sales"
+        )
+        p2, _ = self._make_active_with_primary(
+            full_name="Hanako Tanaka", organization="Global Corp", department="Engineering"
+        )
+
+        # 半角・全角スペース交じり
+        resp = self.client.get(self.url, {"q": "Hanako　Global  Sales"})
+        ids = [p.id for p in resp.context["persons"]]
+        self.assertIn(p1.id, ids)
+        self.assertNotIn(p2.id, ids)
+
+    def test_freeword_search_and_detail_search_combined(self):
+        """フリーワード検索（q）と詳細検索（name等）の併用で AND 検索になる。"""
+        p1, _ = self._make_active_with_primary(
+            full_name="Ken Sato", organization="Next Innovation"
+        )
+        p2, _ = self._make_active_with_primary(
+            full_name="Ken Kondo", organization="Next Innovation"
+        )
+
+        resp = self.client.get(self.url, {"q": "Next", "name": "Sato"})
+        ids = [p.id for p in resp.context["persons"]]
+        self.assertIn(p1.id, ids)
+        self.assertNotIn(p2.id, ids)
+
     # ---- HIG 第6章：多段ソート（単一 sort パラメータ、例 ?sort=company,-title,name）----
 
     def test_single_key_sort_asc_and_desc(self):

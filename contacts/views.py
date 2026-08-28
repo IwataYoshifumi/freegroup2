@@ -209,6 +209,25 @@ class ContactListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
 
         p = self.request.GET
 
+        freeword = p.get("q", "").strip()
+        if freeword:
+            keywords = [k.strip() for k in freeword.replace("　", " ").split() if k.strip()]
+            for kw in keywords:
+                kw_q = (
+                    Q(full_name__icontains=kw)
+                    | Q(organization__icontains=kw)
+                    | Q(department__icontains=kw)
+                    | Q(title__icontains=kw)
+                    | Q(email__icontains=kw)
+                    | Q(mobile_phone__icontains=kw)
+                    | Q(personal_phone__icontains=kw)
+                    | Q(personal_fax__icontains=kw)
+                    | Q(org_phone__icontains=kw)
+                    | Q(org_fax__icontains=kw)
+                    | Q(address__icontains=kw)
+                )
+                qs = qs.filter(kw_q)
+
         def _clean_q(val):
             return (val or "").replace("　", "").replace(" ", "").strip()
 
@@ -284,6 +303,7 @@ class ContactListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
         back.push_current(
             "",
             [
+                "q",
                 "name",
                 "organization",
                 "department",
@@ -304,6 +324,7 @@ class ContactListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
 
         context["active_app"] = "contacts"
         context["active_menu"] = "contacts:contact_list"
+        context["q"] = self.request.GET.get("q", "")
         for key in self._SEARCH_PARAMS:
             context[key] = self.request.GET.get(key, "")
         context["selected_statuses"] = self._get_selected_statuses()
