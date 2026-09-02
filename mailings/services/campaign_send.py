@@ -24,6 +24,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.mail import EmailMultiAlternatives
 from django.db import transaction
@@ -116,11 +117,18 @@ def _send_email_via_backend(ctx: EmailContext) -> None:
     # 簡易テキスト代替：<br> → 改行、<a href="X">Y</a> → "Y (X)" のシンプル変換のみ。
     # 本格生成（html2text）は Phase 5 以降で body_text_is_manual=False 経路に統合する想定。
     text_alt = ctx.body_html.replace("<br>", "\n")
+    bounce_user = getattr(settings, "BOUNCE_INBOX_USER", None)
+    envelope_from = (
+        bounce_user.strip()
+        if (bounce_user and str(bounce_user).strip())
+        else from_value
+    )
     msg = EmailMultiAlternatives(
         subject=ctx.subject_rendered,
         body=text_alt,
-        from_email=from_value,
+        from_email=envelope_from,
         to=[ctx.to_email],
+        headers={"From": from_value},
     )
     msg.attach_alternative(ctx.body_html, "text/html")
     msg.send(fail_silently=False)
