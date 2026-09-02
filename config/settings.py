@@ -317,6 +317,12 @@ EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
 EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "")
 
+BOUNCE_INBOX_HOST = os.getenv("BOUNCE_INBOX_HOST", "")
+BOUNCE_INBOX_PORT = int(os.getenv("BOUNCE_INBOX_PORT", "993"))
+BOUNCE_INBOX_USER = os.getenv("BOUNCE_INBOX_USER", "")
+BOUNCE_INBOX_PASSWORD = os.getenv("BOUNCE_INBOX_PASSWORD", "")
+BOUNCE_INBOX_USE_SSL = os.getenv("BOUNCE_INBOX_USE_SSL", "True") == "True"
+
 SESSION_COOKIE_NAME = "freegroup2_session_8000"
 
 # ============================================================
