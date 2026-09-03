@@ -1896,6 +1896,43 @@
     handle.addEventListener('pointerdown', onPointerDown);
   }
 
+  /**
+   * テキストをクリップボードにコピーする共通関数（HTTP/HTTPS両対応）。
+   * 非表示 textarea と document.execCommand('copy') を使用し、
+   * セキュアコンテキスト外（HTTP・IPアドレス直アクセス等）でも動作する。
+   * コピー成功時、buttonEl 内の <i> アイコンを一時的に bi-check2 に変化させる。
+   */
+  function copyTextToClipboard(text, buttonEl) {
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.style.position = 'fixed';
+    textarea.style.left = '-9999px';
+    textarea.style.top = '0';
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+    let success = false;
+    try {
+      success = document.execCommand('copy');
+    } catch (e) {
+      success = false;
+    }
+    document.body.removeChild(textarea);
+    if (success && buttonEl) {
+      const icon = buttonEl.querySelector('i');
+      if (icon) {
+        const original = icon.className;
+        icon.className = 'bi bi-clipboard-check';
+        setTimeout(function () { icon.className = original; }, 1500);
+      }
+    } else if (!success) {
+      alert('コピーに失敗しました。手動で選択してコピーしてください。');
+    }
+    return success;
+  }
+
+  window.copyTextToClipboard = copyTextToClipboard;
+
   function init() {
     // persons / contacts / tags / mailings 一覧の各テーブルに同じ現在ページ内DOMソートを適用する
     // （フック追加のみ・挙動は共通）。

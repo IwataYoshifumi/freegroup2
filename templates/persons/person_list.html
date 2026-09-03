@@ -56,7 +56,13 @@
             {% url 'persons:person_detail' pk=person.id as detail_url %}
             <tr>
               <td class="app-table__col--action">
-                <a href="{% append_back_url detail_url back %}" class="app-btn app-btn--secondary app-btn--sm">詳細</a>
+                <div class="app-table__actions">
+                  <a href="{% append_back_url detail_url back %}" class="app-icon-btn" style="color:var(--app-text);" title="詳細" aria-label="詳細"><i class="bi bi-search"></i></a>
+                  {% if person.primary_contact and person.status == "active" %}
+                    {% url 'contacts:contact_update_primary' pk=person.primary_contact_id as update_url %}
+                    <a href="{% append_back_url update_url back %}" class="app-icon-btn" style="color:var(--app-text);" title="編集" aria-label="編集"><i class="bi bi-pencil-fill"></i></a>
+                  {% endif %}
+                </div>
               </td>
               <td data-col-key="name" data-sort-key="{{ person.primary_contact.phonetic_name }}">
                 <span class="app-ellipsis" data-tooltip="{{ person.primary_contact.full_name|default:'(氏名なし)' }}">{{ person.primary_contact.full_name|default:"(氏名なし)" }}</span>{% if person.has_unconfirmed_low_mid %} <span class="app-status-badge app-status-badge--warning" title="未確認の低信頼項目があります" aria-label="要確認">要確認</span>{% endif %}

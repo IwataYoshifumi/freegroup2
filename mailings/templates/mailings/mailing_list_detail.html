@@ -70,14 +70,14 @@
           <span>{{ mailing_list.name }}</span>
           {% if not mailing_list.is_archived and not select_for_campaign %}
             <a href="{% append_back_url update_url back %}" class="app-icon-btn" style="color:var(--app-text);" title="編集" aria-label="編集">
-              <i class="bi bi-pencil"></i>
+              <i class="bi bi-pencil-fill"></i>
             </a>
           {% endif %}
           <button type="button" class="js-info-toggle"
                   aria-haspopup="true" aria-expanded="false" aria-controls="js-info-popover"
                   aria-label="詳細情報"
                   style="background:none; border:none; cursor:pointer; padding:0; color:#64748b; font-size:0.85em;">
-            <i class="bi bi-info-circle"></i>
+            <i class="bi bi-info-circle-fill"></i>
           </button>
         </h2>
         <p class="app-muted" style="margin:0; font-size:14px;">{{ mailing_list.description|default:"-" }}</p>
@@ -185,6 +185,7 @@
                 {% include "mailings/_sortable_th.html" with key="company" label="会社" %}
                 {% include "mailings/_sortable_th.html" with key="title" label="役職" %}
                 {% include "mailings/_sortable_th.html" with key="department" label="部署" %}
+                {% include "mailings/_sortable_th.html" with key="salutation_name" label="宛名" %}
                 {% include "mailings/_sortable_th.html" with key="address" label="住所" %}
                 {% include "mailings/_sortable_th.html" with key="email" label="メール" extra_style="min-width:240px;" %}
                 <th data-col-key="added_by">追加者</th>
@@ -198,13 +199,14 @@
                     <td data-col-key="name">
                       {{ surviving.primary_contact.full_name|default:"(氏名なし)" }}
                       {% if surviving.status == "archived" %}
-                        <i class="bi bi-archive" style="color:#d97706; font-size:0.9em; margin-left:2px;" title="アーカイブ済み" aria-label="アーカイブ済み"></i>
+                        <i class="bi bi-archive-fill" style="color:#d97706; font-size:0.9em; margin-left:2px;" title="アーカイブ済み" aria-label="アーカイブ済み"></i>
                       {% endif %}
                       {% include "mailings/_unsubscribed_badge.html" with person=m.person %}
                     </td>
                     <td data-col-key="company">{{ surviving.primary_contact.organization|default:"-" }}</td>
                     <td data-col-key="title">{{ surviving.primary_contact.title|default:"-" }}</td>
                     <td data-col-key="department">{{ surviving.primary_contact.department|default:"-" }}</td>
+                    <td data-col-key="salutation_name">{{ surviving.primary_contact.salutation_name|default:"-" }}</td>
                     <td data-col-key="address">{{ surviving.primary_contact.address|default:"-" }}</td>
                     <td data-col-key="email" style="font-weight:bold;">{{ surviving.primary_contact.email|default:"-" }}</td>
                     <td data-col-key="added_by">{{ m.added_by.username|default:"-" }}</td>

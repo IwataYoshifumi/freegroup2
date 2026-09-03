@@ -40,7 +40,7 @@
           {% csrf_token %}
           {% hidden_back_field back %}
           <button type="submit" class="app-btn app-btn--warning">
-            <i class="bi bi-archive"></i> アーカイブ化
+            <i class="bi bi-archive-fill"></i> アーカイブ化
           </button>
         </form>
       {% endif %}
@@ -88,7 +88,7 @@
                   <a href="{% append_back_url edit_url back %}"
                      class="app-btn--icon"
                      title="主コンタクトを修正" aria-label="主コンタクトを修正"
-                     style="color:inherit; border:none; background:none; text-decoration:none; line-height:1; font-size:1.2rem;"><i class="bi bi-pencil"></i></a>
+                     style="color:inherit; border:none; background:none; text-decoration:none; line-height:1; font-size:1.2rem;"><i class="bi bi-pencil-fill"></i></a>
                 {% endif %}
               {% else %}
                 <span class="app-muted">表示のみモード（編集不可）</span>

@@ -117,7 +117,7 @@
         <table class="app-table app-table--nowrap js-mailings-page-sort">
           <thead>
             <tr>
-              <th class="app-table__col--action" style="width:130px;">操作</th>
+              <th class="app-table__col--action">操作</th>
               <th data-sort-col>リスト名</th>
               <th data-col-key="description" data-sort-col>説明</th>
               <th data-col-key="member_count" data-sort-col>メンバー数</th>
@@ -131,7 +131,7 @@
               {% url 'mailings:mailing_list_detail' pk=ml.id as detail_url %}
               {% url 'mailings:mailing_list_update' pk=ml.id as update_url %}
               <tr>
-                <td class="app-table__col--action" style="width:130px;">
+                <td class="app-table__col--action">
                   <div class="app-table__actions">
                     {% if select_for_campaign %}
                       {% append_back_url detail_url back as detail_back_url %}
@@ -141,9 +141,9 @@
                         <a href="{{ detail_back_url }}?select_for_campaign={{ select_for_campaign.pk }}" class="app-btn app-btn--primary app-btn--sm">選択</a>
                       {% endif %}
                     {% else %}
-                      <a href="{% append_back_url detail_url back %}" class="app-btn app-btn--outline-secondary app-btn--sm">詳細</a>
+                      <a href="{% append_back_url detail_url back %}" class="app-icon-btn" style="color:var(--app-text);" title="詳細" aria-label="詳細"><i class="bi bi-search"></i></a>
                       {% if not ml.is_archived %}
-                        <a href="{% append_back_url update_url back %}" class="app-btn app-btn--success app-btn--sm">編集</a>
+                        <a href="{% append_back_url update_url back %}" class="app-icon-btn" style="color:var(--app-text);" title="編集" aria-label="編集"><i class="bi bi-pencil-fill"></i></a>
                       {% endif %}
                     {% endif %}
                   </div>

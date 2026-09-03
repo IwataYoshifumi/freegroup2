@@ -46,7 +46,6 @@ JS フック予約：
       </div>
       <div class="app-action-area">
         <a href="{{ back_url }}" class="app-btn app-btn--secondary">戻る</a>
-        <a href="{{ cancel_url }}" class="app-btn app-btn--secondary">戻る</a>
       </div>
     </div>
 
@@ -64,7 +63,7 @@ JS フック予約：
       <div>
         <h1>タグで追加：{{ mailing_list.name }}（現在 {{ current_member_count }} 件）</h1>
         <div class="app-message app-message--success" style="margin-top:8px;">
-          <i class="bi bi-plus-circle" style="margin-right:6px;"></i>
+          <i class="bi bi-plus-circle-fill" style="margin-right:6px;"></i>
           <strong>タグで追加：{{ mailing_list.name }}</strong> に対象を追加します。
         </div>
       </div>
@@ -77,7 +76,7 @@ JS フック予約：
       <div>
         <h1>タグで除外：{{ mailing_list.name }}（現在 {{ current_member_count }} 件）</h1>
         <div class="app-message app-message--error" style="margin-top:8px;">
-          <i class="bi bi-dash-circle" style="margin-right:6px;"></i>
+          <i class="bi bi-dash-circle-fill" style="margin-right:6px;"></i>
           <strong>タグで除外：{{ mailing_list.name }}</strong> から対象を外します。
         </div>
       </div>
@@ -188,7 +187,7 @@ JS フック予約：
                   class="app-btn app-btn--secondary app-btn--sm"
                   data-action="open-modal"
                   data-target="globalExcludeModal">
-            <i class="bi bi-plus-circle"></i> タグを追加
+            <i class="bi bi-plus-circle-fill"></i> タグを追加
           </button>
         </div>
         <p class="app-muted" style="margin-bottom:8px; font-size:0.9em;">
@@ -244,7 +243,7 @@ JS フック予約：
         {% if mode == 'create' %}
           <a href="{{ back_url }}" class="app-btn app-btn--secondary">戻る</a>
         {% endif %}
-        <a href="{{ cancel_url }}" class="app-btn app-btn--secondary">戻る</a>
+        <a href="{{ cancel_url }}" class="app-btn app-btn--secondary">キャンセル</a>
       </div>
     </form>
   </section>

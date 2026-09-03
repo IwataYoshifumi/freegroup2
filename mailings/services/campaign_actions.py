@@ -89,16 +89,11 @@ def archive_campaign(campaign):
     """Campaign + 紐付く EmailTemplate を同一 atomic で is_archived=True（(b) §5.6、仕様書 §12.4）。
 
     [性質] 副作用あり（DB 書込：Campaign.is_archived / EmailTemplate.is_archived を 1 atomic）
-    [入力] campaign: Campaign（status=DRAFT のみ）
-    [例外] ValidationError
+    [入力] campaign: Campaign
 
     OneToOne PROTECT のため物理削除不可。Campaign 単独 archive は禁止＝必ず EmailTemplate も
     連動（§12.4）。1 atomic で「片方だけ is_archived=True」を構造的に作らせない。
     """
-    if campaign.status != Campaign.Status.DRAFT:
-        raise ValidationError(
-            f"DRAFT 状態のキャンペーンのみ削除できます（現在: {campaign.status}）"
-        )
     with transaction.atomic():
         template = campaign.template
         campaign.is_archived = True
@@ -153,3 +148,39 @@ def run_test_send(campaign, recipient_email):
     ctx = EmailContext.prepare(campaign, person, EmailMode.TEST)
     ctx = replace(ctx, to_email=recipient_email)
     _send_email_via_backend(ctx)
+
+
+def duplicate_campaign(original_campaign, user, new_name=None):
+    """Campaign + EmailTemplateを複製する。
+
+    [性質] 副作用あり（DB書込：新規Campaign・EmailTemplate作成）
+    [入力] original_campaign: Campaign, user: User,
+           new_name: str | None
+    [出力] 新規作成されたCampaign
+    """
+    with transaction.atomic():
+        name = new_name or f"{original_campaign.name} のコピー"
+        orig_tpl = original_campaign.template
+        new_template = EmailTemplate.objects.create(
+            name=name,
+            subject=orig_tpl.subject,
+            body=orig_tpl.body,
+            body_text=orig_tpl.body_text,
+            body_text_is_manual=orig_tpl.body_text_is_manual,
+            created_by=user,
+        )
+        new_campaign = Campaign(
+            name=name,
+            template=new_template,
+            mailing_list=original_campaign.mailing_list,
+            sender_mode=original_campaign.sender_mode,
+            sender_email=original_campaign.sender_email,
+            sender_name=original_campaign.sender_name,
+            apply_unsubscribe_filter=original_campaign.apply_unsubscribe_filter,
+            status=Campaign.Status.DRAFT,
+            created_by=user,
+        )
+        new_campaign.full_clean()
+        new_campaign.save()
+        return new_campaign
+
