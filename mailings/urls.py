@@ -135,11 +135,6 @@ urlpatterns = [
         "mailings/lists/", views.MailingListListView.as_view(), name="mailing_list_list"
     ),
     path(
-        "mailings/lists/create/",
-        views.MailingListCreateView.as_view(),
-        name="mailing_list_create",
-    ),
-    path(
         "mailings/lists/<uuid:pk>/",
         views.MailingListDetailView.as_view(),
         name="mailing_list_detail",

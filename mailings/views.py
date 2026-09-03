@@ -291,40 +291,6 @@ class MailingListListView(LoginRequiredMixin, PermissionRequiredMixin, ListView)
         return context
 
 
-class MailingListCreateView(LoginRequiredMixin, PermissionRequiredMixin, CreateView):
-    """配信リスト新規作成（name / description のみ）。
-
-    作成後はリスト編集画面（mailing_list_update）にリダイレクトし、そこでタグ選択・
-    プレビュー・凍結を行う。Phase 1 のフロー（§11.4.1）の [1]〜[4] を 2 画面で実装。
-
-    認可（Phase 7 ⑤-B-1、rev19 No.71）：mailings.add_mailinglist。所有者判定なし。
-    """
-
-    model = MailingList
-    form_class = MailingListForm
-    template_name = "mailings/mailing_list_form.html"
-    permission_required = "mailings.add_mailinglist"
-
-    def form_valid(self, form):
-        form.instance.created_by = self.request.user
-        return super().form_valid(form)
-
-    def get_success_url(self):
-        return reverse_lazy("mailings:mailing_list_update", args=[self.object.pk])
-
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        context.update(
-            {
-                "back": BackNavigator(self.request),
-                "active_app": "mailings",
-                "active_menu": "mailings:mailing_list_list",
-                "is_create": True,
-            }
-        )
-        return context
-
-
 class MailingListDetailView(LoginRequiredMixin, PermissionRequiredMixin, DetailView):
     # 認可（Phase 7 ⑤-B-1、rev19 No.72）：mailings.view_mailinglist（全員）。所有者判定なし。
     permission_required = "mailings.view_mailinglist"
@@ -469,7 +435,6 @@ class MailingListUpdateView(LoginRequiredMixin, PermissionRequiredMixin, UpdateV
                 "back": BackNavigator(self.request),
                 "active_app": "mailings",
                 "active_menu": "mailings:mailing_list_list",
-                "is_create": False,
                 "is_frozen": self.object.members_frozen_at is not None,
             }
         )

@@ -1,17 +1,17 @@
 {% extends "mailings/app_base.html" %}
 {% load back_tags %}
 
-{% block title %}{% if is_create %}リスト作成{% else %}リスト編集：{{ object.name }}{% endif %} — FreeGroup2{% endblock %}
+{% block title %}リスト編集：{{ object.name }} — FreeGroup2{% endblock %}
 
 {% block content %}
   <div class="app-page-header">
     <div>
       <h1 style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-        {% if not is_create and is_frozen %}
+        {% if is_frozen %}
           <i class="bi bi-lock-fill" style="color:#64748b;"
              title="凍結: {{ mailing_list.members_frozen_at|date:'Y/m/d H:i' }}"></i>
         {% endif %}
-        <span>{% if is_create %}リスト作成{% else %}リスト編集：{{ object.name }}{% endif %}</span>
+        <span>リスト編集：{{ object.name }}</span>
       </h1>
     </div>
     <div class="app-action-area">
@@ -21,47 +21,29 @@
   </div>
 
   <section class="app-card" style="max-width: 800px; margin-left: 0; margin-right: auto;">
-    <h2 style="margin-bottom:12px;">{% if is_create %}Step 1：リスト本体{% else %}リスト情報{% endif %}</h2>
-    {% if is_create %}
-      <form method="post" class="app-form-grid-edit">
-        {% csrf_token %}
-        <div class="app-form-grid" style="grid-template-columns: 1fr;">
-          {% for field in form %}
-            <div class="app-form__group">
-              <label class="app-form__label" for="{{ field.id_for_label }}">{{ field.label }}</label>
-              {{ field }}
-              {% if field.errors %}{{ field.errors }}{% endif %}
-            </div>
-          {% endfor %}
-        </div>
-        <div class="app-action-area" style="margin-top:16px;">
-          <button type="submit" class="app-btn app-btn--primary">作成して次へ（メンバー組成）</button>
-        </div>
-      </form>
-    {% else %}
-      <form method="post" class="app-form-grid-edit">
-        {% csrf_token %}
-        {% hidden_back_field back %}
-        <div class="app-form-grid" style="grid-template-columns: 1fr;">
-          {% for field in form %}
-            <div class="app-form__group">
-              <label class="app-form__label" for="{{ field.id_for_label }}">{{ field.label }}</label>
-              {{ field }}
-              {% if field.errors %}
-                <div class="app-message app-message--error" style="margin-top:4px;">{{ field.errors|join:" / " }}</div>
-              {% endif %}
-            </div>
-          {% endfor %}
-        </div>
-        <div class="app-action-area" style="margin-top:16px;">
-          <button type="submit" class="app-btn app-btn--primary">修正</button>
-          {% if back.back_exist %}
-            <a href="{% back_url back %}" class="app-btn app-btn--secondary">キャンセル</a>
-          {% else %}
-            <a href="{% url 'mailings:mailing_list_detail' pk=object.id %}" class="app-btn app-btn--secondary">キャンセル</a>
-          {% endif %}
-        </div>
-      </form>
-    {% endif %}
+    <h2 style="margin-bottom:12px;">リスト情報</h2>
+    <form method="post" class="app-form-grid-edit">
+      {% csrf_token %}
+      {% hidden_back_field back %}
+      <div class="app-form-grid" style="grid-template-columns: 1fr;">
+        {% for field in form %}
+          <div class="app-form__group">
+            <label class="app-form__label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+            {{ field }}
+            {% if field.errors %}
+              <div class="app-message app-message--error" style="margin-top:4px;">{{ field.errors|join:" / " }}</div>
+            {% endif %}
+          </div>
+        {% endfor %}
+      </div>
+      <div class="app-action-area" style="margin-top:16px;">
+        <button type="submit" class="app-btn app-btn--primary">修正</button>
+        {% if back.back_exist %}
+          <a href="{% back_url back %}" class="app-btn app-btn--secondary">キャンセル</a>
+        {% else %}
+          <a href="{% url 'mailings:mailing_list_detail' pk=object.id %}" class="app-btn app-btn--secondary">キャンセル</a>
+        {% endif %}
+      </div>
+    </form>
   </section>
 {% endblock %}

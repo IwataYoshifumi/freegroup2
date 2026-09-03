@@ -8549,14 +8549,6 @@ class Phase7MailingListViewAuthTests(TestCase):
         )
 
     # ---- 作成フロー: add_mailinglist（入口で弾く）----
-    def test_create_requires_add_mailinglist(self):
-        url = reverse("mailings:mailing_list_create")
-        # viewer（view のみ）は作成不可
-        viewer = self._user("view_mailinglist")
-        self.assertEqual(self._client(viewer).get(url).status_code, 403)
-        editor = self._user("add_mailinglist")
-        self.assertEqual(self._client(editor).get(url).status_code, 200)
-
     def test_new_list_meta_entry_requires_add_mailinglist(self):
         url = reverse("mailings:new_list_meta")
         viewer = self._user("view_mailinglist")
