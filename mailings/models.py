@@ -603,7 +603,7 @@ class DeliveryHistory(models.Model):
         from config.constants import CAMPAIGN_RECIPIENT_MAX_FAILURES
 
         return (
-            cls.objects.select_for_update(skip_locked=True)
+            cls.objects.select_for_update(skip_locked=True, of=("self",))
             .filter(campaign=campaign)
             .exclude(status=cls.Status.SENT)
             .filter(failed_count__lt=CAMPAIGN_RECIPIENT_MAX_FAILURES)
