@@ -381,7 +381,12 @@ class OriginalDetailView(LoginRequiredMixin, PermissionRequiredMixin, DetailView
         context["warp_failures"] = [
             w for a in attempts for w in (a.get("warp_failures") or [])
         ]
-        context["overlay_polygons"] = _build_overlay_polygons(debug_json)
+        existing_card_indexes = set(
+            business_cards.values_list("card_index", flat=True)
+        )
+        context["overlay_polygons"] = _build_overlay_polygons(
+            debug_json, existing_card_indexes=existing_card_indexes
+        )
         context["warning_stripe"] = _build_warning_stripe(debug_json, mask_white_ratios)
 
         # Phase G: EXIF 情報セクション用に integer indent の raw JSON を渡す（§7.2）。
@@ -751,7 +756,7 @@ def _build_mask_white_ratios(debug_masks):
     return ratios
 
 
-def _build_overlay_polygons(debug_json):
+def _build_overlay_polygons(debug_json, existing_card_indexes=None):
     """SVG polygon 用の points 文字列・重心・巨大候補フラグを事前計算したリスト。
 
     is_giant: results 内の area_ratio 中央値の 1.5 倍以上のものに True。
@@ -759,6 +764,7 @@ def _build_overlay_polygons(debug_json):
     is_manual: 自動枠（integrated_results 由来）は False、手動枠（manual_results 由来）は True。
 
     自動枠の対象は最終検出 integrated_results（通常・反転の統合。BC 化される集合と一致）。
+    existing_card_indexes が指定された場合、削除済みの card_index を持つ自動枠はスキップする。
     手動枠（debug_json.manual_results）は giant 判定の母集団に混ぜず is_giant=False 固定で
     末尾に「足すだけ」（自動枠の points_str/centroid/is_giant/area_ratio は一切変えない）。
     """
@@ -771,6 +777,9 @@ def _build_overlay_polygons(debug_json):
     # 各 polygon の座標と shoelace area を一旦計算
     raw = []
     for r in _final_results(debug_json):
+        card_index = r.get("card_index")
+        if existing_card_indexes is not None and card_index not in existing_card_indexes:
+            continue
         polygon = r.get("polygon") or {}
         coords = []
         for k in keys:
@@ -786,7 +795,7 @@ def _build_overlay_polygons(debug_json):
         poly_area = abs(s) / 2.0
         area_ratio = poly_area / image_area if image_area > 0 else 0.0
         raw.append({
-            "card_index": r.get("card_index"),
+            "card_index": card_index,
             "coords": coords,
             "area_ratio": area_ratio,
         })
@@ -1131,8 +1140,9 @@ class CardDeleteView(LoginRequiredMixin, PermissionRequiredMixin, View):
     """BusinessCard を削除し、元画像詳細にリダイレクトする（POST 専用）。
 
     削除対象は本人所有の BC のみ（user スコープで絞り込み）。
+    ocr_result == 'business_card'（正規名刺）はガードにより削除不可。
     Contact / ContactFieldConfidence は CASCADE で自動削除、card_image の FS 実体は
-    post_delete シグナルで自動削除される。OriginalImage.raw_json は温存される。
+    post_delete シグナルで自動削除、OriginalImage.detected_count は post_delete で再集計される。
     GET / その他メソッドは Django 標準の 405 応答（method_not_allowed）が返る。
     """
 
@@ -1142,9 +1152,52 @@ class CardDeleteView(LoginRequiredMixin, PermissionRequiredMixin, View):
     def post(self, request, pk):
         user = request.user
         bc = get_object_or_404(BusinessCard, pk=pk, original_image__user=user)
+        if not bc.can_delete:
+            messages.error(request, "正規の名刺データは削除できません。")
+            return redirect("cards:card_detail", pk=bc.id)
         original_image_id = bc.original_image_id
         bc.delete()
+        messages.success(request, "名刺データを削除しました。")
         return redirect("originals:original_detail", pk=original_image_id)
+
+
+class CardBulkDeleteView(LoginRequiredMixin, PermissionRequiredMixin, View):
+    """選択された名刺を一括削除する（POST 専用）。
+
+    BusinessCard.ocr_result == 'business_card'（正規名刺）はガードにより削除対象外とする。
+    所有者スコープ（original_image__user=user）で絞り込む。
+    削除後、一覧画面（リファラまたは cards:card_list）へリダイレクトする。
+    """
+
+    permission_required = "cards.delete_businesscard"
+
+    def post(self, request):
+        user = request.user
+        card_ids = request.POST.getlist("card_ids")
+        if not card_ids:
+            messages.warning(request, "削除対象が選択されていません。")
+            return redirect(request.META.get("HTTP_REFERER") or "cards:card_list")
+
+        # ユーザースコープかつ can_delete（DELETABLE_OCR_RESULTS に含まれるもの）だけを取得
+        bcs = list(
+            BusinessCard.objects.filter(
+                id__in=card_ids,
+                original_image__user=user,
+                ocr_result__in=BusinessCard.DELETABLE_OCR_RESULTS,
+            )
+        )
+
+        deleted_count = 0
+        for bc in bcs:
+            bc.delete()
+            deleted_count += 1
+
+        if deleted_count > 0:
+            messages.success(request, f"{deleted_count} 件の名刺データを削除しました。")
+        else:
+            messages.warning(request, "削除可能な名刺データが選択されていませんでした。")
+
+        return redirect(request.META.get("HTTP_REFERER") or "cards:card_list")
 
 
 # 名刺一覧の多段ソート（persons の ?sort=key,-key 機構を流用。列は名刺一覧の実カラムに限定）。

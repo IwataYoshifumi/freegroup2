@@ -7,6 +7,7 @@ app_name = "cards"
 urlpatterns = [
     path("", views.CardListView.as_view(), name="card_list"),
     path("upload/", views.UploadView.as_view(), name="card_upload"),
+    path("bulk-delete/", views.CardBulkDeleteView.as_view(), name="card_bulk_delete"),
     path("<uuid:pk>/", views.CardDetailView.as_view(), name="card_detail"),
     path("<uuid:pk>/edit/", views.CardEditView.as_view(), name="card_edit"),
     path("<uuid:pk>/rotate/", views.CardRotateView.as_view(), name="card_rotate"),

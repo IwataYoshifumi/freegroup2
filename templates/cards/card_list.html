@@ -164,37 +164,52 @@
   </section>
 
   <section class="app-card">
-    <div class="app-table-wrapper">
-      <table class="app-table app-table--nowrap">
-        <thead>
-          <tr>
-            <th class="app-table__col--action">操作</th>
-            <th style="width:28px;"></th>
-            <th>サムネイル</th>
-            <th class="app-table__col--name">氏名</th>
-            <th class="app-table__col--organization">会社</th>
-            <th class="app-table__col--dept">役職</th>
-            <th class="app-table__col--email">主要連絡先</th>
-            <th class="app-table__col--date">作成日時</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for card in cards %}
-            {% url 'cards:card_detail' pk=card.id as detail_url %}
+    <form method="post" action="{% url 'cards:card_bulk_delete' %}" class="js-card-bulk-delete-form">
+      {% csrf_token %}
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:8px;">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <button type="button" class="app-btn app-btn--secondary app-btn--sm js-bulk-delete-toggle" aria-expanded="false">
+            <span class="js-bulk-delete-toggle-icon">▼</span> <span class="js-bulk-delete-toggle-text">削除</span>
+          </button>
+          <button type="submit" class="app-btn app-btn--secondary app-btn--sm js-bulk-delete-btn" style="display:none;" disabled>
+            無効画像を削除する
+          </button>
+        </div>
+      </div>
+
+      <div class="app-table-wrapper">
+        <table class="app-table app-table--nowrap">
+          <thead>
             <tr>
-              <td class="app-table__col--action">
-                <a href="{% append_back_url detail_url back %}" class="app-icon-btn" style="color:var(--app-text);" title="詳細" aria-label="詳細"><i class="bi bi-search"></i></a>
-              </td>
-              <td style="text-align:center; vertical-align:middle;">
-                {% if debug %}
-                  {% if card.has_unconfirmed_low %}
-                    <span class="app-status-dot app-status-dot--error" title="未確認 low あり" aria-label="未確認 low あり"></span>
-                  {% elif card.has_unconfirmed_mid %}
-                    <span class="app-status-dot app-status-dot--warning" title="未確認 mid あり" aria-label="未確認 mid あり"></span>
-                  {% elif card.has_confirmed %}
-                    <span class="app-status-dot app-status-dot--success" title="確認済みあり（未確認なし）" aria-label="確認済みあり"></span>
+              <th class="js-bulk-delete-col" style="width:36px; text-align:center; display:none;">
+                <label class="app-check" style="justify-content:center; min-height:auto; margin:0;">
+                  <input type="checkbox" id="select_all" aria-label="全選択" style="cursor:pointer;">
+                </label>
+              </th>
+              <th class="app-table__col--action">操作</th>
+              <th>サムネイル</th>
+              <th class="app-table__col--name">氏名</th>
+              <th class="app-table__col--organization">会社</th>
+              <th class="app-table__col--dept">役職</th>
+              <th class="app-table__col--email">主要連絡先</th>
+              <th class="app-table__col--date">作成日時</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for card in cards %}
+              {% url 'cards:card_detail' pk=card.id as detail_url %}
+              <tr>
+                <td class="js-bulk-delete-col" style="text-align:center; vertical-align:middle; display:none;">
+                  {% if card.can_delete %}
+                    <label class="app-check" style="justify-content:center; min-height:auto; margin:0;">
+                      <input type="checkbox" name="card_ids" value="{{ card.id }}" class="js-bulk-card-cb" aria-label="選択" style="cursor:pointer;">
+                    </label>
+                  {% else %}
+                    <span class="app-muted" title="正規名刺は削除不可">-</span>
                   {% endif %}
-                {% endif %}
+                </td>
+                <td class="app-table__col--action">
+                <a href="{% append_back_url detail_url back %}" class="app-icon-btn" style="color:var(--app-text);" title="詳細" aria-label="詳細"><i class="bi bi-search"></i></a>
               </td>
               <td>
                 <div style="display:flex;align-items:flex-start;gap:6px;">
@@ -223,7 +238,18 @@
                   </div>
                 </div>
               </td>
-              <td>{{ card.contact.full_name|default:"-" }}</td>
+              <td class="app-table__col--name">
+                {% if debug %}
+                  {% if card.has_unconfirmed_low %}
+                    <span class="app-status-dot app-status-dot--error" title="未確認 low あり" aria-label="未確認 low あり" style="margin-right:4px;"></span>
+                  {% elif card.has_unconfirmed_mid %}
+                    <span class="app-status-dot app-status-dot--warning" title="未確認 mid あり" aria-label="未確認 mid あり" style="margin-right:4px;"></span>
+                  {% elif card.has_confirmed %}
+                    <span class="app-status-dot app-status-dot--success" title="確認済みあり（未確認なし）" aria-label="確認済みあり" style="margin-right:4px;"></span>
+                  {% endif %}
+                {% endif %}
+                {{ card.contact.full_name|default:"-" }}
+              </td>
               <td>
                 {% if card.contact.organization %}
                   <span class="app-ellipsis" data-tooltip="{{ card.contact.organization }}">{{ card.contact.organization|truncatechars:30 }}</span>
@@ -246,6 +272,7 @@
         </tbody>
       </table>
     </div>
+    </form>
 
     <div class="app-card-list">
       {% for card in cards %}
@@ -473,6 +500,105 @@
       document.addEventListener('DOMContentLoaded', init);
     } else {
       init();
+    }
+  })();
+
+  // 一括削除チェックボックス ＆ トグル表示・送信確認
+  (function () {
+    var toggleBtn = document.querySelector('.js-bulk-delete-toggle');
+    var toggleIcon = document.querySelector('.js-bulk-delete-toggle-icon');
+    var toggleText = document.querySelector('.js-bulk-delete-toggle-text');
+    var deleteBtn = document.querySelector('.js-bulk-delete-btn');
+    var master = document.getElementById('select_all');
+    var form = document.querySelector('.js-card-bulk-delete-form');
+    var isOpen = false;
+
+    function updateDeleteButton() {
+      if (!deleteBtn) return;
+      var cbs = document.querySelectorAll('.js-bulk-card-cb:checked');
+      var count = cbs.length;
+
+      if (count > 0) {
+        deleteBtn.textContent = '選択した名刺を削除 (' + count + ')';
+        deleteBtn.classList.remove('app-btn--secondary');
+        deleteBtn.classList.add('app-btn--danger');
+        deleteBtn.disabled = false;
+      } else {
+        deleteBtn.textContent = '無効画像を削除する';
+        deleteBtn.classList.remove('app-btn--danger');
+        deleteBtn.classList.add('app-btn--secondary');
+        deleteBtn.disabled = true;
+      }
+    }
+
+    function setColsVisibility(show) {
+      var cols = document.querySelectorAll('.js-bulk-delete-col');
+      cols.forEach(function (col) {
+        col.style.display = show ? '' : 'none';
+      });
+      if (deleteBtn) {
+        deleteBtn.style.display = show ? '' : 'none';
+      }
+    }
+
+    if (toggleBtn) {
+      toggleBtn.addEventListener('click', function () {
+        isOpen = !isOpen;
+        toggleBtn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+        if (toggleIcon) toggleIcon.textContent = isOpen ? '▲' : '▼';
+        if (toggleText) toggleText.textContent = isOpen ? '閉じる' : '削除';
+
+        setColsVisibility(isOpen);
+
+        if (isOpen) {
+          updateDeleteButton();
+        } else {
+          // 非表示に戻すときは選択をクリア
+          if (master) master.checked = false;
+          document.querySelectorAll('.js-bulk-card-cb').forEach(function (cb) {
+            cb.checked = false;
+          });
+          updateDeleteButton();
+        }
+      });
+    }
+
+    if (master) {
+      master.addEventListener('change', function () {
+        document.querySelectorAll('.js-bulk-card-cb').forEach(function (cb) {
+          cb.checked = master.checked;
+        });
+        updateDeleteButton();
+      });
+    }
+
+    document.addEventListener('change', function (e) {
+      if (e.target && e.target.classList.contains('js-bulk-card-cb')) {
+        updateDeleteButton();
+        if (master) {
+          var all = document.querySelectorAll('.js-bulk-card-cb');
+          var checked = document.querySelectorAll('.js-bulk-card-cb:checked');
+          master.checked = (all.length > 0 && all.length === checked.length);
+        }
+      }
+    });
+
+    if (form) {
+      form.addEventListener('submit', function (event) {
+        var count = document.querySelectorAll('.js-bulk-card-cb:checked').length;
+        if (count === 0) {
+          event.preventDefault();
+          return;
+        }
+        if (!window.confirm('選択した ' + count + ' 件の名刺を削除します。よろしいですか？')) {
+          event.preventDefault();
+          return;
+        }
+        if (deleteBtn) {
+          deleteBtn.disabled = true;
+          deleteBtn.textContent = '削除中...';
+        }
+      });
     }
   })();
 </script>

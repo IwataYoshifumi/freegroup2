@@ -109,6 +109,26 @@ def _sync_manual_results_on_card_delete(sender, instance, **kwargs):
         logger.warning("BusinessCard manual_results sync on delete failed: %s", exc)
 
 
+@receiver(post_delete, sender=BusinessCard)
+def _sync_detected_count_on_card_delete(sender, instance, **kwargs):
+    """BusinessCard 削除時に親 OriginalImage.detected_count を実態に合わせて再集計。
+
+    CardDeleteView / CardBulkDeleteView / admin / CASCADE 等の全削除経路を
+    1箇所でカバーするため post_delete に乗せる。
+    """
+    try:
+        original = OriginalImage.objects.filter(id=instance.original_image_id).first()
+        if original is None:
+            return  # 親ごと削除（CASCADE）→ 同期不要
+        new_count = original.businesscard_set.count()
+        if original.detected_count != new_count:
+            original.detected_count = new_count
+            original.save(update_fields=["detected_count", "updated_at"])
+    except Exception as exc:
+        logger.warning("BusinessCard detected_count sync on delete failed: %s", exc)
+
+
+
 @receiver(post_delete, sender=OriginalImage)
 def _delete_original_image_files(sender, instance, **kwargs):
     """OriginalImage 削除時の FS 実体クリーンアップ。

@@ -328,16 +328,16 @@
   {% endif %}
 
   <div class="app-action-area" style="margin-top:24px; max-width:1100px;">
-    {% if debug %}
+    {% if card.can_delete %}
       {% comment %}
       HIG v1.3 §3.3：物理削除の入口はトラッシュ＋黒系。最終実行（confirm 後）に danger を残す方針。
-      デバッグ用直接削除のため confirm 画面は js-card-delete-btn の JS が出す。js- フックは維持。
+      削除確認ダイアログは js-card-delete-btn の JS が出す。
       {% endcomment %}
       <form method="post" action="{% url 'cards:card_delete' pk=card.id %}"
             class="js-card-delete-form" style="margin: 0;">
         {% csrf_token %}
-        <button type="submit" class="app-btn-trash js-card-delete-btn" title="削除（デバッグ中限定）">
-          🗑 削除（デバッグ中限定）
+        <button type="submit" class="app-btn-trash js-card-delete-btn" title="削除">
+          🗑 削除
         </button>
       </form>
     {% endif %}
@@ -345,26 +345,31 @@
     {% back_link back %}
   </div>
 
+  <script>
+    (function () {
+      // 名刺削除フォームの確認
+      var deleteForm = document.querySelector('.js-card-delete-form');
+      if (deleteForm) {
+        deleteForm.addEventListener('submit', function (event) {
+          if (!window.confirm('この名刺を削除します。よろしいですか？')) {
+            event.preventDefault();
+            return;
+          }
+          var btn = deleteForm.querySelector('.js-card-delete-btn');
+          if (btn) {
+            btn.disabled = true;
+            btn.textContent = '削除中...';
+          }
+        });
+      }
+    })();
+  </script>
+
   {% if debug %}
     {# andypf-json-viewer ライブラリと初期化（raw_json_1 / raw_json_2 viewer 用） #}
     <script src="https://cdn.jsdelivr.net/npm/@andypf/json-viewer@2.4.0/dist/iife/index.js"></script>
     <script>
       (function () {
-        // 名刺削除フォームの確認
-        var deleteForm = document.querySelector('.js-card-delete-form');
-        if (deleteForm) {
-          deleteForm.addEventListener('submit', function (event) {
-            if (!window.confirm('この名刺を削除します。よろしいですか？')) {
-              event.preventDefault();
-              return;
-            }
-            var btn = deleteForm.querySelector('.js-card-delete-btn');
-            if (btn) {
-              btn.disabled = true;
-              btn.textContent = '削除中...';
-            }
-          });
-        }
 
         // andypf-json-viewer へ JSON データを流し込む
         function feedJsonViewer(viewerId, dataScriptId) {

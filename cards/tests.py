@@ -715,7 +715,11 @@ class Phase7CardsViewAuthTests(TestCase):
         original = OriginalImage.objects.create(
             user=owner, status=OriginalImage.STATUS_EXTRACTED
         )
-        bc = BusinessCard.objects.create(original_image=original, card_index=0)
+        bc = BusinessCard.objects.create(
+            original_image=original,
+            card_index=0,
+            ocr_result=BusinessCard.OcrResult.NOT_BUSINESS_CARD,
+        )
         url = reverse("cards:card_delete", kwargs={"pk": bc.pk})
         # 権限なし → 403、BusinessCard は削除されない（破壊的操作の防御）
         resp = self._client(self._user_with()).post(url)

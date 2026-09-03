@@ -281,6 +281,26 @@ class BusinessCard(models.Model):
         version = int(self.updated_at.timestamp()) if self.updated_at else 0
         return f"{self.card_image.url}?v={version}"
 
+    # 削除可能な ocr_result（明確にゴミデータと判定されたもののみ）
+    DELETABLE_OCR_RESULTS = (
+        OcrResult.NOT_BUSINESS_CARD,
+        OcrResult.INSUFFICIENT_INFO,
+        OcrResult.OCR_FAILED,
+        OcrResult.OTHERS,
+    )
+
+    @property
+    def can_delete(self) -> bool:
+        """[性質] 純関数 / 削除可能かどうかを判定する。
+
+        OCR が完了し、明確にゴミデータと判定されたもの
+        （not_business_card / insufficient_info / ocr_failed / others）のみ削除可能。
+        正規の名刺（business_card）および OCR 処理前・処理中（ocr_result is None）は
+        誤削除防止のため削除不可。
+        """
+        return self.ocr_result in self.DELETABLE_OCR_RESULTS
+
+
 
 def _debug_mask_upload_path(instance, filename):
     """[性質] 純関数 / DebugMask の ImageField の保存先を組み立てる。
