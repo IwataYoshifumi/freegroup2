@@ -49,7 +49,7 @@
             {% url 'contacts:contact_detail' pk=contact.id as detail_url %}
             <tr>
               <td class="app-table__col--action">
-                <a href="{% append_back_url detail_url back %}" class="app-btn app-btn--secondary app-btn--sm">詳細</a>
+                <a href="{% append_back_url detail_url back %}" class="app-icon-btn" style="color:var(--app-text);" title="詳細" aria-label="詳細"><i class="bi bi-search"></i></a>
               </td>
               <td data-col-key="name" data-sort-key="{{ contact.phonetic_name }}">{{ contact.full_name|default:"-" }}{% if contact.has_unconfirmed_low_mid %} <span class="app-status-badge app-status-badge--warning" title="未確認の低信頼項目があります" aria-label="要確認">要確認</span>{% endif %}</td>
               <td data-col-key="status" data-sort-key="{{ contact|status_sort_key }}">

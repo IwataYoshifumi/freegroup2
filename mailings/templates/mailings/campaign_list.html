@@ -134,6 +134,7 @@
             <th data-col-key="unsub" data-sort-col>配信停止</th>
             <th data-col-key="created_by" data-sort-col>作成者</th>
             <th data-col-key="created_at" data-sort-col>作成日時</th>
+            <th class="app-table__col--action" style="width:48px;"><span class="visually-hidden">アーカイブ</span></th>
           </tr>
         </thead>
         <tbody>
@@ -142,11 +143,13 @@
               {% url 'mailings:campaign_detail' pk=item.campaign.pk as detail_url %}
               {% url 'mailings:campaign_report' pk=item.campaign.pk as report_url %}
               <td class="app-table__col--action">
-                <a class="app-btn app-btn--sm" href="{% append_back_url detail_url back %}">詳細</a>
-                {# レポートは配信完了以降のみ（下書き・予約配信待機中では出さない、指示書 §2）。 #}
-                {% if item.campaign.status != 'draft' and item.campaign.status != 'scheduled' %}
-                  <a class="app-btn app-btn--sm" href="{% append_back_url report_url back %}">レポート</a>
-                {% endif %}
+                <div class="app-table__actions">
+                  <a href="{% append_back_url detail_url back %}" class="app-icon-btn" style="color:var(--app-text);" title="詳細" aria-label="詳細"><i class="bi bi-search"></i></a>
+                  {# レポートは配信完了以降のみ（下書き・予約配信待機中では出さない、指示書 §2）。 #}
+                  {% if item.campaign.status != 'draft' and item.campaign.status != 'scheduled' %}
+                    <a href="{% append_back_url report_url back %}" class="app-icon-btn" style="color:var(--app-text);" title="レポート" aria-label="レポート"><i class="bi bi-card-text"></i></a>
+                  {% endif %}
+                </div>
               </td>
               <td data-col-key="name"><a href="{% append_back_url detail_url back %}">{{ item.campaign.name }}</a></td>
               <td data-col-key="status">
@@ -162,9 +165,24 @@
               <td data-col-key="unsub">{{ item.summary.unsubscribed }}</td>
               <td data-col-key="created_by">{{ item.campaign.created_by.username|default:"-" }}</td>
               <td data-col-key="created_at">{{ item.campaign.created_at|date:"Y-m-d H:i" }}</td>
+              <td class="app-table__col--action" style="width:48px; text-align:center;">
+                {% if not item.campaign.is_archived and item.campaign.status != 'sending' %}
+                  <form method="post" action="{% url 'mailings:campaign_archive' pk=item.campaign.pk %}" style="margin:0; display:inline-flex;" onsubmit="return confirm('「{{ item.campaign.name }}」をアーカイブします。紐づくメール本文も同時にアーカイブ扱いになります。よろしいですか？');">
+                    {% csrf_token %}
+                    {% hidden_back_field back %}
+                    <button type="submit" class="app-icon-btn" style="color:var(--app-text);" title="アーカイブ" aria-label="アーカイブ"><i class="bi bi-archive-fill"></i></button>
+                  </form>
+                {% elif item.campaign.is_archived %}
+                  <form method="post" action="{% url 'mailings:campaign_unarchive' pk=item.campaign.pk %}" style="margin:0; display:inline-flex;" onsubmit="return confirm('「{{ item.campaign.name }}」を復元（非アーカイブ化）しますか？');">
+                    {% csrf_token %}
+                    {% hidden_back_field back %}
+                    <button type="submit" class="app-icon-btn" style="color:var(--app-text);" title="非アーカイブ化（復元）" aria-label="非アーカイブ化（復元）"><i class="bi bi-arrow-counterclockwise"></i></button>
+                  </form>
+                {% endif %}
+              </td>
             </tr>
           {% empty %}
-            <tr><td colspan="10">
+            <tr><td colspan="11">
               {% if search_name or search_creator %}
                 条件に一致するキャンペーンはありません。
                 <a href="{% url 'mailings:campaign_list' %}">検索条件をリセット →</a>

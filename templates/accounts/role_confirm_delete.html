@@ -51,7 +51,7 @@
         <form method="post" action="">
           {% csrf_token %}
           <div class="app-action-area" style="margin-top: var(--app-space-md);">
-            <a href="{% url 'accounts:role_list' %}" class="app-btn app-btn--secondary">キャンセル</a>
+            <a href="{% url 'accounts:role_list' %}" class="app-btn app-btn--secondary">戻る</a>
             <button type="submit" class="app-btn app-btn--danger">削除する</button>
           </div>
         </form>

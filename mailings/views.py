@@ -2,7 +2,6 @@
 
 実装範囲（Phase 1b-γ）：
   - MailingList CRUD（一覧・作成・詳細・編集・論理削除）
-  - 凍結 AJAX（freeze_members 呼び出し）
   - プレビュー AJAX（extract_persons_by_tags / count_persons_by_tags 呼び出し）
   - 対象外 AJAX（凍結後のメンバー個別物理削除、§11.7.2.1 増やす方向は実装しない）
   - MailingConfig 編集（シングルトン、get_or_create で初回自動作成）
@@ -40,7 +39,6 @@ from persons.services.person_search import SEARCH_PARAMS, search_persons
 from .forms import CampaignForm, EmailTemplateForm, MailingConfigForm, MailingListForm
 from .models import Campaign, EmailTemplate, MailingList, MailingListMember
 from .services.list_freeze import (
-    freeze_members,
     get_or_create_singleton_mailing_config,
 )
 from .services.tag_extraction import (
@@ -453,45 +451,28 @@ class MailingListUpdateView(LoginRequiredMixin, PermissionRequiredMixin, UpdateV
         return MailingList.objects.filter(is_archived=False)
 
     def get_success_url(self):
-        return reverse_lazy("mailings:mailing_list_update", args=[self.object.pk])
+        return reverse_lazy("mailings:mailing_list_detail", kwargs={"pk": self.object.pk})
+
+    def form_valid(self, form):
+        from django.contrib import messages
+
+        response = super().form_valid(form)
+        messages.success(
+            self.request, f"リスト「{self.object.name}」の基本情報を更新しました。"
+        )
+        return response
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        is_frozen = self.object.members_frozen_at is not None
-        # Phase 1b-ε.6 rev14.1：凍結後は閲覧のみ、未凍結時はメンバー追加・削除可能。
-        # 既存メンバー一覧は凍結状態に関わらず常に渡す（未凍結時も削除 UI のため必要）。
-        members = (
-            MailingListMember.objects.filter(mailing_list=self.object)
-            .select_related("person", "person__primary_contact", "added_by")
-            .order_by("created_at")
-        )
-        existing_person_ids = list(members.values_list("person_id", flat=True))
-        # 未凍結時のみ Person 検索結果を渡す（_search_form.html partial で searched=1 のとき）。
-        search_results = None
-        if not is_frozen and self.request.GET.get("searched") == "1":
-            qs = search_persons(self.request.GET, default_statuses=("active",))
-            # 既にメンバーに入っている Person は除外（UniqueConstraint 重複防止 + UX 簡素化）。
-            search_results = qs.exclude(pk__in=existing_person_ids)[:100]
         context.update(
             {
                 "back": BackNavigator(self.request),
                 "active_app": "mailings",
                 "active_menu": "mailings:mailing_list_list",
                 "is_create": False,
-                "is_frozen": is_frozen,
-                "tags_by_category": _tags_grouped_by_category_for_picker(),
-                "members": members,
-                "search_results": search_results,
-                # _search_form.html partial が参照するコンテキスト
-                "selected_statuses": ["active"],
-                "reset_url": reverse_lazy(
-                    "mailings:mailing_list_update", args=[self.object.pk]
-                ),
-                "submit_label": "Person 検索",
+                "is_frozen": self.object.members_frozen_at is not None,
             }
         )
-        for key in SEARCH_PARAMS:
-            context[key] = self.request.GET.get(key, "")
         return context
 
 
@@ -558,49 +539,8 @@ def _render_delete_confirm(request, mailing_list):
 
 
 # ======================================================================
-# AJAX：凍結・プレビュー・対象外（§11.4 / §11.7.2.1）
+# AJAX：プレビュー・メタ更新・対象外（§11.4 / §11.7.2.1）
 # ======================================================================
-
-
-@method_decorator(require_POST, name="dispatch")
-class MailingListFreezeView(LoginRequiredMixin, PermissionRequiredMixin, View):
-    """リスト保存 AJAX（rev14.1 §11.4.3、Phase 1b-ε.6 追補で「凍結保存」→「保存」）。
-
-    タグ ID リストを受け取り extract_persons_by_tags → freeze_members で
-    MailingListMember を置き換え保存する。`members_frozen_at` は触らない（rev14.1）。
-
-    凍結済み（members_frozen_at IS NOT NULL）リストは編集禁止（§11.3.6 dispatch ガード）。
-
-    POST: form-encoded or JSON {"mailing_list_id": uuid, "tag_ids": [uuid, ...]}
-    レスポンス成功: {"ok": true, "member_count": int}
-    レスポンス凍結: HTTP 409 {"ok": false, "error": "frozen", "message": str}
-
-    認可（Phase 7 ⑤-B-1）：mailings.change_mailinglist（既存リストの状態変更）。所有者判定なし。
-    """
-
-    permission_required = "mailings.change_mailinglist"
-
-    def post(self, request):
-        mailing_list_id, tag_ids = _parse_freeze_payload(request)
-        if not mailing_list_id:
-            return JsonResponse(
-                {"ok": False, "error": "missing_mailing_list_id"}, status=400
-            )
-        mailing_list = get_object_or_404(
-            MailingList, pk=mailing_list_id, is_archived=False
-        )
-        if mailing_list.members_frozen_at is not None:
-            return JsonResponse(
-                {
-                    "ok": False,
-                    "error": "frozen",
-                    "message": "このリストは凍結済みのため、保存できません。",
-                },
-                status=409,
-            )
-        persons = extract_persons_by_tags(tag_ids or [])
-        count = freeze_members(mailing_list, persons, request.user)
-        return JsonResponse({"ok": True, "member_count": count})
 
 
 @method_decorator(require_POST, name="dispatch")
@@ -907,6 +847,8 @@ SORT_FIELD_MAP = {
     "company": "primary_contact__organization",
     "department": "primary_contact__department",
     "title": "primary_contact__title",
+    "salutation": "primary_contact__salutation_name",
+    "salutation_name": "primary_contact__salutation_name",
     "address": "primary_contact__address",
     "email": "primary_contact__email",
 }
@@ -3951,6 +3893,71 @@ class CampaignUpdateView(
         return context
 
 
+class CampaignScheduleDatetimeView(
+    LoginRequiredMixin, PermissionRequiredMixin, CampaignOwnerRequiredMixin, View
+):
+    """配信日時（scheduled_at）設定 AJAX（モーダル経由）。
+
+    POST: form-encoded または JSON {"scheduled_at": "YYYY-MM-DDTHH:MM"}
+    認可: mailings.change_campaign ＋ 所有者判定。
+    draft のみ許可（archived や scheduled 等は 400）。
+    未来日時のみ許可（過去日時は 400 ValidationError）。
+    """
+
+    permission_required = "mailings.change_campaign"
+
+    def post(self, request, pk):
+        from datetime import datetime
+        from django.http import JsonResponse
+        from django.utils import timezone
+        from django.utils.dateparse import parse_datetime
+
+        campaign = get_object_or_404(Campaign, pk=pk)
+        if campaign.is_archived or campaign.status != Campaign.Status.DRAFT:
+            return JsonResponse(
+                {"ok": False, "message": "下書き状態のキャンペーンのみ日時を設定できます。"},
+                status=400,
+            )
+
+        raw_val = request.POST.get("scheduled_at", "").strip()
+        if not raw_val and request.content_type and request.content_type.startswith("application/json"):
+            try:
+                import json
+                payload = json.loads(request.body.decode("utf-8"))
+                raw_val = (payload.get("scheduled_at") or "").strip()
+            except Exception:
+                pass
+
+        if not raw_val:
+            return JsonResponse(
+                {"ok": False, "errors": {"scheduled_at": ["予約配信日時を指定してください。"]}},
+                status=400,
+            )
+
+        dt = parse_datetime(raw_val)
+        if dt is None:
+            try:
+                dt = datetime.fromisoformat(raw_val)
+            except ValueError:
+                return JsonResponse(
+                    {"ok": False, "errors": {"scheduled_at": ["日時の形式が正しくありません。"]}},
+                    status=400,
+                )
+
+        if timezone.is_naive(dt):
+            dt = timezone.make_aware(dt, timezone.get_current_timezone())
+
+        if dt <= timezone.now():
+            return JsonResponse(
+                {"ok": False, "errors": {"scheduled_at": ["予約配信日時は未来の日時を指定してください。"]}},
+                status=400,
+            )
+
+        campaign.scheduled_at = dt
+        campaign.save(update_fields=["scheduled_at", "updated_at"])
+        return JsonResponse({"ok": True, "scheduled_at": dt.isoformat()})
+
+
 class _CampaignActionBaseView(
     LoginRequiredMixin, PermissionRequiredMixin, CampaignOwnerRequiredMixin, View
 ):
@@ -4029,7 +4036,7 @@ class CampaignArchiveView(
 ):
     """論理削除（(b) §5.6、仕様書 §12.4）。
 
-    GET = 確認画面、POST = 実行（draft のみ可、Campaign + EmailTemplate を同一 atomic で
+    GET = 確認画面、POST = 実行（Campaign + EmailTemplate を同一 atomic で
     is_archived=True）。MailingListDeleteView 流儀踏襲（指示書 Q4 確定）。
 
     認可（Phase 7 ⑤）：mailings.delete_campaign ＋ 所有者判定（CampaignOwnerRequiredMixin）。
@@ -4116,3 +4123,24 @@ class CampaignTestSendView(_CampaignActionBaseView):
             request, f"{request.user.email} 宛にテスト送信しました。"
         )
         return self._redirect_detail(pk)
+
+
+class CampaignDuplicateView(LoginRequiredMixin, PermissionRequiredMixin, View):
+    """Campaign 複製（下書きとして新規複製）。POST 専用。
+
+    認可：mailings.add_campaign
+    """
+
+    permission_required = "mailings.add_campaign"
+
+    def post(self, request, pk):
+        from django.contrib import messages
+        from .services.campaign_actions import duplicate_campaign
+
+        campaign = get_object_or_404(Campaign, pk=pk)
+        new_campaign = duplicate_campaign(campaign, request.user)
+        messages.success(request, f"キャンペーン「{new_campaign.name}」を複製しました。")
+        back = BackNavigator(request)
+        list_url = reverse("mailings:campaign_list")
+        return redirect(back.append_url(list_url))
+

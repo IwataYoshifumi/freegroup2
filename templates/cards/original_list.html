@@ -151,7 +151,7 @@
             {% url 'originals:original_detail' pk=image.id as detail_url %}
             <tr>
               <td class="app-table__col--action">
-                <a href="{% append_back_url detail_url back %}" class="app-btn app-btn--secondary app-btn--sm">詳細</a>
+                <a href="{% append_back_url detail_url back %}" class="app-icon-btn" style="color:var(--app-text);" title="詳細" aria-label="詳細"><i class="bi bi-search"></i></a>
               </td>
               <td>
                 {% if image.image_file %}

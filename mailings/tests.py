@@ -746,6 +746,28 @@ class SortViewTests(_MemberEditTestBase):
         self.assertEqual(resp.context["current_sort"], "name")
         self.assertEqual(resp.context["current_dir"], "desc")
 
+    def test_detail_view_sort_salutation_name_applies(self):
+        ml = self._make_list()
+        c = self._make_person("Charlie")
+        c.primary_contact.salutation_name = "Charlie 様"
+        c.primary_contact.save(update_fields=["salutation_name"])
+        a = self._make_person("Alice")
+        a.primary_contact.salutation_name = "Alice 先生"
+        a.primary_contact.save(update_fields=["salutation_name"])
+        b = self._make_person("Bob")
+        b.primary_contact.salutation_name = "Bob 部長"
+        b.primary_contact.save(update_fields=["salutation_name"])
+        self._add_member(ml, c)
+        self._add_member(ml, a)
+        self._add_member(ml, b)
+        url = reverse("mailings:mailing_list_detail", args=[ml.pk]) + "?sort=salutation_name&dir=asc"
+        resp = self.client.get(url)
+        members = list(resp.context["members"])
+        salutations = [m.person.primary_contact.salutation_name for m in members]
+        self.assertEqual(salutations, ["Alice 先生", "Bob 部長", "Charlie 様"])
+        self.assertEqual(resp.context["current_sort"], "salutation_name")
+        self.assertEqual(resp.context["current_dir"], "asc")
+
     def test_confirm_view_sort_applies(self):
         ml = self._make_list()
         c = self._make_person("Charlie")
@@ -843,7 +865,7 @@ class ColumnToggleTests(_MemberEditTestBase):
         url = reverse("mailings:mailing_list_detail", args=[ml.pk])
         resp = self.client.get(url)
         body = resp.content.decode("utf-8")
-        for key in ("name", "company", "title", "department", "address", "email"):
+        for key in ("name", "company", "title", "department", "salutation_name", "address", "email"):
             self.assertIn(f'data-col-key="{key}"', body)
 
     def test_unsubscribed_badge_has_js_marker_class(self):
@@ -7683,11 +7705,14 @@ class ArchiveCampaignTests(_PhaseBTestBase):
         self.assertTrue(self.campaign.is_archived)
         self.assertTrue(self.template.is_archived)
 
-    def test_non_draft_raises(self):
-        self.campaign.status = Campaign.Status.SENDING
-        self.campaign.save(update_fields=["status"])
-        with self.assertRaises(ValidationError):
+    def test_non_draft_can_be_archived(self):
+        for status in (Campaign.Status.DONE, Campaign.Status.SCHEDULED, Campaign.Status.SENDING):
+            self.campaign.status = status
+            self.campaign.is_archived = False
+            self.campaign.save(update_fields=["status", "is_archived"])
             archive_campaign(self.campaign)
+            self.campaign.refresh_from_db()
+            self.assertTrue(self.campaign.is_archived)
 
 
 class RunTestSendTests(_PhaseBTestBase):
@@ -7808,9 +7833,21 @@ class CampaignDetailViewTests(_PhaseBTestBase):
         self.assertIn("基本情報", body)
         self.assertIn("メール内容", body)
         self.assertIn("宛先", body)
-        # draft なので「予約する」「基本情報から編集」が出る
+        # draft なので「予約する」「既存から選ぶ」「新規作成」が出る（基本情報から編集は削除済み）
         self.assertIn("予約する", body)
-        self.assertIn("基本情報から編集", body)
+        self.assertIn("既存から選ぶ", body)
+        self.assertIn("新規作成", body)
+        self.assertNotIn("基本情報から編集", body)
+        # タイトル横に編集アイコンが出る
+        self.assertIn('class="bi bi-pencil-fill"', body)
+        # 「4. 配信日時」ラベルとモーダル起動ボタン
+        self.assertIn("4. 配信日時", body)
+        self.assertIn('data-target="scheduleDatetimeModal"', body)
+        # 宛先サマリーに会社名・氏名・部署名・役職・宛名・メアドのヘッダが含まれる
+        for header in ("会社名", "氏名", "部署名", "役職", "宛名", "メアド"):
+            self.assertIn(f"<th>{header}</th>", body)
+        # 宛先サマリーに Person 詳細リンクアイコンが含まれる
+        self.assertIn('class="bi bi-search"', body)
 
     def test_archived_campaign_returns_404(self):
         self.campaign.is_archived = True
@@ -7819,7 +7856,8 @@ class CampaignDetailViewTests(_PhaseBTestBase):
         self.assertEqual(response.status_code, 200)
         body = response.content.decode("utf-8")
         self.assertIn("アーカイブ済み", body)
-        self.assertNotIn("基本情報から編集", body)
+        self.assertNotIn("既存から選ぶ", body)
+        self.assertNotIn("新規作成", body)
 
     def test_scheduled_status_shows_cancel_button_only(self):
         self.campaign.status = Campaign.Status.SCHEDULED
@@ -7864,6 +7902,76 @@ class CampaignUpdateViewTests(_PhaseBTestBase):
         self.assertEqual(response.url, f"/mailings/campaigns/{self.campaign.pk}/")
         self.campaign.refresh_from_db()
         self.assertEqual(self.campaign.name, "改名後")
+
+
+class CampaignScheduleDatetimeViewTests(_PhaseBTestBase):
+    def _url(self):
+        return f"/mailings/campaigns/{self.campaign.pk}/schedule-datetime/"
+
+    def test_post_valid_future_datetime_updates_schedule(self):
+        local_now = timezone.localtime(timezone.now())
+        future_dt = local_now + timedelta(days=2)
+        response = self.client.post(
+            self._url(),
+            data={"scheduled_at": future_dt.strftime("%Y-%m-%dT%H:%M")},
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data["ok"])
+        self.campaign.refresh_from_db()
+        self.assertIsNotNone(self.campaign.scheduled_at)
+        campaign_dt_local = timezone.localtime(self.campaign.scheduled_at)
+        self.assertEqual(
+            campaign_dt_local.strftime("%Y-%m-%d %H:%M"),
+            future_dt.strftime("%Y-%m-%d %H:%M"),
+        )
+
+    def test_post_past_datetime_returns_400(self):
+        past_dt = timezone.now() - timedelta(hours=1)
+        response = self.client.post(
+            self._url(),
+            data={"scheduled_at": past_dt.strftime("%Y-%m-%dT%H:%M")},
+        )
+        self.assertEqual(response.status_code, 400)
+        data = response.json()
+        self.assertFalse(data["ok"])
+        self.assertIn("scheduled_at", data["errors"])
+        self.assertIn("未来の日時", data["errors"]["scheduled_at"][0])
+
+    def test_post_empty_datetime_returns_400(self):
+        response = self.client.post(self._url(), data={"scheduled_at": ""})
+        self.assertEqual(response.status_code, 400)
+        data = response.json()
+        self.assertFalse(data["ok"])
+        self.assertIn("scheduled_at", data["errors"])
+
+    def test_post_non_draft_returns_400(self):
+        self.campaign.status = Campaign.Status.SCHEDULED
+        self.campaign.scheduled_at = timezone.now() + timedelta(hours=1)
+        self.campaign.save(update_fields=["status", "scheduled_at"])
+        future_dt = timezone.now() + timedelta(days=2)
+        response = self.client.post(
+            self._url(),
+            data={"scheduled_at": future_dt.strftime("%Y-%m-%dT%H:%M")},
+        )
+        self.assertEqual(response.status_code, 400)
+        data = response.json()
+        self.assertFalse(data["ok"])
+        self.assertIn("下書き状態", data["message"])
+
+    def test_post_other_owner_returns_403(self):
+        other_user = User.objects.create_user(
+            username="other_owner", password="password", email="other@example.com"
+        )
+        for _cn in ("change_campaign", "view_campaign"):
+            other_user.user_permissions.add(Permission.objects.get(codename=_cn))
+        self.client.force_login(other_user)
+        future_dt = timezone.now() + timedelta(days=2)
+        response = self.client.post(
+            self._url(),
+            data={"scheduled_at": future_dt.strftime("%Y-%m-%dT%H:%M")},
+        )
+        self.assertEqual(response.status_code, 403)
 
 
 class CampaignScheduleViewTests(_PhaseBTestBase):
@@ -7995,6 +8103,11 @@ class CampaignListUiLinksTests(_PhaseBTestBase):
         # 各行に campaign_detail への href が出る（self.campaign で作った draft が
         # 一覧に乗る前提で、URL を確認）
         self.assertIn(f"/mailings/campaigns/{self.campaign.pk}/", body)
+
+    def test_list_does_not_have_duplicate_button(self):
+        response = self.client.get("/mailings/campaigns/")
+        body = response.content.decode("utf-8")
+        self.assertNotIn(f"/mailings/campaigns/{self.campaign.pk}/duplicate/", body)
 
 
 class MailingListListWizardLinkTests(_PhaseBTestBase):
@@ -8805,3 +8918,123 @@ class V16ListSearchAndSidebarSmokeTests(TestCase):
         self.assertContains(
             r2, reverse("mailings:campaign_report", args=[done.pk])
         )
+
+
+class CampaignDuplicateTests(_PhaseBTestBase):
+    def test_duplicate_campaign_service(self):
+        from mailings.services.campaign_actions import duplicate_campaign
+
+        self.campaign.status = Campaign.Status.DONE
+        self.campaign.total_count = 100
+        self.campaign.sent_count = 95
+        self.campaign.failed_count = 5
+        self.campaign.save()
+
+        new_campaign = duplicate_campaign(self.campaign, self.user)
+
+        self.assertNotEqual(new_campaign.pk, self.campaign.pk)
+        self.assertEqual(new_campaign.name, "BaseDraft のコピー")
+        self.assertEqual(new_campaign.status, Campaign.Status.DRAFT)
+        self.assertIsNone(new_campaign.scheduled_at)
+        self.assertIsNone(new_campaign.started_at)
+        self.assertIsNone(new_campaign.completed_at)
+        self.assertEqual(new_campaign.total_count, 0)
+        self.assertEqual(new_campaign.sent_count, 0)
+        self.assertEqual(new_campaign.failed_count, 0)
+        self.assertFalse(new_campaign.is_archived)
+        self.assertEqual(new_campaign.created_by, self.user)
+        self.assertEqual(new_campaign.mailing_list, self.campaign.mailing_list)
+        self.assertEqual(new_campaign.sender_mode, self.campaign.sender_mode)
+        self.assertEqual(
+            new_campaign.apply_unsubscribe_filter,
+            self.campaign.apply_unsubscribe_filter,
+        )
+
+        # EmailTemplate is also duplicated as a new record
+        self.assertNotEqual(new_campaign.template.pk, self.template.pk)
+        self.assertEqual(new_campaign.template.name, "BaseDraft のコピー")
+        self.assertEqual(new_campaign.template.subject, self.template.subject)
+        self.assertEqual(new_campaign.template.body, self.template.body)
+        self.assertFalse(new_campaign.template.is_archived)
+
+        # Original campaign and template remain unchanged
+        self.campaign.refresh_from_db()
+        self.assertEqual(self.campaign.status, Campaign.Status.DONE)
+        self.assertEqual(self.campaign.sent_count, 95)
+
+    def test_duplicate_campaign_view_post(self):
+        url = f"/mailings/campaigns/{self.campaign.pk}/duplicate/"
+        response = self.client.post(url)
+        self.assertEqual(response.status_code, 302)
+
+        new_campaign = Campaign.objects.filter(name="BaseDraft のコピー").first()
+        self.assertIsNotNone(new_campaign)
+        self.assertEqual(response.url, "/mailings/campaigns/")
+
+    def test_duplicate_campaign_view_get_method_not_allowed(self):
+        url = f"/mailings/campaigns/{self.campaign.pk}/duplicate/"
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 405)
+
+
+class MailingListUpdateViewTests(_PhaseBTestBase):
+    def _url(self):
+        return f"/mailings/lists/{self.mailing_list.pk}/update/"
+
+    def test_get_renders_simplified_form_without_step2_step3(self):
+        response = self.client.get(self._url())
+        self.assertEqual(response.status_code, 200)
+        body = response.content.decode("utf-8")
+        # 見出し「リスト情報」と「修正」ボタンが存在する
+        self.assertIn("リスト情報", body)
+        self.assertIn('button type="submit"', body)
+        self.assertIn("修正", body)
+        # Step1/Step2/Step3、プレビュー、js-meta-form などの旧コードが存在しない
+        self.assertNotIn("Step 1：リスト本体", body)
+        self.assertNotIn("Step 2：タグ選択でメンバー組成", body)
+        self.assertNotIn("Step 3：メンバーを手動で追加・削除", body)
+        self.assertNotIn("js-meta-form", body)
+        self.assertNotIn("js-mailing-list-freeze", body)
+
+    def test_post_updates_name_and_description_and_redirects_to_detail(self):
+        response = self.client.post(
+            self._url(),
+            data={
+                "name": "変更後リスト名",
+                "description": "変更後説明文",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            response.url, f"/mailings/lists/{self.mailing_list.pk}/"
+        )
+        self.mailing_list.refresh_from_db()
+        self.assertEqual(self.mailing_list.name, "変更後リスト名")
+        self.assertEqual(self.mailing_list.description, "変更後説明文")
+
+    def test_cancel_button_with_back_navigator(self):
+        from back_navigator.back_navigator import BackNavigator
+        from django.test import RequestFactory
+
+        rf = RequestFactory()
+        req = rf.get("/mailings/lists/")
+        nav = BackNavigator(req)
+        encoded_stack = nav._calc_encode_stack([{"url": "/mailings/lists/", "title": "一覧"}])
+
+        url_with_back = f"{self._url()}?back_stack={encoded_stack}"
+        response = self.client.get(url_with_back)
+        self.assertEqual(response.status_code, 200)
+        body = response.content.decode("utf-8")
+        self.assertIn('<a href="/mailings/lists/" class="app-btn app-btn--secondary">キャンセル</a>', body)
+
+    def test_cancel_button_fallback_to_detail(self):
+        response = self.client.get(self._url())
+        self.assertEqual(response.status_code, 200)
+        body = response.content.decode("utf-8")
+        self.assertIn(
+            f'<a href="/mailings/lists/{self.mailing_list.pk}/" class="app-btn app-btn--secondary">キャンセル</a>',
+            body,
+        )
+
+
+

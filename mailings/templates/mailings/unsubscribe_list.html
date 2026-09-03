@@ -86,7 +86,7 @@
       <table class="app-table js-mailings-page-sort">
         <thead>
           <tr>
-            <th class="app-table__col--action" style="width:70px;">操作</th>
+            <th class="app-table__col--action">操作</th>
             <th>対象 Person</th>
             <th>会社</th>
             <th>送信先メアド</th>
@@ -100,15 +100,15 @@
             {% with surviving=item.person.get_surviving_person %}
               {% url 'persons:person_detail' pk=surviving.pk as person_detail_url %}
               <tr>
-                <td class="app-table__col--action" style="width:70px;">
+                <td class="app-table__col--action">
                   <div class="app-table__actions">
-                    <a class="app-btn app-btn--outline-secondary app-btn--sm" href="{% append_back_url person_detail_url back %}">詳細</a>
+                    <a href="{% append_back_url person_detail_url back %}" class="app-icon-btn" style="color:var(--app-text);" title="詳細" aria-label="詳細"><i class="bi bi-search"></i></a>
                   </div>
                 </td>
                 <td>
                   {{ surviving.primary_contact.full_name|default:"(氏名なし)" }}
                   {% if surviving.status == "archived" %}
-                    <i class="bi bi-archive" style="color:#d97706; font-size:0.9em; margin-left:2px;" title="アーカイブ済み" aria-label="アーカイブ済み"></i>
+                    <i class="bi bi-archive-fill" style="color:#d97706; font-size:0.9em; margin-left:2px;" title="アーカイブ済み" aria-label="アーカイブ済み"></i>
                   {% endif %}
                 </td>
                 <td>{{ surviving.primary_contact.organization|default:"-" }}</td>

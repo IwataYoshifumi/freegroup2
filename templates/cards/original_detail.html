@@ -647,7 +647,7 @@
           );
           layer.appendChild(poly);
         }
-        const r = Math.max(natW, natH) / 120 || 6;   // 表示でほどよく見える半径
+        const r = Math.max(Math.max(natW, natH) / 120, 4);   // 表示でほどよく見える半径（最小4px保証）
         points.forEach(function (p) {
           const c = document.createElementNS(SVGNS, 'circle');
           c.setAttribute('class', 'app-manual-crop__marker');

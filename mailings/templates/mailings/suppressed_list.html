@@ -100,7 +100,7 @@
     <table class="app-table js-mailings-page-sort">
       <thead>
         <tr>
-          <th class="app-table__col--action" style="width:70px;">操作</th>
+          <th class="app-table__col--action">操作</th>
           <th data-sort-col>メアド</th>
           <th data-col-key="source" data-sort-col>登録元</th>
           <th data-col-key="created_at" data-sort-col>登録日時</th>
@@ -111,9 +111,9 @@
         {% for sup in suppressed_emails %}
           {% url 'mailings:suppressed_detail' pk=sup.pk as detail_url %}
           <tr>
-            <td class="app-table__col--action" style="width:70px;">
+            <td class="app-table__col--action">
               <div class="app-table__actions">
-                <a class="app-btn app-btn--outline-secondary app-btn--sm" href="{% append_back_url detail_url back %}">詳細</a>
+                <a href="{% append_back_url detail_url back %}" class="app-icon-btn" style="color:var(--app-text);" title="詳細" aria-label="詳細"><i class="bi bi-search"></i></a>
               </div>
             </td>
             <td>{{ sup.email }}</td>

@@ -38,26 +38,41 @@
       <div>
         <h2 style="margin:0 0 6px 0; font-size:1.1em; color:var(--app-muted, #64748b);">キャンペーン概要</h2>
         <div style="font-size:1.4em; font-weight:bold; display:inline-flex; align-items:center; gap:8px; flex-wrap:wrap;">
-          {{ campaign.name }} {% status_badge campaign %}
+          {{ campaign.name }}
+          {% if not campaign.is_archived and campaign.status == 'draft' %}
+            {% url 'mailings:campaign_update' pk=campaign.pk as edit_url %}
+            <a href="{% append_back_url edit_url back %}" class="app-icon-btn" style="color:var(--app-text);" title="編集" aria-label="編集">
+              <i class="bi bi-pencil-fill"></i>
+            </a>
+          {% endif %}
+          {% status_badge campaign %}
           {% if campaign.is_archived %}
             <span class="app-status-badge app-status-badge--muted">📦 アーカイブ済み</span>
           {% endif %}
         </div>
       </div>
-      {% if not campaign.is_archived and campaign.status == 'draft' %}
-        {% url 'mailings:campaign_archive' pk=campaign.pk as archive_url %}
-        <a href="{% append_back_url archive_url back %}" class="app-icon-btn" style="color:var(--app-text); margin-top:2px;" title="アーカイブ" aria-label="アーカイブ">
-          <i class="bi bi-archive"></i>
-        </a>
-      {% elif campaign.is_archived %}
-        <form method="post" action="{% url 'mailings:campaign_unarchive' pk=campaign.pk %}" style="margin:0;" onsubmit="return confirm('このキャンペーンを復元（非アーカイブ化）しますか？');">
-          {% csrf_token %}
-          {{ back.hidden_fields }}
-          <button type="submit" class="app-btn app-btn--warning" style="display:inline-flex; align-items:center; gap:6px;">
-            <i class="bi bi-archive"></i> 非アーカイブ化（復元）
-          </button>
-        </form>
-      {% endif %}
+      <div style="display:flex; align-items:center; gap:8px;">
+        {% if not campaign.is_archived %}
+          <form method="post" action="{% url 'mailings:campaign_duplicate' pk=campaign.pk %}" style="margin:0;" onsubmit="return confirm('「{{ campaign.name }}」を複製します。よろしいですか？');">
+            {% csrf_token %}
+            {% hidden_back_field back %}
+            <button type="submit" class="app-icon-btn" style="color:var(--app-text);" title="複製" aria-label="複製"><i class="bi bi-copy"></i></button>
+          </form>
+        {% endif %}
+        {% if not campaign.is_archived and campaign.status != 'sending' %}
+          <form method="post" action="{% url 'mailings:campaign_archive' pk=campaign.pk %}" style="margin:0;" onsubmit="return confirm('「{{ campaign.name }}」をアーカイブします。紐づくメール本文も同時にアーカイブ扱いになります。よろしいですか？');">
+            {% csrf_token %}
+            {% hidden_back_field back %}
+            <button type="submit" class="app-icon-btn" style="color:var(--app-text);" title="アーカイブ" aria-label="アーカイブ"><i class="bi bi-archive-fill"></i></button>
+          </form>
+        {% elif campaign.is_archived %}
+          <form method="post" action="{% url 'mailings:campaign_unarchive' pk=campaign.pk %}" style="margin:0;" onsubmit="return confirm('このキャンペーンを復元（非アーカイブ化）しますか？');">
+            {% csrf_token %}
+            {{ back.hidden_fields }}
+            <button type="submit" class="app-icon-btn" style="color:var(--app-text);" title="非アーカイブ化（復元）" aria-label="非アーカイブ化（復元）"><i class="bi bi-arrow-counterclockwise"></i></button>
+          </form>
+        {% endif %}
+      </div>
     </div>
 
     <div class="app-detail-grid" style="margin-top:12px;">
@@ -135,6 +150,7 @@
             </td>
             <td class="app-table__col--action" style="text-align: left;">
               {% if not campaign.is_archived and campaign.status == 'draft' %}
+                <div style="display:flex; gap:4px; flex-wrap:wrap; justify-content:flex-start;">
                   {% url 'mailings:mailing_list_list' as list_select_base_url %}
                   {% append_back_url list_select_base_url back as list_select_back_url %}
                   {% if "?" in list_select_back_url %}
@@ -143,7 +159,6 @@
                     <a href="{{ list_select_back_url }}?select_for_campaign={{ campaign.pk }}" class="app-btn app-btn--success app-btn--sm">既存から選ぶ</a>
                   {% endif %}
                   <a href="{% url 'mailings:new_list_meta' %}?campaign={{ campaign.pk }}" class="app-btn app-btn--primary app-btn--sm">新規作成</a>
-                  <a href="{% append_back_url edit_url back %}" class="app-btn app-btn--success app-btn--sm">基本情報から編集</a>
                 </div>
               {% else %}
                 <span class="app-muted">—</span>
@@ -180,9 +195,9 @@
             </td>
           </tr>
 
-          {# 4. 配信スケジュール #}
+          {# 4. 配信日時 #}
           <tr>
-            <td><strong>4. 配信スケジュール</strong></td>
+            <td><strong>4. 配信日時</strong></td>
             <td>
               {% if campaign.is_schedule_ready %}
                 <span class="app-status-badge app-status-badge--success">✅ 完了</span>
@@ -200,7 +215,7 @@
             <td class="app-table__col--action" style="text-align: left;">
               {% if not campaign.is_archived and campaign.status == 'draft' %}
                 <div style="display:flex; gap:4px; flex-wrap:wrap; justify-content:flex-start;">
-                  <a href="{% append_back_url edit_url back %}" class="app-btn app-btn--success app-btn--sm">日時を設定</a>
+                  <button type="button" class="app-btn app-btn--success app-btn--sm" data-action="open-modal" data-target="scheduleDatetimeModal">日時を設定</button>
                 </div>
               {% else %}
                 <span class="app-muted">—</span>
@@ -296,14 +311,20 @@
     </div>
     <div class="app-form__group" style="margin-top:8px;">
       <label class="app-form__label">件名</label>
-      <div>{{ template.subject|default:"（未入力）" }}</div>
+      <div style="position:relative;">
+        <div style="background:#f9f9f9; padding:12px; padding-right:44px; border-radius:4px;">{{ template.subject|default:"（未入力）" }}</div>
+        <button type="button" class="app-icon-btn" style="color:var(--app-text); position:absolute; top:8px; right:8px;" title="件名をコピー" aria-label="件名をコピー" onclick="copyTextToClipboard(this.dataset.copyText, this);" data-copy-text="{{ campaign.template.subject|escapejs }}"><i class="bi bi-clipboard"></i></button>
+      </div>
     </div>
     <div class="app-collapsible is-open" style="margin-top:12px;">
       <button type="button" class="app-form__label" data-action="toggle-collapsible" data-target="bodyCollapse" aria-expanded="true" style="background:none; border:none; cursor:pointer; padding:0;">
         <span class="app-collapsible__icon">▾</span> 本文（記法を含んだ生テキスト）
       </button>
       <div id="bodyCollapse" class="app-collapsible__panel">
-        <pre style="white-space:pre-wrap; word-wrap:break-word; background:#f9f9f9; padding:12px; border-radius:4px; max-height:400px; overflow:auto;">{{ template.body|default:"（未入力）" }}</pre>
+        <div style="position:relative;">
+          <pre style="white-space:pre-wrap; word-wrap:break-word; background:#f9f9f9; padding:12px; padding-right:44px; border-radius:4px; max-height:400px; overflow:auto;">{{ template.body|default:"（未入力）" }}</pre>
+          <button type="button" class="app-icon-btn" style="color:var(--app-text); position:absolute; top:8px; right:8px;" title="本文をコピー" aria-label="本文をコピー" onclick="copyTextToClipboard(this.dataset.copyText, this);" data-copy-text="{{ campaign.template.body|escapejs }}"><i class="bi bi-clipboard"></i></button>
+        </div>
       </div>
     </div>
   </section>
@@ -319,14 +340,29 @@
       {% if sample_recipients %}
         <table class="app-table" style="margin-top:8px;">
           <thead>
-            <tr><th>会社名</th><th>氏名</th><th>メアド</th></tr>
+            <tr>
+              <th class="app-table__col--action" style="width:36px;"></th>
+              <th>会社名</th>
+              <th>氏名</th>
+              <th>部署名</th>
+              <th>役職</th>
+              <th>宛名</th>
+              <th>メアド</th>
+            </tr>
           </thead>
           <tbody>
             {% for person in sample_recipients %}
               <tr>
-                <td>{{ person.primary_contact.organization|default:"—" }}</td>
+                <td class="app-table__col--action">
+                  {% url 'persons:person_detail' pk=person.pk as person_detail_url %}
+                  <a href="{% append_back_url person_detail_url back %}" class="app-icon-btn" style="color:var(--app-text);" title="詳細" aria-label="詳細"><i class="bi bi-search"></i></a>
+                </td>
+                <td>{{ person.primary_contact.organization|default:"-" }}</td>
                 <td>{{ person.primary_contact.full_name|default:person.id }}</td>
-                <td>{{ person.primary_contact.email|default:"—" }}</td>
+                <td>{{ person.primary_contact.department|default:"-" }}</td>
+                <td>{{ person.primary_contact.title|default:"-" }}</td>
+                <td>{{ person.primary_contact.salutation_name|default:"-" }}</td>
+                <td>{{ person.primary_contact.email|default:"-" }}</td>
               </tr>
             {% endfor %}
           </tbody>
@@ -344,8 +380,85 @@
     {% endif %}
   </section>
 
-  {# ====== inline モーダル：schedule / cancel_schedule / test_send ====== #}
+  {# ====== inline モーダル：schedule_datetime / schedule / cancel_schedule / test_send ====== #}
   {% if not campaign.is_archived and campaign.status == 'draft' %}
+    <div id="scheduleDatetimeModal" class="app-modal" hidden role="dialog" aria-modal="true" aria-labelledby="scheduleDatetimeModalTitle">
+      <div class="app-modal__panel">
+        <header class="app-modal__header">
+          <h2 id="scheduleDatetimeModalTitle">配信日時の設定</h2>
+          <button type="button" class="app-btn app-btn--sm" data-action="close-modal">閉じる</button>
+        </header>
+        <div class="app-modal__body">
+          <form id="scheduleDatetimeForm" method="post" action="{% url 'mailings:campaign_schedule_datetime' pk=campaign.pk %}" style="margin-top:8px;">
+            {% csrf_token %}
+            <div id="scheduleDatetimeError" class="app-message app-message--error" style="display:none; margin-bottom:12px;"></div>
+            <div class="app-form__group">
+              <label for="id_scheduled_at" class="app-form__label">予約配信日時</label>
+              <input type="datetime-local" id="id_scheduled_at" name="scheduled_at" class="app-input"
+                     value="{% if campaign.scheduled_at %}{{ campaign.scheduled_at|date:'Y-m-d\TH:i' }}{% endif %}"
+                     required>
+              <p class="app-muted" style="margin-top:4px; font-size:13px;">未来の日時を指定してください。</p>
+            </div>
+            <div class="app-action-area" style="margin-top:16px;">
+              <button type="submit" class="app-btn app-btn--primary">設定する</button>
+              <button type="button" class="app-btn" data-action="close-modal">戻る</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+    <script>
+      (function () {
+        var form = document.getElementById('scheduleDatetimeForm');
+        var errorBox = document.getElementById('scheduleDatetimeError');
+        if (form) {
+          form.addEventListener('submit', function (e) {
+            e.preventDefault();
+            if (errorBox) {
+              errorBox.style.display = 'none';
+              errorBox.textContent = '';
+            }
+            var formData = new FormData(form);
+            fetch(form.action, {
+              method: 'POST',
+              body: formData,
+              headers: {
+                'X-Requested-With': 'XMLHttpRequest'
+              }
+            })
+            .then(function (res) {
+              return res.json().then(function (data) {
+                return { ok: res.ok, status: res.status, data: data };
+              });
+            })
+            .then(function (result) {
+              if (result.ok && result.data.ok) {
+                window.location.reload();
+              } else {
+                var msg = '日時の設定に失敗しました。';
+                if (result.data && result.data.errors && result.data.errors.scheduled_at) {
+                  msg = Array.isArray(result.data.errors.scheduled_at) ? result.data.errors.scheduled_at.join(' ') : result.data.errors.scheduled_at;
+                } else if (result.data && result.data.message) {
+                  msg = result.data.message;
+                }
+                if (errorBox) {
+                  errorBox.textContent = msg;
+                  errorBox.style.display = 'block';
+                } else {
+                  alert(msg);
+                }
+              }
+            })
+            .catch(function () {
+              if (errorBox) {
+                errorBox.textContent = '通信エラーが発生しました。もう一度お試しください。';
+                errorBox.style.display = 'block';
+              }
+            });
+          });
+        }
+      })();
+    </script>
     <div id="scheduleConfirmModal" class="app-modal" hidden role="dialog" aria-modal="true" aria-labelledby="scheduleConfirmModalTitle">
       <div class="app-modal__panel">
         <header class="app-modal__header">

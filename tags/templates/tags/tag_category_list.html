@@ -8,10 +8,16 @@
     <div>
       <h1>タグカテゴリ一覧</h1>
     </div>
-    <div class="app-action-area">
-      {% url 'tags:tag_category_create' as create_url %}
-      <a href="{% append_back_url create_url back %}" class="app-btn app-btn--primary">＋ 新規カテゴリ作成</a>
+    <div class="app-page-header__actions">
+      {% back_all_link back %}
+      {% back_link back %}
     </div>
+  </div>
+
+  {# 遷移導線（新規作成）はタイトル直下・左上に配置（HIG 7.3）。「＋」除去。 #}
+  <div class="app-action-area" style="justify-content:flex-start; margin-bottom:16px; max-width:1100px;">
+    {% url 'tags:tag_category_create' as create_url %}
+    <a href="{% append_back_url create_url back %}" class="app-btn app-btn--primary">新規カテゴリ作成</a>
   </div>
 
   {% if categories %}
@@ -38,7 +44,7 @@
           <thead>
             <tr>
               <th style="width:32px;"></th>
-              <th class="app-table__col--action" style="width:130px;">操作</th>
+              <th class="app-table__col--action">操作</th>
               <th>並び順</th>
               <th>カテゴリ名</th>
               <th>説明</th>
@@ -52,11 +58,11 @@
               {% url 'tags:tag_category_update' pk=cat.id as update_url %}
               <tr data-pk="{{ cat.id }}">
                 <td class="js-sort-handle" style="cursor:grab; text-align:center; user-select:none; color:#888;">⋮⋮</td>
-                <td class="app-table__col--action" style="width:130px;">
+                <td class="app-table__col--action">
                   <div class="app-table__actions">
-                    <a href="{% append_back_url detail_url back %}" class="app-btn app-btn--outline-secondary app-btn--sm">詳細</a>
+                    <a href="{% append_back_url detail_url back %}" class="app-icon-btn" style="color:var(--app-text);" title="詳細" aria-label="詳細"><i class="bi bi-search"></i></a>
                     {% if not cat.is_archived %}
-                      <a href="{% append_back_url update_url back %}" class="app-btn app-btn--success app-btn--sm">編集</a>
+                      <a href="{% append_back_url update_url back %}" class="app-icon-btn" style="color:var(--app-text);" title="編集" aria-label="編集"><i class="bi bi-pencil-fill"></i></a>
                     {% endif %}
                   </div>
                 </td>

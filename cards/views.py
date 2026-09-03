@@ -925,8 +925,19 @@ def _prepare_manual_warp(original, points_payload):
         )
         return None, JsonResponse({"error": "元画像を読み込めませんでした。"}, status=400)
 
-    # warp（公開ラッパー経由・None は小さすぎ等）。
-    warp_result = warp_card_from_points(np_rgb, parsed_points)
+    # warp（公開ラッパー経由・None は小さすぎ等、OpenCV 例外は不正範囲として捕捉）。
+    try:
+        warp_result = warp_card_from_points(np_rgb, parsed_points)
+    except Exception as e:
+        logger.warning(
+            "manual_crop: warp_card_from_points で例外 OriginalImage %s: %s",
+            original.id,
+            e,
+        )
+        return None, JsonResponse(
+            {"error": "指定範囲が不正です。名刺の四隅を正しくクリックし直してください。"},
+            status=400,
+        )
     if warp_result is None:
         return None, JsonResponse(
             {"error": "指定範囲が小さすぎます（名刺として切り出せません）。"}, status=400

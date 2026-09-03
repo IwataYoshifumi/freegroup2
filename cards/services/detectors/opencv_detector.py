@@ -81,6 +81,9 @@ def _dedup_center_dist_ratio() -> float:
 # ── 透視変換パラメータ ────────────────────────────────────
 _MIN_WARP_WIDTH = 100
 _MIN_WARP_HEIGHT = 50
+# 手動切り出し専用の最小サイズ下限（透視変換が数学的に破綻しない最低限）
+_MIN_MANUAL_WARP_WIDTH = 20
+_MIN_MANUAL_WARP_HEIGHT = 10
 
 # ── 反転リトライ後 polygon の外側マージン拡張 ────────────
 # 反転後マスクは「名刺の中身（白地）の連続領域」を拾うため、polygon が
@@ -690,11 +693,16 @@ def _pts_to_polygon(pts: np.ndarray) -> dict:
     return {k: {"x": float(pts[i][0]), "y": float(pts[i][1])} for i, k in enumerate(keys)}
 
 
-def _warp_card(np_rgb: np.ndarray, src_pts: np.ndarray) -> tuple[np.ndarray | None, int, int]:
+def _warp_card(
+    np_rgb: np.ndarray,
+    src_pts: np.ndarray,
+    min_width: int = _MIN_WARP_WIDTH,
+    min_height: int = _MIN_WARP_HEIGHT,
+) -> tuple[np.ndarray | None, int, int]:
     """[性質] 純関数 / 4点透視変換を行い (warped_rgb, computed_w, computed_h) を返す。
 
     出力サイズは polygon の実ピクセル辺長から算出する（人工拡大しない）。
-    サイズ基準未満（_MIN_WARP_WIDTH / _MIN_WARP_HEIGHT）の場合は warped_rgb=None を返すが、
+    サイズ基準未満（min_width / min_height）の場合は warped_rgb=None を返すが、
     computed_w / computed_h は warp_failures 記録用に必ず返す。
     """
     tl, tr, br, bl = src_pts
@@ -706,7 +714,7 @@ def _warp_card(np_rgb: np.ndarray, src_pts: np.ndarray) -> tuple[np.ndarray | No
         np.linalg.norm(bl - tl),
         np.linalg.norm(br - tr),
     ))
-    if w < _MIN_WARP_WIDTH or h < _MIN_WARP_HEIGHT:
+    if w < min_width or h < min_height:
         return None, w, h
     dst_pts = np.float32([[0, 0], [w, 0], [w, h], [0, h]])
     M = cv2.getPerspectiveTransform(src_pts, dst_pts)
@@ -719,6 +727,7 @@ def warp_card_from_points(np_rgb: np.ndarray, points) -> tuple[Image.Image, dict
 
     手動切り出し経路の唯一の warp 入口。private な _sort_corners / _warp_card を内部で
     呼び、View から直接叩かせない（4点の整列規約・最小サイズ判定をこの関数に閉じ込める）。
+    手動切り出し専用の緩和下限（_MIN_MANUAL_WARP_WIDTH / _MIN_MANUAL_WARP_HEIGHT）を使用する。
 
     [入力] np_rgb: 元画像全体の np.ndarray（RGB, shape (H, W, 3)）
            points: 4 点の座標（任意順・元画像ピクセル座標）。[[x, y], ...] 相当の
@@ -727,11 +736,13 @@ def warp_card_from_points(np_rgb: np.ndarray, points) -> tuple[Image.Image, dict
              warped_image: 透視変換済み PIL.Image（向き補正なし）
              polygon:      _sort_corners 整列後（TL/TR/BR/BL 順）の polygon dict（{x, y}）。
                            自動枠（_pts_to_polygon）と同一形式。
-           サイズ基準未満（_MIN_WARP_WIDTH / _MIN_WARP_HEIGHT）で切り出せないときは None。
+           サイズ基準未満（_MIN_MANUAL_WARP_WIDTH / _MIN_MANUAL_WARP_HEIGHT）で切り出せないときは None。
     """
     src_pts = np.array(points, dtype=np.float32)
     sorted_pts = _sort_corners(src_pts)
-    warped_rgb, _w, _h = _warp_card(np_rgb, sorted_pts)
+    warped_rgb, _w, _h = _warp_card(
+        np_rgb, sorted_pts, min_width=_MIN_MANUAL_WARP_WIDTH, min_height=_MIN_MANUAL_WARP_HEIGHT
+    )
     if warped_rgb is None:
         return None
     return Image.fromarray(warped_rgb), _pts_to_polygon(sorted_pts)

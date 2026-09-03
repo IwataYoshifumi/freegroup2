@@ -12,7 +12,7 @@
                 aria-haspopup="true" aria-expanded="false" aria-controls="js-info-popover"
                 aria-label="詳細情報"
                 style="background:none; border:none; cursor:pointer; padding:0; color:#64748b; font-size:0.85em;">
-          <i class="bi bi-info-circle"></i>
+          <i class="bi bi-info-circle-fill"></i>
         </button>
       </h1>
 
@@ -61,7 +61,7 @@
           <span>{{ category.name }}</span>
           {% if not category.is_archived %}
             <a href="{% append_back_url update_url back %}" class="app-icon-btn" style="color:var(--app-text);" title="編集" aria-label="編集">
-              <i class="bi bi-pencil"></i>
+              <i class="bi bi-pencil-fill"></i>
             </a>
           {% endif %}
         </h2>
@@ -113,7 +113,7 @@
         <table class="app-table app-table--nowrap">
           <thead>
             <tr>
-              <th class="app-table__col--action" style="width:130px;">操作</th>
+              <th class="app-table__col--action">操作</th>
               <th>タグ名</th>
               <th>付与 Person 数</th>
               <th>状態</th>
@@ -125,11 +125,11 @@
               {% url 'tags:tag_detail' pk=tag.id as tag_detail_url %}
               {% url 'tags:tag_update' pk=tag.id as tag_update_url %}
               <tr>
-                <td class="app-table__col--action" style="width:130px;">
+                <td class="app-table__col--action">
                   <div class="app-table__actions">
-                    <a href="{% append_back_url tag_detail_url back %}" class="app-btn app-btn--outline-secondary app-btn--sm">詳細</a>
+                    <a href="{% append_back_url tag_detail_url back %}" class="app-icon-btn" style="color:var(--app-text);" title="詳細" aria-label="詳細"><i class="bi bi-search"></i></a>
                     {% if not tag.is_archived %}
-                      <a href="{% append_back_url tag_update_url back %}" class="app-btn app-btn--success app-btn--sm">編集</a>
+                      <a href="{% append_back_url tag_update_url back %}" class="app-icon-btn" style="color:var(--app-text);" title="編集" aria-label="編集"><i class="bi bi-pencil-fill"></i></a>
                     {% endif %}
                   </div>
                 </td>

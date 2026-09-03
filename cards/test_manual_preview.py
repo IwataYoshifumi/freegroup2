@@ -98,10 +98,31 @@ class ManualPreviewViewTests(TestCase):
 
     def test_too_small_warp_400(self):
         oi = self._original()
-        small = [[10, 10], [60, 10], [60, 40], [10, 40]]  # W=50<100
+        # W=10 < 20, H=5 < 10 → 緩和された手動切り出し下限未満で 400
+        small = [[10, 10], [20, 10], [20, 15], [10, 15]]
         resp = self._post(oi, points=small)
         self.assertEqual(resp.status_code, 400)
         self.assertIn("小さ", resp.json()["error"])
+
+    def test_small_warp_allowed_with_relaxed_limit(self):
+        oi = self._original()
+        # W=50, H=30（旧閾値 100x50 未満だが、新閾値 20x10 以上）→ 成功
+        relaxed = [[10, 10], [60, 10], [60, 40], [10, 40]]
+        resp = self._post(oi, points=relaxed)
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.json()["success"])
+        self.assertTrue(resp.json()["image"].startswith("data:image/png;base64,"))
+
+    def test_warp_exception_handled_as_400(self):
+        import cv2
+        from unittest.mock import patch
+
+        oi = self._original()
+        # OpenCV 内部例外（透視変換計算失敗など）が発生しても 500 で落とさず 400
+        with patch("cards.views.warp_card_from_points", side_effect=cv2.error("perspective transform failed")):
+            resp = self._post(oi)
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("不正", resp.json()["error"])
 
     def test_out_of_range_400(self):
         oi = self._original()
