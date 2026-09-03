@@ -83,25 +83,24 @@
         {% if tag.is_archived %}
           {% if tag.category.is_archived %}
             <span class="app-btn app-btn--warning" style="opacity:0.5; pointer-events:none;" aria-disabled="true"
-                  title="親カテゴリがアーカイブ済みのため操作できません">非アーカイブ化</span>
+                  title="親カテゴリがアーカイブ済みのため操作できません"><i class="bi bi-archive-fill"></i> 非アーカイブ化</span>
           {% else %}
             <form method="post" action="{% url 'tags:tag_unarchive' pk=tag.id %}" style="display:inline;"
                   onsubmit="return confirm('「{{ tag.name }}」を非アーカイブ化します。よろしいですか？');">
               {% csrf_token %}
               {{ back.hidden_fields }}
-              <button type="submit" class="app-btn app-btn--warning">非アーカイブ化</button>
+              <button type="submit" class="app-btn app-btn--warning">
+                <i class="bi bi-archive-fill"></i> 非アーカイブ化
+              </button>
             </form>
           {% endif %}
         {% else %}
-          <button type="button" class="app-btn app-btn--outline-secondary js-archive-toggle"
-                  aria-haspopup="true" aria-expanded="false" aria-controls="js-archive-form">
-            <i class="bi bi-caret-down-fill"></i>
-          </button>
-          <form id="js-archive-form" method="post" action="{% url 'tags:tag_delete' pk=tag.id %}"
-                style="display:none;"
+          <form method="post" action="{% url 'tags:tag_delete' pk=tag.id %}" style="display:inline;"
                 onsubmit="return confirm('「{{ tag.name }}」をアーカイブ化します。よろしいですか？');">
             {% csrf_token %}
-            <button type="submit" class="app-btn app-btn--warning">アーカイブ化</button>
+            <button type="submit" class="app-btn app-btn--warning">
+              <i class="bi bi-archive-fill"></i> アーカイブ化
+            </button>
           </form>
         {% endif %}
       </div>
@@ -159,16 +158,6 @@
 
   <script>
     (function () {
-      // ▼ アーカイブ化展開トグル
-      var toggle = document.querySelector('.js-archive-toggle');
-      var form = document.getElementById('js-archive-form');
-      if (toggle && form) {
-        toggle.addEventListener('click', function () {
-          var opening = form.style.display === 'none' || form.style.display === '';
-          form.style.display = opening ? 'inline' : 'none';
-          toggle.setAttribute('aria-expanded', opening ? 'true' : 'false');
-        });
-      }
       // ⓘ ポップオーバー（クリック開閉 + 外クリックで閉じる）
       var infoBtn = document.querySelector('.js-info-toggle');
       var infoPop = document.getElementById('js-info-popover');

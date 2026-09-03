@@ -15,13 +15,6 @@
     <div class="app-action-area">
       {% back_all_link back %}
       {% back_link back %}
-      <form method="post" action="{% url 'persons:person_unarchive' pk=person.id %}" style="display:inline;" onsubmit="return confirm('「{{ person }}」を非アーカイブ化します。よろしいですか？');">
-        {% csrf_token %}
-        {% hidden_back_field back %}
-        <button type="submit" class="app-btn app-btn--warning">
-          <i class="bi bi-archive-fill"></i> 非アーカイブ化
-        </button>
-      </form>
     </div>
   </div>
 
@@ -38,7 +31,16 @@
     </div>
     <div class="app-detail-item">
       <div class="app-detail-label">代表表示</div>
-      <div class="app-detail-value">{{ person }}</div>
+      <div class="app-detail-value" style="display:flex; align-items:center; justify-content:space-between;">
+        <span>{{ person }}</span>
+        <form method="post" action="{% url 'persons:person_unarchive' pk=person.id %}" style="margin:0; display:inline-flex;" onsubmit="return confirm('「{{ person }}」を非アーカイブ化します。よろしいですか？');">
+          {% csrf_token %}
+          {% hidden_back_field back %}
+          <button type="submit" class="app-icon-btn" style="color:var(--app-text);" title="非アーカイブ化" aria-label="非アーカイブ化">
+            <i class="bi bi-archive-fill"></i>
+          </button>
+        </form>
+      </div>
     </div>
     <div class="app-detail-item">
       <div class="app-detail-label">作成日時</div>

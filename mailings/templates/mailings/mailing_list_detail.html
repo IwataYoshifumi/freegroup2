@@ -26,25 +26,19 @@
       {% if not select_for_campaign %}
         {% url 'mailings:mailing_list_delete' pk=mailing_list.id as delete_url %}
         {% if mailing_list.is_archived %}
-          <button type="button" class="app-btn app-btn--outline-secondary js-archive-toggle"
-                  aria-haspopup="true" aria-expanded="false" aria-controls="js-archive-form">
-            <i class="bi bi-caret-down-fill"></i>
-          </button>
-          <form id="js-archive-form" method="post" action="{% url 'mailings:mailing_list_unarchive' pk=mailing_list.id %}"
-                style="display:none;"
+          <form method="post" action="{% url 'mailings:mailing_list_unarchive' pk=mailing_list.id %}"
+                style="margin:0; display:inline-flex;"
                 onsubmit="return confirm('「{{ mailing_list.name }}」を非アーカイブ化します。よろしいですか？');">
             {% csrf_token %}
             {{ back.hidden_fields }}
-            <button type="submit" class="app-btn app-btn--warning">非アーカイブ化</button>
+            <button type="submit" class="app-icon-btn" style="color:var(--app-text);" title="非アーカイブ化" aria-label="非アーカイブ化">
+              <i class="bi bi-archive-fill"></i>
+            </button>
           </form>
         {% else %}
-          <button type="button" class="app-btn app-btn--outline-secondary js-archive-toggle"
-                  aria-haspopup="true" aria-expanded="false" aria-controls="js-archive-form">
-            <i class="bi bi-caret-down-fill"></i>
-          </button>
-          <span id="js-archive-form" style="display:none;">
-            <a href="{% append_back_url delete_url back %}" class="app-btn app-btn--warning">アーカイブ化</a>
-          </span>
+          <a href="{% append_back_url delete_url back %}" class="app-icon-btn" style="color:var(--app-text);" title="アーカイブ化" aria-label="アーカイブ化">
+            <i class="bi bi-archive-fill"></i>
+          </a>
         {% endif %}
       {% endif %}
     </div>
@@ -238,16 +232,6 @@
 
   <script>
     (function () {
-      // ▼ アーカイブ化展開トグル
-      var toggle = document.querySelector('.js-archive-toggle');
-      var box = document.getElementById('js-archive-form');
-      if (toggle && box) {
-        toggle.addEventListener('click', function () {
-          var opening = box.style.display === 'none' || box.style.display === '';
-          box.style.display = opening ? 'inline' : 'none';
-          toggle.setAttribute('aria-expanded', opening ? 'true' : 'false');
-        });
-      }
       // ⓘ ポップオーバー
       var infoBtn = document.querySelector('.js-info-toggle');
       var infoPop = document.getElementById('js-info-popover');

@@ -33,17 +33,8 @@
          class="app-btn app-btn--warning">このパーソンをログインアカウントに紐付ける</a>
     {% endif %}
 
-    {# 右寄せ：アーカイブ化＋戻る #}
+    {# 右寄せ：戻る #}
     <div style="margin-left:auto; display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
-      {% if contact.person and contact.person.status == "active" %}
-        <form method="post" action="{% url 'persons:person_archive' pk=contact.person.id %}" style="display:inline;" onsubmit="return confirm('「{{ contact.person }}」をアーカイブ化します。よろしいですか？');">
-          {% csrf_token %}
-          {% hidden_back_field back %}
-          <button type="submit" class="app-btn app-btn--warning">
-            <i class="bi bi-archive-fill"></i> アーカイブ化
-          </button>
-        </form>
-      {% endif %}
       {% back_all_link back %}
       {% back_link back %}
     </div>
@@ -54,56 +45,64 @@
   {# ============================================================ #}
   <div style="display:grid; grid-template-columns:1fr{% if business_card and business_card.card_image %} minmax(320px,420px){% endif %}; gap:var(--app-space-md); max-width:1100px; margin-top:var(--app-space-md); align-items:start;">
     <section class="app-card" style="margin:0;">
-      {# 氏名行：左端「氏名」＋右に値・主コンタクトバッジ・ⓘ（姓/名/敬称付き）・鉛筆 #}
+      {# 氏名行：左端「氏名」＋右に値・主コンタクトバッジ・ⓘ（姓/名/敬称付き）・鉛筆・アーカイブ #}
       <div class="app-cd-section">
         <div class="app-cd-section__name">氏名</div>
-        <div style="display:flex; flex-direction:column; gap:4px; width:100%;">
-          <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-            <strong>{{ contact.full_name|default:"(氏名なし)" }}</strong>
-            {% status_badge contact %}
-            {% if contact.person.status != "active" %}{% status_badge contact.person %}{% endif %}
-            {% if pending_duplicates %}
-              {% with first_dup=pending_duplicates.first %}
-                {% if first_dup.group_id %}
-                  {% url 'duplicates:duplicate_group_detail' group_id=first_dup.group_id as dup_url %}
+        <div class="app-detail-list app-contact-detail-fields">
+          <div class="app-detail-item" style="grid-column:1 / -1; align-items:center;">
+            <div class="app-detail-label">氏名</div>
+            <div class="app-detail-value" style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; width:100%;">
+              <strong>{{ contact.full_name|default:"(氏名なし)" }}</strong>
+              {% status_badge contact %}
+              {% if contact.person.status != "active" %}{% status_badge contact.person %}{% endif %}
+              {% if pending_duplicates %}
+                {% with first_dup=pending_duplicates.first %}
+                  {% if first_dup.group_id %}
+                    {% url 'duplicates:duplicate_group_detail' group_id=first_dup.group_id as dup_url %}
+                  {% else %}
+                    {% url 'duplicates:duplicate_group_list' as dup_url %}
+                  {% endif %}
+                  <a href="{% append_back_url dup_url back %}"
+                     class="app-btn app-btn--outline-secondary app-btn--sm"
+                     style="text-decoration:none;">
+                    マージ候補 {{ pending_duplicates|length }} 件
+                  </a>
+                {% endwith %}
+              {% endif %}
+              {% if contact.last_name or contact.first_name or contact.phonetic_name or contact.salutation_name %}
+                {% with name_tip="姓："|add:contact.last_name|add:" ／ 名："|add:contact.first_name|add:" ／ 読みカナ："|add:contact.phonetic_name|add:" ／ 敬称付き氏名（メール宛名）："|add:contact.salutation_name %}
+                  <span class="app-help-icon" data-tooltip="{{ name_tip }}" aria-label="氏名の内訳" role="img">i</span>
+                {% endwith %}
+              {% endif %}
+              <span style="margin-left:auto; display:inline-flex; align-items:center; gap:8px;">
+                {% if is_editable %}
+                  {% if is_primary %}{% url 'contacts:contact_update_primary' contact.id as edit_url %}{% elif is_active %}{% url 'contacts:contact_update_active' contact.id as edit_url %}{% endif %}
+                  {% if edit_url %}
+                    <a href="{% append_back_url edit_url back %}"
+                       class="app-btn--icon"
+                       title="主コンタクトを修正" aria-label="主コンタクトを修正"
+                       style="color:inherit; border:none; background:none; text-decoration:none; line-height:1; font-size:1.2rem;"><i class="bi bi-pencil-fill"></i></a>
+                  {% endif %}
                 {% else %}
-                  {% url 'duplicates:duplicate_group_list' as dup_url %}
+                  <span class="app-muted">表示のみモード（編集不可）</span>
                 {% endif %}
-                <a href="{% append_back_url dup_url back %}"
-                   class="app-btn app-btn--outline-secondary app-btn--sm"
-                   style="text-decoration:none;">
-                  マージ候補 {{ pending_duplicates|length }} 件
-                </a>
-              {% endwith %}
-            {% endif %}
-            {% if contact.last_name or contact.first_name or contact.phonetic_name or contact.salutation_name %}
-              {% with name_tip="姓："|add:contact.last_name|add:" ／ 名："|add:contact.first_name|add:" ／ 読みカナ："|add:contact.phonetic_name|add:" ／ 敬称付き氏名（メール宛名）："|add:contact.salutation_name %}
-                <span class="app-help-icon" data-tooltip="{{ name_tip }}" aria-label="氏名の内訳" role="img">i</span>
-              {% endwith %}
-            {% endif %}
-            <span style="margin-left:auto; display:inline-flex; align-items:center; gap:8px;">
-              {% if is_editable %}
-                {% if is_primary %}{% url 'contacts:contact_update_primary' contact.id as edit_url %}{% elif is_active %}{% url 'contacts:contact_update_active' contact.id as edit_url %}{% endif %}
-                {% if edit_url %}
-                  <a href="{% append_back_url edit_url back %}"
-                     class="app-btn--icon"
-                     title="主コンタクトを修正" aria-label="主コンタクトを修正"
-                     style="color:inherit; border:none; background:none; text-decoration:none; line-height:1; font-size:1.2rem;"><i class="bi bi-pencil-fill"></i></a>
+                {% if contact.person and contact.person.status == "active" %}
+                  <form method="post" action="{% url 'persons:person_archive' pk=contact.person.id %}" style="margin:0; display:inline-flex;" onsubmit="return confirm('「{{ contact.person }}」をアーカイブ化します。よろしいですか？');">
+                    {% csrf_token %}
+                    {% hidden_back_field back %}
+                    <button type="submit" class="app-icon-btn" style="color:var(--app-text);" title="アーカイブ化" aria-label="アーカイブ化">
+                      <i class="bi bi-archive-fill"></i>
+                    </button>
+                  </form>
                 {% endif %}
-              {% else %}
-                <span class="app-muted">表示のみモード（編集不可）</span>
-              {% endif %}
-            </span>
-          </div>
-          {% if contact.phonetic_name or contact.salutation_name %}
-            <div class="app-detail-list app-contact-detail-fields" style="margin-top:4px;">
-              {% if contact.phonetic_name %}
-                {% include "contacts/_contact_field.html" with field_name="phonetic_name" label="読みカナ" value=contact.phonetic_name full_width=True %}
-              {% endif %}
-              {% if contact.salutation_name %}
-                {% include "contacts/_contact_field.html" with field_name="salutation_name" label="敬称付き氏名（メール宛名）" value=contact.salutation_name full_width=True %}
-              {% endif %}
+              </span>
             </div>
+          </div>
+          {% if contact.phonetic_name %}
+            {% include "contacts/_contact_field.html" with field_name="phonetic_name" label="読みカナ" value=contact.phonetic_name full_width=True %}
+          {% endif %}
+          {% if contact.salutation_name %}
+            {% include "contacts/_contact_field.html" with field_name="salutation_name" label="敬称付き氏名（メール宛名）" value=contact.salutation_name full_width=True %}
           {% endif %}
         </div>
       </div>
