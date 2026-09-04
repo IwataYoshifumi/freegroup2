@@ -605,8 +605,13 @@ class DeliveryHistory(models.Model):
         return (
             cls.objects.select_for_update(skip_locked=True, of=("self",))
             .filter(campaign=campaign)
-            .exclude(status=cls.Status.SENT)
-            .filter(failed_count__lt=CAMPAIGN_RECIPIENT_MAX_FAILURES)
+            .filter(
+                models.Q(status=cls.Status.PENDING)
+                | models.Q(
+                    status=cls.Status.FAILED,
+                    failed_count__lt=CAMPAIGN_RECIPIENT_MAX_FAILURES,
+                )
+            )
             .select_related("person", "person__primary_contact")
             .order_by("created_at")[:limit]
         )

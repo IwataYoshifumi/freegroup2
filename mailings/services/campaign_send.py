@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.mail import EmailMultiAlternatives
-from django.db import transaction
+from django.db import models, transaction
 from django.utils import timezone
 
 from config.constants import (
@@ -207,8 +207,31 @@ def send_one_recipient(campaign: Campaign, history: DeliveryHistory) -> bool:
         return True
 
 
+def _update_campaign_counts(campaign: Campaign) -> None:
+    """各バッチ実行後の集計値（sent_count / failed_count / total_count）を DB に反映（§7.2.1）。
+
+    [性質] 副作用あり（Campaign レコードのカウント値を更新）
+    [入力] campaign: Campaign
+    [出力] None
+    bounced / unsubscribed は sent_count / failed_count には含めない。
+    """
+    histories = DeliveryHistory.objects.filter(campaign=campaign)
+    sent_count = histories.filter(status=DeliveryHistory.Status.SENT).count()
+    final_failed = histories.filter(
+        status=DeliveryHistory.Status.FAILED,
+        failed_count__gte=CAMPAIGN_RECIPIENT_MAX_FAILURES,
+    ).count()
+    total = histories.count()
+    Campaign.objects.filter(pk=campaign.pk).update(
+        sent_count=sent_count,
+        failed_count=final_failed,
+        total_count=total,
+        updated_at=timezone.now(),
+    )
+
+
 def _check_campaign_completion(campaign: Campaign) -> None:
-    """完了判定（§7.2.1 / §7.2.2）：全員 sent または最終 failed なら status=done。
+    """完了判定（§7.2.1 / §7.2.2）：未処理（pending またはリトライ余地あり failed）が 0 件なら status=done。
 
     [性質] 副作用あり（条件を満たす場合のみ Campaign.status / completed_at / 集計値を更新）
     [入力] campaign: Campaign
@@ -219,14 +242,20 @@ def _check_campaign_completion(campaign: Campaign) -> None:
     if total == 0:
         return
 
-    sent_qs = histories.filter(status=DeliveryHistory.Status.SENT)
-    sent_count = sent_qs.count()
-    final_failed = histories.filter(
-        status=DeliveryHistory.Status.FAILED,
-        failed_count__gte=CAMPAIGN_RECIPIENT_MAX_FAILURES,
+    retryable_count = histories.filter(
+        models.Q(status=DeliveryHistory.Status.PENDING)
+        | models.Q(
+            status=DeliveryHistory.Status.FAILED,
+            failed_count__lt=CAMPAIGN_RECIPIENT_MAX_FAILURES,
+        )
     ).count()
 
-    if sent_count + final_failed >= total:
+    if retryable_count == 0:
+        sent_count = histories.filter(status=DeliveryHistory.Status.SENT).count()
+        final_failed = histories.filter(
+            status=DeliveryHistory.Status.FAILED,
+            failed_count__gte=CAMPAIGN_RECIPIENT_MAX_FAILURES,
+        ).count()
         campaign.status = Campaign.Status.DONE
         campaign.completed_at = timezone.now()
         campaign.sent_count = sent_count
@@ -314,6 +343,9 @@ def execute_campaign_send(
             summary["sent"] += 1
         else:
             summary["failed"] += 1
+
+    # 各バッチ後のカウント値反映（途中経過の可視化）
+    _update_campaign_counts(campaign)
 
     # 5. 完了判定
     _check_campaign_completion(campaign)

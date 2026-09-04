@@ -4118,7 +4118,7 @@ class EmailContextSettingsMergeTests(_Phase3TestBase):
         person = self._make_person()
         campaign = self._make_footer_campaign()
         for mode in (EmailMode.PRODUCTION, EmailMode.TEST, EmailMode.PREVIEW):
-            with self.subTest(mode=mode):
+            with self.subTest(mode=mode.value):
                 ctx = EmailContext.prepare(campaign, person, mode)
                 self.assertIn("株式会社サンプル", ctx.body_html)
                 self.assertIn("東京都千代田区1-1-1", ctx.body_html)
@@ -9030,3 +9030,182 @@ class MailingListUpdateViewTests(_PhaseBTestBase):
 
 
 
+
+
+class BouncedAndCompletionBugFixTests(_Phase3TestBase):
+    """バウンス除外・リトライ判定・完了判定・バッチ途中集計の恒久修正テスト。"""
+
+    def test_get_pending_for_campaign_filters(self):
+        """get_pending_for_campaign が pending とリトライ可能 failed のみを抽出し、
+        bounced, sent, unsubscribed, 最終確定 failed を除外することを検証（Bug ①）。
+        """
+        p1 = self._make_person("Alice")
+        p2 = self._make_person("Bob")
+        p3 = self._make_person("Charlie")
+        p4 = self._make_person("Dave")
+        p5 = self._make_person("Eve")
+        p6 = self._make_person("Frank")
+        for p in [p1, p2, p3, p4, p5, p6]:
+            self._add_member(self.mailing_list, p)
+
+        campaign = self._make_campaign()
+
+        h_pending = DeliveryHistory.objects.create(
+            campaign=campaign, person=p1, to_email="alice@example.com",
+            status=DeliveryHistory.Status.PENDING, failed_count=0
+        )
+        h_failed_retry = DeliveryHistory.objects.create(
+            campaign=campaign, person=p2, to_email="bob@example.com",
+            status=DeliveryHistory.Status.FAILED, failed_count=1
+        )
+        h_failed_final = DeliveryHistory.objects.create(
+            campaign=campaign, person=p3, to_email="charlie@example.com",
+            status=DeliveryHistory.Status.FAILED, failed_count=CAMPAIGN_RECIPIENT_MAX_FAILURES
+        )
+        h_sent = DeliveryHistory.objects.create(
+            campaign=campaign, person=p4, to_email="dave@example.com",
+            status=DeliveryHistory.Status.SENT, failed_count=0
+        )
+        h_bounced = DeliveryHistory.objects.create(
+            campaign=campaign, person=p5, to_email="eve@example.com",
+            status=DeliveryHistory.Status.BOUNCED, failed_count=0
+        )
+        h_unsub = DeliveryHistory.objects.create(
+            campaign=campaign, person=p6, to_email="frank@example.com",
+            status=DeliveryHistory.Status.UNSUBSCRIBED, failed_count=0
+        )
+
+        with transaction.atomic():
+            pending_items = list(DeliveryHistory.get_pending_for_campaign(campaign, limit=10))
+
+        pending_ids = [h.id for h in pending_items]
+        self.assertIn(h_pending.id, pending_ids)
+        self.assertIn(h_failed_retry.id, pending_ids)
+        self.assertNotIn(h_failed_final.id, pending_ids)
+        self.assertNotIn(h_sent.id, pending_ids)
+        self.assertNotIn(h_bounced.id, pending_ids)
+        self.assertNotIn(h_unsub.id, pending_ids)
+        self.assertEqual(len(pending_ids), 2)
+
+    def test_check_campaign_completion_with_bounced_and_sent(self):
+        """bounced が存在しても pending/リトライ可能 failed が 0 件なら DONE 遷移し、
+        bounced は sent_count / failed_count に算入されないこと（Bug ②）。
+        """
+        p1 = self._make_person("Alice")
+        p2 = self._make_person("Bob")
+        for p in [p1, p2]:
+            self._add_member(self.mailing_list, p)
+
+        campaign = self._make_campaign(status=Campaign.Status.SENDING)
+        DeliveryHistory.objects.create(
+            campaign=campaign, person=p1, to_email="alice@example.com",
+            status=DeliveryHistory.Status.SENT, failed_count=0
+        )
+        DeliveryHistory.objects.create(
+            campaign=campaign, person=p2, to_email="bob@example.com",
+            status=DeliveryHistory.Status.BOUNCED, failed_count=0
+        )
+
+        from mailings.services.campaign_send import _check_campaign_completion
+        _check_campaign_completion(campaign)
+
+        campaign.refresh_from_db()
+        self.assertEqual(campaign.status, Campaign.Status.DONE)
+        self.assertIsNotNone(campaign.completed_at)
+        self.assertEqual(campaign.sent_count, 1)
+        self.assertEqual(campaign.failed_count, 0)
+
+    def test_check_campaign_completion_blocked_by_retryable_failed(self):
+        """リトライ可能な failed レコードが残っている場合は DONE に遷移しないこと（Bug ②）。"""
+        p1 = self._make_person("Alice")
+        p2 = self._make_person("Bob")
+        for p in [p1, p2]:
+            self._add_member(self.mailing_list, p)
+
+        campaign = self._make_campaign(status=Campaign.Status.SENDING)
+        DeliveryHistory.objects.create(
+            campaign=campaign, person=p1, to_email="alice@example.com",
+            status=DeliveryHistory.Status.SENT, failed_count=0
+        )
+        DeliveryHistory.objects.create(
+            campaign=campaign, person=p2, to_email="bob@example.com",
+            status=DeliveryHistory.Status.FAILED, failed_count=CAMPAIGN_RECIPIENT_MAX_FAILURES - 1
+        )
+
+        from mailings.services.campaign_send import _check_campaign_completion
+        _check_campaign_completion(campaign)
+
+        campaign.refresh_from_db()
+        self.assertEqual(campaign.status, Campaign.Status.SENDING)
+        self.assertIsNone(campaign.completed_at)
+
+    def test_check_campaign_completion_with_final_failed(self):
+        """最終確定 failed (failed_count >= M) と bounced が存在し、未処理 0 件なら DONE 遷移し、
+        failed_count には最終確定 failed のみが算入されること（Bug ②）。
+        """
+        p1 = self._make_person("Alice")
+        p2 = self._make_person("Bob")
+        p3 = self._make_person("Charlie")
+        for p in [p1, p2, p3]:
+            self._add_member(self.mailing_list, p)
+
+        campaign = self._make_campaign(status=Campaign.Status.SENDING)
+        DeliveryHistory.objects.create(
+            campaign=campaign, person=p1, to_email="alice@example.com",
+            status=DeliveryHistory.Status.SENT, failed_count=0
+        )
+        DeliveryHistory.objects.create(
+            campaign=campaign, person=p2, to_email="bob@example.com",
+            status=DeliveryHistory.Status.BOUNCED, failed_count=0
+        )
+        DeliveryHistory.objects.create(
+            campaign=campaign, person=p3, to_email="charlie@example.com",
+            status=DeliveryHistory.Status.FAILED, failed_count=CAMPAIGN_RECIPIENT_MAX_FAILURES
+        )
+
+        from mailings.services.campaign_send import _check_campaign_completion
+        _check_campaign_completion(campaign)
+
+        campaign.refresh_from_db()
+        self.assertEqual(campaign.status, Campaign.Status.DONE)
+        self.assertEqual(campaign.sent_count, 1)
+        self.assertEqual(campaign.failed_count, 1)
+
+    def test_update_campaign_counts_per_batch(self):
+        """バッチ送信中（未完了時）でも _update_campaign_counts により
+        Campaign の sent_count / failed_count / total_count が DB に反映されること（Bug ③）。
+        """
+        p1 = self._make_person("Alice")
+        p2 = self._make_person("Bob")
+        p3 = self._make_person("Charlie")
+        p4 = self._make_person("Dave")
+        for p in [p1, p2, p3, p4]:
+            self._add_member(self.mailing_list, p)
+
+        campaign = self._make_campaign(status=Campaign.Status.SENDING)
+        DeliveryHistory.objects.create(
+            campaign=campaign, person=p1, to_email="alice@example.com",
+            status=DeliveryHistory.Status.SENT, failed_count=0
+        )
+        DeliveryHistory.objects.create(
+            campaign=campaign, person=p2, to_email="bob@example.com",
+            status=DeliveryHistory.Status.FAILED, failed_count=CAMPAIGN_RECIPIENT_MAX_FAILURES
+        )
+        DeliveryHistory.objects.create(
+            campaign=campaign, person=p3, to_email="charlie@example.com",
+            status=DeliveryHistory.Status.BOUNCED, failed_count=0
+        )
+        DeliveryHistory.objects.create(
+            campaign=campaign, person=p4, to_email="dave@example.com",
+            status=DeliveryHistory.Status.PENDING, failed_count=0
+        )
+
+        from mailings.services.campaign_send import _update_campaign_counts
+        _update_campaign_counts(campaign)
+
+        campaign.refresh_from_db()
+        self.assertEqual(campaign.sent_count, 1)
+        self.assertEqual(campaign.failed_count, 1)
+        self.assertEqual(campaign.total_count, 4)
+        # まだ pending があるので status は SENDING のまま
+        self.assertEqual(campaign.status, Campaign.Status.SENDING)
