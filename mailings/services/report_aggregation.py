@@ -15,7 +15,7 @@ Phase 6：配信レポートは「既存データを読んで集計・表示す�
 
 from __future__ import annotations
 
-from typing import Iterable, List, Dict, Any
+from typing import Iterable, List, Dict, Any, Sequence
 
 from django.db.models import Count, Max, Q, Sum
 
@@ -175,10 +175,13 @@ def get_link_aggregates(campaign: Campaign) -> List[Dict[str, Any]]:
 # ----------------------------------------------------------------------
 
 
-def get_clicked_persons(campaign: Campaign):
+def get_clicked_persons(campaign: Campaign, url: str = None):
     """有効クリックした受信者一覧（§6.2.3、Person 単位、重複排除）。
 
     [性質] 準関数
+    [入力] campaign: Campaign
+           url: str | None — 指定すると TrackingLink.original_url で絞り込む。
+                              None（既定）は全 URL が対象（従来動作）。
     [出力] List[dict]（person / last_action_at で並ぶ、last_action_at 降順）
       - person: Person（select_related primary_contact 済み）
       - last_action_at: 該当 campaign で当該 person の有効クリックの最終日時
@@ -186,13 +189,22 @@ def get_clicked_persons(campaign: Campaign):
     """
     # campaign × person で TrackingLink を引き、有効クリックがある（click_count>0）
     # ものに絞って last_clicked_at の最大を取る。Person 単位の重複排除はここで成立。
+    qs = TrackingLink.objects.filter(campaign=campaign, click_count__gt=0)
+    if url:
+        qs = qs.filter(original_url=url)
     rows = (
-        TrackingLink.objects.filter(campaign=campaign, click_count__gt=0)
+        qs
         .values("person")
-        .annotate(last_action_at=Max("last_clicked_at"))
+        .annotate(
+            last_action_at=Max("last_clicked_at"),
+            click_count=Sum("click_count"),
+            total_access_count=Sum("total_access_count"),
+        )
         .order_by("-last_action_at")
     )
-    return _hydrate_person_rows(rows, "last_action_at")
+    return _hydrate_person_rows(
+        rows, "last_action_at", extra_keys=("click_count", "total_access_count")
+    )
 
 
 def get_bounced_persons(campaign: Campaign):
@@ -234,7 +246,9 @@ def get_unsubscribed_persons(campaign: Campaign):
     return _hydrate_person_rows(rows, "last_action_at")
 
 
-def _hydrate_person_rows(rows, action_key: str) -> List[Dict[str, Any]]:
+def _hydrate_person_rows(
+    rows, action_key: str, extra_keys: Sequence[str] = ()
+) -> List[Dict[str, Any]]:
     """person ID + last_action_at の組を Person オブジェクトに膨らませる（N+1 対策）。
 
     [性質] 準関数（DB 読み取り 1 回：Person + primary_contact を select_related で取得）
@@ -256,7 +270,11 @@ def _hydrate_person_rows(rows, action_key: str) -> List[Dict[str, Any]]:
         person = person_map.get(r["person"])
         if person is None:
             continue
-        out.append({"person": person, "last_action_at": r[action_key]})
+        entry = {"person": person, "last_action_at": r[action_key]}
+        for key in extra_keys:
+            if key in r:
+                entry[key] = r[key]
+        out.append(entry)
     return out
 
 

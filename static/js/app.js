@@ -1931,7 +1931,15 @@
     return success;
   }
 
+  function copyTextFromElement(elementId, buttonEl) {
+    const el = document.getElementById(elementId);
+    if (!el) return false;
+    const text = (el.value !== undefined) ? el.value : el.textContent;
+    return copyTextToClipboard(text, buttonEl);
+  }
+
   window.copyTextToClipboard = copyTextToClipboard;
+  window.copyTextFromElement = copyTextFromElement;
 
   function init() {
     // persons / contacts / tags / mailings 一覧の各テーブルに同じ現在ページ内DOMソートを適用する

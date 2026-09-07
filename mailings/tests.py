@@ -6947,6 +6947,21 @@ class CampaignReportFilteredListViewsTests(_Phase6TestBase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "clk@example.com")
 
+    def test_clicked_view_displays_click_and_total_access_count(self):
+        p1, _ = self._make_person("Clk1", "clk1@example.com")
+        self._make_tracking(
+            p1, "https://a/", click_count=3, total_access_count=5, last_clicked_at=timezone.now()
+        )
+        response = self.client.get(
+            f"/mailings/campaigns/{self.campaign.pk}/report/clicked/"
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "clk1@example.com")
+        rows = response.context["rows"]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["click_count"], 3)
+        self.assertEqual(rows[0]["total_access_count"], 5)
+
     def test_bounced_view_renders_only_bouncers(self):
         p, c = self._make_person("Bnc", "bnc@example.com")
         self._make_history(p, c, status=DeliveryHistory.Status.BOUNCED)

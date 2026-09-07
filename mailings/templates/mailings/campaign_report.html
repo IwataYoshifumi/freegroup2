@@ -6,77 +6,140 @@
 {% block content %}
   <div class="app-page-header">
     <div>
-      <h1>{{ campaign.name }}</h1>
+      <h1>配信レポート</h1>
     </div>
     <div class="app-page-header__actions">
-      <a class="app-btn app-btn--secondary" href="{% url 'mailings:campaign_list' %}">一覧へ戻る</a>
+      {% if back.has_back %}
+        {% back_all_link back %}
+        {% back_link back %}
+      {% else %}
+        <a href="{% url 'mailings:campaign_detail' pk=campaign.pk %}" class="app-btn app-btn--secondary">戻る</a>
+      {% endif %}
     </div>
   </div>
 
-  {# 1. 基本情報 #}
+  {# 1. キャンペーン名（旧・基本情報、横1行テーブル） #}
   <section class="app-card">
-    <h2>基本情報</h2>
-    <dl class="app-dl">
-      <dt>状態</dt><dd>{{ campaign.get_status_display }}</dd>
-      <dt>配信予定</dt><dd>{{ campaign.scheduled_at|date:"Y-m-d H:i"|default:"—" }}</dd>
-      <dt>配信開始</dt><dd>{{ campaign.started_at|date:"Y-m-d H:i"|default:"—" }}</dd>
-      <dt>配信完了</dt><dd>{{ campaign.completed_at|date:"Y-m-d H:i"|default:"—" }}</dd>
-      <dt>作成者</dt><dd>{{ campaign.created_by }}</dd>
-    </dl>
+    <h2>{{ campaign.name }}</h2>
+    <div class="app-table-wrapper">
+      <table class="app-table">
+        <thead>
+          <tr>
+            <th>状態</th>
+            <th>配信予定</th>
+            <th>配信開始</th>
+            <th>配信完了</th>
+            <th>作成者</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>{{ campaign.get_status_display }}</td>
+            <td>{{ campaign.scheduled_at|default:"-" }}</td>
+            <td>{{ campaign.started_at|default:"-" }}</td>
+            <td>{{ campaign.completed_at|default:"-" }}</td>
+            <td>{{ campaign.created_by }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
   </section>
 
-  {# 2. 集計値カード（§6.2.2 / §13.1）#}
+  {# 2. 集計値（横並び1行 + 件数側に虫眼鏡アイコン + 右上に CSV 項目選択ボタン） #}
   <section class="app-card">
-    <h2>集計値</h2>
-    <table class="app-table">
-      <tr><th>配信件数</th><td>{{ summary.total }}</td></tr>
-      <tr><th>送信成功</th><td>{{ summary.sent }}</td></tr>
-      <tr><th>バウンス数</th><td>{{ summary.bounced }}</td></tr>
-      <tr><th>有効クリック数</th><td>{{ summary.valid_clicks }}（総アクセス数 {{ summary.total_access }}）</td></tr>
-      <tr><th>配信停止数</th><td>{{ summary.unsubscribed }}</td></tr>
-    </table>
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+      <h2 style="margin:0;">集計値</h2>
+      <a class="app-btn app-btn--primary app-btn--sm" href="{% url 'mailings:campaign_report_csv' pk=campaign.pk %}">CSV 項目選択へ</a>
+    </div>
+    <div class="app-table-wrapper">
+      <table class="app-table">
+        <thead>
+          <tr>
+            <th>配信件数</th>
+            <th>送信成功</th>
+            <th>バウンス数</th>
+            <th>有効クリック数（総アクセス）</th>
+            <th>配信停止数</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>{{ summary.total }}</td>
+            <td>{{ summary.sent }}</td>
+            <td>
+              {{ summary.bounced }}
+              <a href="{% url 'mailings:campaign_report_bounced' campaign.pk %}" class="app-icon-btn" title="バウンス一覧を見る">
+                <i class="bi bi-search"></i>
+              </a>
+            </td>
+            <td>
+              {{ summary.valid_clicks }} 件（総アクセス {{ summary.total_access }} 回）
+              <a href="{% url 'mailings:campaign_report_clicked' campaign.pk %}" class="app-icon-btn" title="クリック一覧を見る">
+                <i class="bi bi-search"></i>
+              </a>
+            </td>
+            <td>
+              {{ summary.unsubscribed }}
+              <a href="{% url 'mailings:campaign_report_unsubscribed' campaign.pk %}" class="app-icon-btn" title="配信停止一覧を見る">
+                <i class="bi bi-search"></i>
+              </a>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
   </section>
 
-  {# 3. リンク別クリック数表（§6.2.2 項目3）#}
+  {# 3. リンク別クリック数表（URL は別タブ・詳細ボタン・ユニーククリックパーソン） #}
   <section class="app-card">
     <h2>リンク別クリック数</h2>
-    <table class="app-table">
-      <thead>
-        <tr>
-          <th>URL</th>
-          <th>有効クリック</th>
-          <th>総アクセス</th>
-          <th>ユニーククリックユーザー</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for link in link_aggregates %}
+    <div class="app-table-wrapper">
+      <table class="app-table">
+        <thead>
           <tr>
-            <td>{{ link.original_url }}</td>
-            <td>{{ link.valid_clicks }}</td>
-            <td>{{ link.total_access }}</td>
-            <td>{{ link.unique_users }}</td>
+            <th>操作</th>
+            <th>URL</th>
+            <th>ユニーククリックパーソン</th>
+            <th>有効クリック</th>
+            <th>総アクセス</th>
           </tr>
-        {% empty %}
-          <tr><td colspan="4">トラッキングリンクはありません。</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {% for link in link_aggregates %}
+            <tr>
+              <td>
+                {% if link.valid_clicks > 0 %}
+                  <a href="{% url 'mailings:campaign_report_clicked' campaign.pk %}?url={{ link.original_url|urlencode }}"
+                     class="app-btn app-btn--outline-secondary app-btn--sm">詳細</a>
+                {% else %}
+                  <button type="button" class="app-btn app-btn--outline-secondary app-btn--sm" disabled>詳細</button>
+                {% endif %}
+              </td>
+              <td>
+                <a href="{{ link.original_url }}" target="_blank" rel="noopener noreferrer"
+                   style="color: var(--color-primary, #0d6efd); text-decoration: underline; word-break: break-all;">
+                  {{ link.original_url }}
+                </a>
+              </td>
+              <td>{{ link.unique_users }}</td>
+              <td>{{ link.valid_clicks }}</td>
+              <td>{{ link.total_access }}</td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="5">トラッキングリンクはありません。</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
   </section>
 
-  {# 4. 絞り込み一覧リンク（§6.2.2 項目4）#}
-  <section class="app-card">
-    <h2>受信者一覧</h2>
-    <p>
-      <a class="app-btn app-btn--secondary" href="{% url 'mailings:campaign_report_clicked' pk=campaign.pk %}">クリックした人を見る</a>
-      <a class="app-btn app-btn--secondary" href="{% url 'mailings:campaign_report_bounced' pk=campaign.pk %}">バウンスした人を見る</a>
-      <a class="app-btn app-btn--secondary" href="{% url 'mailings:campaign_report_unsubscribed' pk=campaign.pk %}">配信停止した人を見る</a>
-    </p>
-  </section>
-
-  {# 5. CSV ダウンロード（§6.2.2 項目5 / §13.2）#}
-  <section class="app-card">
-    <h2>CSV ダウンロード</h2>
-    <p><a class="app-btn app-btn--primary" href="{% url 'mailings:campaign_report_csv' pk=campaign.pk %}">CSV 項目選択へ</a></p>
-  </section>
+  {# 補助戻るナビ（最下部右寄せ） #}
+  <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:24px;">
+    {% if back.has_back %}
+      {% back_all_link back %}
+      {% back_link back %}
+    {% else %}
+      <a href="{% url 'mailings:campaign_detail' pk=campaign.pk %}" class="app-btn app-btn--secondary">戻る</a>
+    {% endif %}
+  </div>
 {% endblock %}

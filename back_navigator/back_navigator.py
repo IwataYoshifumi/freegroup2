@@ -266,6 +266,11 @@ class BackNavigator:
         return self._back_exist
 
     @property
+    def has_back(self):
+        """戻り先が存在するか（back_exist の別名）"""
+        return self._back_exist
+
+    @property
     def back_all_exist(self):
         """最初に戻るボタンを表示するか（スタックが2個以上ある場合）"""
         return self._back_all_exist

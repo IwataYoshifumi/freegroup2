@@ -300,6 +300,56 @@
     </div>
   </section>
 
+  {# ====== 配信レポートサマリー（done / failed のみ表示） ====== #}
+  {% if campaign.status == 'done' or campaign.status == 'failed' %}
+  <section class="app-card" style="max-width: 1100px; margin-left: 0; margin-right: auto;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+      <h2 style="margin:0;">配信レポート</h2>
+      <a class="app-btn app-btn--outline-secondary app-btn--sm"
+         href="{% url 'mailings:campaign_report' pk=campaign.pk %}">詳細レポートを見る →</a>
+    </div>
+    <table class="app-table">
+      <thead>
+        <tr>
+          <th>配信件数</th>
+          <th>送信成功</th>
+          <th>バウンス</th>
+          <th>有効クリック（総アクセス）</th>
+          <th>配信停止</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>{{ summary.total }}</td>
+          <td>{{ summary.sent }}</td>
+          <td>
+            {% if summary.bounced >= 1 %}
+              <a href="{% url 'mailings:campaign_report_bounced' pk=campaign.pk %}">{{ summary.bounced }}</a>
+            {% else %}
+              {{ summary.bounced }}
+            {% endif %}
+          </td>
+          <td>
+            {% if summary.valid_clicks >= 1 %}
+              <a href="{% url 'mailings:campaign_report_clicked' pk=campaign.pk %}">{{ summary.valid_clicks }} 件</a>
+            {% else %}
+              {{ summary.valid_clicks }} 件
+            {% endif %}
+            （総アクセス {{ summary.total_access }} 回）
+          </td>
+          <td>
+            {% if summary.unsubscribed >= 1 %}
+              <a href="{% url 'mailings:campaign_report_unsubscribed' pk=campaign.pk %}">{{ summary.unsubscribed }}</a>
+            {% else %}
+              {{ summary.unsubscribed }}
+            {% endif %}
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+  {% endif %}
+
   {# ====== メール内容 ====== #}
   <section class="app-card" style="max-width: 1100px; margin-left: 0; margin-right: auto;">
     <div style="display:flex; justify-content:space-between; align-items:center;">
@@ -313,7 +363,8 @@
       <label class="app-form__label">件名</label>
       <div style="position:relative;">
         <div style="background:#f9f9f9; padding:12px; padding-right:44px; border-radius:4px;">{{ template.subject|default:"（未入力）" }}</div>
-        <button type="button" class="app-icon-btn" style="color:var(--app-text); position:absolute; top:8px; right:8px;" title="件名をコピー" aria-label="件名をコピー" onclick="copyTextToClipboard(this.dataset.copyText, this);" data-copy-text="{{ campaign.template.subject|escapejs }}"><i class="bi bi-clipboard"></i></button>
+        <textarea id="campaignSubjectRaw" style="display:none;" readonly>{{ template.subject|default:"" }}</textarea>
+        <button type="button" class="app-icon-btn" style="color:var(--app-text); position:absolute; top:8px; right:8px;" title="件名をコピー" aria-label="件名をコピー" onclick="copyTextFromElement('campaignSubjectRaw', this);"><i class="bi bi-clipboard"></i></button>
       </div>
     </div>
     <div class="app-collapsible is-open" style="margin-top:12px;">
@@ -323,7 +374,8 @@
       <div id="bodyCollapse" class="app-collapsible__panel">
         <div style="position:relative;">
           <pre style="white-space:pre-wrap; word-wrap:break-word; background:#f9f9f9; padding:12px; padding-right:44px; border-radius:4px; max-height:400px; overflow:auto;">{{ template.body|default:"（未入力）" }}</pre>
-          <button type="button" class="app-icon-btn" style="color:var(--app-text); position:absolute; top:8px; right:8px;" title="本文をコピー" aria-label="本文をコピー" onclick="copyTextToClipboard(this.dataset.copyText, this);" data-copy-text="{{ campaign.template.body|escapejs }}"><i class="bi bi-clipboard"></i></button>
+          <textarea id="campaignBodyRaw" style="display:none;" readonly>{{ template.body|default:"" }}</textarea>
+          <button type="button" class="app-icon-btn" style="color:var(--app-text); position:absolute; top:8px; right:8px;" title="本文をコピー" aria-label="本文をコピー" onclick="copyTextFromElement('campaignBodyRaw', this);"><i class="bi bi-clipboard"></i></button>
         </div>
       </div>
     </div>
@@ -520,4 +572,15 @@
       </div>
     </div>
   {% endif %}
+
+  <script>
+    if (typeof window.copyTextFromElement !== 'function') {
+      window.copyTextFromElement = function (elementId, buttonEl) {
+        var el = document.getElementById(elementId);
+        if (!el) return false;
+        var text = (el.value !== undefined) ? el.value : el.textContent;
+        return copyTextToClipboard(text, buttonEl);
+      };
+    }
+  </script>
 {% endblock %}
