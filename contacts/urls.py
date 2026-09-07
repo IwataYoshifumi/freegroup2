@@ -23,6 +23,22 @@ urlpatterns = [
     path("", views.ContactListView.as_view(), name="contact_list"),
     # create/ は <uuid:pk>/ より前に配置（uuid コンバータと衝突しないが念のため）
     path("create/", views.ContactCreateView.as_view(), name="contact_create"),
+    # コンタクト CSV インポート（仕様書 v1.6 §4）
+    path(
+        "import/",
+        views.ContactImportUploadView.as_view(),
+        name="contact_import_upload",
+    ),
+    path(
+        "import/preview/",
+        views.ContactImportPreviewView.as_view(),
+        name="contact_import_preview",
+    ),
+    path(
+        "import/done/",
+        views.ContactImportDoneView.as_view(),
+        name="contact_import_done",
+    ),
     path(
         "<uuid:pk>/",
         views.ContactDetailView.as_view(),

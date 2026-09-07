@@ -1123,3 +1123,208 @@ class PreviewContactView(LoginRequiredMixin, PermissionRequiredMixin, View):
                 "field_confidences": contact.get_field_confidences(),
             },
         )
+
+
+# ======================================================================
+# コンタクト CSV インポート View（仕様書 v1.6 §4）
+# ======================================================================
+
+
+class ContactImportUploadView(LoginRequiredMixin, PermissionRequiredMixin, View):
+    """GET/POST /contacts/import/（仕様書 v1.6 §4.1）。
+
+    CSV ファイルのアップロード画面を表示し、一時領域へ保管してプレビューへ遷移する。
+    認可：contacts.import_contact
+    """
+
+    permission_required = "contacts.import_contact"
+    template_name = "contacts/contact_import_upload.html"
+
+    def get(self, request):
+        return render(
+            request,
+            self.template_name,
+            {
+                "back": BackNavigator(request),
+                "active_app": "contacts",
+            },
+        )
+
+    def post(self, request):
+        from .services.csv_import import save_temp_import_file
+
+        uploaded_file = request.FILES.get("csv_file")
+        if not uploaded_file:
+            messages.error(request, "CSVファイルを選択してください。")
+            return render(
+                request,
+                self.template_name,
+                {
+                    "back": BackNavigator(request),
+                    "active_app": "contacts",
+                },
+            )
+
+        if not uploaded_file.name.lower().endswith(".csv"):
+            messages.error(request, "拡張子が .csv のファイルを選択してください。")
+            return render(
+                request,
+                self.template_name,
+                {
+                    "back": BackNavigator(request),
+                    "active_app": "contacts",
+                },
+            )
+
+        try:
+            token, storage_path = save_temp_import_file(uploaded_file)
+        except Exception as exc:
+            messages.error(request, f"ファイルの一時保存に失敗しました: {exc}")
+            return render(
+                request,
+                self.template_name,
+                {
+                    "back": BackNavigator(request),
+                    "active_app": "contacts",
+                },
+            )
+
+        request.session["contact_import_token"] = token
+        request.session["contact_import_storage_path"] = storage_path
+        request.session["contact_import_filename"] = uploaded_file.name
+        request.session.modified = True
+
+        return redirect(reverse("contacts:contact_import_preview"))
+
+
+class ContactImportPreviewView(LoginRequiredMixin, PermissionRequiredMixin, View):
+    """GET/POST /contacts/import/preview/（仕様書 v1.6 §4.1）。
+
+    CSV のパース結果プレビュー（件数サマリー・先頭10件サンプル）を表示し、確定を実行する。
+    認可：contacts.import_contact
+    """
+
+    permission_required = "contacts.import_contact"
+    template_name = "contacts/contact_import_preview.html"
+
+    def get(self, request):
+        from .services.csv_import import (
+            delete_temp_import_file,
+            parse_csv_for_preview,
+            read_temp_import_file,
+        )
+
+        token = request.session.get("contact_import_token")
+        storage_path = request.session.get("contact_import_storage_path")
+        filename = request.session.get("contact_import_filename", "import.csv")
+
+        if not token or not storage_path:
+            messages.error(request, "アップロード情報が見つかりません。最初からやり直してください。")
+            return redirect(reverse("contacts:contact_import_upload"))
+
+        try:
+            csv_text = read_temp_import_file(storage_path)
+        except Exception as exc:
+            delete_temp_import_file(storage_path)
+            request.session.pop("contact_import_token", None)
+            request.session.pop("contact_import_storage_path", None)
+            messages.error(request, f"一時ファイルの読み込みに失敗しました: {exc}")
+            return redirect(reverse("contacts:contact_import_upload"))
+
+        preview_data = parse_csv_for_preview(csv_text)
+        if "error" in preview_data:
+            delete_temp_import_file(storage_path)
+            request.session.pop("contact_import_token", None)
+            request.session.pop("contact_import_storage_path", None)
+            messages.error(request, preview_data["error"])
+            return redirect(reverse("contacts:contact_import_upload"))
+
+        return render(
+            request,
+            self.template_name,
+            {
+                "preview": preview_data,
+                "filename": filename,
+                "token": token,
+                "back": BackNavigator(request),
+                "active_app": "contacts",
+            },
+        )
+
+    def post(self, request):
+        from .services.csv_import import (
+            delete_temp_import_file,
+            execute_csv_import,
+            read_temp_import_file,
+        )
+
+        action = request.POST.get("action")
+        storage_path = request.session.get("contact_import_storage_path")
+        session_token = request.session.get("contact_import_token")
+
+        if action == "cancel":
+            delete_temp_import_file(storage_path)
+            request.session.pop("contact_import_token", None)
+            request.session.pop("contact_import_storage_path", None)
+            request.session.pop("contact_import_filename", None)
+            return redirect(reverse("contacts:contact_list"))
+
+        # 確定処理（二重確定防止：トークンの一致確認）
+        post_token = request.POST.get("token")
+        if not session_token or post_token != session_token or not storage_path:
+            messages.error(
+                request,
+                "このインポート処理は既に確定済みか、セッションが無効です。",
+            )
+            return redirect(reverse("contacts:contact_list"))
+
+        try:
+            csv_text = read_temp_import_file(storage_path)
+        except Exception as exc:
+            delete_temp_import_file(storage_path)
+            request.session.pop("contact_import_token", None)
+            request.session.pop("contact_import_storage_path", None)
+            messages.error(request, f"ファイル読み込みエラー: {exc}")
+            return redirect(reverse("contacts:contact_import_upload"))
+
+        # 一時ファイルの即時掃除とトークン無効化（仕様書 §4.1）
+        delete_temp_import_file(storage_path)
+        request.session.pop("contact_import_token", None)
+        request.session.pop("contact_import_storage_path", None)
+        filename = request.session.pop("contact_import_filename", "import.csv")
+
+        # インポート確定実行
+        result = execute_csv_import(csv_text, request.user)
+        result["filename"] = filename
+
+        # PRG パターンで結果画面へ引き渡し（仕様書 §4.1）
+        request.session["contact_import_result"] = result
+        request.session.modified = True
+
+        return redirect(reverse("contacts:contact_import_done"))
+
+
+class ContactImportDoneView(LoginRequiredMixin, PermissionRequiredMixin, View):
+    """GET /contacts/import/done/（仕様書 v1.6 §4.1）。
+
+    インポート完了結果画面を表示する（PRG パターン、セッションから pop して1回きり表示）。
+    認可：contacts.import_contact
+    """
+
+    permission_required = "contacts.import_contact"
+    template_name = "contacts/contact_import_done.html"
+
+    def get(self, request):
+        result = request.session.pop("contact_import_result", None)
+        if not result:
+            return redirect(reverse("contacts:contact_list"))
+
+        return render(
+            request,
+            self.template_name,
+            {
+                "result": result,
+                "active_app": "contacts",
+            },
+        )
+
