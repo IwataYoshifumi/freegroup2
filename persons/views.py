@@ -50,11 +50,19 @@ from .services.person_search import SEARCH_PARAMS, search_persons
 # ----------------------------------------------------------------------
 
 PERSON_LIST_SORT_FIELD_MAP = {
-    # 氏名は読み（phonetic_name＝カタカナ）の五十音順で並べる（漢字コード順ではなく）。
+    # 氏名・ヨミカナは読み（phonetic_name＝カタカナ）の五十音順で並べる（漢字コード順ではなく）。
     "name": "primary_contact__phonetic_name",
+    "phonetic_name": "primary_contact__phonetic_name",
+    "status": "status",
     "company": "primary_contact__organization",
     "title": "primary_contact__title",
     "email": "primary_contact__email",
+    "mobile_phone": "primary_contact__mobile_phone",
+    "personal_contact": "primary_contact__personal_phone",
+    "org_contact": "primary_contact__org_phone",
+    "address": "primary_contact__address",
+    "lang": "primary_contact__lang",
+    "updated_at": "updated_at",
 }
 # 多段ソートの最大段数（ソートコントロールの行数と一致）。
 PERSON_LIST_SORT_MAX_KEYS = 3
@@ -97,7 +105,9 @@ def _apply_person_list_sort(qs, params):
 
     [性質] 純関数（QuerySet を加工して返すのみ・DB 操作なし）
     有効トークンが無ければ qs をそのまま返す（search_persons() の既定並びを温存）。
-    指定有りのときだけ許可リスト経由で order_by を多段で差し替える（末尾に pk で安定化）。
+    指定有りのときだけ許可リスト経由で order_by を多段で差し替える。
+    タイブレークとして primary_contact__full_name（ヨミカナ未入力/同値レコードの
+    漢字表記グルーピング）、末尾に pk で安定化する。
     """
     tokens = _parse_person_sort(params)
     if not tokens:
@@ -106,6 +116,7 @@ def _apply_person_list_sort(qs, params):
     for key, direction in tokens:
         prefix = "-" if direction == "desc" else ""
         order.append(prefix + PERSON_LIST_SORT_FIELD_MAP[key])
+    order.append("primary_contact__full_name")
     order.append("pk")
     return qs.order_by(*order)
 
@@ -148,6 +159,18 @@ class PersonListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
     template_name = "persons/person_list.html"
     context_object_name = "persons"
     paginate_by = 20
+    _PER_PAGE_CHOICES = (20, 50, 100)
+
+    def _resolve_per_page(self):
+        """[性質] 純関数 / per_page を 20/50/100 に解決。無指定・不正値・範囲外は 20。"""
+        try:
+            n = int(self.request.GET.get("per_page", 20))
+        except (TypeError, ValueError):
+            return 20
+        return n if n in self._PER_PAGE_CHOICES else 20
+
+    def get_paginate_by(self, queryset):
+        return self._resolve_per_page()
 
     def get_queryset(self):
         # v1.6 Phase 1b: 検索ロジックを persons.services.person_search に切り出し（論点 A-1）。
@@ -181,6 +204,7 @@ class PersonListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
                 "searched",
                 # HIG 6.1：並び替え・ページ状態を戻るで復元するため sort を追加（単一パラメータ）。
                 "sort",
+                "per_page",
                 "page",
             ],
         )
@@ -188,6 +212,8 @@ class PersonListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
 
         # 検索フォーム内ソートコントロール用（sort_rows / sort_is_active / sort_value）。
         context.update(_person_sort_context(self.request.GET))
+        context["per_page"] = self._resolve_per_page()
+        context["per_page_choices"] = self._PER_PAGE_CHOICES
 
         context["active_app"] = "persons"
         context["active_menu"] = "persons:person_list"

@@ -347,7 +347,7 @@ class PersonListViewTests(TestCase):
 
     def test_all_invalid_or_empty_sort_keeps_default(self):
         """全キーが不正（or 空）なら sort 無効＝既定の並びを維持し、折りたたみは閉じ判定。"""
-        resp = self.client.get(self.url, {"sort": "department,address"})
+        resp = self.client.get(self.url, {"sort": "department,invalid_key"})
         self.assertFalse(resp.context["sort_is_active"])
         self.assertEqual(resp.context["sort_value"], "")
         # 全行が「指定なし」
@@ -396,7 +396,7 @@ class PersonListViewTests(TestCase):
         self.assertIn("js-person-sort-control", body)
         self.assertIn('name="sort"', body)
         self.assertIn("app-radio-toggle", body)
-        for label in ("指定なし", "氏名", "会社", "役職", "連絡先"):
+        for label in ("指定なし", "氏名", "会社", "役職"):
             self.assertIn(label, body)
         # 列切替（data-col-key と persons 専用キー）は維持
         self.assertIn("data-col-key", body)
@@ -448,6 +448,67 @@ class PersonListViewTests(TestCase):
         resp2 = self.client.get(self.url, {"page": "2"})
         self.assertEqual(len(list(resp2.context["persons"])), 1)
 
+    def test_per_page_param_changes_page_size(self):
+        """per_page は 20/50/100 のみ許可。不正値・未指定は 20 へフォールバック。"""
+        for i in range(25):
+            self._make_active_with_primary(full_name=f"pp-size-{i:02d}")
+
+        # 未指定: 既定 20（25件なので paginated）
+        resp_default = self.client.get(self.url)
+        self.assertEqual(resp_default.context["per_page"], 20)
+        self.assertTrue(resp_default.context["is_paginated"])
+        self.assertEqual(len(list(resp_default.context["persons"])), 20)
+
+        # per_page=50: 1ページに収まる（setUp の 1 件 + 25 件 = 26 件）
+        resp_50 = self.client.get(self.url, {"per_page": "50"})
+        self.assertEqual(resp_50.context["per_page"], 50)
+        self.assertFalse(resp_50.context["is_paginated"])
+        self.assertEqual(len(list(resp_50.context["persons"])), 26)
+
+        # per_page=100
+        resp_100 = self.client.get(self.url, {"per_page": "100"})
+        self.assertEqual(resp_100.context["per_page"], 100)
+
+        # 不正値: 既定 20 へフォールバック
+        for invalid in ("abc", "30", "-1", "200"):
+            resp_inv = self.client.get(self.url, {"per_page": invalid})
+            self.assertEqual(resp_inv.context["per_page"], 20)
+
+    def test_pagination_no_duplicate_page_param(self):
+        """2ページ目以降のリンクで page パラメータが重複しない（{% querystring %}）。"""
+        for i in range(25):
+            self._make_active_with_primary(full_name=f"dup-page-{i:02d}")
+
+        resp = self.client.get(self.url, {"page": "2", "status": "active"})
+        body = resp.content.decode("utf-8")
+        # page=2&page= のような重複がないこと
+        self.assertNotIn("page=2&amp;page=", body)
+        self.assertNotIn("page=2&page=", body)
+        # 前のページへのリンクが正しく生成されていること
+        self.assertIn("page=1", body)
+
+    def test_per_page_in_push_current(self):
+        """戻る復元用に push_current が per_page を保持する。"""
+        resp = self.client.get(self.url, {"per_page": "50"})
+        back = resp.context["back"]
+        urls = " ".join(entry.get("url", "") for entry in back.back_stack)
+        self.assertIn("per_page=50", urls)
+
+    def test_sort_control_renders_per_page_choices(self):
+        """ソート折りたたみに表示件数セレクト（20/50/100）が描画され、見出しが「ソート・表示件数」になる。"""
+        resp = self.client.get(self.url)
+        body = resp.content.decode("utf-8")
+        self.assertIn("ソート・表示件数", body)
+        self.assertIn('name="per_page"', body)
+        self.assertIn('value="20"', body)
+        self.assertIn('value="50"', body)
+        self.assertIn('value="100"', body)
+
+        # per_page=50 のときは折りたたみが初期状態で開く（is-open）
+        resp_50 = self.client.get(self.url, {"per_page": "50"})
+        body_50 = resp_50.content.decode("utf-8")
+        self.assertIn("js-person-sort-control is-open", body_50)
+
     def test_orphan_person_in_list(self):
         """primary_contact NULL の active Person もリストに表示される。"""
         orphan = Person.objects.create()  # primary_contact=None, status=active
@@ -480,10 +541,11 @@ class PersonListViewTests(TestCase):
         # 見出し（業務語・分割後）
         for head in ("メール", "携帯電話", "個人電話・FAX", "会社電話・FAX", "住所"):
             self.assertIn(head, body)
-        # 値（携帯・住所・会社電話/FAX 併記）
+        # 値（携帯・住所・会社電話/FAX 縦積み）
         self.assertIn("090-5555-6666", body)
         self.assertIn("Aichi Toyota", body)
-        self.assertIn("TEL 0561-00-0000／FAX 0561-11-1111", body)
+        self.assertIn("TEL 0561-00-0000", body)
+        self.assertIn("FAX 0561-11-1111", body)
         # 個人は phone のみ → TEL のみ（FAX 併記なし）
         self.assertIn("TEL 052-2222-3333", body)
 
@@ -1596,6 +1658,90 @@ class PersonMailingListMembershipUITests(TestCase):
 
         body = resp.content.decode("utf-8")
         self.assertNotIn("マージ候補", body)
+
+
+class PersonListSortTests(TestCase):
+    """Person 一覧の多段ソート（HIG v1.6.3 §6.2）およびヨミカナ列表示のテスト。"""
+
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(
+            username="person_sort_tester", password="password"
+        )
+        _grant_view_person(self.user)
+        self.client.login(username="person_sort_tester", password="password")
+
+    def test_parse_person_sort_all_12_keys(self):
+        from persons.views import (
+            PERSON_LIST_SORT_FIELD_MAP,
+            _parse_person_sort,
+        )
+
+        expected_keys = {
+            "name",
+            "phonetic_name",
+            "status",
+            "company",
+            "title",
+            "email",
+            "mobile_phone",
+            "personal_contact",
+            "org_contact",
+            "address",
+            "lang",
+            "updated_at",
+        }
+        self.assertEqual(set(PERSON_LIST_SORT_FIELD_MAP.keys()), expected_keys)
+
+        # 全キーが昇順・降順で正しくパースできること
+        for k in expected_keys:
+            self.assertEqual(_parse_person_sort({"sort": k}), [(k, "asc")])
+            self.assertEqual(_parse_person_sort({"sort": f"-{k}"}), [(k, "desc")])
+
+    def test_parse_person_sort_filters_invalid_and_limits(self):
+        from persons.views import _parse_person_sort
+
+        # 不正キー無視、重複除外、最大3段
+        params = {"sort": "status,invalid_key,-company,status,updated_at,lang"}
+        tokens = _parse_person_sort(params)
+        self.assertEqual(
+            tokens,
+            [("status", "asc"), ("company", "desc"), ("updated_at", "asc")],
+        )
+
+    def test_apply_person_list_sort(self):
+        from persons.views import _apply_person_list_sort
+
+        qs = Person.objects.all()
+        # 空パラメータ
+        self.assertEqual(_apply_person_list_sort(qs, {}), qs)
+
+        # ソート適用
+        sorted_qs = _apply_person_list_sort(qs, {"sort": "status,-phonetic_name"})
+        self.assertEqual(
+            sorted_qs.query.order_by,
+            ("status", "-primary_contact__phonetic_name", "pk"),
+        )
+
+    def test_person_list_html_renders_phonetic_name_column_and_sort_options(self):
+        url = reverse("persons:person_list")
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 200)
+        body = resp.content.decode("utf-8")
+
+        # ヨミカナ列ヘッダ
+        self.assertIn('data-col-key="phonetic_name"', body)
+        self.assertIn("ヨミカナ", body)
+
+        # 列トグル
+        self.assertIn('data-col-key="phonetic_name" data-default="0"', body)
+
+        # ソートコントロールの選択肢
+        self.assertIn('value="phonetic_name"', body)
+        self.assertIn('value="mobile_phone"', body)
+        self.assertIn('value="personal_contact"', body)
+        self.assertIn('value="org_contact"', body)
+        self.assertIn('value="updated_at"', body)
+
 
 
 
