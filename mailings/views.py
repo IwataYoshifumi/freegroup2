@@ -4196,11 +4196,14 @@ class MailingListMemberExportView(LoginRequiredMixin, PermissionRequiredMixin, V
             IMPORTABLE_KEYS,
             generate_mailing_list_csv,
             make_export_disposition_header,
+            make_export_filename,
         )
 
         mailing_list = get_object_or_404(MailingList, pk=pk)
-        selected = [f for f in request.POST.getlist("fields") if f in EXPORT_AVAILABLE_KEYS]
-        if not selected:
+        selected_fields = [
+            f for f in request.POST.getlist("fields") if f in EXPORT_AVAILABLE_KEYS
+        ]
+        if not selected_fields:
             messages.error(request, "1項目以上選択してください。")
             return render(
                 request,
@@ -4215,7 +4218,26 @@ class MailingListMemberExportView(LoginRequiredMixin, PermissionRequiredMixin, V
                 },
             )
 
-        csv_text = generate_mailing_list_csv(mailing_list, selected)
+        members = list(mailing_list.members.all())
+        filename = make_export_filename(mailing_list)
+
+        from actionlogs.models import ActionLog
+
+        ActionLog.record(
+            user=request.user,
+            action="contact_export",
+            object_repr=mailing_list.name,
+            note=f"メーリングリストCSVエクスポート完了: {len(members)}件 (リスト: {mailing_list.name})",
+            data={
+                "mailing_list_id": str(mailing_list.id),
+                "mailing_list_name": mailing_list.name,
+                "count": len(members),
+                "fields": selected_fields,
+                "filename": filename,
+            },
+        )
+
+        csv_text = generate_mailing_list_csv(mailing_list, selected_fields)
         response = HttpResponse(csv_text, content_type="text/csv; charset=utf-8")
         response["Content-Disposition"] = make_export_disposition_header(mailing_list)
         return response

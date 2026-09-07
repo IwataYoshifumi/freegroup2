@@ -236,6 +236,32 @@ class MailingListCSVExportExecutionTests(BaseCSVExportTestCase):
         self.assertEqual(row2[2], "suzuki@example.com")
         self.assertEqual(row2[4], "退会済み")  # 退会済みフラグ
 
+    def test_csv_export_records_action_log(self):
+        from actionlogs.models import ActionLog
+
+        p, c = self._create_person_with_contact(full_name="田中 太郎")
+        self._create_member(p)
+
+        url = reverse(
+            "mailings:mailing_list_member_export",
+            kwargs={"pk": self.mailing_list.pk},
+        )
+        selected = ["full_name", "email"]
+        resp = self.client.post(url, {"fields": selected})
+        self.assertEqual(resp.status_code, 200)
+
+        # ActionLog の検証
+        log = ActionLog.objects.filter(action="contact_export").last()
+        self.assertIsNotNone(log)
+        self.assertEqual(log.user, self.user)
+        self.assertEqual(log.object_repr, self.mailing_list.name)
+        self.assertIn("メーリングリストCSVエクスポート完了: 1件", log.note)
+        self.assertEqual(log.data["mailing_list_id"], str(self.mailing_list.id))
+        self.assertEqual(log.data["mailing_list_name"], self.mailing_list.name)
+        self.assertEqual(log.data["count"], 1)
+        self.assertEqual(log.data["fields"], selected)
+        self.assertIn("メーリングリスト_東京支社リスト_", log.data["filename"])
+
 
 class MailingListCSVExportMergeResolutionTests(BaseCSVExportTestCase):
     """Person マージ解決および primary_contact 不在時のテスト（仕様書 §3.5）。"""
