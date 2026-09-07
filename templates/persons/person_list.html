@@ -2,6 +2,7 @@
 {% load back_tags %}
 {% load badge_tags %}
 {% load lang_tags %}
+{% load phone_tags %}
 
 {% block title %}パーソン一覧 — FreeGroup2{% endblock %}
 
@@ -38,6 +39,7 @@
           <tr>
             <th class="app-table__col--action">操作</th>
             <th class="app-table__col--name" data-col-key="name" data-sort-col>氏名</th>
+            <th data-col-key="phonetic_name" data-sort-col>ヨミカナ</th>
             <th class="app-table__col--status" data-col-key="status" data-sort-col>状態</th>
             <th class="app-table__col--organization" data-col-key="company" data-sort-col>会社</th>
             <th class="app-table__col--dept" data-col-key="title" data-sort-col>役職</th>
@@ -67,6 +69,7 @@
               <td data-col-key="name" data-sort-key="{{ person.primary_contact.phonetic_name }}">
                 <span class="app-ellipsis" data-tooltip="{{ person.primary_contact.full_name|default:'(氏名なし)' }}">{{ person.primary_contact.full_name|default:"(氏名なし)" }}</span>{% if person.has_unconfirmed_low_mid %} <span class="app-status-badge app-status-badge--warning" title="未確認の低信頼項目があります" aria-label="要確認">要確認</span>{% endif %}
               </td>
+              <td data-col-key="phonetic_name">{{ person.primary_contact.phonetic_name|default:"-" }}</td>
               <td data-col-key="status">
                 {% if person.status != "active" %}{% status_badge person %}{% endif %}
               </td>
@@ -85,23 +88,17 @@
                   <span class="app-ellipsis" data-tooltip="{{ person.primary_contact.email }}">{{ person.primary_contact.email|truncatechars:32 }}</span>
                 {% else %}-{% endif %}
               </td>
-              <td data-col-key="mobile_phone">{{ person.primary_contact.mobile_phone|default:"-" }}</td>
+              <td data-col-key="mobile_phone">{% if person.primary_contact.mobile_phone %}{% format_phone person.primary_contact.mobile_phone %}{% else %}-{% endif %}</td>
               <td data-col-key="personal_contact">
-                {% if person.primary_contact.personal_phone and person.primary_contact.personal_fax %}
-                  TEL {{ person.primary_contact.personal_phone }}／FAX {{ person.primary_contact.personal_fax }}
-                {% elif person.primary_contact.personal_phone %}
-                  TEL {{ person.primary_contact.personal_phone }}
-                {% elif person.primary_contact.personal_fax %}
-                  FAX {{ person.primary_contact.personal_fax }}
+                {% if person.primary_contact.personal_phone or person.primary_contact.personal_fax %}
+                  {% if person.primary_contact.personal_phone %}<div>TEL {% format_phone person.primary_contact.personal_phone %}</div>{% endif %}
+                  {% if person.primary_contact.personal_fax %}<div>FAX {% format_phone person.primary_contact.personal_fax %}</div>{% endif %}
                 {% else %}-{% endif %}
               </td>
               <td data-col-key="org_contact">
-                {% if person.primary_contact.org_phone and person.primary_contact.org_fax %}
-                  TEL {{ person.primary_contact.org_phone }}／FAX {{ person.primary_contact.org_fax }}
-                {% elif person.primary_contact.org_phone %}
-                  TEL {{ person.primary_contact.org_phone }}
-                {% elif person.primary_contact.org_fax %}
-                  FAX {{ person.primary_contact.org_fax }}
+                {% if person.primary_contact.org_phone or person.primary_contact.org_fax %}
+                  {% if person.primary_contact.org_phone %}<div>TEL {% format_phone person.primary_contact.org_phone %}</div>{% endif %}
+                  {% if person.primary_contact.org_fax %}<div>FAX {% format_phone person.primary_contact.org_fax %}</div>{% endif %}
                 {% else %}-{% endif %}
               </td>
               <td data-col-key="address">
@@ -114,7 +111,7 @@
               <td data-col-key="updated_at">{{ person.updated_at|date:"Y/m/d H:i" }}</td>
             </tr>
           {% empty %}
-            <tr><td colspan="13" class="app-muted">
+            <tr><td colspan="14" class="app-muted">
               該当するパーソンがいません。新しい名刺を取り込めばパーソンが自動で作られます。
               <a href="{% url 'cards:card_upload' %}">名刺を取り込む →</a>
             </td></tr>

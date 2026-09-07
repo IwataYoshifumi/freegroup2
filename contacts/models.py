@@ -188,6 +188,8 @@ class Contact(models.Model):
         ]
         permissions = [
             ("edit_all_contacts", "他人の Contact を編集できる（横断権限、Phase 7 段2-B）"),
+            ("export_contact", "コンタクトのCSVエクスポート権限"),
+            ("import_contact", "コンタクトCSV一括インポート権限"),
         ]
 
     # Contact のユーザー入力対象フィールドのマスター定義（仕様書 §11.6.2）。

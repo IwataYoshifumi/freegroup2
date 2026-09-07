@@ -58,6 +58,8 @@ class ContactGroupPermissionTests(TestCase):
                 ("contacts", "view_contact"),
                 ("contacts", "add_contact"),
                 ("contacts", "change_contact"),
+                ("contacts", "export_contact"),
+                ("contacts", "import_contact"),
             },
         )
 
@@ -70,12 +72,34 @@ class ContactGroupPermissionTests(TestCase):
                 ("contacts", "change_contact"),
                 ("contacts", "delete_contact"),
                 ("contacts", "edit_all_contacts"),
+                ("contacts", "export_contact"),
+                ("contacts", "import_contact"),
             },
         )
 
     def test_edit_all_contacts_only_in_admin(self):
         self.assertNotIn(("contacts", "edit_all_contacts"), _group_perms("contact_editor"))
         self.assertNotIn(("contacts", "edit_all_contacts"), _group_perms("contact_viewer"))
+
+    def test_export_import_contact_permission_allocation(self):
+        """仕様書 v1.6 §2.2: export_contact / import_contact の各グループ配分ルール検証。"""
+        # contact_admin, contact_editor: 両方あり
+        for name in ("contact_admin", "contact_editor"):
+            perms = _group_perms(name)
+            self.assertIn(("contacts", "export_contact"), perms, f"{name} should have export_contact")
+            self.assertIn(("contacts", "import_contact"), perms, f"{name} should have import_contact")
+
+        # campaign_admin, campaign_editor: export_contact のみあり
+        for name in ("campaign_admin", "campaign_editor"):
+            perms = _group_perms(name)
+            self.assertIn(("contacts", "export_contact"), perms, f"{name} should have export_contact")
+            self.assertNotIn(("contacts", "import_contact"), perms, f"{name} should NOT have import_contact")
+
+        # contact_viewer, campaign_viewer: 一切付与しない
+        for name in ("contact_viewer", "campaign_viewer"):
+            perms = _group_perms(name)
+            self.assertNotIn(("contacts", "export_contact"), perms, f"{name} should NOT have export_contact")
+            self.assertNotIn(("contacts", "import_contact"), perms, f"{name} should NOT have import_contact")
 
 
 class CardGroupPermissionTests(TestCase):

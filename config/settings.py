@@ -423,3 +423,8 @@ LOGGING = {
         "level": "WARNING",
     },
 }
+
+# コンタクトのデフォルト国コード（ISO 3166-1 alpha-2）
+# CSVインポートの country 未入力時、および手動作成フォームの country 初期値に使用
+DEFAULT_CONTACT_COUNTRY = os.getenv("DEFAULT_CONTACT_COUNTRY", "JP")
+

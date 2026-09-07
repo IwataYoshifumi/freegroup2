@@ -13,8 +13,14 @@
     </div>
   </div>
 
-  <div class="app-action-area" style="justify-content:flex-start; margin-bottom:16px;">
+  <div class="app-action-area" style="justify-content:flex-start; margin-bottom:16px; gap:8px;">
     <a href="{% append_back_url create_url back %}" class="app-btn app-btn--primary">コンタクト新規作成</a>
+    {% if perms.contacts.import_contact %}
+      {% url 'contacts:contact_import_upload' as import_url %}
+      <a href="{% append_back_url import_url back %}" class="app-btn app-btn--secondary">
+        <i class="bi bi-upload" style="margin-right:4px;"></i>インポート
+      </a>
+    {% endif %}
   </div>
 
   <section class="app-card app-person-search">

@@ -4135,3 +4135,87 @@ class CampaignDuplicateView(LoginRequiredMixin, PermissionRequiredMixin, View):
         list_url = reverse("mailings:campaign_list")
         return redirect(back.append_url(list_url))
 
+
+# ======================================================================
+# メーリングリスト CSV エクスポート View（仕様書 v1.6 §3）
+# ======================================================================
+
+
+class MailingListMemberExportFormView(LoginRequiredMixin, PermissionRequiredMixin, View):
+    """GET /mailings/lists/<uuid:pk>/export/（仕様書 v1.6 §3.1）。
+
+    メーリングリストメンバー CSV エクスポートのカラム選択画面を表示する。
+    認可：contacts.export_contact
+    """
+
+    http_method_names = ["get"]
+    permission_required = "contacts.export_contact"
+
+    def get(self, request, pk):
+        from .services.csv_export import (
+            DEFAULT_SELECTED_KEYS,
+            EXPORT_COLUMNS,
+            IMPORTABLE_KEYS,
+        )
+
+        mailing_list = get_object_or_404(MailingList, pk=pk)
+        return render(
+            request,
+            "mailings/mailing_list_export_form.html",
+            {
+                "mailing_list": mailing_list,
+                "columns": EXPORT_COLUMNS,
+                "default_selected": DEFAULT_SELECTED_KEYS,
+                "importable_keys": IMPORTABLE_KEYS,
+                "back": BackNavigator(request),
+                "active_app": "mailings",
+            },
+        )
+
+
+class MailingListMemberExportView(LoginRequiredMixin, PermissionRequiredMixin, View):
+    """POST /mailings/lists/<uuid:pk>/export/csv/（仕様書 v1.6 §3.1）。
+
+    選択された項目でメーリングリストメンバー CSV を生成しダウンロードを返す。
+    認可：contacts.export_contact
+    """
+
+    http_method_names = ["post"]
+    permission_required = "contacts.export_contact"
+
+    def post(self, request, pk):
+        from django.contrib import messages
+        from django.http import HttpResponse
+
+        from .services.csv_export import (
+            DEFAULT_SELECTED_KEYS,
+            EXPORT_AVAILABLE_KEYS,
+            EXPORT_COLUMNS,
+            IMPORTABLE_KEYS,
+            generate_mailing_list_csv,
+            make_export_disposition_header,
+        )
+
+        mailing_list = get_object_or_404(MailingList, pk=pk)
+        selected = [f for f in request.POST.getlist("fields") if f in EXPORT_AVAILABLE_KEYS]
+        if not selected:
+            messages.error(request, "1項目以上選択してください。")
+            return render(
+                request,
+                "mailings/mailing_list_export_form.html",
+                {
+                    "mailing_list": mailing_list,
+                    "columns": EXPORT_COLUMNS,
+                    "default_selected": DEFAULT_SELECTED_KEYS,
+                    "importable_keys": IMPORTABLE_KEYS,
+                    "back": BackNavigator(request),
+                    "active_app": "mailings",
+                },
+            )
+
+        csv_text = generate_mailing_list_csv(mailing_list, selected)
+        response = HttpResponse(csv_text, content_type="text/csv; charset=utf-8")
+        response["Content-Disposition"] = make_export_disposition_header(mailing_list)
+        return response
+
+

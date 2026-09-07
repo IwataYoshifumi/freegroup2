@@ -3,7 +3,7 @@
 複製・persons 専用。共通化はしない）。
 
 ドロップダウン＋トグルボタン（app-radio-toggle）で列を表示/非表示し、localStorage に
-永続化する。氏名列は固定（disabled checked、非表示不可）。状態・会社・役職・メール・
+永続化する。氏名列は固定（disabled checked、非表示不可）。ヨミカナ・状態・言語・会社・役職・メール・
 携帯電話・個人電話/FAX・会社電話/FAX・住所・アクティブ数・更新日時を切替可能。
 localStorage キーは persons 専用（person_list_visible_columns）で他画面と混ざらない。
 
@@ -13,7 +13,7 @@ app-radio-toggle CSS で視覚的に隠し、隣の label をボタンとして�
 
 既定表示（列が多いので初期は絞る）：
   ON  = 状態・会社・役職・メール・携帯電話・アクティブ数・更新日時
-  OFF = 個人電話/FAX・会社電話/FAX・住所（data-default="0" で初期OFF）
+  OFF = ヨミカナ・言語・個人電話/FAX・会社電話/FAX・住所（data-default="0" で初期OFF）
 localStorage に保存済みのキーは保存値を優先、未保存キーは data-default（既定 ON、"0" なら OFF）。
 
 利用前提（呼び出し側）：
@@ -41,6 +41,11 @@ localStorage に保存済みのキーは保存値を優先、未保存キーは 
       <li>
         <label style="cursor:default;">
           <input type="checkbox" disabled checked> 氏名（必須）
+        </label>
+      </li>
+      <li>
+        <label>
+          <input type="checkbox" class="js-person-column-toggle__cb" data-col-key="phonetic_name" data-default="0"> ヨミカナ
         </label>
       </li>
       <li>

@@ -1,0 +1,70 @@
+{% extends "cards/app_base.html" %}
+{% load back_tags %}
+
+{% block title %}コンタクト CSV インポート — FreeGroup2{% endblock %}
+
+{% block content %}
+  <div class="app-page-header">
+    <div>
+      <h1>コンタクト CSV インポート</h1>
+    </div>
+    <div class="app-page-header__actions">
+      {% if back.has_back %}
+        {% back_all_link back %}
+        {% back_link back %}
+      {% else %}
+        <a href="{% url 'contacts:contact_list' %}" class="app-btn app-btn--secondary">戻る</a>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if messages %}
+    {% for message in messages %}
+      <section class="app-card">
+        <div class="app-message{% if message.tags %} app-message--{{ message.tags }}{% else %} app-message--error{% endif %}">{{ message }}</div>
+      </section>
+    {% endfor %}
+  {% endif %}
+
+  <section class="app-card">
+    <h2 style="margin-top:0; font-size:1.15em;">1. CSV ファイルの選択</h2>
+    <p class="app-muted">
+      インポート対象の CSV ファイルを選択してください。次の画面で内容のプレビューと件数確認を行い、確定後に登録されます。
+    </p>
+
+    <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:16px; margin-bottom:24px;">
+      <h3 style="margin-top:0; font-size:1em; color:#334155;">仕様と注意点</h3>
+      <ul style="margin:0; padding-left:20px; font-size:0.9em; color:#475569; line-height:1.6;">
+        <li>文字コード：<strong>UTF-8（BOM 付き推奨）</strong> に対応しています。</li>
+        <li>1行目はヘッダー行（列名）が必要です（日本語名・英語フィールド名の両方に対応）。</li>
+        <li>必須項目：<strong>「姓（last_name）」「名（first_name）」</strong>（いずれも未入力の行は自動的にスキップされます）。</li>
+        <li>メーリングリスト等からエクスポートした CSV をそのまま再利用できます（「宛名」「住所」「退会状態」「Person ID」等は自動的に無視されます）。</li>
+        <li>国コードが未入力の場合は、システムのデフォルト値（<code>{{ DEFAULT_CONTACT_COUNTRY|default:"JP" }}</code>）で自動補完されます。</li>
+      </ul>
+    </div>
+
+    <form method="post" enctype="multipart/form-data" action="{% url 'contacts:contact_import_upload' %}">
+      {% csrf_token %}
+      {{ back.hidden_fields }}
+
+      <div class="app-form__group" style="margin-bottom:24px;">
+        <label for="id_csv_file" style="display:block; font-weight:bold; margin-bottom:8px;">
+          CSV ファイル <span class="app-required-badge" style="color:#ef4444; font-size:0.85em;">必須</span>
+        </label>
+        <input type="file" id="id_csv_file" name="csv_file" accept=".csv,text/csv" required
+               style="display:block; width:100%; max-width:480px; padding:8px 12px; border:1px solid #cbd5e1; border-radius:4px; background:#fff;">
+      </div>
+
+      <div class="app-action-area" style="justify-content:flex-start; gap:12px;">
+        <button type="submit" class="app-btn app-btn--primary">
+          <i class="bi bi-arrow-right-circle" style="margin-right:6px;"></i>アップロードしてプレビュー
+        </button>
+        {% if back.has_back %}
+          {% back_link back %}
+        {% else %}
+          <a href="{% url 'contacts:contact_list' %}" class="app-btn app-btn--secondary">キャンセル</a>
+        {% endif %}
+      </div>
+    </form>
+  </section>
+{% endblock %}

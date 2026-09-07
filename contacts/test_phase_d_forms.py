@@ -459,6 +459,28 @@ class AddedFiveFieldsFormTests(TestCase):
         self.assertIn("legal_entity_type_position", form.errors)
 
 
+class ContactCountryInitialSettingTests(TestCase):
+    """DEFAULT_CONTACT_COUNTRY 設定値に基づく country 初期値（仕様書 v1.6 §5.2）。"""
+
+    def test_default_country_initial_is_jp(self):
+        form_create = ContactCreateForm()
+        self.assertEqual(form_create.fields["country"].initial, "JP")
+
+        person = Person.objects.create()
+        form_role = ContactAddAdditionalRoleForm(person=person)
+        self.assertEqual(form_role.fields["country"].initial, "JP")
+
+    def test_country_initial_respects_settings_override(self):
+        with self.settings(DEFAULT_CONTACT_COUNTRY="US"):
+            form_create = ContactCreateForm()
+            self.assertEqual(form_create.fields["country"].initial, "US")
+
+            person = Person.objects.create()
+            form_role = ContactAddAdditionalRoleForm(person=person)
+            self.assertEqual(form_role.fields["country"].initial, "US")
+
+
+
 class PostalDisplayContactDetailTests(TestCase):
     """Phase D2 話2：contact_detail で postal_code が国別整形表示される（DB は raw 維持）。"""
 

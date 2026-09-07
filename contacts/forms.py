@@ -554,8 +554,8 @@ class ContactCreateForm(ContactBaseForm):
         kwargs.pop("instance", None)
         super().__init__(*args, **kwargs)
         self._apply_widget_classes()
-        # 新規作成は国デフォルト JP（UI §2.2、未バインド表示用 initial）。
-        self.fields["country"].initial = "JP"
+        # 新規作成は国デフォルト（未バインド表示用 initial）。
+        self.fields["country"].initial = getattr(settings, "DEFAULT_CONTACT_COUNTRY", "JP")
 
     def clean(self):
         cleaned = super().clean()
@@ -593,8 +593,8 @@ class ContactAddAdditionalRoleForm(ContactBaseForm):
         kwargs.pop("instance", None)
         super().__init__(*args, **kwargs)
         self._apply_widget_classes()
-        # 新規作成は国デフォルト JP（UI §2.2、未バインド表示用 initial）。
-        self.fields["country"].initial = "JP"
+        # 新規作成は国デフォルト（未バインド表示用 initial）。
+        self.fields["country"].initial = getattr(settings, "DEFAULT_CONTACT_COUNTRY", "JP")
 
     def clean(self):
         cleaned = super().clean()
