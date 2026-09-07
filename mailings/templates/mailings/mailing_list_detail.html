@@ -2,7 +2,9 @@
 {% load back_tags %}
 
 {% block title %}
-  {% if select_for_campaign %}
+  {% if is_export_mode %}
+    エキスポート：リスト詳細 — FreeGroup2
+  {% elif select_for_campaign %}
     キャンペーン（配信リスト選択） — FreeGroup2
   {% else %}
     {{ mailing_list.name }} — 配信リスト詳細 — FreeGroup2
@@ -13,7 +15,9 @@
   <div class="app-page-header">
     <div>
       <h1>
-        {% if select_for_campaign %}
+        {% if is_export_mode %}
+          エキスポート：リスト詳細
+        {% elif select_for_campaign %}
           キャンペーン（配信リスト選択）
         {% else %}
           リスト詳細
@@ -170,7 +174,7 @@
       <div style="display:flex; align-items:center; gap:8px;">
         {% if is_export_mode and perms.contacts.export_contact and not select_for_campaign %}
           {% url 'mailings:mailing_list_member_export_form' pk=mailing_list.id as export_url %}
-          <a href="{% append_back_url export_url back %}" class="app-btn app-btn--secondary">
+          <a href="{% append_back_url export_url back %}" class="app-btn app-btn--primary" id="btn-export-csv">
             <i class="bi bi-download" style="margin-right:4px;"></i>CSVエクスポート
           </a>
         {% endif %}

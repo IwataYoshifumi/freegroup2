@@ -2,7 +2,9 @@
 {% load back_tags %}
 
 {% block title %}
-  {% if select_for_campaign %}
+  {% if is_export_mode %}
+    エキスポート：リスト一覧 — FreeGroup2
+  {% elif select_for_campaign %}
     キャンペーン（配信リスト選択） — FreeGroup2
   {% else %}
     配信リスト一覧 — FreeGroup2
@@ -13,7 +15,9 @@
   <div class="app-page-header" style="max-width:1100px;">
     <div>
       <h1>
-        {% if select_for_campaign %}
+        {% if is_export_mode %}
+          エキスポート：リスト一覧
+        {% elif select_for_campaign %}
           キャンペーン（配信リスト選択）
         {% else %}
           配信リスト一覧

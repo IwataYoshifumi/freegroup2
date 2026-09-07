@@ -307,6 +307,9 @@ class MailingListDetailButtonTests(BaseCSVExportTestCase):
         resp = self.client.get(url)
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "CSVエクスポート")
+        self.assertContains(resp, "app-btn--primary")
+        self.assertContains(resp, "btn-export-csv")
+        self.assertContains(resp, "エキスポート：リスト詳細")
         export_form_url = reverse(
             "mailings:mailing_list_member_export_form",
             kwargs={"pk": self.mailing_list.pk},
@@ -325,6 +328,7 @@ class MailingListDetailButtonTests(BaseCSVExportTestCase):
         resp = self.client.get(url)
         self.assertEqual(resp.status_code, 200)
         self.assertNotContains(resp, "CSVエクスポート")
+        self.assertNotContains(resp, "エキスポート：リスト詳細")
         # 通常アクセス時は編集アイコン・メンバー操作ボタンが表示される
         self.assertContains(resp, "bi-pencil-fill")
         self.assertContains(resp, "メンバーを追加")
@@ -350,6 +354,8 @@ class MailingListListExportModeTests(BaseCSVExportTestCase):
         url = reverse("mailings:mailing_list_list")
         resp = self.client.get(url)
         self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "配信リスト一覧")
+        self.assertNotContains(resp, "エキスポート：リスト一覧")
         self.assertContains(resp, "新規リスト作成")
         self.assertContains(resp, "操作")
 
@@ -357,6 +363,7 @@ class MailingListListExportModeTests(BaseCSVExportTestCase):
         url = reverse("mailings:mailing_list_list") + "?mode=export"
         resp = self.client.get(url)
         self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "エキスポート：リスト一覧")
         self.assertNotContains(resp, "新規リスト作成")
         self.assertNotContains(resp, "操作")
         self.assertContains(resp, "mode=export")
