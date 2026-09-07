@@ -235,13 +235,17 @@
     {% else %}
       <p class="app-muted">{% if is_frozen %}メンバーがまだ凍結されていません。{% else %}メンバーがまだいません。{% endif %}</p>
     {% endif %}
+  </section>
 
-    {# ε.4：戻るボタン画面下部。タグが空文字を返すので、両方空ならラッパーだけ残るが視覚上は影響しない。 #}
-    <div class="app-action-area" style="margin-top:16px; justify-content:flex-start;">
+  {# 画面下部戻るボタン（カード外） #}
+  <div class="app-action-area" style="margin-top:16px; justify-content:flex-start;">
+    {% if back.has_back %}
       {% back_all_link back %}
       {% back_link back %}
-    </div>
-  </section>
+    {% else %}
+      <a href="{% url 'mailings:mailing_list_list' %}" class="app-btn app-btn--secondary">戻る</a>
+    {% endif %}
+  </div>
 
   <script>
     (function () {
