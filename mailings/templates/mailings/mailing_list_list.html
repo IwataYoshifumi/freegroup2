@@ -33,10 +33,12 @@
       キャンペーン「{{ select_for_campaign.name }}」に紐づけるリストを一覧から選択してください。
     </div>
   {% else %}
-    <div class="app-action-area" style="justify-content:flex-start; margin-bottom:16px; max-width:1100px;">
-      {% url 'mailings:new_list_meta' as create_url %}
-      <a href="{% append_back_url create_url back %}" class="app-btn app-btn--primary">新規リスト作成</a>
-    </div>
+    {% if not is_export_mode %}
+      <div class="app-action-area" style="justify-content:flex-start; margin-bottom:16px; max-width:1100px;">
+        {% url 'mailings:new_list_meta' as create_url %}
+        <a href="{% append_back_url create_url back %}" class="app-btn app-btn--primary">新規リスト作成</a>
+      </div>
+    {% endif %}
   {% endif %}
 
   {% comment %}
@@ -47,6 +49,9 @@
   <section class="app-card" style="margin-bottom:16px; max-width:1100px;">
     <form method="get" class="app-form-grid-edit">
       <input type="hidden" name="searched" value="1">
+      {% if is_export_mode %}
+        <input type="hidden" name="mode" value="export">
+      {% endif %}
       {% if select_for_campaign %}
         <input type="hidden" name="select_for_campaign" value="{{ select_for_campaign.pk }}">
       {% endif %}
@@ -117,7 +122,9 @@
         <table class="app-table app-table--nowrap js-mailings-page-sort">
           <thead>
             <tr>
-              <th class="app-table__col--action">操作</th>
+              {% if not is_export_mode %}
+                <th class="app-table__col--action">操作</th>
+              {% endif %}
               <th data-sort-col>リスト名</th>
               <th data-col-key="description" data-sort-col>説明</th>
               <th data-col-key="member_count" data-sort-col>メンバー数</th>
@@ -131,29 +138,36 @@
               {% url 'mailings:mailing_list_detail' pk=ml.id as detail_url %}
               {% url 'mailings:mailing_list_update' pk=ml.id as update_url %}
               <tr>
-                <td class="app-table__col--action">
-                  <div class="app-table__actions">
-                    {% if select_for_campaign %}
-                      {% append_back_url detail_url back as detail_back_url %}
-                      {% if "?" in detail_back_url %}
-                        <a href="{{ detail_back_url }}&select_for_campaign={{ select_for_campaign.pk }}" class="app-btn app-btn--primary app-btn--sm">選択</a>
+                {% if not is_export_mode %}
+                  <td class="app-table__col--action">
+                    <div class="app-table__actions">
+                      {% if select_for_campaign %}
+                        {% append_back_url detail_url back as detail_back_url %}
+                        {% if "?" in detail_back_url %}
+                          <a href="{{ detail_back_url }}&select_for_campaign={{ select_for_campaign.pk }}" class="app-btn app-btn--primary app-btn--sm">選択</a>
+                        {% else %}
+                          <a href="{{ detail_back_url }}?select_for_campaign={{ select_for_campaign.pk }}" class="app-btn app-btn--primary app-btn--sm">選択</a>
+                        {% endif %}
                       {% else %}
-                        <a href="{{ detail_back_url }}?select_for_campaign={{ select_for_campaign.pk }}" class="app-btn app-btn--primary app-btn--sm">選択</a>
+                        <a href="{% append_back_url detail_url back %}" class="app-icon-btn" style="color:var(--app-text);" title="詳細" aria-label="詳細"><i class="bi bi-search"></i></a>
+                        {% if not ml.is_archived %}
+                          <a href="{% append_back_url update_url back %}" class="app-icon-btn" style="color:var(--app-text);" title="編集" aria-label="編集"><i class="bi bi-pencil-fill"></i></a>
+                        {% endif %}
                       {% endif %}
-                    {% else %}
-                      <a href="{% append_back_url detail_url back %}" class="app-icon-btn" style="color:var(--app-text);" title="詳細" aria-label="詳細"><i class="bi bi-search"></i></a>
-                      {% if not ml.is_archived %}
-                        <a href="{% append_back_url update_url back %}" class="app-icon-btn" style="color:var(--app-text);" title="編集" aria-label="編集"><i class="bi bi-pencil-fill"></i></a>
-                      {% endif %}
-                    {% endif %}
-                  </div>
-                </td>
+                    </div>
+                  </td>
+                {% endif %}
                 <td>
                   {% if ml.members_frozen_at %}
                     <i class="bi bi-lock-fill" style="color:#64748b; margin-right:4px;"
                        title="凍結: {{ ml.members_frozen_at|date:'Y/m/d H:i' }}"></i>
                   {% endif %}
-                  {{ ml.name }}
+                  {% append_back_url detail_url back as detail_back_url %}
+                  {% if is_export_mode %}
+                    <a href="{{ detail_back_url }}{% if '?' in detail_back_url %}&{% else %}?{% endif %}mode=export">{{ ml.name }}</a>
+                  {% else %}
+                    <a href="{{ detail_back_url }}">{{ ml.name }}</a>
+                  {% endif %}
                 </td>
                 <td data-col-key="description">
                   {% if ml.description %}

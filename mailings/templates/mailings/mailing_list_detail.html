@@ -50,7 +50,7 @@
               <i class="bi bi-lock-fill" style="color: #64748b;" title="凍結: {{ mailing_list.members_frozen_at|date:'Y/m/d H:i' }}"></i>
             {% endif %}
             <span>{{ mailing_list.name }}</span>
-            {% if not mailing_list.is_archived and not select_for_campaign %}
+            {% if not mailing_list.is_archived and not select_for_campaign and not is_export_mode %}
               <a href="{% append_back_url update_url back %}" class="app-icon-btn" style="color: var(--app-text);" title="編集" aria-label="編集">
                 <i class="bi bi-pencil-fill"></i>
               </a>
@@ -66,7 +66,7 @@
 
         <!-- 右側: アーカイブ / 非アーカイブ化ボタン -->
         <div>
-          {% if not select_for_campaign %}
+          {% if not select_for_campaign and not is_export_mode %}
             {% if mailing_list.is_archived %}
               <form method="post" action="{% url 'mailings:mailing_list_unarchive' pk=mailing_list.id %}" style="margin:0; display:inline-flex;" onsubmit="return confirm('「{{ mailing_list.name }}」を非アーカイブ化します。よろしいですか？');">
                 {% csrf_token %}
@@ -126,7 +126,7 @@
     {% endif %}
 
     {# メンバー操作4ボタン（左寄せ・横一列並び） #}
-    {% if not select_for_campaign %}
+    {% if not select_for_campaign and not is_export_mode %}
       {% url 'mailings:list_member_add' pk=mailing_list.id as member_add_url %}
       {% url 'mailings:list_member_add_by_tag' pk=mailing_list.id as member_add_by_tag_url %}
       {% url 'mailings:list_member_remove' pk=mailing_list.id as member_remove_url %}
@@ -168,7 +168,7 @@
         {% endif %}
       </div>
       <div style="display:flex; align-items:center; gap:8px;">
-        {% if perms.contacts.export_contact and not select_for_campaign %}
+        {% if is_export_mode and perms.contacts.export_contact and not select_for_campaign %}
           {% url 'mailings:mailing_list_member_export_form' pk=mailing_list.id as export_url %}
           <a href="{% append_back_url export_url back %}" class="app-btn app-btn--secondary">
             <i class="bi bi-download" style="margin-right:4px;"></i>CSVエクスポート

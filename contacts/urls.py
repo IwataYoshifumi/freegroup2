@@ -30,6 +30,11 @@ urlpatterns = [
         name="contact_import_upload",
     ),
     path(
+        "import/",
+        views.ContactImportUploadView.as_view(),
+        name="contact_import",
+    ),
+    path(
         "import/preview/",
         views.ContactImportPreviewView.as_view(),
         name="contact_import_preview",

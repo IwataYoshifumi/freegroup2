@@ -300,10 +300,10 @@ class MailingListCSVExportMergeResolutionTests(BaseCSVExportTestCase):
 
 
 class MailingListDetailButtonTests(BaseCSVExportTestCase):
-    """詳細画面（mailing_list_detail.html）のエクスポートボタン表示制御テスト。"""
+    """詳細画面（mailing_list_detail.html）のエクスポートボタンおよびエクスポートモード表示制御テスト。"""
 
-    def test_export_button_shown_for_privileged_user(self):
-        url = reverse("mailings:mailing_list_detail", kwargs={"pk": self.mailing_list.pk})
+    def test_export_button_shown_for_privileged_user_in_export_mode(self):
+        url = reverse("mailings:mailing_list_detail", kwargs={"pk": self.mailing_list.pk}) + "?mode=export"
         resp = self.client.get(url)
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "CSVエクスポート")
@@ -312,6 +312,22 @@ class MailingListDetailButtonTests(BaseCSVExportTestCase):
             kwargs={"pk": self.mailing_list.pk},
         )
         self.assertContains(resp, export_form_url)
+        # エクスポートモード時は編集ペン・アーカイブ・メンバー操作ボタンが非表示
+        self.assertNotContains(resp, "bi-pencil-fill")
+        self.assertNotContains(resp, "title=\"アーカイブ化\"")
+        self.assertNotContains(resp, "メンバーを追加")
+        self.assertNotContains(resp, "タグで追加")
+        self.assertNotContains(resp, "メンバーを削除")
+        self.assertNotContains(resp, "タグで除外")
+
+    def test_export_button_hidden_in_normal_mode(self):
+        url = reverse("mailings:mailing_list_detail", kwargs={"pk": self.mailing_list.pk})
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, "CSVエクスポート")
+        # 通常アクセス時は編集アイコン・メンバー操作ボタンが表示される
+        self.assertContains(resp, "bi-pencil-fill")
+        self.assertContains(resp, "メンバーを追加")
 
     def test_export_button_hidden_for_unprivileged_user(self):
         unprivileged = User.objects.create_user(
@@ -321,7 +337,27 @@ class MailingListDetailButtonTests(BaseCSVExportTestCase):
         client = Client()
         client.force_login(unprivileged)
 
-        url = reverse("mailings:mailing_list_detail", kwargs={"pk": self.mailing_list.pk})
+        url = reverse("mailings:mailing_list_detail", kwargs={"pk": self.mailing_list.pk}) + "?mode=export"
         resp = client.get(url)
         self.assertEqual(resp.status_code, 200)
         self.assertNotContains(resp, "CSVエクスポート")
+
+
+class MailingListListExportModeTests(BaseCSVExportTestCase):
+    """一覧画面（mailing_list_list.html）のエクスポートモード表示制御テスト。"""
+
+    def test_list_in_normal_mode(self):
+        url = reverse("mailings:mailing_list_list")
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "新規リスト作成")
+        self.assertContains(resp, "操作")
+
+    def test_list_in_export_mode(self):
+        url = reverse("mailings:mailing_list_list") + "?mode=export"
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, "新規リスト作成")
+        self.assertNotContains(resp, "操作")
+        self.assertContains(resp, "mode=export")
+

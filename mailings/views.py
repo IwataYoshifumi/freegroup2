@@ -254,7 +254,7 @@ class MailingListListView(LoginRequiredMixin, PermissionRequiredMixin, ListView)
         context = super().get_context_data(**kwargs)
         back = BackNavigator(self.request)
         # 検索条件・ソート・ページ・選択モードも keys に含め「戻る」で一覧状態を復元する（HIG 6.1）。
-        back.push_current("", ["page", "status", "searched", "name", "sort", "select_for_campaign"])
+        back.push_current("", ["page", "status", "searched", "name", "sort", "select_for_campaign", "mode"])
 
         select_for_campaign = None
         campaign_id = self.request.GET.get("select_for_campaign", "").strip()
@@ -271,6 +271,7 @@ class MailingListListView(LoginRequiredMixin, PermissionRequiredMixin, ListView)
                 "selected_statuses": self._selected_statuses(),
                 "search_name": self.request.GET.get("name", ""),
                 "select_for_campaign": select_for_campaign,
+                "is_export_mode": self.request.GET.get("mode") == "export",
                 "column_storage_key": "mailing_list_list_visible_columns",
                 "column_defs": [
                     {"key": "description", "label": "説明", "default": False},
@@ -341,6 +342,7 @@ class MailingListDetailView(LoginRequiredMixin, PermissionRequiredMixin, DetailV
                 "current_sort": sort_key,
                 "current_dir": sort_dir,
                 "select_for_campaign": select_for_campaign,
+                "is_export_mode": self.request.GET.get("mode") == "export",
             }
         )
         return context

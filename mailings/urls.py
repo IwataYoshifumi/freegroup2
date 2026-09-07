@@ -135,6 +135,9 @@ urlpatterns = [
         "mailings/lists/", views.MailingListListView.as_view(), name="mailing_list_list"
     ),
     path(
+        "mailings/lists/", views.MailingListListView.as_view(), name="list_list"
+    ),
+    path(
         "mailings/lists/<uuid:pk>/",
         views.MailingListDetailView.as_view(),
         name="mailing_list_detail",
