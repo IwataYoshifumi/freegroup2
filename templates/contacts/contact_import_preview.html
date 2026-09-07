@@ -340,15 +340,24 @@
       })();
     </script>
 
-    <form method="post" action="{% url 'contacts:contact_import_preview' %}">
+    <!-- ローディングオーバーレイ（確定処理中） -->
+    <div id="import-loading-overlay" class="app-modal-backdrop" style="display:none; z-index:2000; align-items:center; justify-content:center;">
+      <div style="background:var(--app-surface, #fff); border:1px solid var(--app-border, #e2e8f0); border-radius:12px; padding:36px 40px; box-shadow:0 20px 40px rgba(0,0,0,0.18); text-align:center; max-width:440px; width:90%; margin:auto;">
+        <div class="app-loading__spinner" style="width:42px; height:42px; border-width:4px; margin:0 auto 20px;"></div>
+        <div style="font-size:1.25em; font-weight:700; color:var(--app-text, #1e293b); margin-bottom:10px;">インポート処理中...</div>
+        <div style="font-size:0.92em; color:var(--app-muted, #64748b); line-height:1.6;">データの登録を行っています。<br>完了まで画面を閉じずにお待ちください。</div>
+      </div>
+    </div>
+
+    <form method="post" action="{% url 'contacts:contact_import_preview' %}" id="import-confirm-form">
       {% csrf_token %}
       <input type="hidden" name="token" value="{{ token }}">
+      <input type="hidden" name="action" id="import-action-input" value="confirm">
       {{ back.hidden_fields }}
 
       <div class="app-action-area" style="justify-content:flex-start; gap:12px;">
         {% if preview.success_count > 0 %}
-          <button type="submit" name="action" value="confirm" class="app-btn app-btn--primary"
-                  onclick="return confirm('{{ preview.success_count }} 件のコンタクトをインポートします。よろしいですか？');">
+          <button type="submit" id="btn-confirm-import" class="app-btn app-btn--primary">
             <i class="bi bi-check-circle" style="margin-right:6px;"></i>インポートを確定して実行
           </button>
         {% else %}
@@ -356,10 +365,56 @@
             登録見込みデータがありません
           </button>
         {% endif %}
-        <button type="submit" name="action" value="cancel" class="app-btn app-btn--secondary">
+        <button type="button" id="btn-cancel-import" class="app-btn app-btn--secondary">
           キャンセル
         </button>
       </div>
     </form>
+
+    <script>
+      (function() {
+        var form = document.getElementById('import-confirm-form');
+        if (!form) return;
+
+        var confirmBtn = document.getElementById('btn-confirm-import');
+        var cancelBtn = document.getElementById('btn-cancel-import');
+        var overlay = document.getElementById('import-loading-overlay');
+        var actionInput = document.getElementById('import-action-input');
+
+        if (cancelBtn) {
+          cancelBtn.addEventListener('click', function() {
+            if (actionInput) actionInput.value = 'cancel';
+            form.submit();
+          });
+        }
+
+        form.addEventListener('submit', function(e) {
+          if (actionInput && actionInput.value === 'cancel') {
+            return;
+          }
+
+          var ok = confirm('{{ preview.success_count }} 件のコンタクトをインポートします。よろしいですか？');
+          if (!ok) {
+            e.preventDefault();
+            return false;
+          }
+
+          if (overlay) {
+            overlay.style.display = 'flex';
+          }
+
+          if (confirmBtn) {
+            confirmBtn.disabled = true;
+            confirmBtn.style.pointerEvents = 'none';
+            confirmBtn.style.opacity = '0.6';
+          }
+          if (cancelBtn) {
+            cancelBtn.disabled = true;
+            cancelBtn.style.pointerEvents = 'none';
+            cancelBtn.style.opacity = '0.6';
+          }
+        });
+      })();
+    </script>
   </section>
 {% endblock %}

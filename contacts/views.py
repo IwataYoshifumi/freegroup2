@@ -1299,6 +1299,22 @@ class ContactImportPreviewView(LoginRequiredMixin, PermissionRequiredMixin, View
         result = execute_csv_import(csv_text, request.user)
         result["filename"] = filename
 
+        # ActionLog 記録（完走後に全体で1件記録）
+        from actionlogs.models import ActionLog
+
+        ActionLog.record(
+            user=request.user,
+            action="contact_import",
+            object_repr=filename,
+            note=f"CSVインポート完了: 成功 {result['success_count']}件, スキップ {result['skipped_count']}件 (ファイル: {filename})",
+            data={
+                "filename": filename,
+                "total_count": result.get("total_count", 0),
+                "success_count": result.get("success_count", 0),
+                "skipped_count": result.get("skipped_count", 0),
+            },
+        )
+
         # PRG パターンで結果画面へ引き渡し（仕様書 §4.1）
         request.session["contact_import_result"] = result
         request.session.modified = True

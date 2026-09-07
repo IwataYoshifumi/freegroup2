@@ -205,6 +205,11 @@ class ContactCSVImportPreviewTests(BaseImportTestCase):
         self.assertContains(resp, 'id="pagination-nav"')
         self.assertContains(resp, 'スキップ見込み')
         self.assertContains(resp, '姓および名が未入力')
+        # ローディングスピナー要素の検証
+        self.assertContains(resp, 'id="import-loading-overlay"')
+        self.assertContains(resp, "インポート処理中...")
+        self.assertContains(resp, "データの登録を行っています。")
+        self.assertContains(resp, "完了まで画面を閉じずにお待ちください。")
 
 
 class ContactCSVImportNormalizationTests(BaseImportTestCase):
@@ -295,6 +300,15 @@ class ContactCSVImportExecutionTests(BaseImportTestCase):
         self.assertContains(resp_done, "スキップ件数")
         self.assertContains(resp_done, "1")
         self.assertContains(resp_done, "4 行目")  # 3件目のスキップ行 (ヘッダー1 + データ3 = 4行目)
+
+        # ActionLog の記録確認
+        from actionlogs.models import ActionLog
+        action_log = ActionLog.objects.filter(action="contact_import").last()
+        self.assertIsNotNone(action_log)
+        self.assertEqual(action_log.user, self.user)
+        self.assertIn("CSVインポート完了: 成功 2件, スキップ 1件", action_log.note)
+        self.assertEqual(action_log.data["success_count"], 2)
+        self.assertEqual(action_log.data["skipped_count"], 1)
 
         # 2回目の結果画面アクセスはセッション破棄済みのため一覧へリダイレクト
         resp_done_repeat = self.client.get(reverse("contacts:contact_import_done"))
