@@ -252,7 +252,7 @@ def parse_csv_for_preview(csv_text: str) -> dict:
 
     total_count = 0
     skippable_count = 0
-    samples = []
+    rows = []
 
     for row in reader:
         if not any(cell.strip() for cell in row):
@@ -265,21 +265,29 @@ def parse_csv_for_preview(csv_text: str) -> dict:
         is_skip = is_row_skippable(row_dict)
         if is_skip:
             skippable_count += 1
+            status = "skip"
+            skip_reason = "姓および名が未入力"
+        else:
+            status = "valid"
+            skip_reason = ""
 
-        if len(samples) < 10:
-            samples.append(
-                {
-                    "row_no": total_count + 1,  # ヘッダーを1行目として2行目から
-                    "last_name": row_dict.get("last_name", ""),
-                    "first_name": row_dict.get("first_name", ""),
-                    "full_name": row_dict.get("full_name", ""),
-                    "organization": row_dict.get("organization", ""),
-                    "department": row_dict.get("department", ""),
-                    "title": row_dict.get("title", ""),
-                    "email": row_dict.get("email", ""),
-                    "is_skippable": is_skip,
-                }
-            )
+        rows.append(
+            {
+                "row_num": total_count + 1,  # ヘッダーを1行目として2行目から
+                "row_no": total_count + 1,
+                "status": status,
+                "skip_reason": skip_reason,
+                "last_name": row_dict.get("last_name", ""),
+                "first_name": row_dict.get("first_name", ""),
+                "full_name": row_dict.get("full_name", ""),
+                "org_name": row_dict.get("organization", ""),
+                "organization": row_dict.get("organization", ""),
+                "department": row_dict.get("department", ""),
+                "title": row_dict.get("title", ""),
+                "email": row_dict.get("email", ""),
+                "is_skippable": is_skip,
+            }
+        )
 
     if total_count == 0:
         return {"error": "CSVファイルにデータ行が存在しません。"}
@@ -290,7 +298,8 @@ def parse_csv_for_preview(csv_text: str) -> dict:
         "total_count": total_count,
         "success_count": success_estimated_count,
         "skippable_count": skippable_count,
-        "samples": samples,
+        "rows": rows,
+        "samples": rows[:10],
     }
 
 

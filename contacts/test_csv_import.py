@@ -166,6 +166,46 @@ class ContactCSVImportPreviewTests(BaseImportTestCase):
         self.assertContains(resp, "登録見込み件数")
         self.assertContains(resp, "スキップ見込み件数")
 
+    def test_preview_rows_and_pagination_structure(self):
+        csv_data = (
+            "姓,名,会社名,メール\n"
+            "山田,太郎,山田商事,yamada@example.com\n"
+            "鈴木,,鈴木工業,suzuki@example.com\n"
+            ",,名無商事,noname@example.com\n"
+        )
+        file = self._make_csv_file(csv_data)
+        self.client.post(reverse("contacts:contact_import_upload"), {"csv_file": file})
+
+        resp = self.client.get(reverse("contacts:contact_import_preview"))
+        self.assertEqual(resp.status_code, 200)
+
+        # context 内の全パース行データ検証
+        self.assertIn("preview_rows", resp.context)
+        rows = resp.context["preview_rows"]
+        self.assertEqual(len(rows), 3)
+
+        # 1行目: valid
+        self.assertEqual(rows[0]["row_num"], 2)
+        self.assertEqual(rows[0]["status"], "valid")
+        self.assertEqual(rows[0]["last_name"], "山田")
+        self.assertEqual(rows[0]["first_name"], "太郎")
+        self.assertEqual(rows[0]["skip_reason"], "")
+
+        # 3行目: skip
+        self.assertEqual(rows[2]["row_num"], 4)
+        self.assertEqual(rows[2]["status"], "skip")
+        self.assertEqual(rows[2]["skip_reason"], "姓および名が未入力")
+
+        # HTML内要素検証
+        self.assertContains(resp, 'data-filter="all"')
+        self.assertContains(resp, 'data-filter="valid"')
+        self.assertContains(resp, 'data-filter="skip"')
+        self.assertContains(resp, 'id="import-preview-data"')
+        self.assertContains(resp, 'id="pagination-info"')
+        self.assertContains(resp, 'id="pagination-nav"')
+        self.assertContains(resp, 'スキップ見込み')
+        self.assertContains(resp, '姓および名が未入力')
+
 
 class ContactCSVImportNormalizationTests(BaseImportTestCase):
     """正規化パイプラインおよびフィールド自動補完のテスト。"""

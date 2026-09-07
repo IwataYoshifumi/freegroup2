@@ -1244,6 +1244,8 @@ class ContactImportPreviewView(LoginRequiredMixin, PermissionRequiredMixin, View
             self.template_name,
             {
                 "preview": preview_data,
+                "preview_rows": preview_data.get("rows", []),
+                "rows_json": json.dumps(preview_data.get("rows", [])),
                 "filename": filename,
                 "token": token,
                 "back": BackNavigator(request),

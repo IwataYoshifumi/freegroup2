@@ -59,19 +59,37 @@
       </div>
     {% endif %}
 
-    <h3 style="font-size:1em; margin-bottom:10px; display:flex; justify-content:space-between; align-items:center;">
-      <span>サンプルデータ表示（先頭 {{ preview.samples|length }} 件）</span>
-      {% if preview.total_count > 10 %}
-        <span class="app-muted" style="font-size:0.85em; font-weight:normal;">※大量データ負荷軽減のため先頭10件のみ表示</span>
-      {% endif %}
+    <style>
+      .app-tab-group .app-btn.is-active {
+        background: var(--app-color-primary, #2563eb);
+        color: #fff;
+        border-color: var(--app-color-primary, #2563eb);
+        font-weight: 600;
+      }
+      .app-pagination-info {
+        font-size: 0.9em;
+        color: var(--app-muted, #64748b);
+      }
+    </style>
+
+    <h3 style="font-size:1.05em; margin-bottom:12px; display:flex; justify-content:space-between; align-items:center;">
+      <span>インポートデータ一覧</span>
     </h3>
 
-    <div class="app-table-wrapper" style="margin-bottom:24px;">
+    {# フィルタタブ切り替え #}
+    <div class="app-tab-group" style="margin-bottom: 12px; display: flex; gap: 8px; flex-wrap: wrap;">
+      <button type="button" class="app-btn app-btn--secondary is-active" data-filter="all">すべて (<span id="count-all">{{ preview.total_count }}</span>)</button>
+      <button type="button" class="app-btn app-btn--secondary" data-filter="valid">登録見込み (<span id="count-valid">{{ preview.success_count }}</span>)</button>
+      <button type="button" class="app-btn app-btn--secondary" data-filter="skip">スキップ見込み (<span id="count-skip">{{ preview.skippable_count }}</span>)</button>
+    </div>
+
+    <div class="app-table-wrapper" style="margin-bottom:12px;">
       <table class="app-table app-table--nowrap">
         <thead>
           <tr>
             <th style="width:60px;">行</th>
-            <th>判定</th>
+            <th style="width:110px;">判定</th>
+            <th>理由</th>
             <th>姓</th>
             <th>名</th>
             <th>氏名</th>
@@ -81,29 +99,246 @@
             <th>メール</th>
           </tr>
         </thead>
-        <tbody>
-          {% for row in preview.samples %}
-            <tr{% if row.is_skippable %} style="background:#fffbeb;"{% endif %}>
-              <td>{{ row.row_no }}</td>
+        <tbody id="preview-table-body">
+          {% for row in preview.rows|slice:":20" %}
+            <tr{% if row.status == "skip" or row.is_skippable %} style="background:#fffbeb;"{% endif %}>
+              <td>{{ row.row_num|default:row.row_no }}</td>
               <td>
-                {% if row.is_skippable %}
-                  <span class="app-status-badge app-status-badge--warning" title="姓・名が未入力のためスキップされます">スキップ見込み</span>
+                {% if row.status == "skip" or row.is_skippable %}
+                  <span class="app-status-badge app-status-badge--warning" title="{{ row.skip_reason|default:'姓・名が未入力のためスキップされます' }}">スキップ見込み</span>
                 {% else %}
                   <span class="app-status-badge app-status-badge--success">登録見込み</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if row.status == "skip" or row.is_skippable %}
+                  {{ row.skip_reason|default:"姓および名が未入力" }}
+                {% else %}
+                  <span class="app-muted">-</span>
                 {% endif %}
               </td>
               <td>{{ row.last_name|default:"-" }}</td>
               <td>{{ row.first_name|default:"-" }}</td>
               <td>{{ row.full_name|default:"(自動組み立て)" }}</td>
-              <td>{{ row.organization|default:"-" }}</td>
+              <td>{{ row.org_name|default:row.organization|default:"-" }}</td>
               <td>{{ row.department|default:"-" }}</td>
               <td>{{ row.title|default:"-" }}</td>
               <td>{{ row.email|default:"-" }}</td>
+            </tr>
+          {% empty %}
+            <tr>
+              <td colspan="10" class="app-table__empty" style="text-align:center; padding:24px; color:#64748b;">
+                データ行が存在しません。
+              </td>
             </tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
+
+    {# ページネーションコントロール #}
+    <div class="app-pagination-wrapper" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:24px;">
+      <div class="app-pagination-info" id="pagination-info">
+        {% if preview.total_count %}
+          {{ preview.total_count }}件中 1〜{% if preview.total_count < 20 %}{{ preview.total_count }}{% else %}20{% endif %}件を表示
+        {% endif %}
+      </div>
+      <nav class="app-pagination" id="pagination-nav" aria-label="ページネーション" style="margin-top:0;">
+      </nav>
+    </div>
+
+    {{ preview.rows|json_script:"import-preview-data" }}
+    <script>
+      (function() {
+        var dataScript = document.getElementById('import-preview-data');
+        if (!dataScript) return;
+        var allRows = [];
+        try {
+          allRows = JSON.parse(dataScript.textContent || '[]');
+        } catch (e) {
+          console.error('Failed to parse preview data JSON', e);
+          return;
+        }
+
+        var PAGE_SIZE = 20;
+        var currentFilter = 'all';
+        var currentPage = 1;
+
+        var countAll = document.getElementById('count-all');
+        var countValid = document.getElementById('count-valid');
+        var countSkip = document.getElementById('count-skip');
+        var tbody = document.getElementById('preview-table-body');
+        var paginationInfo = document.getElementById('pagination-info');
+        var paginationNav = document.getElementById('pagination-nav');
+        var tabButtons = document.querySelectorAll('.app-tab-group button[data-filter]');
+
+        var validRows = allRows.filter(function(r) { return r.status === 'valid'; });
+        var skipRows = allRows.filter(function(r) { return r.status === 'skip'; });
+
+        if (countAll) countAll.textContent = allRows.length;
+        if (countValid) countValid.textContent = validRows.length;
+        if (countSkip) countSkip.textContent = skipRows.length;
+
+        function getFilteredRows() {
+          if (currentFilter === 'valid') return validRows;
+          if (currentFilter === 'skip') return skipRows;
+          return allRows;
+        }
+
+        function escapeHtml(str) {
+          if (str === null || str === undefined) return '';
+          return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+        }
+
+        function renderTable() {
+          var rows = getFilteredRows();
+          var totalCount = rows.length;
+          var totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
+
+          if (currentPage > totalPages) currentPage = totalPages;
+          if (currentPage < 1) currentPage = 1;
+
+          var startIdx = (currentPage - 1) * PAGE_SIZE;
+          var endIdx = Math.min(startIdx + PAGE_SIZE, totalCount);
+          var pageRows = rows.slice(startIdx, endIdx);
+
+          if (paginationInfo) {
+            if (totalCount === 0) {
+              paginationInfo.textContent = '0件中 0件を表示';
+            } else {
+              paginationInfo.textContent = totalCount + '件中 ' + (startIdx + 1) + '〜' + endIdx + '件を表示';
+            }
+          }
+
+          if (pageRows.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="10" class="app-table__empty" style="text-align:center; padding:24px; color:#64748b;">該当するデータはありません。</td></tr>';
+          } else {
+            var html = '';
+            for (var i = 0; i < pageRows.length; i++) {
+              var row = pageRows[i];
+              var isSkip = row.status === 'skip';
+              var bgStyle = isSkip ? ' style="background:#fffbeb;"' : '';
+              var badgeHtml = isSkip
+                ? '<span class="app-status-badge app-status-badge--warning" title="' + escapeHtml(row.skip_reason || 'スキップ対象') + '">スキップ見込み</span>'
+                : '<span class="app-status-badge app-status-badge--success">登録見込み</span>';
+              var reasonHtml = isSkip ? escapeHtml(row.skip_reason || '姓および名が未入力') : '<span class="app-muted">-</span>';
+              var fullNameText = row.full_name ? escapeHtml(row.full_name) : (isSkip ? '<span class="app-muted">-</span>' : '<span class="app-muted">(自動組み立て)</span>');
+              var orgText = (row.org_name || row.organization) ? escapeHtml(row.org_name || row.organization) : '<span class="app-muted">-</span>';
+
+              html += '<tr' + bgStyle + '>' +
+                '<td>' + escapeHtml(row.row_num || row.row_no) + '</td>' +
+                '<td>' + badgeHtml + '</td>' +
+                '<td>' + reasonHtml + '</td>' +
+                '<td>' + (row.last_name ? escapeHtml(row.last_name) : '<span class="app-muted">-</span>') + '</td>' +
+                '<td>' + (row.first_name ? escapeHtml(row.first_name) : '<span class="app-muted">-</span>') + '</td>' +
+                '<td>' + fullNameText + '</td>' +
+                '<td>' + orgText + '</td>' +
+                '<td>' + (row.department ? escapeHtml(row.department) : '<span class="app-muted">-</span>') + '</td>' +
+                '<td>' + (row.title ? escapeHtml(row.title) : '<span class="app-muted">-</span>') + '</td>' +
+                '<td>' + (row.email ? escapeHtml(row.email) : '<span class="app-muted">-</span>') + '</td>' +
+                '</tr>';
+            }
+            tbody.innerHTML = html;
+          }
+
+          renderPagination(totalPages);
+        }
+
+        function renderPagination(totalPages) {
+          if (!paginationNav) return;
+
+          if (totalPages <= 1) {
+            paginationNav.innerHTML = '';
+            return;
+          }
+
+          var html = '';
+
+          // 前へボタン
+          var prevDisabled = currentPage <= 1 ? ' disabled' : '';
+          html += '<button type="button" class="app-pagination__button" data-action="prev"' + prevDisabled + '>前へ</button>';
+
+          // ページ番号ボタン
+          var pages = getPaginationPageList(currentPage, totalPages);
+          for (var i = 0; i < pages.length; i++) {
+            var p = pages[i];
+            if (p === '...') {
+              html += '<span class="app-pagination__button" style="border:none; background:transparent; cursor:default;">…</span>';
+            } else {
+              var isActive = p === currentPage ? ' is-active' : '';
+              html += '<button type="button" class="app-pagination__button' + isActive + '" data-page="' + p + '">' + p + '</button>';
+            }
+          }
+
+          // 次へボタン
+          var nextDisabled = currentPage >= totalPages ? ' disabled' : '';
+          html += '<button type="button" class="app-pagination__button" data-action="next"' + nextDisabled + '>次へ</button>';
+
+          paginationNav.innerHTML = html;
+        }
+
+        function getPaginationPageList(current, total) {
+          if (total <= 7) {
+            var list = [];
+            for (var i = 1; i <= total; i++) list.push(i);
+            return list;
+          }
+          if (current <= 4) {
+            return [1, 2, 3, 4, 5, '...', total];
+          }
+          if (current >= total - 3) {
+            return [1, '...', total - 4, total - 3, total - 2, total - 1, total];
+          }
+          return [1, '...', current - 1, current, current + 1, '...', total];
+        }
+
+        tabButtons.forEach(function(btn) {
+          btn.addEventListener('click', function() {
+            tabButtons.forEach(function(b) { b.classList.remove('is-active'); });
+            this.classList.add('is-active');
+            currentFilter = this.getAttribute('data-filter') || 'all';
+            currentPage = 1;
+            renderTable();
+          });
+        });
+
+        if (paginationNav) {
+          paginationNav.addEventListener('click', function(e) {
+            var btn = e.target.closest('button');
+            if (!btn || btn.disabled) return;
+
+            var action = btn.getAttribute('data-action');
+            var page = btn.getAttribute('data-page');
+
+            if (action === 'prev') {
+              if (currentPage > 1) {
+                currentPage--;
+                renderTable();
+              }
+            } else if (action === 'next') {
+              var totalPages = Math.ceil(getFilteredRows().length / PAGE_SIZE);
+              if (currentPage < totalPages) {
+                currentPage++;
+                renderTable();
+              }
+            } else if (page) {
+              var p = parseInt(page, 10);
+              if (!isNaN(p) && p !== currentPage) {
+                currentPage = p;
+                renderTable();
+              }
+            }
+          });
+        }
+
+        renderTable();
+      })();
+    </script>
 
     <form method="post" action="{% url 'contacts:contact_import_preview' %}">
       {% csrf_token %}
