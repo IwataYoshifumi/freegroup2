@@ -154,6 +154,17 @@ urlpatterns = [
         views.MailingListUnarchiveView.as_view(),
         name="mailing_list_unarchive",
     ),
+    # メーリングリスト CSV エクスポート（仕様書 v1.6 §3）
+    path(
+        "mailings/lists/<uuid:pk>/export/",
+        views.MailingListMemberExportFormView.as_view(),
+        name="mailing_list_member_export_form",
+    ),
+    path(
+        "mailings/lists/<uuid:pk>/export/csv/",
+        views.MailingListMemberExportView.as_view(),
+        name="mailing_list_member_export",
+    ),
     # AJAX エンドポイント
     path(
         "mailings/lists/preview/",

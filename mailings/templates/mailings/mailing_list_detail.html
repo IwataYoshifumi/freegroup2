@@ -165,7 +165,13 @@
           <span class="app-status-badge app-status-badge--muted">先頭 50 件を表示</span>
         {% endif %}
       </div>
-      <div>
+      <div style="display:flex; align-items:center; gap:8px;">
+        {% if perms.contacts.export_contact and not select_for_campaign %}
+          {% url 'mailings:mailing_list_member_export_form' pk=mailing_list.id as export_url %}
+          <a href="{% append_back_url export_url back %}" class="app-btn app-btn--secondary">
+            <i class="bi bi-download" style="margin-right:4px;"></i>CSVエクスポート
+          </a>
+        {% endif %}
         {% include "mailings/_column_toggle.html" with storage_key="mailing_list_visible_columns_detail" %}
       </div>
     </div>
