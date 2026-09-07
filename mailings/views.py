@@ -3425,7 +3425,11 @@ class _CampaignReportFilteredListBaseView(
 
 
 class CampaignReportClickedListView(_CampaignReportFilteredListBaseView):
-    """GET /mailings/campaigns/<uuid:pk>/report/clicked/（§5.1 No.13、§6.2.3）。"""
+    """GET /mailings/campaigns/<uuid:pk>/report/clicked/（§5.1 No.13、§6.2.3）。
+
+    ?url=<original_url> が指定された場合、その URL をクリックした受信者のみを表示。
+    省略時は全クリック者（従来動作）。
+    """
 
     template_name = "mailings/campaign_report_clicked.html"
     page_title = "クリックした受信者"
@@ -3436,6 +3440,28 @@ class CampaignReportClickedListView(_CampaignReportFilteredListBaseView):
 
         return get_clicked_persons(campaign)
 
+    def get(self, request, pk):
+        from django.shortcuts import get_object_or_404, render
+
+        from mailings.services.report_aggregation import get_clicked_persons
+
+        from .models import Campaign as _Campaign
+
+        campaign = get_object_or_404(_Campaign.objects.select_related("template"), pk=pk)
+        target_url = request.GET.get("url") or None
+        rows = get_clicked_persons(campaign, url=target_url)
+        return render(
+            request,
+            self.template_name,
+            {
+                "campaign": campaign,
+                "rows": rows,
+                "page_title": self.page_title,
+                "target_url": target_url,
+                "back": BackNavigator(request),
+                "active_app": "mailings",
+            },
+        )
 
 class CampaignReportBouncedListView(_CampaignReportFilteredListBaseView):
     """GET /mailings/campaigns/<uuid:pk>/report/bounced/（§5.1 No.14、§6.2.3）。"""

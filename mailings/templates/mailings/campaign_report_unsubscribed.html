@@ -9,38 +9,55 @@
       <h1>{{ page_title }}：{{ campaign.name }}</h1>
     </div>
     <div class="app-page-header__actions">
-      <a class="app-btn app-btn--secondary" href="{% url 'mailings:campaign_report' pk=campaign.pk %}">レポートへ戻る</a>
+      {% if back.has_back %}
+        {% back_all_link back %}
+        {% back_link back %}
+      {% else %}
+        <a href="{% url 'mailings:campaign_report' pk=campaign.pk %}" class="app-btn app-btn--secondary">戻る</a>
+      {% endif %}
     </div>
   </div>
 
   <section class="app-card">
-    <table class="app-table">
-      <thead>
-        <tr>
-          <th>会社名</th>
-          <th>氏名</th>
-          <th>メアド</th>
-          <th>停止日時</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in rows %}
+    <div class="app-table-wrapper">
+      <table class="app-table">
+        <thead>
           <tr>
-            <td>{{ row.person.primary_contact.organization|default:"—" }}</td>
-            <td>{{ row.person.primary_contact.full_name|default:row.person.id }}</td>
-            <td>{{ row.person.primary_contact.email|default:"—" }}</td>
-            <td>{{ row.last_action_at|date:"Y-m-d H:i"|default:"—" }}</td>
-            <td>
-              {% if row.person.primary_contact %}
-                <a class="app-btn app-btn--sm" href="{% url 'contacts:contact_detail' pk=row.person.primary_contact.pk %}">詳細</a>
-              {% endif %}
-            </td>
+            <th>操作</th>
+            <th>会社名</th>
+            <th>氏名</th>
+            <th>メール</th>
+            <th>停止日時</th>
           </tr>
-        {% empty %}
-          <tr><td colspan="5">該当する受信者はいません。</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {% for row in rows %}
+            <tr>
+              <td>
+                {% if row.person.primary_contact %}
+                  <a class="app-btn app-btn--outline-secondary app-btn--sm" href="{% url 'contacts:contact_detail' pk=row.person.primary_contact.pk %}">詳細</a>
+                {% endif %}
+              </td>
+              <td>{{ row.person.primary_contact.organization|default:"—" }}</td>
+              <td>{{ row.person.primary_contact.full_name|default:row.person.id }}</td>
+              <td>{{ row.person.primary_contact.email|default:"—" }}</td>
+              <td>{{ row.last_action_at|date:"Y-m-d H:i"|default:"—" }}</td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="5">該当する受信者はいません。</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
   </section>
+
+  {# 補助戻るナビ（最下部右寄せ） #}
+  <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:24px;">
+    {% if back.has_back %}
+      {% back_all_link back %}
+      {% back_link back %}
+    {% else %}
+      <a href="{% url 'mailings:campaign_report' pk=campaign.pk %}" class="app-btn app-btn--secondary">戻る</a>
+    {% endif %}
+  </div>
 {% endblock %}

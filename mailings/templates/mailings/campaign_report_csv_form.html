@@ -9,7 +9,12 @@
       <h1>CSV ダウンロード：{{ campaign.name }}</h1>
     </div>
     <div class="app-page-header__actions">
-      <a class="app-btn app-btn--secondary" href="{% url 'mailings:campaign_report' pk=campaign.pk %}">レポートへ戻る</a>
+      {% if back.has_back %}
+        {% back_all_link back %}
+        {% back_link back %}
+      {% else %}
+        <a href="{% url 'mailings:campaign_report' pk=campaign.pk %}" class="app-btn app-btn--secondary">戻る</a>
+      {% endif %}
     </div>
   </div>
 
