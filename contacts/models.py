@@ -130,6 +130,13 @@ class Contact(models.Model):
     full_name_is_manual = models.BooleanField(default=False)
     display_name_is_manual = models.BooleanField(default=False)
 
+    company = models.ForeignKey(
+        "companies.Company",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="contacts",
+    )
     organization = models.CharField(max_length=255, blank=True, default="")
     # v1.6.0 新規（組織サブ）
     org_core_name = models.CharField(max_length=255, blank=True, default="")

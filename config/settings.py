@@ -98,6 +98,10 @@ INSTALLED_APPS = [
     "actionlogs",
     "tags",
     "mailings",
+    "companies",
+    "deals",
+    "activities",
+    "attachments",
 ]
 
 AUTH_USER_MODEL = "accounts.CustomUser"
@@ -202,6 +206,7 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 # Media files
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
+PROTECTED_MEDIA_ROOT = BASE_DIR / "protected_media"
 
 # Card detector backend ("opencv" | "ai")
 CARD_DETECTOR_BACKEND = os.getenv("CARD_DETECTOR_BACKEND", "opencv")

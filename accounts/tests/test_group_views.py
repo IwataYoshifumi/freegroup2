@@ -47,12 +47,14 @@ class GroupListTests(TestCase):
         self.op = _grant_manage_role(User.objects.create_user("gop", password="x"))
         self.client.force_login(self.op)
 
-    def test_lists_all_16_groups(self):
+    def test_lists_all_groups(self):
         resp = self.client.get(reverse("accounts:group_list"))
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(len(resp.context["groups_info"]), 16)
+        self.assertEqual(len(resp.context["groups_info"]), 25)
         self.assertContains(resp, "person_admin")
         self.assertContains(resp, "card_viewer")
+        self.assertContains(resp, "deal_admin")
+        self.assertContains(resp, "company_viewer")
 
     def test_admin_group_flagged(self):
         resp = self.client.get(reverse("accounts:group_list"))

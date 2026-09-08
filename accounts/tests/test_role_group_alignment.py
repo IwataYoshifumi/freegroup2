@@ -221,21 +221,30 @@ class RoleDefaultGroupsTests(TestCase):
 
     def test_admin_groups(self):
         names = self._names("admin")
-        self.assertEqual(len(names), 6)
+        self.assertEqual(len(names), 9)
         self.assertIn("contact_admin", names)
         self.assertIn("card_admin", names)
+        self.assertIn("deal_admin", names)
+        self.assertIn("activity_admin", names)
+        self.assertIn("company_admin", names)
 
     def test_sales_groups(self):
         names = self._names("sales")
-        self.assertEqual(len(names), 5)
+        self.assertEqual(len(names), 8)
         self.assertIn("contact_editor", names)
         self.assertIn("card_editor", names)
+        self.assertIn("deal_editor", names)
+        self.assertIn("activity_editor", names)
+        self.assertIn("company_editor", names)
 
     def test_viewer_groups(self):
         names = self._names("viewer")
-        self.assertEqual(len(names), 5)
+        self.assertEqual(len(names), 8)
         self.assertIn("contact_viewer", names)
         self.assertIn("card_viewer", names)
+        self.assertIn("deal_viewer", names)
+        self.assertIn("activity_viewer", names)
+        self.assertIn("company_viewer", names)
 
     def test_existing_bundles_unchanged(self):
         # 既存束ね（person_*/campaign_*/tag_*/user_admin）が維持されていること。
