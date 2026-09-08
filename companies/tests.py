@@ -520,13 +520,14 @@ class CompanyViewTests(TestCase):
         self.assertEqual(group["company_count"], 3)
         self.assertEqual(group["max_score"], 120)
         self.assertEqual(group["rank"], CompanyDuplicateCandidate.Rank.POSSIBLE_HIGH)
-        # HTML内に各社情報とラジオボタン、一括統合ボタンが表示されていること
+        # HTML内に各社情報とラジオボタン、統合対象チェックボックス、統合ボタンが表示されていること
         self.assertContains(resp, "テスト株式会社")
         self.assertContains(resp, "テスト株式会社 分社B")
         self.assertContains(resp, "テスト株式会社 分社C")
-        self.assertContains(resp, "選択した会社に一括統合")
-        self.assertContains(resp, "別会社")
+        self.assertContains(resp, "チェックした会社を統合")
+        self.assertContains(resp, "別会社として判定")
         self.assertContains(resp, f'name="surviving_company_{group["id"]}"')
+        self.assertContains(resp, 'name="target_company_ids"')
 
     def test_group_batch_merge_and_mark_different(self):
         self.client.login(username="comp_user", password="password")
@@ -574,7 +575,7 @@ class CompanyViewTests(TestCase):
             {
                 "group_id": "grp_test",
                 "surviving_company_grp_test": str(m1.id),
-                "merge_company_ids": f"{m1.id},{m2.id},{m3.id}",
+                "target_company_ids": [str(m2.id), str(m3.id)],
                 "next": reverse("companies:company_candidate_list"),
             },
         )
@@ -590,6 +591,49 @@ class CompanyViewTests(TestCase):
         mcand2.refresh_from_db()
         self.assertEqual(mcand1.review_status, CompanyDuplicateCandidate.ReviewStatus.MERGED)
         self.assertEqual(mcand2.review_status, CompanyDuplicateCandidate.ReviewStatus.MERGED)
+
+    def test_group_selective_merge(self):
+        """チェックボックスによる選別マージ（チェックした会社のみ統合、外した会社は残る）を検証。"""
+        self.client.login(username="comp_user", password="password")
+        s1 = Company.objects.create(organization="選別テスト存続社", domain="s1.example.jp")
+        s2 = Company.objects.create(organization="選別テスト統合対象社", domain="s2.example.jp")
+        s3 = Company.objects.create(organization="選別テスト除外社", domain="s3.example.jp")
+        cand12 = CompanyDuplicateCandidate.objects.create(
+            company_a=s1, company_b=s2, score=100, rank=CompanyDuplicateCandidate.Rank.POSSIBLE_HIGH
+        )
+        cand13 = CompanyDuplicateCandidate.objects.create(
+            company_a=s1, company_b=s3, score=100, rank=CompanyDuplicateCandidate.Rank.POSSIBLE_HIGH
+        )
+
+        # 0件選択時のエラーバリデーション
+        resp_empty = self.client.post(
+            reverse("companies:company_merge"),
+            {
+                "surviving_company_id": str(s1.id),
+                "target_company_ids": [],
+            },
+        )
+        self.assertEqual(resp_empty.status_code, 302)
+        s2.refresh_from_db()
+        self.assertEqual(s2.status, Company.Status.ACTIVE)
+
+        # s2 のみ選択してマージ実行（s3 はチェックを外して除外）
+        resp_selective = self.client.post(
+            reverse("companies:company_merge"),
+            {
+                "surviving_company_id": str(s1.id),
+                "target_company_ids": [str(s2.id)],
+            },
+        )
+        self.assertEqual(resp_selective.status_code, 302)
+        s2.refresh_from_db()
+        s3.refresh_from_db()
+        # s2 は s1 に統合される
+        self.assertEqual(s2.status, Company.Status.MERGED)
+        self.assertEqual(s2.merged_into, s1)
+        # s3 は統合されず ACTIVE のまま残る
+        self.assertEqual(s3.status, Company.Status.ACTIVE)
+        self.assertIsNone(s3.merged_into)
 
 
 class LinkCompaniesCommandTests(TestCase):

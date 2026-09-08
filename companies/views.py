@@ -369,10 +369,10 @@ class CompanyMergeView(LoginRequiredMixin, PermissionRequiredMixin, View):
                         surviving_company_id = val
                         break
 
-        # 2. 統合対象会社IDリストの取得
-        raw_merge_ids = request.POST.getlist("merge_company_ids")
+        # 2. 統合対象会社IDリストの取得（target_company_ids を優先）
+        raw_merge_ids = request.POST.getlist("target_company_ids") or request.POST.getlist("merge_company_ids")
         if not raw_merge_ids:
-            raw_merge_ids_str = request.POST.get("merge_company_ids") or request.POST.get("target_company_ids", "")
+            raw_merge_ids_str = request.POST.get("target_company_ids") or request.POST.get("merge_company_ids", "")
             raw_merge_ids = [i.strip() for i in raw_merge_ids_str.split(",") if i.strip()]
         else:
             expanded = []
@@ -388,11 +388,15 @@ class CompanyMergeView(LoginRequiredMixin, PermissionRequiredMixin, View):
         target_company_ids = [cid for cid in raw_merge_ids if str(cid) != str(surviving_company_id)]
 
         if not target_company_ids:
-            messages.error(request, "統合対象の会社が指定されていません。")
+            messages.error(request, "統合対象の会社が選択されていません。")
             return redirect("companies:company_candidate_list")
 
         surviving_company = get_object_or_404(Company, pk=surviving_company_id)
         target_companies = list(Company.objects.filter(id__in=target_company_ids))
+
+        if not target_companies:
+            messages.error(request, "有効な統合対象会社が見つかりませんでした。")
+            return redirect("companies:company_candidate_list")
 
         try:
             execute_company_merge(
