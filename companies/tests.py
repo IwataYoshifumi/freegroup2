@@ -1,12 +1,19 @@
+import io
+from unittest.mock import patch
+
 from django.contrib.admin.sites import AdminSite
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
-from django.db import IntegrityError
+from django.core.management import call_command
+from django.db import IntegrityError, models
 from django.test import TestCase
 from django.urls import reverse
 
 from companies.admin import CompanyAdmin, CompanyDuplicateCandidateAdmin
 from companies.models import Company, CompanyDuplicateCandidate
+from companies.services import link_contact_to_company
+from contacts.models import Contact
+from persons.models import Person
 
 User = get_user_model()
 
@@ -438,6 +445,130 @@ class CompanyViewTests(TestCase):
         target_merge.refresh_from_db()
         self.assertEqual(target_merge.status, Company.Status.MERGED)
         self.assertEqual(target_merge.merged_into, self.company)
+
+
+class LinkCompaniesCommandTests(TestCase):
+    """link_companies 管理コマンドの検証（仕様書 §6.5.4）。"""
+
+    def setUp(self):
+        self.person = Person.objects.create()
+
+    def test_link_companies_unlinked_contact_creates_and_links_company(self):
+        contact = Contact.objects.create(
+            person=self.person,
+            organization="株式会社アルファ自動化",
+            org_domain_name="alpha-auto.co.jp",
+        )
+        self.assertIsNone(contact.company)
+
+        out = io.StringIO()
+        call_command("link_companies", stdout=out)
+        contact.refresh_from_db()
+
+        self.assertIsNotNone(contact.company)
+        self.assertEqual(contact.company.organization, "株式会社アルファ自動化")
+        self.assertEqual(contact.company.domain, "alpha-auto.co.jp")
+        output_str = out.getvalue()
+        self.assertIn("会社リンク処理が完了しました。", output_str)
+        self.assertIn("新規リンク成功数: 1 件", output_str)
+        self.assertIn("新規会社作成数: 1 件", output_str)
+
+    def test_link_companies_links_to_existing_exact_match(self):
+        existing_comp = Company.objects.create(
+            organization="株式会社ベータ既存",
+            domain="beta-existing.co.jp",
+        )
+        contact = Contact.objects.create(
+            person=self.person,
+            organization="株式会社ベータ既存",
+            org_domain_name="beta-existing.co.jp",
+        )
+
+        out = io.StringIO()
+        call_command("link_companies", stdout=out)
+        contact.refresh_from_db()
+
+        self.assertEqual(contact.company, existing_comp)
+        self.assertEqual(Company.objects.filter(domain="beta-existing.co.jp").count(), 1)
+        output_str = out.getvalue()
+        self.assertIn("新規リンク成功数: 1 件", output_str)
+        self.assertIn("新規会社作成数: 0 件", output_str)
+
+    def test_link_companies_generates_duplicate_candidate(self):
+        existing_comp = Company.objects.create(
+            organization="ガンマ工業株式会社",
+            domain="gamma-kougyo.co.jp",
+            phone="03-9999-1111",
+            address="東京都港区赤坂1-2-3",
+        )
+        # ドメイン違いだが同一名称＋同一電話＋同一住所（POSSIBLE_HIGH 候補）
+        contact = Contact.objects.create(
+            person=self.person,
+            organization="ガンマ工業株式会社",
+            org_domain_name="gamma-branch.co.jp",
+            org_phone="03-9999-1111",
+            address="東京都港区赤坂1-2-3",
+        )
+
+        out = io.StringIO()
+        call_command("link_companies", stdout=out)
+        contact.refresh_from_db()
+
+        self.assertIsNotNone(contact.company)
+        self.assertNotEqual(contact.company, existing_comp)
+
+        # 重複候補が登録されたことを検証
+        candidate = CompanyDuplicateCandidate.objects.filter(
+            models.Q(company_a=existing_comp, company_b=contact.company)
+            | models.Q(company_a=contact.company, company_b=existing_comp)
+        ).first()
+        self.assertIsNotNone(candidate)
+        output_str = out.getvalue()
+        self.assertIn("重複候補（CompanyDuplicateCandidate）生成数: 1 件", output_str)
+
+    def test_link_companies_limit_and_all_flags(self):
+        c1 = Contact.objects.create(person=self.person, organization="会社1", org_domain_name="c1.com")
+        c2 = Contact.objects.create(person=self.person, organization="会社2", org_domain_name="c2.com")
+
+        out = io.StringIO()
+        call_command("link_companies", limit=1, stdout=out)
+        c1.refresh_from_db()
+        c2.refresh_from_db()
+
+        # limit=1 により c1 のみリンクされる
+        self.assertIsNotNone(c1.company)
+        self.assertIsNone(c2.company)
+
+        # --all なしでは既にリンク済みの c1 はスキップされ、c2 のみ処理される
+        out2 = io.StringIO()
+        call_command("link_companies", stdout=out2)
+        c2.refresh_from_db()
+        self.assertIsNotNone(c2.company)
+        self.assertIn("処理対象件数: 1 件", out2.getvalue())
+
+    def test_link_companies_error_resilience(self):
+        c1 = Contact.objects.create(person=self.person, organization="例外テスト1")
+        c2 = Contact.objects.create(person=self.person, organization="正常テスト2")
+
+        original_link = link_contact_to_company
+
+        def faulty_link(contact, user=None):
+            if contact.id == c1.id:
+                raise RuntimeError("擬似障害エラー")
+            return original_link(contact, user=user)
+
+        with patch("companies.management.commands.link_companies.link_contact_to_company", side_effect=faulty_link):
+            out = io.StringIO()
+            err = io.StringIO()
+            call_command("link_companies", stdout=out, stderr=err)
+
+        c1.refresh_from_db()
+        c2.refresh_from_db()
+
+        self.assertIsNone(c1.company)
+        self.assertIsNotNone(c2.company)
+        self.assertIn("エラー件数: 1 件", out.getvalue())
+        self.assertIn("擬似障害エラー", err.getvalue())
 
 
 
