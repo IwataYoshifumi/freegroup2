@@ -71,8 +71,14 @@ class CompanyDetailView(LoginRequiredMixin, DetailView):
         context["contacts"] = company.contacts.order_by(
             "last_name", "first_name"
         )
-        context["deals"] = company.deals.filter(is_archived=False).order_by(
-            "-created_at"
+        deals = company.deals.filter(is_archived=False).order_by("-created_at")
+        context["deals"] = deals
+        from activities.models import Activity
+        context["activities"] = (
+            Activity.objects.filter(deal__in=deals, is_archived=False)
+            .select_related("deal", "user")
+            .prefetch_related("activity_persons__person")
+            .order_by("-occurred_at")
         )
         context["can_edit"] = self.request.user.has_perm("companies.change_company")
         context["can_archive"] = self.request.user.has_perm("companies.change_company")

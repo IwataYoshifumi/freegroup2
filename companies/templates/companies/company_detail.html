@@ -102,6 +102,49 @@
     </div>
   </section>
 
+  {# 活動履歴 #}
+  <section class="app-card" style="margin-bottom:24px;">
+    <h2 style="font-size:16px; margin-bottom:16px;">活動履歴（{{ activities.count }}件）</h2>
+    <div class="app-table-wrapper">
+      <table class="app-table">
+        <thead>
+          <tr>
+            <th>日時</th>
+            <th>種別</th>
+            <th>方向</th>
+            <th>担当者</th>
+            <th>関連案件</th>
+            <th>メモ</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for activity in activities %}
+            <tr>
+              <td>{{ activity.occurred_at|date:"Y-m-d H:i" }}</td>
+              <td><span class="app-status-badge">{{ activity.get_activity_type_display }}</span></td>
+              <td>{{ activity.get_direction_display|default:"-" }}</td>
+              <td>{{ activity.user|default:"-" }}</td>
+              <td>
+                {% if activity.deal %}
+                  <a href="{% url 'deals:deal_detail' pk=activity.deal.id %}">{{ activity.deal.name }}</a>
+                {% else %}-{% endif %}
+              </td>
+              <td>{{ activity.memo|truncatechars:40|default:"-" }}</td>
+              <td>
+                <a href="{% url 'activities:activity_detail' pk=activity.id %}" class="app-btn app-btn--ghost app-btn--sm">詳細</a>
+              </td>
+            </tr>
+          {% empty %}
+            <tr>
+              <td colspan="7" class="app-muted" style="text-align:center; padding:16px;">紐づく活動履歴はありません。</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
   {# 所属コンタクト #}
   <section class="app-card">
     <h2 style="font-size:16px; margin-bottom:16px;">所属コンタクト（{{ contacts.count }}件）</h2>
