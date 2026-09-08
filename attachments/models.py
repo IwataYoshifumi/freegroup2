@@ -70,5 +70,10 @@ class Attachment(models.Model):
             ),
         ]
 
+    def has_view_permission(self, user):
+        from attachments.permissions import can_view_attachment
+
+        return can_view_attachment(user, self)
+
     def __str__(self):
         return self.original_filename

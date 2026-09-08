@@ -1,14 +1,18 @@
 from datetime import timedelta
 from django.contrib.admin.sites import AdminSite
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Permission
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError
 from django.test import TestCase
+from django.urls import reverse
 from django.utils import timezone
 
 from activities.admin import ActivityAdmin, ActivityPersonAdmin, ActivityUserAdmin
-from activities.models import Activity, ActivityPerson, ActivityUser
+from activities.models import Activity, ActivityPerson, ActivityType, ActivityUser, Direction
+from contacts.models import Contact
 from deals.models import Deal, PersonRole, UserRole
+from mailings.models import Campaign, ClickLog, EmailTemplate, TrackingLink
 from persons.models import Person
 
 User = get_user_model()
@@ -304,4 +308,135 @@ class ActivityPermissionTests(TestCase):
         qs_outsider = visible_activities_for(self.outsider)
         self.assertEqual(qs_outsider.count(), 1)
         self.assertEqual(qs_outsider.first(), act2)
+
+
+class ActivityViewTests(TestCase):
+    """activities View層の認可・表示・画面遷移の検証（仕様書 第3章, §7.3）。"""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="act_owner", password="password")
+        self.attendee = User.objects.create_user(username="act_attendee", password="password")
+        self.outsider = User.objects.create_user(username="act_outsider", password="password")
+
+        add_perm = Permission.objects.get(codename="add_activity")
+        change_perm = Permission.objects.get(codename="change_activity")
+        self.user.user_permissions.add(add_perm, change_perm)
+        self.attendee.user_permissions.add(add_perm, change_perm)
+
+        self.person = Person.objects.create()
+        self.deal = Deal.objects.create(name="提案中案件", primary_person=self.person, owner=self.user)
+        self.activity = Activity.objects.create(
+            deal=self.deal,
+            activity_type=ActivityType.VISIT,
+            direction=Direction.OUTGOING,
+            occurred_at=timezone.now(),
+            user=self.user,
+            memo="初回訪問議事録",
+        )
+        ActivityUser.objects.create(activity=self.activity, user=self.attendee, role=UserRole.SUPPORT)
+        ActivityPerson.objects.create(activity=self.activity, person=self.person, role=PersonRole.ATTENDEE)
+
+    def test_activity_list_view_anonymous_redirect(self):
+        response = self.client.get(reverse("activities:activity_list"))
+        self.assertEqual(response.status_code, 302)
+
+    def test_activity_list_view_authenticated(self):
+        self.client.login(username="act_owner", password="password")
+        response = self.client.get(reverse("activities:activity_list") + "?mode=all")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "訪問")  # get_activity_type_display
+        self.assertContains(response, "初回訪問議事録")
+
+    def test_activity_detail_view_permissions(self):
+        # 実施者
+        self.client.login(username="act_owner", password="password")
+        response = self.client.get(reverse("activities:activity_detail", kwargs={"pk": self.activity.pk}))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "初回訪問議事録")
+
+        # 同席者
+        self.client.login(username="act_attendee", password="password")
+        response = self.client.get(reverse("activities:activity_detail", kwargs={"pk": self.activity.pk}))
+        self.assertEqual(response.status_code, 200)
+
+        # 部外者 -> 403
+        self.client.login(username="act_outsider", password="password")
+        response = self.client.get(reverse("activities:activity_detail", kwargs={"pk": self.activity.pk}))
+        self.assertEqual(response.status_code, 403)
+
+    def test_activity_create_view_and_post(self):
+        self.client.login(username="act_owner", password="password")
+        url = reverse("activities:activity_create")
+        response = self.client.get(url + f"?person_id={self.person.id}&deal_id={self.deal.id}")
+        self.assertEqual(response.status_code, 200)
+
+        post_data = {
+            "activity_type": ActivityType.PHONE,
+            "direction": Direction.INCOMING,
+            "occurred_at": timezone.localtime().strftime("%Y-%m-%dT%H:%M"),
+            "deal": str(self.deal.id),
+            "memo": "電話問い合わせ受付",
+            "person_id": str(self.person.id),
+        }
+        response = self.client.post(url, data=post_data)
+        self.assertEqual(response.status_code, 302)
+
+        new_act = Activity.objects.get(memo="電話問い合わせ受付")
+        self.assertEqual(new_act.activity_type, ActivityType.PHONE)
+        self.assertEqual(new_act.user, self.user)
+        self.assertEqual(new_act.created_by, self.user)
+        # ActivityPerson が自動生成されていること
+        self.assertTrue(ActivityPerson.objects.filter(activity=new_act, person=self.person).exists())
+
+    def test_activity_update_view(self):
+        self.client.login(username="act_owner", password="password")
+        url = reverse("activities:activity_update", kwargs={"pk": self.activity.pk})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+
+        response = self.client.post(url, data={
+            "activity_type": ActivityType.WEB_MEETING,
+            "direction": Direction.OUTGOING,
+            "occurred_at": timezone.localtime(self.activity.occurred_at).strftime("%Y-%m-%dT%H:%M"),
+            "memo": "訪問からWeb会議に変更",
+        })
+        self.assertEqual(response.status_code, 302)
+        self.activity.refresh_from_db()
+        self.assertEqual(self.activity.activity_type, ActivityType.WEB_MEETING)
+        self.assertEqual(self.activity.memo, "訪問からWeb会議に変更")
+
+    def test_activity_archive_view(self):
+        self.client.login(username="act_owner", password="password")
+        url = reverse("activities:activity_archive", kwargs={"pk": self.activity.pk})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+
+        response = self.client.post(url)
+        self.assertEqual(response.status_code, 302)
+        self.activity.refresh_from_db()
+        self.assertTrue(self.activity.is_archived)
+
+    def test_campaign_unfollowed_list_view(self):
+        self.client.login(username="act_owner", password="password")
+        template = EmailTemplate.objects.create(name="Template", subject="Sub", body="Body", created_by=self.user)
+        campaign = Campaign.objects.create(name="夏期プロモーション", template=template, created_by=self.user)
+        link = TrackingLink.objects.create(campaign=campaign, person=self.person, original_url="https://example.com/promo", token="tok_unfollowed")
+
+        contact = Contact.objects.create(person=self.person, last_name="山田", first_name="花子")
+        self.person.primary_contact = contact
+        self.person.save(update_fields=["primary_contact"])
+
+        ClickLog.objects.create(
+            tracking_link=link,
+            http_method="GET",
+            is_valid_click=True,
+        )
+
+        url = reverse("activities:campaign_unfollowed_list", kwargs={"campaign_id": campaign.id})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "未フォローパーソン一覧")
+        self.assertContains(response, str(self.person))
+        self.assertContains(response, f"person_id={self.person.id}&campaign_id={campaign.id}")
+
 

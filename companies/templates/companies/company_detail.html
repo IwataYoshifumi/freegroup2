@@ -1,0 +1,143 @@
+{% extends "cards/app_base.html" %}
+{% load back_tags %}
+
+{% block title %}{{ company.organization }} — 会社詳細 — FreeGroup2{% endblock %}
+
+{% block content %}
+  <div class="app-page-header">
+    <div>
+      <h1>{{ company.organization }}</h1>
+      <div style="font-size:13px; color:var(--app-muted); margin-top:4px;">
+        状態: <span class="app-status-badge">{{ company.get_status_display }}</span>
+        {% if company.merged_into %}
+          （統合先: <a href="{% url 'companies:company_detail' pk=company.merged_into.id %}">{{ company.merged_into.organization }}</a>）
+        {% endif %}
+      </div>
+    </div>
+    <div class="app-action-area">
+      {% back_all_link back %}
+      {% back_link back %}
+    </div>
+  </div>
+
+  <div class="app-action-area" style="justify-content:flex-start; margin-bottom:20px; gap:8px;">
+    {% if can_edit %}
+      {% url 'companies:company_update' pk=company.id as edit_url %}
+      <a href="{% append_back_url edit_url back %}" class="app-btn app-btn--success">編集</a>
+    {% endif %}
+    {% if can_archive and company.status != "archived" %}
+      {% url 'companies:company_archive' pk=company.id as archive_url %}
+      <a href="{% append_back_url archive_url back %}" class="app-btn app-btn--warning">アーカイブ</a>
+    {% endif %}
+  </div>
+
+  <section class="app-card" style="margin-bottom:24px;">
+    <h2 style="font-size:16px; margin-bottom:16px;">会社概要</h2>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+      <div>
+        <div class="app-form__label">ドメイン</div>
+        <div>{{ company.domain|default:"-" }}</div>
+      </div>
+      <div>
+        <div class="app-form__label">電話番号</div>
+        <div>{{ company.phone|default:"-" }}</div>
+      </div>
+      <div>
+        <div class="app-form__label">Webサイト</div>
+        <div>
+          {% if company.website %}
+            <a href="{{ company.website }}" target="_blank" rel="noopener noreferrer">{{ company.website }}</a>
+          {% else %}-{% endif %}
+        </div>
+      </div>
+      <div>
+        <div class="app-form__label">登録日時</div>
+        <div>{{ company.created_at|date:"Y-m-d H:i" }}</div>
+      </div>
+      <div style="grid-column:1 / -1;">
+        <div class="app-form__label">住所</div>
+        <div>{{ company.address|default:"-" }}</div>
+      </div>
+    </div>
+  </section>
+
+  {# 関連案件 #}
+  <section class="app-card" style="margin-bottom:24px;">
+    <h2 style="font-size:16px; margin-bottom:16px;">関連案件（{{ deals.count }}件）</h2>
+    <div class="app-table-wrapper">
+      <table class="app-table">
+        <thead>
+          <tr>
+            <th>案件名</th>
+            <th>ステージ</th>
+            <th>金額</th>
+            <th>主担当</th>
+            <th>担当者</th>
+            <th>更新日時</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for deal in deals %}
+            <tr>
+              <td>
+                <a href="{% url 'deals:deal_detail' pk=deal.id %}" style="font-weight:600;">{{ deal.name }}</a>
+              </td>
+              <td><span class="app-status-badge">{{ deal.get_stage_display }}</span></td>
+              <td>{% if deal.amount is not None %}¥{{ deal.amount|floatformat:0 }}{% else %}-{% endif %}</td>
+              <td>{{ deal.primary_person|default:"-" }}</td>
+              <td>{{ deal.owner|default:"-" }}</td>
+              <td>{{ deal.updated_at|date:"Y-m-d H:i" }}</td>
+              <td>
+                <a href="{% url 'deals:deal_detail' pk=deal.id %}" class="app-btn app-btn--ghost app-btn--sm">詳細</a>
+              </td>
+            </tr>
+          {% empty %}
+            <tr>
+              <td colspan="7" class="app-muted" style="text-align:center; padding:16px;">紐づく案件はありません。</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  {# 所属コンタクト #}
+  <section class="app-card">
+    <h2 style="font-size:16px; margin-bottom:16px;">所属コンタクト（{{ contacts.count }}件）</h2>
+    <div class="app-table-wrapper">
+      <table class="app-table">
+        <thead>
+          <tr>
+            <th>氏名</th>
+            <th>役職</th>
+            <th>部署</th>
+            <th>メール</th>
+            <th>電話番号</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for contact in contacts %}
+            <tr>
+              <td>
+                <a href="{% url 'contacts:contact_detail' pk=contact.id %}" style="font-weight:600;">{{ contact.full_name }}</a>
+              </td>
+              <td>{{ contact.title|default:"-" }}</td>
+              <td>{{ contact.department|default:"-" }}</td>
+              <td>{{ contact.email|default:"-" }}</td>
+              <td>{{ contact.phone|default:"-" }}</td>
+              <td>
+                <a href="{% url 'contacts:contact_detail' pk=contact.id %}" class="app-btn app-btn--ghost app-btn--sm">詳細</a>
+              </td>
+            </tr>
+          {% empty %}
+            <tr>
+              <td colspan="6" class="app-muted" style="text-align:center; padding:16px;">所属するコンタクトはありません。</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+{% endblock %}

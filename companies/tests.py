@@ -1,7 +1,9 @@
 from django.contrib.admin.sites import AdminSite
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Permission
 from django.db import IntegrityError
 from django.test import TestCase
+from django.urls import reverse
 
 from companies.admin import CompanyAdmin, CompanyDuplicateCandidateAdmin
 from companies.models import Company, CompanyDuplicateCandidate
@@ -294,5 +296,148 @@ class CompanyServiceTests(TestCase):
         self.assertTrue(archived)
         comp.refresh_from_db()
         self.assertEqual(comp.status, Company.Status.ARCHIVED)
+
+
+class CompanyViewTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(
+            username="comp_user",
+            password="password",
+        )
+        self.user.user_permissions.add(
+            Permission.objects.get(codename="add_company"),
+            Permission.objects.get(codename="change_company"),
+            Permission.objects.get(codename="delete_company"),
+            Permission.objects.get(codename="merge_company"),
+        )
+        self.company = Company.objects.create(
+            organization="テスト株式会社",
+            domain="example.jp",
+            phone="03-1111-2222",
+            address="東京都千代田区",
+            website="https://example.jp",
+        )
+
+    def test_company_list_view(self):
+        # 未ログインはログインへ
+        resp = self.client.get(reverse("companies:company_list"))
+        self.assertEqual(resp.status_code, 302)
+
+        self.client.login(username="comp_user", password="password")
+        resp = self.client.get(reverse("companies:company_list"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "テスト株式会社")
+        self.assertContains(resp, "有効")  # get_status_display
+
+        # 検索
+        resp_search = self.client.get(reverse("companies:company_list"), {"q": "存在しない会社"})
+        self.assertEqual(resp_search.status_code, 200)
+        self.assertNotContains(resp_search, "テスト株式会社")
+
+    def test_company_detail_view(self):
+        self.client.login(username="comp_user", password="password")
+        resp = self.client.get(reverse("companies:company_detail", kwargs={"pk": self.company.pk}))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "テスト株式会社")
+        self.assertContains(resp, "03-1111-2222")
+
+    def test_company_create_and_update_view(self):
+        self.client.login(username="comp_user", password="password")
+        # 作成
+        resp = self.client.post(
+            reverse("companies:company_create"),
+            {
+                "organization": "新規設立株式会社",
+                "domain": "newco.jp",
+                "phone": "06-9999-8888",
+                "address": "大阪府大阪市",
+                "website": "https://newco.jp",
+            },
+        )
+        self.assertEqual(resp.status_code, 302)
+        new_co = Company.objects.get(organization="新規設立株式会社")
+        self.assertEqual(new_co.domain, "newco.jp")
+
+        # 編集
+        resp = self.client.post(
+            reverse("companies:company_update", kwargs={"pk": new_co.pk}),
+            {
+                "organization": "新規設立株式会社改",
+                "domain": "newco-kai.jp",
+                "phone": "06-9999-8888",
+                "address": "大阪府大阪市",
+                "website": "https://newco-kai.jp",
+            },
+        )
+        self.assertEqual(resp.status_code, 302)
+        new_co.refresh_from_db()
+        self.assertEqual(new_co.organization, "新規設立株式会社改")
+
+    def test_company_archive_view(self):
+        self.client.login(username="comp_user", password="password")
+        resp = self.client.post(reverse("companies:company_archive", kwargs={"pk": self.company.pk}))
+        self.assertEqual(resp.status_code, 302)
+        self.company.refresh_from_db()
+        self.assertEqual(self.company.status, Company.Status.ARCHIVED)
+
+    def test_company_duplicate_candidate_list_and_permissions(self):
+        # 権限なしユーザー
+        no_perm_user = get_user_model().objects.create_user(
+            username="no_perm_user", password="password"
+        )
+        self.client.login(username="no_perm_user", password="password")
+        resp = self.client.get(reverse("companies:company_candidate_list"))
+        self.assertEqual(resp.status_code, 403)
+
+        # 権限ありユーザー
+        self.client.login(username="comp_user", password="password")
+        target = Company.objects.create(organization="テスト株式会社類似", domain="example.jp")
+        candidate = CompanyDuplicateCandidate.objects.create(
+            company_a=self.company,
+            company_b=target,
+            score=90,
+            rank=CompanyDuplicateCandidate.Rank.POSSIBLE_HIGH,
+        )
+        resp = self.client.get(reverse("companies:company_candidate_list"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "テスト株式会社")
+        self.assertContains(resp, "テスト株式会社類似")
+
+    def test_company_merge_view_and_mark_different(self):
+        self.client.login(username="comp_user", password="password")
+        target = Company.objects.create(organization="テスト株式会社ターゲット", domain="target.jp")
+        cand = CompanyDuplicateCandidate.objects.create(
+            company_a=self.company,
+            company_b=target,
+            score=85,
+            rank=CompanyDuplicateCandidate.Rank.POSSIBLE_HIGH,
+        )
+
+        # 別会社としてマーク
+        resp = self.client.post(reverse("companies:company_mark_different", kwargs={"pk": cand.id}))
+        self.assertEqual(resp.status_code, 302)
+        cand.refresh_from_db()
+        self.assertEqual(cand.review_status, CompanyDuplicateCandidate.ReviewStatus.DIFFERENT_COMPANY)
+
+        # マージテスト用会社と候補作成
+        target_merge = Company.objects.create(organization="テストマージ対象株式会社", domain="target-merge.jp")
+        cand2 = CompanyDuplicateCandidate.objects.create(
+            company_a=self.company,
+            company_b=target_merge,
+            score=85,
+            rank=CompanyDuplicateCandidate.Rank.POSSIBLE_HIGH,
+        )
+        resp = self.client.post(
+            reverse("companies:company_merge"),
+            {
+                "surviving_company_id": str(self.company.id),
+                "target_company_ids": str(target_merge.id),
+            },
+        )
+        self.assertEqual(resp.status_code, 302)
+        target_merge.refresh_from_db()
+        self.assertEqual(target_merge.status, Company.Status.MERGED)
+        self.assertEqual(target_merge.merged_into, self.company)
+
 
 

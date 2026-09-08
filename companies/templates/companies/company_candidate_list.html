@@ -1,0 +1,95 @@
+{% extends "cards/app_base.html" %}
+{% load back_tags %}
+
+{% block title %}重複会社候補レビュー一覧 — FreeGroup2{% endblock %}
+
+{% block content %}
+  <div class="app-page-header">
+    <div>
+      <h1>重複会社候補レビュー</h1>
+    </div>
+    <div class="app-action-area">
+      {% back_all_link back %}
+      {% back_link back %}
+    </div>
+  </div>
+
+  <section class="app-card">
+    <p class="app-muted" style="margin-bottom:16px;">
+      システムが自動検出した類似・重複の可能性がある会社ペアの一覧です。確認の上、統合または別会社としての判定を行ってください。
+    </p>
+
+    <div class="app-table-wrapper">
+      <table class="app-table">
+        <thead>
+          <tr>
+            <th>会社 A</th>
+            <th>会社 B</th>
+            <th>一致スコア</th>
+            <th>判定ランク</th>
+            <th>検出日時</th>
+            <th style="width:180px;">操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for cand in candidates %}
+            <tr>
+              <td>
+                <a href="{% url 'companies:company_detail' pk=cand.company_a.id %}" target="_blank" style="font-weight:600;">
+                  {{ cand.company_a.organization }}
+                </a>
+                <div style="font-size:12px; color:var(--app-muted);">
+                  {{ cand.company_a.domain|default:"ドメインなし" }} / {{ cand.company_a.phone|default:"電話なし" }}
+                </div>
+              </td>
+              <td>
+                <a href="{% url 'companies:company_detail' pk=cand.company_b.id %}" target="_blank" style="font-weight:600;">
+                  {{ cand.company_b.organization }}
+                </a>
+                <div style="font-size:12px; color:var(--app-muted);">
+                  {{ cand.company_b.domain|default:"ドメインなし" }} / {{ cand.company_b.phone|default:"電話なし" }}
+                </div>
+              </td>
+              <td>
+                <strong>{{ cand.score }}</strong> 点
+              </td>
+              <td>
+                <span class="app-status-badge">{{ cand.get_rank_display }}</span>
+              </td>
+              <td>{{ cand.created_at|date:"Y-m-d H:i" }}</td>
+              <td>
+                <div style="display:flex; gap:6px;">
+                  <a href="{% url 'companies:company_merge' %}?candidate_id={{ cand.id }}" class="app-btn app-btn--primary app-btn--sm">
+                    統合確認
+                  </a>
+                  <form method="post" action="{% url 'companies:company_mark_different' pk=cand.id %}" style="margin:0;">
+                    {% csrf_token %}
+                    <button type="submit" class="app-btn app-btn--ghost app-btn--sm" onclick="return confirm('このペアを別会社として記録しますか？');">
+                      別会社
+                    </button>
+                  </form>
+                </div>
+              </td>
+            </tr>
+          {% empty %}
+            <tr>
+              <td colspan="6" class="app-muted" style="text-align:center; padding:24px;">現在、レビュー待ちの重複会社候補はありません。</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    {% if is_paginated %}
+      <div class="app-pagination" style="display:flex; justify-content:center; gap:8px; margin-top:16px;">
+        {% if page_obj.has_previous %}
+          <a href="?page={{ page_obj.previous_page_number }}" class="app-btn app-btn--secondary app-btn--sm">前へ</a>
+        {% endif %}
+        <span style="align-self:center; font-size:14px;">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span>
+        {% if page_obj.has_next %}
+          <a href="?page={{ page_obj.next_page_number }}" class="app-btn app-btn--secondary app-btn--sm">次へ</a>
+        {% endif %}
+      </div>
+    {% endif %}
+  </section>
+{% endblock %}

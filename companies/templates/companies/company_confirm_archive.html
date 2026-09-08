@@ -1,0 +1,31 @@
+{% extends "cards/app_base.html" %}
+{% load back_tags %}
+
+{% block title %}会社アーカイブ確認 — {{ company.organization }} — FreeGroup2{% endblock %}
+
+{% block content %}
+  <div class="app-page-header">
+    <div>
+      <h1>会社アーカイブ確認：{{ company.organization }}</h1>
+    </div>
+    <div class="app-action-area">
+      {% back_all_link back %}
+      {% back_link back %}
+    </div>
+  </div>
+
+  <section class="app-card" style="max-width: 600px; margin-left: 0; margin-right: auto;">
+    <p>この会社をアーカイブします。アーカイブ後も一覧の「アーカイブ済み」フィルタから確認できます。</p>
+    <p class="app-muted" style="font-size:13px;">※紐づくコンタクトや案件は削除されず保持されます。</p>
+
+    <form method="post" style="margin-top:20px;">
+      {% csrf_token %}
+      {% hidden_back_field back %}
+      <div class="app-action-area">
+        {% back_all_link back %}
+        {% back_link back %}
+        <button type="submit" class="app-btn app-btn--warning">アーカイブする</button>
+      </div>
+    </form>
+  </section>
+{% endblock %}

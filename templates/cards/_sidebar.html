@@ -96,6 +96,13 @@
       <a href="{% url 'mailings:list_list' %}?mode=export" role="menuitem">エクスポート</a>
     </div>
   </div>
+  <div class="app-sidebar__section-title" style="margin-top:16px;">案件・活動</div>
+  <a href="{% url 'deals:deal_list' %}" {% if active_menu == 'deals:deal_list' %}class="is-active"{% endif %}>案件一覧</a>
+  <a href="{% url 'activities:activity_list' %}" {% if active_menu == 'activities:activity_list' %}class="is-active"{% endif %}>活動一覧</a>
+  <a href="{% url 'companies:company_list' %}" {% if active_menu == 'companies:company_list' %}class="is-active"{% endif %}>会社一覧</a>
+  {% if perms.companies.merge_company %}
+    <a href="{% url 'companies:company_candidate_list' %}" {% if active_menu == 'companies:company_candidate_list' %}class="is-active"{% endif %}>重複会社候補</a>
+  {% endif %}
 </nav>
 
 <script>

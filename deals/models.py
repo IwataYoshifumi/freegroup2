@@ -179,6 +179,18 @@ class Deal(models.Model):
                 }
             )
 
+    @property
+    def expected_value(self):
+        """予想売上（金額 × 確度%）。未入力時は None。"""
+        if self.amount is None or self.probability is None:
+            return None
+        return int(self.amount * self.probability / 100)
+
+    def has_view_permission(self, user):
+        from deals.permissions import can_view_deal
+
+        return can_view_deal(user, self)
+
     def __str__(self):
         return self.name
 

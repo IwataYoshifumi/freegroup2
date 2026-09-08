@@ -1,0 +1,130 @@
+{% extends "cards/app_base.html" %}
+{% load back_tags %}
+
+{% block title %}活動一覧 — FreeGroup2{% endblock %}
+
+{% block content %}
+  {% url 'activities:activity_create' as create_url %}
+  <div class="app-page-header">
+    <div>
+      <h1>活動一覧</h1>
+    </div>
+    <div class="app-action-area">
+      {% back_all_link back %}
+      {% back_link back %}
+    </div>
+  </div>
+
+  <div class="app-action-area" style="justify-content:flex-start; margin-bottom:16px; gap:8px;">
+    {% if perms.activities.add_activity %}
+      <a href="{% append_back_url create_url back %}" class="app-btn app-btn--primary">活動新規作成</a>
+    {% endif %}
+    <a href="{% url 'activities:activity_list' %}?mode=daily" class="app-btn {% if current_mode == 'daily' %}app-btn--secondary{% else %}app-btn--ghost{% endif %}">本日の日報</a>
+    <a href="{% url 'activities:activity_list' %}?mode=all" class="app-btn {% if current_mode != 'daily' and not current_date %}app-btn--secondary{% else %}app-btn--ghost{% endif %}">全期間一覧</a>
+  </div>
+
+  <section class="app-card" style="margin-bottom:16px;">
+    <form method="get" class="app-filter-form" style="display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end;">
+      <div class="app-form__group" style="margin-bottom:0;">
+        <label class="app-form__label" for="filter-q">キーワード検索</label>
+        <input type="text" id="filter-q" name="q" value="{{ current_q }}" class="app-input" placeholder="内容・場所・案件名・パーソン名">
+      </div>
+      <div class="app-form__group" style="margin-bottom:0;">
+        <label class="app-form__label" for="filter-date">実施日</label>
+        <input type="date" id="filter-date" name="date" value="{{ current_date }}" class="app-input">
+      </div>
+      <div class="app-form__group" style="margin-bottom:0;">
+        <label class="app-form__label" for="filter-type">活動種別</label>
+        <select id="filter-type" name="activity_type" class="app-select">
+          <option value="">（すべて）</option>
+          {% for code, label in activity_types %}
+            <option value="{{ code }}" {% if current_activity_type == code %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="app-form__group" style="margin-bottom:0;">
+        <label class="app-form__label" for="filter-direction">方向</label>
+        <select id="filter-direction" name="direction" class="app-select">
+          <option value="">（すべて）</option>
+          {% for code, label in directions %}
+            <option value="{{ code }}" {% if current_direction == code %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="app-form__group" style="margin-bottom:0;">
+        <label class="app-form__label" for="filter-status">状態</label>
+        <select id="filter-status" name="status" class="app-select">
+          <option value="active" {% if current_status == "active" %}selected{% endif %}>有効な活動</option>
+          <option value="archived" {% if current_status == "archived" %}selected{% endif %}>アーカイブ済み</option>
+          <option value="all" {% if current_status == "all" %}selected{% endif %}>全件</option>
+        </select>
+      </div>
+      <div style="display:flex; gap:8px;">
+        <button type="submit" class="app-btn app-btn--secondary">絞り込み</button>
+        <a href="{% url 'activities:activity_list' %}" class="app-btn app-btn--ghost">リセット</a>
+      </div>
+    </form>
+  </section>
+
+  <section class="app-card">
+    <div class="app-table-wrapper">
+      <table class="app-table app-table--nowrap">
+        <thead>
+          <tr>
+            <th style="width:60px;">操作</th>
+            <th>実施日時</th>
+            <th>種別</th>
+            <th>方向</th>
+            <th>社内担当</th>
+            <th>相手方参加者</th>
+            <th>関連案件</th>
+            <th>場所・URL</th>
+            <th>内容メモ</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for activity in activities %}
+            {% url 'activities:activity_detail' pk=activity.id as detail_url %}
+            <tr>
+              <td>
+                <a href="{% append_back_url detail_url back %}" class="app-btn app-btn--ghost app-btn--sm">詳細</a>
+              </td>
+              <td>{{ activity.occurred_at|date:"Y-m-d H:i" }}</td>
+              <td><span class="app-status-badge">{{ activity.get_activity_type_display }}</span></td>
+              <td>{{ activity.get_direction_display|default:"-" }}</td>
+              <td>{{ activity.user|default:"-" }}</td>
+              <td>
+                {% for ap in activity.activity_persons.all %}
+                  {{ ap.person }}{% if not forloop.last %}, {% endif %}
+                {% empty %}-{% endfor %}
+              </td>
+              <td>
+                {% if activity.deal %}
+                  <a href="{% url 'deals:deal_detail' pk=activity.deal.id %}">{{ activity.deal.name }}</a>
+                {% else %}-{% endif %}
+              </td>
+              <td>{{ activity.place|default:"-" }}</td>
+              <td>{{ activity.memo|truncatechars:35|default:"-" }}</td>
+            </tr>
+          {% empty %}
+            <tr>
+              <td colspan="9" class="app-muted" style="text-align:center; padding:24px;">該当する活動記録がありません。</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    {% if is_paginated %}
+      <div class="app-pagination" style="display:flex; justify-content:center; gap:8px; margin-top:16px;">
+        {% if page_obj.has_previous %}
+          <a href="?page={{ page_obj.previous_page_number }}{% if current_q %}&q={{ current_q }}{% endif %}{% if current_date %}&date={{ current_date }}{% endif %}{% if current_activity_type %}&activity_type={{ current_activity_type }}{% endif %}{% if current_direction %}&direction={{ current_direction }}{% endif %}{% if current_status %}&status={{ current_status }}{% endif %}" class="app-btn app-btn--secondary app-btn--sm">前へ</a>
+        {% endif %}
+        <span style="align-self:center; font-size:14px;">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span>
+        {% if page_obj.has_next %}
+          <a href="?page={{ page_obj.next_page_number }}{% if current_q %}&q={{ current_q }}{% endif %}{% if current_date %}&date={{ current_date }}{% endif %}{% if current_activity_type %}&activity_type={{ current_activity_type }}{% endif %}{% if current_direction %}&direction={{ current_direction }}{% endif %}{% if current_status %}&status={{ current_status }}{% endif %}" class="app-btn app-btn--secondary app-btn--sm">次へ</a>
+        {% endif %}
+      </div>
+    {% endif %}
+  </section>
+{% endblock %}

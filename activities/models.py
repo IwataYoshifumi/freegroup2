@@ -100,6 +100,11 @@ class Activity(models.Model):
         if self.occurred_at and self.occurred_at > timezone.now():
             raise ValidationError({"occurred_at": "実施日時に未来の日時は指定できません。"})
 
+    def has_view_permission(self, user):
+        from activities.permissions import can_view_activity
+
+        return can_view_activity(user, self)
+
     def __str__(self):
         date_str = timezone.localtime(self.occurred_at).strftime("%Y-%m-%d") if self.occurred_at else ""
         return f"{date_str} {self.get_activity_type_display()}"

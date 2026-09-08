@@ -5,8 +5,10 @@ from django.conf import settings
 from django.contrib.admin.sites import AdminSite
 from django.contrib.auth import get_user_model
 from django.core.files.base import ContentFile
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError, transaction
 from django.test import TestCase, TransactionTestCase, override_settings
+from django.urls import reverse
 from django.utils import timezone
 
 from activities.models import Activity
@@ -98,8 +100,6 @@ class AttachmentStorageTests(TestCase):
 
     def tearDown(self):
         super().tearDown()
-        if os.path.exists(settings.PROTECTED_MEDIA_ROOT):
-            shutil.rmtree(settings.PROTECTED_MEDIA_ROOT, ignore_errors=True)
 
 
 class AttachmentDeletionSignalTests(TransactionTestCase):
@@ -248,8 +248,6 @@ class AttachmentServiceTests(TransactionTestCase):
     def tearDown(self):
         self.settings_override.disable()
         shutil.rmtree(self.temp_dir, ignore_errors=True)
-        if os.path.exists(settings.PROTECTED_MEDIA_ROOT):
-            shutil.rmtree(settings.PROTECTED_MEDIA_ROOT, ignore_errors=True)
 
     def test_can_view_attachment(self):
         from attachments.permissions import can_view_attachment
@@ -296,4 +294,115 @@ class AttachmentServiceTests(TransactionTestCase):
         self.assertEqual(log.data["target_type"], "deal")
         self.assertEqual(log.data["target_id"], str(self.deal.id))
         self.assertEqual(log.data["target_name"], "添付ファイルテスト案件")
+
+
+class AttachmentViewTests(TestCase):
+    def setUp(self):
+        os.makedirs(settings.PROTECTED_MEDIA_ROOT, exist_ok=True)
+        self.owner = User.objects.create_user(username="att_owner", password="password")
+        self.attendee = User.objects.create_user(username="att_attendee", password="password")
+        self.outsider = User.objects.create_user(username="att_outsider", password="password")
+
+        from django.contrib.auth.models import Permission
+        for u in (self.owner, self.attendee):
+            u.user_permissions.add(
+                Permission.objects.get(codename="add_attachment"),
+                Permission.objects.get(codename="change_attachment"),
+                Permission.objects.get(codename="delete_attachment"),
+                Permission.objects.get(codename="view_attachment"),
+                Permission.objects.get(codename="change_deal"),
+                Permission.objects.get(codename="add_deal"),
+            )
+
+        self.person = Person.objects.create()
+        self.deal = Deal.objects.create(name="ViewTest案件", primary_person=self.person, owner=self.owner)
+        from deals.models import DealUser, UserRole
+        DealUser.objects.create(deal=self.deal, user=self.attendee, role=UserRole.SUPPORT)
+
+        self.attachment = Attachment.objects.create(
+            deal=self.deal,
+            file=ContentFile(b"Test content for download", name="提案書_テスト.pdf"),
+            original_filename="提案書_テスト.pdf",
+            uploaded_by=self.owner,
+        )
+
+    def tearDown(self):
+        super().tearDown()
+        try:
+            if self.attachment.file and self.attachment.file.storage.exists(self.attachment.file.name):
+                self.attachment.file.delete(save=False)
+        except Exception:
+            pass
+
+    def test_protected_file_download_view(self):
+        url = reverse("attachments:attachment_download", kwargs={"pk": self.attachment.pk})
+
+        # 未ログインはログインへ
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 302)
+
+        # 部外者は403
+        self.client.login(username="att_outsider", password="password")
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 403)
+
+        # 案件オーナーはダウンロード成功＆RFC 5987ヘッダー検証
+        self.client.login(username="att_owner", password="password")
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("filename*=UTF-8''", resp.headers.get("Content-Disposition", ""))
+        resp.close()
+
+    def test_attachment_upload_view(self):
+        self.client.login(username="att_owner", password="password")
+        url = reverse("attachments:attachment_upload")
+
+        # 正常アップロード
+        test_file = SimpleUploadedFile("spec.txt", b"spec details", content_type="text/plain")
+        resp = self.client.post(
+            url,
+            {
+                "deal_id": str(self.deal.id),
+                "file": test_file,
+                "memo": "仕様書メモ",
+            },
+        )
+        self.assertEqual(resp.status_code, 302)
+        new_att = Attachment.objects.filter(deal=self.deal, original_filename="spec.txt").first()
+        self.assertIsNotNone(new_att)
+        self.assertEqual(new_att.memo, "仕様書メモ")
+
+        # 危険な拡張子（.exe）の拒否
+        bad_file = SimpleUploadedFile("virus.exe", b"binary data", content_type="application/octet-stream")
+        resp_bad = self.client.post(
+            url,
+            {
+                "deal_id": str(self.deal.id),
+                "file": bad_file,
+            },
+        )
+        self.assertEqual(resp_bad.status_code, 302)
+        self.assertFalse(Attachment.objects.filter(deal=self.deal, original_filename="virus.exe").exists())
+
+    def test_attachment_delete_view_permissions(self):
+        # 同席者は削除権限なし（403）
+        self.client.login(username="att_attendee", password="password")
+        url = reverse("attachments:attachment_delete", kwargs={"pk": self.attachment.pk})
+        resp = self.client.post(url)
+        self.assertEqual(resp.status_code, 403)
+
+        # オーナーは削除成功
+        self.client.login(username="att_owner", password="password")
+        resp = self.client.post(url)
+        self.assertEqual(resp.status_code, 302)
+        self.assertFalse(Attachment.objects.filter(pk=self.attachment.pk).exists())
+
+    def test_attachment_memo_update_view(self):
+        self.client.login(username="att_owner", password="password")
+        url = reverse("attachments:attachment_update_memo", kwargs={"pk": self.attachment.pk})
+        resp = self.client.post(url, {"memo": "更新されたメモ"})
+        self.assertEqual(resp.status_code, 302)
+        self.attachment.refresh_from_db()
+        self.assertEqual(self.attachment.memo, "更新されたメモ")
+
 

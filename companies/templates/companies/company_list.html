@@ -1,0 +1,106 @@
+{% extends "cards/app_base.html" %}
+{% load back_tags %}
+
+{% block title %}会社一覧 — FreeGroup2{% endblock %}
+
+{% block content %}
+  {% url 'companies:company_create' as create_url %}
+  <div class="app-page-header">
+    <div>
+      <h1>会社一覧</h1>
+    </div>
+    <div class="app-action-area">
+      {% back_all_link back %}
+      {% back_link back %}
+    </div>
+  </div>
+
+  <div class="app-action-area" style="justify-content:flex-start; margin-bottom:16px; gap:8px;">
+    {% if perms.companies.add_company %}
+      <a href="{% append_back_url create_url back %}" class="app-btn app-btn--primary">会社新規作成</a>
+    {% endif %}
+    {% if perms.companies.merge_company %}
+      <a href="{% url 'companies:company_candidate_list' %}" class="app-btn app-btn--secondary">重複会社候補</a>
+    {% endif %}
+  </div>
+
+  <section class="app-card" style="margin-bottom:16px;">
+    <form method="get" class="app-filter-form" style="display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end;">
+      <div class="app-form__group" style="margin-bottom:0;">
+        <label class="app-form__label" for="filter-q">キーワード検索</label>
+        <input type="text" id="filter-q" name="q" value="{{ current_q }}" class="app-input" placeholder="会社名・ドメイン・電話・住所">
+      </div>
+      <div class="app-form__group" style="margin-bottom:0;">
+        <label class="app-form__label" for="filter-status">状態</label>
+        <select id="filter-status" name="status" class="app-select">
+          <option value="active" {% if current_status == "active" %}selected{% endif %}>有効な会社</option>
+          <option value="archived" {% if current_status == "archived" %}selected{% endif %}>アーカイブ済み</option>
+          <option value="merged" {% if current_status == "merged" %}selected{% endif %}>統合済み</option>
+          <option value="all" {% if current_status == "all" %}selected{% endif %}>全件</option>
+        </select>
+      </div>
+      <div style="display:flex; gap:8px;">
+        <button type="submit" class="app-btn app-btn--secondary">絞り込み</button>
+        <a href="{% url 'companies:company_list' %}" class="app-btn app-btn--ghost">リセット</a>
+      </div>
+    </form>
+  </section>
+
+  <section class="app-card">
+    <div class="app-table-wrapper">
+      <table class="app-table app-table--nowrap">
+        <thead>
+          <tr>
+            <th style="width:60px;">操作</th>
+            <th>会社名</th>
+            <th>ドメイン</th>
+            <th>電話番号</th>
+            <th>住所</th>
+            <th>Webサイト</th>
+            <th>状態</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for company in companies %}
+            {% url 'companies:company_detail' pk=company.id as detail_url %}
+            <tr>
+              <td>
+                <a href="{% append_back_url detail_url back %}" class="app-btn app-btn--ghost app-btn--sm">詳細</a>
+              </td>
+              <td>
+                <a href="{% append_back_url detail_url back %}" style="font-weight:600; color:var(--app-color-primary);">{{ company.organization }}</a>
+              </td>
+              <td>{{ company.domain|default:"-" }}</td>
+              <td>{{ company.phone|default:"-" }}</td>
+              <td>{{ company.address|truncatechars:30|default:"-" }}</td>
+              <td>
+                {% if company.website %}
+                  <a href="{{ company.website }}" target="_blank" rel="noopener noreferrer">リンク</a>
+                {% else %}-{% endif %}
+              </td>
+              <td>
+                <span class="app-status-badge">{{ company.get_status_display }}</span>
+              </td>
+            </tr>
+          {% empty %}
+            <tr>
+              <td colspan="7" class="app-muted" style="text-align:center; padding:24px;">該当する会社がありません。</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    {% if is_paginated %}
+      <div class="app-pagination" style="display:flex; justify-content:center; gap:8px; margin-top:16px;">
+        {% if page_obj.has_previous %}
+          <a href="?page={{ page_obj.previous_page_number }}{% if current_q %}&q={{ current_q }}{% endif %}{% if current_status %}&status={{ current_status }}{% endif %}" class="app-btn app-btn--secondary app-btn--sm">前へ</a>
+        {% endif %}
+        <span style="align-self:center; font-size:14px;">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span>
+        {% if page_obj.has_next %}
+          <a href="?page={{ page_obj.next_page_number }}{% if current_q %}&q={{ current_q }}{% endif %}{% if current_status %}&status={{ current_status }}{% endif %}" class="app-btn app-btn--secondary app-btn--sm">次へ</a>
+        {% endif %}
+      </div>
+    {% endif %}
+  </section>
+{% endblock %}

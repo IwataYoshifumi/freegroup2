@@ -1,13 +1,17 @@
 from datetime import timedelta
 from django.contrib.admin.sites import AdminSite
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Permission
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError
 from django.test import TestCase
+from django.urls import reverse
 from django.utils import timezone
 
+from companies.models import Company
+from contacts.models import Contact
 from deals.admin import DealAdmin, DealPersonAdmin, DealUserAdmin
-from deals.models import Deal, DealPerson, DealUser, PersonRole, UserRole
+from deals.models import Deal, DealPerson, DealType, DealUser, PersonRole, Stage, UserRole
 from persons.models import Person
 
 User = get_user_model()
@@ -348,4 +352,152 @@ class DealPermissionTests(TestCase):
         qs_outsider = visible_deals_for(self.outsider)
         self.assertEqual(qs_outsider.count(), 1)
         self.assertEqual(qs_outsider.first(), deal2)
+
+
+class DealViewTests(TestCase):
+    """deals View層の認可・表示・画面遷移の検証（仕様書 §2.1, §2.5, §2.6, §7.1）。"""
+
+    def setUp(self):
+        self.owner = User.objects.create_user(username="deal_owner", password="password")
+        self.editor = User.objects.create_user(username="deal_editor", password="password")
+        self.outsider = User.objects.create_user(username="deal_outsider", password="password")
+        self.perm_add = Permission.objects.get(codename="add_deal")
+        self.perm_change = Permission.objects.get(codename="change_deal")
+        self.perm_view_all = Permission.objects.get(codename="view_all_deals")
+        self.perm_edit_all = Permission.objects.get(codename="edit_all_deals")
+
+        self.owner.user_permissions.add(self.perm_add, self.perm_change)
+        self.editor.user_permissions.add(self.perm_add, self.perm_change)
+
+        self.person = Person.objects.create()
+        self.company = Company.objects.create(organization="テスト株式会社")
+        self.contact = Contact.objects.create(person=self.person, company=self.company, last_name="田中", first_name="太郎")
+        self.person.primary_contact = self.contact
+        self.person.save(update_fields=["primary_contact"])
+
+        self.deal = Deal.objects.create(
+            name="基幹システム導入",
+            primary_person=self.person,
+            company=self.company,
+            owner=self.owner,
+            stage=Stage.QUOTATION,
+            amount=5000000,
+            probability=80,
+        )
+        DealUser.objects.create(deal=self.deal, user=self.editor, role=UserRole.SUPPORT)
+
+    def test_deal_list_view_anonymous_redirect(self):
+        url = reverse("deals:deal_list")
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 302)
+
+    def test_deal_list_view_authenticated(self):
+        self.client.login(username="deal_owner", password="password")
+        response = self.client.get(reverse("deals:deal_list"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "基幹システム導入")
+        self.assertContains(response, "テスト株式会社")
+        self.assertContains(response, "見積提示")
+
+    def test_deal_detail_view_permissions(self):
+        # 権限あり（owner）
+        self.client.login(username="deal_owner", password="password")
+        response = self.client.get(reverse("deals:deal_detail", kwargs={"pk": self.deal.pk}))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "基幹システム導入")
+
+        # 権限あり（DealUser）
+        self.client.login(username="deal_editor", password="password")
+        response = self.client.get(reverse("deals:deal_detail", kwargs={"pk": self.deal.pk}))
+        self.assertEqual(response.status_code, 200)
+
+        # 権限なし（outsider）-> 403
+        self.client.login(username="deal_outsider", password="password")
+        response = self.client.get(reverse("deals:deal_detail", kwargs={"pk": self.deal.pk}))
+        self.assertEqual(response.status_code, 403)
+
+    def test_deal_create_view_and_post(self):
+        self.client.login(username="deal_owner", password="password")
+        url = reverse("deals:deal_create")
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+
+        post_data = {
+            "name": "新規クラウド移行案件",
+            "primary_person": str(self.person.id),
+            "stage": Stage.INITIAL_MEETING,
+            "probability": 50,
+            "deal_type": DealType.NEW,
+            "amount": 3000000,
+        }
+        response = self.client.post(url, data=post_data)
+        self.assertEqual(response.status_code, 302)
+        new_deal = Deal.objects.get(name="新規クラウド移行案件")
+        self.assertEqual(new_deal.owner, self.owner)
+        self.assertEqual(new_deal.created_by, self.owner)
+        # primary_person から company が自動補完されたか検証
+        self.assertEqual(new_deal.company, self.company)
+
+    def test_deal_update_view(self):
+        self.client.login(username="deal_owner", password="password")
+        url = reverse("deals:deal_update", kwargs={"pk": self.deal.pk})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+
+        response = self.client.post(url, data={
+            "name": "基幹システム導入（変更後）",
+            "company": str(self.company.id),
+            "stage": Stage.UNDER_REVIEW,
+            "probability": 70,
+            "amount": 6000000,
+        })
+        self.assertEqual(response.status_code, 302)
+        self.deal.refresh_from_db()
+        self.assertEqual(self.deal.name, "基幹システム導入（変更後）")
+        self.assertEqual(self.deal.probability, 70)
+
+    def test_deal_close_view(self):
+        self.client.login(username="deal_owner", password="password")
+        url = reverse("deals:deal_close", kwargs={"pk": self.deal.pk})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+
+        # 失注実行
+        response = self.client.post(url, data={
+            "stage": Stage.LOST,
+            "closed_at": str(timezone.localdate()),
+            "lost_reason": "予算超過のため見送り",
+        })
+        self.assertEqual(response.status_code, 302)
+        self.deal.refresh_from_db()
+        self.assertEqual(self.deal.stage, Stage.LOST)
+        self.assertEqual(self.deal.lost_reason, "予算超過のため見送り")
+
+    def test_deal_reassign_owner_view(self):
+        self.client.login(username="deal_owner", password="password")
+        url = reverse("deals:deal_reassign_owner", kwargs={"pk": self.deal.pk})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+
+        # editor は DealUser にいる
+        self.assertTrue(DealUser.objects.filter(deal=self.deal, user=self.editor).exists())
+
+        response = self.client.post(url, data={"new_owner": str(self.editor.id)})
+        self.assertEqual(response.status_code, 302)
+        self.deal.refresh_from_db()
+        self.assertEqual(self.deal.owner, self.editor)
+        # DealUser から自動除外されていること
+        self.assertFalse(DealUser.objects.filter(deal=self.deal, user=self.editor).exists())
+
+    def test_deal_archive_view(self):
+        self.client.login(username="deal_owner", password="password")
+        url = reverse("deals:deal_archive", kwargs={"pk": self.deal.pk})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+
+        response = self.client.post(url)
+        self.assertEqual(response.status_code, 302)
+        self.deal.refresh_from_db()
+        self.assertTrue(self.deal.is_archived)
+
 

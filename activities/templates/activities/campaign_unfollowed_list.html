@@ -1,0 +1,88 @@
+{% extends "cards/app_base.html" %}
+{% load back_tags %}
+
+{% block title %}キャンペーン未フォローパーソン一覧 — {{ campaign.name }} — FreeGroup2{% endblock %}
+
+{% block content %}
+  <div class="app-page-header">
+    <div>
+      <h1>未フォローパーソン一覧</h1>
+      <div style="font-size:13px; color:var(--app-muted); margin-top:4px;">
+        対象キャンペーン: <strong>{{ campaign.name }}</strong>
+      </div>
+    </div>
+    <div class="app-action-area">
+      {% back_all_link back %}
+      {% back_link back %}
+    </div>
+  </div>
+
+  <section class="app-card">
+    <p class="app-muted" style="margin-bottom:16px;">
+      このキャンペーン内のリンクをクリックしたものの、まだ活動記録が残されていないパーソンの一覧です。
+    </p>
+
+    <div class="app-table-wrapper">
+      <table class="app-table app-table--nowrap">
+        <thead>
+          <tr>
+            <th>氏名</th>
+            <th>会社名</th>
+            <th>メール</th>
+            <th>役職</th>
+            <th>状態</th>
+            <th style="width:120px;">操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for person in persons %}
+            {% with contact=person.primary_contact %}
+              <tr>
+                <td>
+                  <strong>{{ person }}</strong>
+                </td>
+                <td>
+                  {% if contact and contact.company %}
+                    {{ contact.company.organization }}
+                  {% elif contact and contact.organization %}
+                    {{ contact.organization }}
+                  {% else %}-{% endif %}
+                </td>
+                <td>
+                  {% if contact and contact.email %}{{ contact.email }}{% else %}-{% endif %}
+                </td>
+                <td>
+                  {% if contact and contact.title %}{{ contact.title }}{% else %}-{% endif %}
+                </td>
+                <td>
+                  <span class="app-status-badge">{{ person.get_status_display }}</span>
+                </td>
+                <td>
+                  <a href="{% url 'activities:activity_create' %}?person_id={{ person.id }}&campaign_id={{ campaign.id }}" class="app-btn app-btn--primary app-btn--sm">
+                    活動を記録
+                  </a>
+                </td>
+              </tr>
+            {% endwith %}
+          {% empty %}
+            <tr>
+              <td colspan="6" class="app-muted" style="text-align:center; padding:24px;">未フォローのパーソンはありません。全員フォロー済みです。</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    {% if is_paginated %}
+      <div class="app-pagination" style="display:flex; justify-content:center; gap:8px; margin-top:16px;">
+        {% if page_obj.has_previous %}
+          <a href="?page={{ page_obj.previous_page_number }}" class="app-btn app-btn--secondary app-btn--sm">前へ</a>
+        {% endif %}
+        <span style="align-self:center; font-size:14px;">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span>
+        {% if page_obj.has_next %}
+          <a href="?page={{ page_obj.next_page_number }}" class="app-btn app-btn--secondary app-btn--sm">次へ</a>
+        {% endif %}
+      </div>
+    {% endif %}
+  </section>
+{% endblock %}

@@ -1,0 +1,66 @@
+{% extends "cards/app_base.html" %}
+{% load back_tags %}
+
+{% block title %}会社統合確認 — FreeGroup2{% endblock %}
+
+{% block content %}
+  <div class="app-page-header">
+    <div>
+      <h1>会社統合（マージ）確認</h1>
+    </div>
+    <div class="app-action-area">
+      {% back_all_link back %}
+      {% back_link back %}
+    </div>
+  </div>
+
+  <section class="app-card" style="max-width: 800px; margin-left: 0; margin-right: auto;">
+    <div class="app-alert app-alert--warning" style="margin-bottom:20px;">
+      <strong>ご注意:</strong> 統合を実行すると、統合対象会社のすべてのコンタクトおよび案件が存続会社へ移行され、統合対象会社のステータスは「統合済み」に変更されます。この操作は慎重に行ってください。
+    </div>
+
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px; margin-bottom:24px;">
+      <div style="background:var(--app-surface-subtle, #f8fafc); padding:16px; border-radius:8px; border:2px solid var(--app-color-primary, #3b82f6);">
+        <h3 style="font-size:15px; margin-top:0; color:var(--app-color-primary, #3b82f6);">存続会社（残る会社）</h3>
+        <div style="font-size:18px; font-weight:600; margin-bottom:8px;">{{ surviving_company.organization }}</div>
+        <div><strong>ドメイン:</strong> {{ surviving_company.domain|default:"未設定" }}</div>
+        <div><strong>電話:</strong> {{ surviving_company.phone|default:"未設定" }}</div>
+        <div><strong>住所:</strong> {{ surviving_company.address|default:"未設定" }}</div>
+        <div><strong>登録日時:</strong> {{ surviving_company.created_at|date:"Y-m-d H:i" }}</div>
+        <div style="margin-top:8px; font-size:13px; color:var(--app-muted);">
+          所属コンタクト: {{ surviving_company.contacts.count }}件 / 案件: {{ surviving_company.deals.count }}件
+        </div>
+      </div>
+
+      <div style="background:var(--app-surface-subtle, #f8fafc); padding:16px; border-radius:8px; border:1px solid var(--app-border, #e2e8f0);">
+        <h3 style="font-size:15px; margin-top:0; color:var(--app-color-danger, #ef4444);">統合対象会社（統合されて消える会社）</h3>
+        {% for target in target_companies %}
+          <div style="margin-bottom:12px; padding-bottom:8px; border-bottom:1px solid #e2e8f0;">
+            <div style="font-size:16px; font-weight:600;">{{ target.organization }}</div>
+            <div><strong>ドメイン:</strong> {{ target.domain|default:"未設定" }}</div>
+            <div><strong>電話:</strong> {{ target.phone|default:"未設定" }}</div>
+            <div><strong>住所:</strong> {{ target.address|default:"未設定" }}</div>
+            <div><strong>登録日時:</strong> {{ target.created_at|date:"Y-m-d H:i" }}</div>
+            <div style="margin-top:4px; font-size:13px; color:var(--app-muted);">
+              所属コンタクト: {{ target.contacts.count }}件 / 案件: {{ target.deals.count }}件
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <form method="post" action="{% url 'companies:company_merge' %}">
+      {% csrf_token %}
+      {{ form.surviving_company_id }}
+      {{ form.target_company_ids }}
+
+      <div class="app-action-area" style="justify-content:flex-end;">
+        {% back_all_link back %}
+        {% back_link back %}
+        <button type="submit" class="app-btn app-btn--primary" onclick="return confirm('本当に統合を実行しますか？');">
+          上記の内容で統合を実行する
+        </button>
+      </div>
+    </form>
+  </section>
+{% endblock %}
