@@ -17,6 +17,16 @@
     </div>
   </div>
 
+  {% if messages %}
+    <div style="display:flex; flex-direction:column; gap:10px; margin-bottom:16px;">
+      {% for message in messages %}
+        <div class="app-alert {% if message.tags == 'error' %}app-alert--danger{% elif message.tags == 'warning' %}app-alert--warning{% else %}app-alert--info{% endif %}">
+          {{ message }}
+        </div>
+      {% endfor %}
+    </div>
+  {% endif %}
+
   <div style="display:flex; flex-direction:column; gap:20px;">
     {% for group in groups %}
       <section class="app-card" style="margin-bottom:0;">
