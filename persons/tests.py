@@ -1719,7 +1719,7 @@ class PersonListSortTests(TestCase):
         sorted_qs = _apply_person_list_sort(qs, {"sort": "status,-phonetic_name"})
         self.assertEqual(
             sorted_qs.query.order_by,
-            ("status", "-primary_contact__phonetic_name", "pk"),
+            ("status", "-primary_contact__phonetic_name", "primary_contact__full_name", "pk"),
         )
 
     def test_person_list_html_renders_phonetic_name_column_and_sort_options(self):
