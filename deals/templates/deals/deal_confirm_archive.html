@@ -1,10 +1,10 @@
-{% extends "cards/app_base.html" %}
+{% extends "deals/app_base.html" %}
 {% load back_tags %}
 
 {% block title %}案件アーカイブ確認 — {{ deal.name }} — FreeGroup2{% endblock %}
 
 {% block content %}
-  <div class="app-page-header">
+  <div class="app-page-header" style="max-width: 840px; margin-left: 0; margin-right: auto; margin-bottom: 16px;">
     <div>
       <h1>案件アーカイブ確認：{{ deal.name }}</h1>
     </div>
@@ -14,7 +14,7 @@
     </div>
   </div>
 
-  <section class="app-card" style="max-width: 600px; margin-left: 0; margin-right: auto;">
+  <section class="app-card" style="max-width: 840px; margin-left: 0; margin-right: auto;">
     <p>この案件をアーカイブします。アーカイブ後も一覧の「アーカイブ済み」フィルタから確認できます。</p>
     <p class="app-muted" style="font-size:13px;">※紐づく活動記録や添付ファイルは削除されず保持されます。</p>
 

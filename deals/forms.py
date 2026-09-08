@@ -28,19 +28,33 @@ class DealForm(forms.ModelForm):
             "source_campaign",
             "memo",
         ]
+        labels = {
+            "name": "案件名",
+            "primary_person": "相手方主担当（パーソン）",
+            "company": "会社名",
+            "owner": "社内担当者",
+            "stage": "ステージ",
+            "probability": "確度（%）",
+            "deal_type": "商談種別",
+            "amount": "金額（円）",
+            "expected_close_date": "成約目標日",
+            "lead_source": "流入経路",
+            "source_campaign": "流入元キャンペーン",
+            "memo": "メモ",
+        }
         widgets = {
             "name": forms.TextInput(attrs={"class": "app-input", "placeholder": "案件名を入力"}),
-            "primary_person": forms.Select(attrs={"class": "app-select"}),
-            "company": forms.Select(attrs={"class": "app-select"}),
-            "owner": forms.Select(attrs={"class": "app-select"}),
-            "stage": forms.Select(attrs={"class": "app-select"}),
+            "primary_person": forms.Select(attrs={"class": "app-select app-input"}),
+            "company": forms.Select(attrs={"class": "app-select app-input"}),
+            "owner": forms.Select(attrs={"class": "app-select app-input"}),
+            "stage": forms.Select(attrs={"class": "app-select app-input"}),
             "probability": forms.NumberInput(attrs={"class": "app-input", "min": 0, "max": 100, "placeholder": "0〜100"}),
-            "deal_type": forms.Select(attrs={"class": "app-select"}),
+            "deal_type": forms.Select(attrs={"class": "app-select app-input"}),
             "amount": forms.NumberInput(attrs={"class": "app-input", "min": 0, "placeholder": "金額（円）"}),
-            "expected_close_date": forms.DateInput(attrs={"class": "app-input", "type": "date"}),
-            "lead_source": forms.Select(attrs={"class": "app-select"}),
-            "source_campaign": forms.Select(attrs={"class": "app-select"}),
-            "memo": forms.Textarea(attrs={"class": "app-textarea", "rows": 4}),
+            "expected_close_date": forms.DateInput(attrs={"class": "app-input app-input--date", "type": "date"}),
+            "lead_source": forms.Select(attrs={"class": "app-select app-input"}),
+            "source_campaign": forms.Select(attrs={"class": "app-select app-input"}),
+            "memo": forms.Textarea(attrs={"class": "app-textarea app-input", "rows": 4}),
         }
 
     def clean(self):
@@ -82,17 +96,29 @@ class DealUpdateForm(forms.ModelForm):
             "source_campaign",
             "memo",
         ]
+        labels = {
+            "name": "案件名",
+            "company": "会社名",
+            "stage": "ステージ",
+            "probability": "確度（%）",
+            "deal_type": "商談種別",
+            "amount": "金額（円）",
+            "expected_close_date": "成約目標日",
+            "lead_source": "流入経路",
+            "source_campaign": "流入元キャンペーン",
+            "memo": "メモ",
+        }
         widgets = {
             "name": forms.TextInput(attrs={"class": "app-input"}),
-            "company": forms.Select(attrs={"class": "app-select"}),
-            "stage": forms.Select(attrs={"class": "app-select"}),
+            "company": forms.Select(attrs={"class": "app-select app-input"}),
+            "stage": forms.Select(attrs={"class": "app-select app-input"}),
             "probability": forms.NumberInput(attrs={"class": "app-input", "min": 0, "max": 100}),
-            "deal_type": forms.Select(attrs={"class": "app-select"}),
+            "deal_type": forms.Select(attrs={"class": "app-select app-input"}),
             "amount": forms.NumberInput(attrs={"class": "app-input", "min": 0}),
-            "expected_close_date": forms.DateInput(attrs={"class": "app-input", "type": "date"}),
-            "lead_source": forms.Select(attrs={"class": "app-select"}),
-            "source_campaign": forms.Select(attrs={"class": "app-select"}),
-            "memo": forms.Textarea(attrs={"class": "app-textarea", "rows": 4}),
+            "expected_close_date": forms.DateInput(attrs={"class": "app-input app-input--date", "type": "date"}),
+            "lead_source": forms.Select(attrs={"class": "app-select app-input"}),
+            "source_campaign": forms.Select(attrs={"class": "app-select app-input"}),
+            "memo": forms.Textarea(attrs={"class": "app-textarea app-input", "rows": 4}),
         }
 
     def clean(self):
@@ -111,12 +137,12 @@ class DealCloseForm(forms.Form):
 
     stage = forms.ChoiceField(
         choices=[(Stage.WON, "受注"), (Stage.LOST, "失注")],
-        widget=forms.Select(attrs={"class": "app-select"}),
+        widget=forms.Select(attrs={"class": "app-select app-input"}),
         label="クローズ種別",
     )
     closed_at = forms.DateField(
         required=False,
-        widget=forms.DateInput(attrs={"class": "app-input", "type": "date"}),
+        widget=forms.DateInput(attrs={"class": "app-input app-input--date", "type": "date"}),
         label="成約・失注確定日",
         help_text="空欄の場合は本日の日付が設定されます",
     )
@@ -151,7 +177,7 @@ class DealReassignOwnerForm(forms.Form):
 
     new_owner = forms.ModelChoiceField(
         queryset=User.objects.filter(is_active=True),
-        widget=forms.Select(attrs={"class": "app-select"}),
+        widget=forms.Select(attrs={"class": "app-select app-input"}),
         label="新担当者（社内）",
     )
 
@@ -161,7 +187,7 @@ class DealReassignPrimaryPersonForm(forms.Form):
 
     new_person = forms.ModelChoiceField(
         queryset=Person.objects.all(),
-        widget=forms.Select(attrs={"class": "app-select"}),
+        widget=forms.Select(attrs={"class": "app-select app-input"}),
         label="新主担当者（相手方）",
     )
 
@@ -172,9 +198,14 @@ class DealPersonForm(forms.ModelForm):
     class Meta:
         model = DealPerson
         fields = ["person", "role", "memo"]
+        labels = {
+            "person": "相手方関係者（パーソン）",
+            "role": "役割",
+            "memo": "メモ",
+        }
         widgets = {
-            "person": forms.Select(attrs={"class": "app-select"}),
-            "role": forms.Select(attrs={"class": "app-select"}),
+            "person": forms.Select(attrs={"class": "app-select app-input"}),
+            "role": forms.Select(attrs={"class": "app-select app-input"}),
             "memo": forms.TextInput(attrs={"class": "app-input", "placeholder": "役割・関係メモ"}),
         }
 
@@ -185,8 +216,13 @@ class DealUserForm(forms.ModelForm):
     class Meta:
         model = DealUser
         fields = ["user", "role", "memo"]
+        labels = {
+            "user": "社内担当者",
+            "role": "担当役割",
+            "memo": "メモ",
+        }
         widgets = {
-            "user": forms.Select(attrs={"class": "app-select"}),
-            "role": forms.Select(attrs={"class": "app-select"}),
+            "user": forms.Select(attrs={"class": "app-select app-input"}),
+            "role": forms.Select(attrs={"class": "app-select app-input"}),
             "memo": forms.TextInput(attrs={"class": "app-input", "placeholder": "担当役割メモ"}),
         }

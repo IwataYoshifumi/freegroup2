@@ -1,0 +1,6 @@
+{# 案件管理サイドバー部品（include 専用）。app_base.html から呼ばれる。 #}
+<nav class="app-sidebar" aria-label="案件管理メニュー">
+  <div class="app-sidebar__section-title">案件管理</div>
+  <a href="{% url 'deals:deal_list' %}" {% if active_menu == 'deals:deal_list' %}class="is-active"{% endif %}>案件一覧</a>
+  <a href="{% url 'activities:activity_list' %}" {% if active_menu == 'activities:activity_list' %}class="is-active"{% endif %}>活動一覧</a>
+</nav>

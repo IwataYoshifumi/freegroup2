@@ -24,6 +24,11 @@ urlpatterns = [
         CompanyDuplicateCandidateListView.as_view(),
         name="company_candidate_list",
     ),
+    path(
+        "candidates/",
+        CompanyDuplicateCandidateListView.as_view(),
+        name="candidate_list",
+    ),
     path("merge/", CompanyMergeView.as_view(), name="company_merge"),
     path(
         "candidates/<uuid:pk>/different/",

@@ -4,7 +4,7 @@
 {% block title %}{% if is_create %}会社新規作成{% else %}会社編集：{{ form.instance.organization }}{% endif %} — FreeGroup2{% endblock %}
 
 {% block content %}
-  <div class="app-page-header">
+  <div class="app-page-header" style="max-width: 840px; margin-left: 0; margin-right: auto; margin-bottom: 16px;">
     <div>
       <h1>{% if is_create %}会社新規作成{% else %}会社編集：{{ form.instance.organization }}{% endif %}</h1>
     </div>
@@ -14,8 +14,8 @@
     </div>
   </div>
 
-  <section class="app-card" style="max-width: 640px; margin-left: 0; margin-right: auto;">
-    <form method="post" class="app-form-grid-edit">
+  <section class="app-card" style="max-width: 840px; margin-left: 0; margin-right: auto;">
+    <form method="post" novalidate>
       {% csrf_token %}
       {% hidden_back_field back %}
 
@@ -25,21 +25,49 @@
         </div>
       {% endif %}
 
-      <div style="display:flex; flex-direction:column; gap:16px;">
-        {% for field in form %}
-          <div class="app-form__group" style="margin-bottom:0;">
-            <label class="app-form__label" for="{{ field.id_for_label }}">
-              {{ field.label }}
-              {% if field.field.required %}<span style="color:var(--app-color-danger, #ef4444);">*</span>{% endif %}
-            </label>
-            {{ field }}
-            {% if field.errors %}
-              <div style="color:var(--app-color-danger, #ef4444); font-size:12px; margin-top:4px;">
-                {{ field.errors }}
-              </div>
-            {% endif %}
-          </div>
-        {% endfor %}
+      <div class="app-form-grid app-form-grid-edit">
+        {# 会社名・組織名: 1行・全幅 #}
+        <div class="app-form__group app-form__group--full">
+          <label class="app-form__label" for="{{ form.organization.id_for_label }}">
+            {{ form.organization.label }}{% if form.organization.field.required %} <span style="color:var(--app-color-danger, #ef4444);">*</span>{% endif %}
+          </label>
+          {{ form.organization }}
+          {% if form.organization.errors %}<div class="app-form__error">{{ form.organization.errors }}</div>{% endif %}
+        </div>
+
+        {# ドメイン & 電話番号: 2列横並び (1:1) #}
+        <div class="app-form__group">
+          <label class="app-form__label" for="{{ form.domain.id_for_label }}">
+            {{ form.domain.label }}{% if form.domain.field.required %} <span style="color:var(--app-color-danger, #ef4444);">*</span>{% endif %}
+          </label>
+          {{ form.domain }}
+          {% if form.domain.errors %}<div class="app-form__error">{{ form.domain.errors }}</div>{% endif %}
+        </div>
+        <div class="app-form__group">
+          <label class="app-form__label" for="{{ form.phone.id_for_label }}">
+            {{ form.phone.label }}{% if form.phone.field.required %} <span style="color:var(--app-color-danger, #ef4444);">*</span>{% endif %}
+          </label>
+          {{ form.phone }}
+          {% if form.phone.errors %}<div class="app-form__error">{{ form.phone.errors }}</div>{% endif %}
+        </div>
+
+        {# WebサイトURL: 1行・全幅 #}
+        <div class="app-form__group app-form__group--full">
+          <label class="app-form__label" for="{{ form.website.id_for_label }}">
+            {{ form.website.label }}{% if form.website.field.required %} <span style="color:var(--app-color-danger, #ef4444);">*</span>{% endif %}
+          </label>
+          {{ form.website }}
+          {% if form.website.errors %}<div class="app-form__error">{{ form.website.errors }}</div>{% endif %}
+        </div>
+
+        {# 住所: 1行・全幅 #}
+        <div class="app-form__group app-form__group--full">
+          <label class="app-form__label" for="{{ form.address.id_for_label }}">
+            {{ form.address.label }}{% if form.address.field.required %} <span style="color:var(--app-color-danger, #ef4444);">*</span>{% endif %}
+          </label>
+          {{ form.address }}
+          {% if form.address.errors %}<div class="app-form__error">{{ form.address.errors }}</div>{% endif %}
+        </div>
       </div>
 
       <div class="app-action-area" style="margin-top:24px;">

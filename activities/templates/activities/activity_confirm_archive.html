@@ -1,10 +1,10 @@
-{% extends "cards/app_base.html" %}
+{% extends "deals/app_base.html" %}
 {% load back_tags %}
 
 {% block title %}活動アーカイブ確認 — FreeGroup2{% endblock %}
 
 {% block content %}
-  <div class="app-page-header">
+  <div class="app-page-header" style="max-width: 840px; margin-left: 0; margin-right: auto; margin-bottom: 16px;">
     <div>
       <h1>活動アーカイブ確認</h1>
     </div>
@@ -14,7 +14,7 @@
     </div>
   </div>
 
-  <section class="app-card" style="max-width: 600px; margin-left: 0; margin-right: auto;">
+  <section class="app-card" style="max-width: 840px; margin-left: 0; margin-right: auto;">
     <p>この活動記録をアーカイブします。アーカイブされた活動は日報や放置案件の接触履歴から除外されます。</p>
     <div style="background:var(--app-surface-subtle, #f8fafc); padding:12px; border-radius:6px; margin:16px 0;">
       <div><strong>日時:</strong> {{ activity.occurred_at|date:"Y-m-d H:i" }}</div>

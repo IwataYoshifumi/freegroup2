@@ -1,0 +1,22 @@
+{# 案件管理アプリ用ベース。base.html を継承し、サイドバー（deals/_sidebar.html）を組み込む。 #}
+{% extends "base.html" %}
+
+{% block app_name %}案件管理{% endblock %}
+{% block drawer_title %}案件管理{% endblock %}
+
+{% block app_content %}
+  <div class="app-main-area">
+    {% include "deals/_sidebar.html" %}
+    <main class="app-main">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+{% endblock %}
+
+{# サイドバーありページ＝≡（ハンバーガー）を出す（CSS は body.has-sidebar で限定）。 #}
+{% block body_class %}has-sidebar{% endblock %}
+
+{% block drawer_content %}
+  {# ドロワーはアプリ内サイドバーのみ（横断ナビはトップバー▼へ分離）。 #}
+  {% include "deals/_sidebar.html" %}
+{% endblock %}

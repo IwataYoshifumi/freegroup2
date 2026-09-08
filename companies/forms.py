@@ -12,6 +12,13 @@ class CompanyForm(forms.ModelForm):
     class Meta:
         model = Company
         fields = ["organization", "domain", "phone", "address", "website"]
+        labels = {
+            "organization": "会社名・組織名",
+            "domain": "ドメイン",
+            "phone": "電話番号",
+            "address": "住所",
+            "website": "WebサイトURL",
+        }
         widgets = {
             "organization": forms.TextInput(attrs={"class": "app-input", "placeholder": "会社名・組織名"}),
             "domain": forms.TextInput(attrs={"class": "app-input", "placeholder": "example.com"}),

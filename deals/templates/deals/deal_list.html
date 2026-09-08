@@ -1,4 +1,4 @@
-{% extends "cards/app_base.html" %}
+{% extends "deals/app_base.html" %}
 {% load back_tags %}
 
 {% block title %}案件一覧 — FreeGroup2{% endblock %}
@@ -29,7 +29,7 @@
       </div>
       <div class="app-form__group" style="margin-bottom:0;">
         <label class="app-form__label" for="filter-stage">ステージ</label>
-        <select id="filter-stage" name="stage" class="app-select">
+        <select id="filter-stage" name="stage" class="app-select app-input">
           <option value="">（すべて）</option>
           {% for code, label in stages %}
             <option value="{{ code }}" {% if current_stage == code %}selected{% endif %}>{{ label }}</option>
@@ -38,15 +38,15 @@
       </div>
       <div class="app-form__group" style="margin-bottom:0;">
         <label class="app-form__label" for="filter-status">状態</label>
-        <select id="filter-status" name="status" class="app-select">
+        <select id="filter-status" name="status" class="app-select app-input">
           <option value="active" {% if current_status == "active" %}selected{% endif %}>有効な案件</option>
           <option value="archived" {% if current_status == "archived" %}selected{% endif %}>アーカイブ済み</option>
           <option value="all" {% if current_status == "all" %}selected{% endif %}>全件</option>
         </select>
       </div>
       <div style="display:flex; gap:8px;">
-        <button type="submit" class="app-btn app-btn--secondary">絞り込み</button>
-        <a href="{% url 'deals:deal_list' %}" class="app-btn app-btn--ghost">リセット</a>
+        <button type="submit" class="app-btn app-btn--primary app-btn--sm">絞り込み</button>
+        <a href="{% url 'deals:deal_list' %}" class="app-btn app-btn--secondary app-btn--sm">リセット</a>
       </div>
     </form>
   </section>

@@ -1,4 +1,4 @@
-{% extends "cards/app_base.html" %}
+{% extends "deals/app_base.html" %}
 {% load back_tags %}
 
 {% block title %}活動一覧 — FreeGroup2{% endblock %}
@@ -31,11 +31,11 @@
       </div>
       <div class="app-form__group" style="margin-bottom:0;">
         <label class="app-form__label" for="filter-date">実施日</label>
-        <input type="date" id="filter-date" name="date" value="{{ current_date }}" class="app-input">
+        <input type="date" id="filter-date" name="date" value="{{ current_date }}" class="app-input app-input--date">
       </div>
       <div class="app-form__group" style="margin-bottom:0;">
         <label class="app-form__label" for="filter-type">活動種別</label>
-        <select id="filter-type" name="activity_type" class="app-select">
+        <select id="filter-type" name="activity_type" class="app-select app-input">
           <option value="">（すべて）</option>
           {% for code, label in activity_types %}
             <option value="{{ code }}" {% if current_activity_type == code %}selected{% endif %}>{{ label }}</option>
@@ -44,7 +44,7 @@
       </div>
       <div class="app-form__group" style="margin-bottom:0;">
         <label class="app-form__label" for="filter-direction">方向</label>
-        <select id="filter-direction" name="direction" class="app-select">
+        <select id="filter-direction" name="direction" class="app-select app-input">
           <option value="">（すべて）</option>
           {% for code, label in directions %}
             <option value="{{ code }}" {% if current_direction == code %}selected{% endif %}>{{ label }}</option>
@@ -53,15 +53,15 @@
       </div>
       <div class="app-form__group" style="margin-bottom:0;">
         <label class="app-form__label" for="filter-status">状態</label>
-        <select id="filter-status" name="status" class="app-select">
+        <select id="filter-status" name="status" class="app-select app-input">
           <option value="active" {% if current_status == "active" %}selected{% endif %}>有効な活動</option>
           <option value="archived" {% if current_status == "archived" %}selected{% endif %}>アーカイブ済み</option>
           <option value="all" {% if current_status == "all" %}selected{% endif %}>全件</option>
         </select>
       </div>
       <div style="display:flex; gap:8px;">
-        <button type="submit" class="app-btn app-btn--secondary">絞り込み</button>
-        <a href="{% url 'activities:activity_list' %}" class="app-btn app-btn--ghost">リセット</a>
+        <button type="submit" class="app-btn app-btn--primary app-btn--sm">絞り込み</button>
+        <a href="{% url 'activities:activity_list' %}" class="app-btn app-btn--secondary app-btn--sm">リセット</a>
       </div>
     </form>
   </section>

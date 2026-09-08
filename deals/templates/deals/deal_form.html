@@ -1,10 +1,10 @@
-{% extends "cards/app_base.html" %}
+{% extends "deals/app_base.html" %}
 {% load back_tags %}
 
 {% block title %}{% if is_create %}案件新規作成{% else %}案件編集：{{ form.instance.name }}{% endif %} — FreeGroup2{% endblock %}
 
 {% block content %}
-  <div class="app-page-header">
+  <div class="app-page-header" style="max-width: 840px; margin-left: 0; margin-right: auto; margin-bottom: 16px;">
     <div>
       <h1>{% if is_create %}案件新規作成{% else %}案件編集：{{ form.instance.name }}{% endif %}</h1>
     </div>
@@ -14,8 +14,8 @@
     </div>
   </div>
 
-  <section class="app-card" style="max-width: 760px; margin-left: 0; margin-right: auto;">
-    <form method="post" class="app-form-grid-edit">
+  <section class="app-card" style="max-width: 840px; margin-left: 0; margin-right: auto;">
+    <form method="post" novalidate>
       {% csrf_token %}
       {% hidden_back_field back %}
 
@@ -25,22 +25,129 @@
         </div>
       {% endif %}
 
-      <div style="display:flex; flex-direction:column; gap:16px;">
-        {% for field in form %}
-          <div class="app-form__group" style="margin-bottom:0;">
-            <label class="app-form__label" for="{{ field.id_for_label }}">
-              {{ field.label }}
-              {% if field.field.required %}<span style="color:var(--app-color-danger, #ef4444);">*</span>{% endif %}
-              {% if field.help_text %}<span class="app-muted" style="font-size:12px; margin-left:6px;">{{ field.help_text }}</span>{% endif %}
+      <div class="app-form-grid app-form-grid-edit">
+        {# 1. 案件名: 1行・全幅 #}
+        <div class="app-form__group app-form__group--full">
+          <label class="app-form__label" for="{{ form.name.id_for_label }}">
+            {{ form.name.label }}{% if form.name.field.required %} <span style="color:var(--app-color-danger, #ef4444);">*</span>{% endif %}
+          </label>
+          {{ form.name }}
+          {% if form.name.errors %}<div class="app-form__error">{{ form.name.errors }}</div>{% endif %}
+        </div>
+
+        {# 2. 相手方主担当（パーソン） & 会社名: 2列横並び (1:1) #}
+        {% if form.primary_person %}
+          <div class="app-form__group">
+            <label class="app-form__label" for="{{ form.primary_person.id_for_label }}">
+              {{ form.primary_person.label }}{% if form.primary_person.field.required %} <span style="color:var(--app-color-danger, #ef4444);">*</span>{% endif %}
             </label>
-            {{ field }}
-            {% if field.errors %}
-              <div style="color:var(--app-color-danger, #ef4444); font-size:12px; margin-top:4px;">
-                {{ field.errors }}
-              </div>
-            {% endif %}
+            {{ form.primary_person }}
+            {% if form.primary_person.errors %}<div class="app-form__error">{{ form.primary_person.errors }}</div>{% endif %}
           </div>
-        {% endfor %}
+          <div class="app-form__group">
+            <label class="app-form__label" for="{{ form.company.id_for_label }}">
+              {{ form.company.label }}{% if form.company.field.required %} <span style="color:var(--app-color-danger, #ef4444);">*</span>{% endif %}
+            </label>
+            {{ form.company }}
+            {% if form.company.errors %}<div class="app-form__error">{{ form.company.errors }}</div>{% endif %}
+          </div>
+        {% else %}
+          <div class="app-form__group app-form__group--full">
+            <label class="app-form__label" for="{{ form.company.id_for_label }}">
+              {{ form.company.label }}{% if form.company.field.required %} <span style="color:var(--app-color-danger, #ef4444);">*</span>{% endif %}
+            </label>
+            {{ form.company }}
+            {% if form.company.errors %}<div class="app-form__error">{{ form.company.errors }}</div>{% endif %}
+          </div>
+        {% endif %}
+
+        {# 3. 社内担当者 & ステージ: 2列横並び (1:1) #}
+        {% if form.owner %}
+          <div class="app-form__group">
+            <label class="app-form__label" for="{{ form.owner.id_for_label }}">
+              {{ form.owner.label }}{% if form.owner.field.required %} <span style="color:var(--app-color-danger, #ef4444);">*</span>{% endif %}
+            </label>
+            {{ form.owner }}
+            {% if form.owner.errors %}<div class="app-form__error">{{ form.owner.errors }}</div>{% endif %}
+          </div>
+          <div class="app-form__group">
+            <label class="app-form__label" for="{{ form.stage.id_for_label }}">
+              {{ form.stage.label }}{% if form.stage.field.required %} <span style="color:var(--app-color-danger, #ef4444);">*</span>{% endif %}
+            </label>
+            {{ form.stage }}
+            {% if form.stage.errors %}<div class="app-form__error">{{ form.stage.errors }}</div>{% endif %}
+          </div>
+        {% else %}
+          <div class="app-form__group">
+            <label class="app-form__label" for="{{ form.stage.id_for_label }}">
+              {{ form.stage.label }}{% if form.stage.field.required %} <span style="color:var(--app-color-danger, #ef4444);">*</span>{% endif %}
+            </label>
+            {{ form.stage }}
+            {% if form.stage.errors %}<div class="app-form__error">{{ form.stage.errors }}</div>{% endif %}
+          </div>
+          <div class="app-form__group"></div>
+        {% endif %}
+
+        {# 4. 確度（%） & 商談種別 #}
+        <div class="app-form__group app-form__group--full">
+          <div style="display:flex; gap:16px; align-items:flex-start; flex-wrap:wrap;">
+            <div style="width:140px;">
+              <label class="app-form__label" for="{{ form.probability.id_for_label }}">
+                {{ form.probability.label }}{% if form.probability.field.required %} <span style="color:var(--app-color-danger, #ef4444);">*</span>{% endif %}
+              </label>
+              {{ form.probability }}
+              {% if form.probability.errors %}<div class="app-form__error">{{ form.probability.errors }}</div>{% endif %}
+            </div>
+            <div style="flex:1; min-width:200px;">
+              <label class="app-form__label" for="{{ form.deal_type.id_for_label }}">
+                {{ form.deal_type.label }}{% if form.deal_type.field.required %} <span style="color:var(--app-color-danger, #ef4444);">*</span>{% endif %}
+              </label>
+              {{ form.deal_type }}
+              {% if form.deal_type.errors %}<div class="app-form__error">{{ form.deal_type.errors }}</div>{% endif %}
+            </div>
+          </div>
+        </div>
+
+        {# 5. 金額（円） & 成約目標日: 2列横並び (1:1) #}
+        <div class="app-form__group">
+          <label class="app-form__label" for="{{ form.amount.id_for_label }}">
+            {{ form.amount.label }}{% if form.amount.field.required %} <span style="color:var(--app-color-danger, #ef4444);">*</span>{% endif %}
+          </label>
+          {{ form.amount }}
+          {% if form.amount.errors %}<div class="app-form__error">{{ form.amount.errors }}</div>{% endif %}
+        </div>
+        <div class="app-form__group">
+          <label class="app-form__label" for="{{ form.expected_close_date.id_for_label }}">
+            {{ form.expected_close_date.label }}{% if form.expected_close_date.field.required %} <span style="color:var(--app-color-danger, #ef4444);">*</span>{% endif %}
+          </label>
+          {{ form.expected_close_date }}
+          {% if form.expected_close_date.errors %}<div class="app-form__error">{{ form.expected_close_date.errors }}</div>{% endif %}
+        </div>
+
+        {# 6. 流入経路 & 流入元キャンペーン: 2列横並び (1:1) #}
+        <div class="app-form__group">
+          <label class="app-form__label" for="{{ form.lead_source.id_for_label }}">
+            {{ form.lead_source.label }}{% if form.lead_source.field.required %} <span style="color:var(--app-color-danger, #ef4444);">*</span>{% endif %}
+          </label>
+          {{ form.lead_source }}
+          {% if form.lead_source.errors %}<div class="app-form__error">{{ form.lead_source.errors }}</div>{% endif %}
+        </div>
+        <div class="app-form__group">
+          <label class="app-form__label" for="{{ form.source_campaign.id_for_label }}">
+            {{ form.source_campaign.label }}{% if form.source_campaign.field.required %} <span style="color:var(--app-color-danger, #ef4444);">*</span>{% endif %}
+          </label>
+          {{ form.source_campaign }}
+          {% if form.source_campaign.errors %}<div class="app-form__error">{{ form.source_campaign.errors }}</div>{% endif %}
+        </div>
+
+        {# 7. メモ: 1行・全幅 #}
+        <div class="app-form__group app-form__group--full">
+          <label class="app-form__label" for="{{ form.memo.id_for_label }}">
+            {{ form.memo.label }}{% if form.memo.field.required %} <span style="color:var(--app-color-danger, #ef4444);">*</span>{% endif %}
+          </label>
+          {{ form.memo }}
+          {% if form.memo.errors %}<div class="app-form__error">{{ form.memo.errors }}</div>{% endif %}
+        </div>
       </div>
 
       <div class="app-action-area" style="margin-top:24px;">

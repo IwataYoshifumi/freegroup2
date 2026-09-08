@@ -32,7 +32,7 @@
       </div>
       <div class="app-form__group" style="margin-bottom:0;">
         <label class="app-form__label" for="filter-status">状態</label>
-        <select id="filter-status" name="status" class="app-select">
+        <select id="filter-status" name="status" class="app-select app-input">
           <option value="active" {% if current_status == "active" %}selected{% endif %}>有効な会社</option>
           <option value="archived" {% if current_status == "archived" %}selected{% endif %}>アーカイブ済み</option>
           <option value="merged" {% if current_status == "merged" %}selected{% endif %}>統合済み</option>
@@ -40,8 +40,8 @@
         </select>
       </div>
       <div style="display:flex; gap:8px;">
-        <button type="submit" class="app-btn app-btn--secondary">絞り込み</button>
-        <a href="{% url 'companies:company_list' %}" class="app-btn app-btn--ghost">リセット</a>
+        <button type="submit" class="app-btn app-btn--primary app-btn--sm">絞り込み</button>
+        <a href="{% url 'companies:company_list' %}" class="app-btn app-btn--secondary app-btn--sm">リセット</a>
       </div>
     </form>
   </section>

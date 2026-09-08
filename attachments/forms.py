@@ -27,6 +27,10 @@ class AttachmentUploadForm(forms.ModelForm):
     class Meta:
         model = Attachment
         fields = ["file", "memo"]
+        labels = {
+            "file": "添付ファイル",
+            "memo": "メモ・備考",
+        }
         widgets = {
             "file": forms.FileInput(attrs={"class": "app-input"}),
             "memo": forms.TextInput(attrs={"class": "app-input", "placeholder": "メモ・備考（任意）"}),
@@ -53,6 +57,9 @@ class AttachmentMemoUpdateForm(forms.ModelForm):
     class Meta:
         model = Attachment
         fields = ["memo"]
+        labels = {
+            "memo": "メモ・備考",
+        }
         widgets = {
             "memo": forms.TextInput(attrs={"class": "app-input", "placeholder": "メモ・備考"}),
         }

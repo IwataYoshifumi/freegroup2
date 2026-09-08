@@ -83,6 +83,10 @@
   <a href="{% url 'duplicates:duplicate_group_list' %}" {% if active_menu == 'duplicates:duplicate_group_list' %}class="is-active"{% endif %}>重複候補一覧</a>
   <a href="{% url 'originals:original_list' %}" {% if active_menu == 'originals:original_list' %}class="is-active"{% endif %}>元画像一覧</a>
   <a href="{% url 'duplicates:merge_log_list' %}" {% if active_menu == 'duplicates:merge_log_list' %}class="is-active"{% endif %}>マージログ</a>
+  <a href="{% url 'companies:company_list' %}" {% if active_menu == 'companies:company_list' %}class="is-active"{% endif %}>会社一覧</a>
+  {% if perms.companies.merge_company %}
+    <a href="{% url 'companies:candidate_list' %}" {% if active_menu == 'companies:company_candidate_list' or active_menu == 'companies:candidate_list' %}class="is-active"{% endif %}>重複会社候補</a>
+  {% endif %}
   <div class="app-sidebar-flyout">
     <div class="app-sidebar-flyout__trigger{% if active_menu == 'contacts:contact_import' or is_export_mode %} is-active{% endif %}"
          role="button" tabindex="0" aria-haspopup="true" aria-expanded="false">
@@ -96,13 +100,6 @@
       <a href="{% url 'mailings:list_list' %}?mode=export" role="menuitem">エクスポート</a>
     </div>
   </div>
-  <div class="app-sidebar__section-title" style="margin-top:16px;">案件・活動</div>
-  <a href="{% url 'deals:deal_list' %}" {% if active_menu == 'deals:deal_list' %}class="is-active"{% endif %}>案件一覧</a>
-  <a href="{% url 'activities:activity_list' %}" {% if active_menu == 'activities:activity_list' %}class="is-active"{% endif %}>活動一覧</a>
-  <a href="{% url 'companies:company_list' %}" {% if active_menu == 'companies:company_list' %}class="is-active"{% endif %}>会社一覧</a>
-  {% if perms.companies.merge_company %}
-    <a href="{% url 'companies:company_candidate_list' %}" {% if active_menu == 'companies:company_candidate_list' %}class="is-active"{% endif %}>重複会社候補</a>
-  {% endif %}
 </nav>
 
 <script>

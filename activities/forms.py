@@ -20,18 +20,28 @@ class ActivityForm(forms.ModelForm):
             "deal",
             "campaign",
         ]
+        labels = {
+            "activity_type": "活動種別",
+            "direction": "受発信種別",
+            "occurred_at": "活動日時",
+            "user": "対応担当者",
+            "place": "場所・会議URL",
+            "memo": "活動内容メモ",
+            "deal": "関連案件",
+            "campaign": "関連キャンペーン",
+        }
         widgets = {
-            "activity_type": forms.Select(attrs={"class": "app-select"}),
-            "direction": forms.Select(attrs={"class": "app-select"}),
+            "activity_type": forms.Select(attrs={"class": "app-select app-input"}),
+            "direction": forms.Select(attrs={"class": "app-select app-input"}),
             "occurred_at": forms.DateTimeInput(
-                attrs={"class": "app-input", "type": "datetime-local"},
+                attrs={"class": "app-input app-input--date", "type": "datetime-local"},
                 format="%Y-%m-%dT%H:%M",
             ),
-            "user": forms.Select(attrs={"class": "app-select"}),
+            "user": forms.Select(attrs={"class": "app-select app-input"}),
             "place": forms.TextInput(attrs={"class": "app-input", "placeholder": "訪問先・会議URL等"}),
-            "memo": forms.Textarea(attrs={"class": "app-textarea", "rows": 4, "placeholder": "活動内容・議事録等"}),
-            "deal": forms.Select(attrs={"class": "app-select"}),
-            "campaign": forms.Select(attrs={"class": "app-select"}),
+            "memo": forms.Textarea(attrs={"class": "app-textarea app-input", "rows": 4, "placeholder": "活動内容・議事録等"}),
+            "deal": forms.Select(attrs={"class": "app-select app-input"}),
+            "campaign": forms.Select(attrs={"class": "app-select app-input"}),
         }
 
     def __init__(self, *args, **kwargs):
@@ -52,9 +62,14 @@ class ActivityPersonForm(forms.ModelForm):
     class Meta:
         model = ActivityPerson
         fields = ["person", "role", "memo"]
+        labels = {
+            "person": "相手方関係者（パーソン）",
+            "role": "役割",
+            "memo": "メモ",
+        }
         widgets = {
-            "person": forms.Select(attrs={"class": "app-select"}),
-            "role": forms.Select(attrs={"class": "app-select"}),
+            "person": forms.Select(attrs={"class": "app-select app-input"}),
+            "role": forms.Select(attrs={"class": "app-select app-input"}),
             "memo": forms.TextInput(attrs={"class": "app-input", "placeholder": "関係メモ"}),
         }
 
@@ -65,8 +80,13 @@ class ActivityUserForm(forms.ModelForm):
     class Meta:
         model = ActivityUser
         fields = ["user", "role", "memo"]
+        labels = {
+            "user": "社内同席者",
+            "role": "担当役割",
+            "memo": "メモ",
+        }
         widgets = {
-            "user": forms.Select(attrs={"class": "app-select"}),
-            "role": forms.Select(attrs={"class": "app-select"}),
+            "user": forms.Select(attrs={"class": "app-select app-input"}),
+            "role": forms.Select(attrs={"class": "app-select app-input"}),
             "memo": forms.TextInput(attrs={"class": "app-input", "placeholder": "担当役割メモ"}),
         }
