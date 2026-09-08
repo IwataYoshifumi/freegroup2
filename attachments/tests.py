@@ -213,3 +213,87 @@ class AttachmentAdminTests(TestCase):
         self.assertIn("deal", self.admin.autocomplete_fields)
         self.assertIn("activity", self.admin.autocomplete_fields)
         self.assertIn("uploaded_by", self.admin.autocomplete_fields)
+
+
+class AttachmentServiceTests(TransactionTestCase):
+    """attachments/services.py および permissions.py の検証（仕様書 §4.4.2, §7.4）。"""
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.settings_override = override_settings(PROTECTED_MEDIA_ROOT=self.temp_dir)
+        self.settings_override.enable()
+
+        self.owner = User.objects.create_user(username="deal_owner", password="password")
+        self.attendee = User.objects.create_user(username="deal_attendee", password="password")
+        self.uploader = User.objects.create_user(username="deal_uploader", password="password")
+        self.outsider = User.objects.create_user(username="deal_outsider", password="password")
+        self.privileged_user = User.objects.create_user(username="privileged_admin", password="password")
+
+        from django.contrib.auth.models import Permission
+        edit_all_deals_perm = Permission.objects.get(codename="edit_all_deals")
+        self.privileged_user.user_permissions.add(edit_all_deals_perm)
+
+        self.person = Person.objects.create()
+        self.deal = Deal.objects.create(name="添付ファイルテスト案件", primary_person=self.person, owner=self.owner)
+        from deals.models import DealUser, UserRole
+        DealUser.objects.create(deal=self.deal, user=self.attendee, role=UserRole.SUPPORT)
+
+        self.attachment = Attachment.objects.create(
+            deal=self.deal,
+            file=ContentFile(b"proposal PDF content", name="proposal.pdf"),
+            original_filename="proposal.pdf",
+            uploaded_by=self.uploader,
+        )
+
+    def tearDown(self):
+        self.settings_override.disable()
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+        if os.path.exists(settings.PROTECTED_MEDIA_ROOT):
+            shutil.rmtree(settings.PROTECTED_MEDIA_ROOT, ignore_errors=True)
+
+    def test_can_view_attachment(self):
+        from attachments.permissions import can_view_attachment
+
+        # 親 Deal の閲覧権限者に委譲される
+        self.assertTrue(can_view_attachment(self.owner, self.attachment))
+        self.assertTrue(can_view_attachment(self.attendee, self.attachment))
+        self.assertFalse(can_view_attachment(self.outsider, self.attachment))
+
+    def test_can_delete_attachment_permissions(self):
+        from attachments.permissions import can_delete_attachment
+
+        # アップロード者本人: 削除可
+        self.assertTrue(can_delete_attachment(self.uploader, self.attachment))
+        # 親 Deal の owner: 削除可
+        self.assertTrue(can_delete_attachment(self.owner, self.attachment))
+        # 特権保持者（edit_all_deals）: 削除可
+        self.assertTrue(can_delete_attachment(self.privileged_user, self.attachment))
+        # DealUser（同席者・関係者）: 削除不可（仕様書 §7.4 厳守）
+        self.assertFalse(can_delete_attachment(self.attendee, self.attachment))
+        # 部外者: 削除不可
+        self.assertFalse(can_delete_attachment(self.outsider, self.attachment))
+
+    def test_delete_attachment_service(self):
+        from actionlogs.models import ActionLog
+        from attachments.services import delete_attachment
+
+        storage = self.attachment.file.storage
+        file_path = self.attachment.file.name
+        self.assertTrue(storage.exists(file_path))
+
+        att_id = self.attachment.id
+        delete_attachment(self.attachment, user=self.owner)
+
+        # DB 上の物理削除
+        self.assertFalse(Attachment.objects.filter(id=att_id).exists())
+
+        # 実ファイル削除（post_delete シグナル連携）
+        self.assertFalse(storage.exists(file_path))
+
+        # 親 Deal のコンテキスト情報を含む ActionLog が記録されていること
+        log = ActionLog.objects.filter(action="attachment_deleted").latest("created_at")
+        self.assertEqual(log.data["original_filename"], "proposal.pdf")
+        self.assertEqual(log.data["target_type"], "deal")
+        self.assertEqual(log.data["target_id"], str(self.deal.id))
+        self.assertEqual(log.data["target_name"], "添付ファイルテスト案件")
+

@@ -144,3 +144,164 @@ class ActivityAdminTests(TestCase):
     def test_activity_user_admin_autocomplete_fields(self):
         self.assertIn("activity", self.activity_user_admin.autocomplete_fields)
         self.assertIn("user", self.activity_user_admin.autocomplete_fields)
+
+
+class ActivityServiceTests(TestCase):
+    """activities/services.py のコアロジック検証（仕様書 §3.5.2）。"""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="sales_rep", password="password")
+
+    def test_get_unfollowed_campaign_persons(self):
+        from activities.services import get_unfollowed_campaign_persons
+        from mailings.models import Campaign, ClickLog, EmailTemplate, TrackingLink
+
+        template = EmailTemplate.objects.create(name="Webinar Template", subject="案内", body="本文", created_by=self.user)
+        campaign = Campaign.objects.create(name="新商品ウェビナー案内", template=template, created_by=self.user)
+
+        # 1. クリック済み・有効・活動なし -> 未フォロー
+        p1 = Person.objects.create()
+        tl1 = TrackingLink.objects.create(campaign=campaign, person=p1, original_url="https://example.com/1", token="tok1")
+        ClickLog.objects.create(tracking_link=tl1, http_method="GET", is_valid_click=True)
+
+        # 2. クリックしたが無効（ボット等、is_valid_click=False） -> 対象外
+        p2 = Person.objects.create()
+        tl2 = TrackingLink.objects.create(campaign=campaign, person=p2, original_url="https://example.com/2", token="tok2")
+        ClickLog.objects.create(tracking_link=tl2, http_method="GET", is_valid_click=False)
+
+        # 3. クリック済み・有効・活動あり（ActivityPersonに登録） -> フォロー済み（対象外）
+        p3 = Person.objects.create()
+        tl3 = TrackingLink.objects.create(campaign=campaign, person=p3, original_url="https://example.com/3", token="tok3")
+        ClickLog.objects.create(tracking_link=tl3, http_method="GET", is_valid_click=True)
+        act3 = Activity.objects.create(
+            campaign=campaign,
+            activity_type=Activity.ActivityType.PHONE,
+            occurred_at=timezone.now(),
+            user=self.user,
+        )
+        ActivityPerson.objects.create(activity=act3, person=p3, role=PersonRole.ATTENDEE)
+
+        # 4. Personマージ：旧Person p4_old がクリックし、p4_surviving にマージされた場合 -> 生存側 p4_surviving が返る
+        p4_surviving = Person.objects.create()
+        p4_old = Person.objects.create(merged_into=p4_surviving, status=Person.Status.MERGED)
+        tl4 = TrackingLink.objects.create(campaign=campaign, person=p4_old, original_url="https://example.com/4", token="tok4")
+        ClickLog.objects.create(tracking_link=tl4, http_method="GET", is_valid_click=True)
+
+        # 5. 退職・アーカイブ済み Person（status='retired'）も後任フォローが必要なため対象に含まれる
+        p5_retired = Person.objects.create(status="retired")
+        tl5 = TrackingLink.objects.create(campaign=campaign, person=p5_retired, original_url="https://example.com/5", token="tok5")
+        ClickLog.objects.create(tracking_link=tl5, http_method="GET", is_valid_click=True)
+
+        unfollowed_qs = get_unfollowed_campaign_persons(campaign)
+        unfollowed_ids = set(unfollowed_qs.values_list("id", flat=True))
+
+        self.assertIn(p1.id, unfollowed_ids)
+        self.assertNotIn(p2.id, unfollowed_ids)
+        self.assertNotIn(p3.id, unfollowed_ids)
+        self.assertIn(p4_surviving.id, unfollowed_ids)
+        self.assertNotIn(p4_old.id, unfollowed_ids)
+        self.assertIn(p5_retired.id, unfollowed_ids)
+
+    def test_archive_activity(self):
+        from actionlogs.models import ActionLog
+        from activities.services import archive_activity
+
+        person = Person.objects.create()
+        activity = Activity.objects.create(
+            activity_type=Activity.ActivityType.WEB_MEETING,
+            occurred_at=timezone.now(),
+            user=self.user,
+        )
+        archived = archive_activity(activity, user=self.user)
+        self.assertTrue(archived.is_archived)
+
+        log = ActionLog.objects.filter(action="activity_archived", content_type__model="activity").latest("created_at")
+        self.assertEqual(str(log.content_object.id), str(activity.id))
+
+
+class ActivityPermissionTests(TestCase):
+    """activities/permissions.py の認可述語検証（仕様書 §7.3）。"""
+
+    def setUp(self):
+        from django.contrib.auth.models import Permission
+        self.user = User.objects.create_user(username="act_owner", password="password")
+        self.attendee = User.objects.create_user(username="act_attendee", password="password")
+        self.outsider = User.objects.create_user(username="outsider", password="password")
+        self.privileged_user = User.objects.create_user(username="privileged", password="password")
+
+        change_act_perm = Permission.objects.get(codename="change_activity")
+        view_all_perm = Permission.objects.get(codename="view_all_activities")
+        edit_all_perm = Permission.objects.get(codename="edit_all_activities")
+
+        self.user.user_permissions.add(change_act_perm)
+        self.attendee.user_permissions.add(change_act_perm)
+        self.privileged_user.user_permissions.add(change_act_perm, view_all_perm, edit_all_perm)
+
+        self.person = Person.objects.create()
+        self.deal = Deal.objects.create(name="紐付き案件", primary_person=self.person, owner=self.user)
+        self.activity = Activity.objects.create(
+            deal=self.deal,
+            activity_type=Activity.ActivityType.VISIT,
+            occurred_at=timezone.now(),
+            user=self.user,
+        )
+        ActivityUser.objects.create(activity=self.activity, user=self.attendee, role=UserRole.SUPPORT)
+
+    def test_can_view_activity(self):
+        from activities.permissions import can_view_activity
+
+        self.assertTrue(can_view_activity(self.user, self.activity))
+        self.assertTrue(can_view_activity(self.attendee, self.activity))
+        self.assertTrue(can_view_activity(self.privileged_user, self.activity))
+        self.assertFalse(can_view_activity(self.outsider, self.activity))
+
+    def test_can_edit_activity(self):
+        from activities.permissions import can_edit_activity
+
+        self.assertTrue(can_edit_activity(self.user, self.activity))
+        self.assertTrue(can_edit_activity(self.attendee, self.activity))
+        self.assertTrue(can_edit_activity(self.privileged_user, self.activity))
+        self.assertFalse(can_edit_activity(self.outsider, self.activity))
+
+        # change_activity 権限を失った場合は実施者でも不可（仕様書 §7.3 の AND 条件厳守）
+        from django.contrib.auth.models import Permission
+        self.user.user_permissions.remove(Permission.objects.get(codename="change_activity"))
+        self.user = User.objects.get(pk=self.user.pk)
+        self.assertFalse(can_edit_activity(self.user, self.activity))
+
+    def test_can_archive_activity(self):
+        from activities.permissions import can_archive_activity
+
+        # 実施者・特権保持者は可、ActivityUser（同席者）は不可
+        self.assertTrue(can_archive_activity(self.user, self.activity))
+        self.assertTrue(can_archive_activity(self.privileged_user, self.activity))
+        self.assertFalse(can_archive_activity(self.attendee, self.activity))
+        self.assertFalse(can_archive_activity(self.outsider, self.activity))
+
+    def test_visible_activities_for(self):
+        from activities.permissions import visible_activities_for
+
+        act2 = Activity.objects.create(
+            activity_type=Activity.ActivityType.PHONE,
+            occurred_at=timezone.now(),
+            user=self.outsider,
+        )
+
+        # privileged は全件（2件）
+        self.assertEqual(visible_activities_for(self.privileged_user).count(), 2)
+
+        # user は自身の活動（1件）
+        qs_user = visible_activities_for(self.user)
+        self.assertEqual(qs_user.count(), 1)
+        self.assertEqual(qs_user.first(), self.activity)
+
+        # attendee は参加者となっている活動（1件）
+        qs_attendee = visible_activities_for(self.attendee)
+        self.assertEqual(qs_attendee.count(), 1)
+        self.assertEqual(qs_attendee.first(), self.activity)
+
+        # outsider は act2 のみ（1件）
+        qs_outsider = visible_activities_for(self.outsider)
+        self.assertEqual(qs_outsider.count(), 1)
+        self.assertEqual(qs_outsider.first(), act2)
+

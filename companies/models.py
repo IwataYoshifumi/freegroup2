@@ -50,6 +50,37 @@ class Company(models.Model):
     def __str__(self):
         return self.organization
 
+    def mark_as_merged(self, surviving_company):
+        """統合済みとして自身を更新する。"""
+        self.status = self.Status.MERGED
+        self.merged_into = surviving_company
+        self.save(update_fields=["status", "merged_into", "updated_at"])
+
+    def transfer_contacts_to_company(self, surviving_company):
+        """紐づく Contact および Deal を surviving_company へ付け替える（仕様書 §6.5.5）。"""
+        from django.apps import apps
+        from contacts.models import Contact
+
+        Deal = apps.get_model("deals", "Deal")
+        Contact.objects.filter(company=self).update(company=surviving_company)
+        Deal.objects.filter(company=self).update(company=surviving_company)
+
+        from companies.services import maybe_fill_company_domain
+        maybe_fill_company_domain(surviving_company, self.domain)
+
+        self.mark_as_merged(surviving_company)
+
+    def get_surviving_company(self):
+        """マージチェーンを辿り、最終的な生存 Company を返す。"""
+        curr = self
+        seen = set()
+        while curr.status == self.Status.MERGED and curr.merged_into_id:
+            if curr.id in seen:
+                break
+            seen.add(curr.id)
+            curr = curr.merged_into
+        return curr
+
 
 class CompanyDuplicateCandidate(models.Model):
     """会社重複候補（仕様書 v1.5 §6.5.3）。"""
