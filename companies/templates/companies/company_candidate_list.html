@@ -23,7 +23,6 @@
         <form method="post" action="{% url 'companies:company_merge' %}" style="margin:0;">
           {% csrf_token %}
           <input type="hidden" name="group_id" value="{{ group.id }}">
-          <input type="hidden" name="merge_company_ids" value="{{ group.all_company_ids_str }}">
           <input type="hidden" name="candidate_ids" value="{{ group.candidate_ids_str }}">
           <input type="hidden" name="next" value="{% url 'companies:company_candidate_list' %}">
 

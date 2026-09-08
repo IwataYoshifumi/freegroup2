@@ -369,16 +369,33 @@ class CompanyMergeView(LoginRequiredMixin, PermissionRequiredMixin, View):
                         surviving_company_id = val
                         break
 
-        # 2. 統合対象会社IDリストの取得（target_company_ids を優先）
-        raw_merge_ids = request.POST.getlist("target_company_ids") or request.POST.getlist("merge_company_ids")
-        if not raw_merge_ids:
-            raw_merge_ids_str = request.POST.get("target_company_ids") or request.POST.get("merge_company_ids", "")
-            raw_merge_ids = [i.strip() for i in raw_merge_ids_str.split(",") if i.strip()]
+        # 2. 統合対象会社IDリストの取得
+        # 新UIからの送信（group_id が存在するか、または target_company_ids が明示的に送られてきた場合）
+        if "group_id" in request.POST or "target_company_ids" in request.POST:
+            raw_merge_ids = request.POST.getlist("target_company_ids")
+            if not raw_merge_ids:
+                raw_merge_ids_str = request.POST.get("target_company_ids", "")
+                raw_merge_ids = [i.strip() for i in raw_merge_ids_str.split(",") if i.strip()]
+            else:
+                expanded = []
+                for item in raw_merge_ids:
+                    expanded.extend([i.strip() for i in item.split(",") if i.strip()])
+                raw_merge_ids = expanded
         else:
-            expanded = []
-            for item in raw_merge_ids:
-                expanded.extend([i.strip() for i in item.split(",") if i.strip()])
-            raw_merge_ids = expanded
+            # 旧APIや直接POST互換（merge_company_ids のみ指定された場合）
+            raw_merge_ids = request.POST.getlist("merge_company_ids")
+            if not raw_merge_ids:
+                raw_merge_ids_str = request.POST.get("merge_company_ids", "")
+                raw_merge_ids = [i.strip() for i in raw_merge_ids_str.split(",") if i.strip()]
+            else:
+                expanded = []
+                for item in raw_merge_ids:
+                    expanded.extend([i.strip() for i in item.split(",") if i.strip()])
+                raw_merge_ids = expanded
+
+        if not raw_merge_ids:
+            messages.error(request, "統合対象の会社が選択されていません。")
+            return redirect("companies:company_candidate_list")
 
         if not surviving_company_id:
             messages.error(request, "存続会社が選択されていません。")

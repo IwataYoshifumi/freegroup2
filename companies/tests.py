@@ -605,7 +605,44 @@ class CompanyViewTests(TestCase):
             company_a=s1, company_b=s3, score=100, rank=CompanyDuplicateCandidate.Rank.POSSIBLE_HIGH
         )
 
-        # 0件選択時のエラーバリデーション
+        # 1. チェックボックス全解除（HTML仕様により target_company_ids キー自体が POST されない場合）
+        resp_unchecked = self.client.post(
+            reverse("companies:company_merge"),
+            {
+                "group_id": "grp_selective",
+                "surviving_company_id": str(s1.id),
+                # target_company_ids は一切送信されない
+            },
+            follow=True,
+        )
+        self.assertEqual(resp_unchecked.status_code, 200)
+        messages_unchecked = [m.message for m in resp_unchecked.context["messages"]]
+        self.assertIn("統合対象の会社が選択されていません。", messages_unchecked)
+        s2.refresh_from_db()
+        s3.refresh_from_db()
+        self.assertEqual(s2.status, Company.Status.ACTIVE)
+        self.assertEqual(s3.status, Company.Status.ACTIVE)
+
+        # 2. 仮に旧 hidden (merge_company_ids) が送られても、新UIからの送信時はフォールバックしないことを検証
+        resp_no_fallback = self.client.post(
+            reverse("companies:company_merge"),
+            {
+                "group_id": "grp_selective",
+                "surviving_company_id": str(s1.id),
+                "merge_company_ids": f"{s1.id},{s2.id},{s3.id}",
+                # チェック全解除のため target_company_ids は未送信
+            },
+            follow=True,
+        )
+        self.assertEqual(resp_no_fallback.status_code, 200)
+        messages_no_fallback = [m.message for m in resp_no_fallback.context["messages"]]
+        self.assertIn("統合対象の会社が選択されていません。", messages_no_fallback)
+        s2.refresh_from_db()
+        s3.refresh_from_db()
+        self.assertEqual(s2.status, Company.Status.ACTIVE)
+        self.assertEqual(s3.status, Company.Status.ACTIVE)
+
+        # 3. 明示的な空リスト送信時のエラーバリデーション
         resp_empty = self.client.post(
             reverse("companies:company_merge"),
             {
@@ -615,9 +652,11 @@ class CompanyViewTests(TestCase):
         )
         self.assertEqual(resp_empty.status_code, 302)
         s2.refresh_from_db()
+        s3.refresh_from_db()
         self.assertEqual(s2.status, Company.Status.ACTIVE)
+        self.assertEqual(s3.status, Company.Status.ACTIVE)
 
-        # s2 のみ選択してマージ実行（s3 はチェックを外して除外）
+        # 4. s2 のみ選択してマージ実行（s3 はチェックを外して除外）
         resp_selective = self.client.post(
             reverse("companies:company_merge"),
             {
