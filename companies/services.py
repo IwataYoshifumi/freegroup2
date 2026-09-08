@@ -233,10 +233,11 @@ def create_company_from_contact(contact, user=None) -> Company:
         org_domain = derive_org_domain_name(contact.email)
 
     domain = org_domain if org_domain and not is_generic_email_domain(org_domain) else ""
+    phone = getattr(contact, "org_phone", "") or getattr(contact, "personal_phone", "") or ""
     return Company.objects.create(
         organization=contact.organization,
         domain=domain,
-        phone=getattr(contact, "org_phone", "") or "",
+        phone=phone,
         address=getattr(contact, "address", "") or "",
         website=getattr(contact, "website", "") or "",
         created_by=user,
@@ -307,7 +308,7 @@ def link_contact_to_company(contact, user=None) -> Company | None:
     exact_matches = []
     other_candidates = []
 
-    contact_phone = getattr(contact, "org_phone", "") or ""
+    contact_phone = getattr(contact, "org_phone", "") or getattr(contact, "personal_phone", "") or ""
     contact_addr = getattr(contact, "address", "") or ""
     contact_web = getattr(contact, "website", "") or ""
 
