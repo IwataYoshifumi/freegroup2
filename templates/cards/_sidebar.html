@@ -1,4 +1,79 @@
 {# 名刺管理サイドバー部品（include 専用）。app_base.html から呼ばれる。 #}
+<style>
+  .app-sidebar {
+    overflow: visible !important;
+  }
+  .app-sidebar-flyout {
+    position: relative;
+  }
+  .app-sidebar-flyout__trigger {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px;
+    border-radius: 8px;
+    margin-bottom: 2px;
+    cursor: pointer;
+    color: var(--app-text);
+    text-decoration: none;
+    user-select: none;
+    transition: background 0.15s ease, color 0.15s ease;
+  }
+  .app-sidebar-flyout__trigger:hover,
+  .app-sidebar-flyout:hover .app-sidebar-flyout__trigger,
+  .app-sidebar-flyout__trigger.is-active {
+    background: #eff6ff;
+    color: var(--app-color-primary);
+    font-weight: 600;
+  }
+  .app-sidebar-flyout__trigger:hover i,
+  .app-sidebar-flyout:hover .app-sidebar-flyout__trigger i,
+  .app-sidebar-flyout__trigger.is-active i {
+    color: var(--app-color-primary);
+  }
+  .app-sidebar-flyout__menu {
+    display: none;
+    position: absolute;
+    left: calc(100% + 4px);
+    top: 0;
+    min-width: 140px;
+    background: var(--app-surface, #fff);
+    border: 1px solid var(--app-border, #e2e8f0);
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+    padding: 4px;
+    z-index: 1050;
+  }
+  .app-sidebar-flyout__menu::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -8px;
+    width: 8px;
+    height: 100%;
+  }
+  .app-sidebar-flyout:hover .app-sidebar-flyout__menu,
+  .app-sidebar-flyout:focus-within .app-sidebar-flyout__menu {
+    display: block !important;
+  }
+  .app-sidebar-flyout__menu a {
+    display: block;
+    padding: 8px 12px;
+    border-radius: 6px;
+    color: var(--app-text);
+    text-decoration: none;
+    font-size: 14px;
+    white-space: nowrap;
+    margin-bottom: 2px;
+    transition: background 0.15s ease, color 0.15s ease;
+  }
+  .app-sidebar-flyout__menu a:hover {
+    background: #eff6ff;
+    color: var(--app-color-primary);
+    font-weight: 600;
+  }
+</style>
+
 <nav class="app-sidebar" aria-label="名刺管理メニュー">
   <div class="app-sidebar__section-title">名刺管理</div>
   <a href="{% url 'cards:card_upload' %}" {% if active_menu == 'cards:card_upload' %}class="is-active"{% endif %}>名刺アップロード</a>
@@ -8,4 +83,48 @@
   <a href="{% url 'duplicates:duplicate_group_list' %}" {% if active_menu == 'duplicates:duplicate_group_list' %}class="is-active"{% endif %}>重複候補一覧</a>
   <a href="{% url 'originals:original_list' %}" {% if active_menu == 'originals:original_list' %}class="is-active"{% endif %}>元画像一覧</a>
   <a href="{% url 'duplicates:merge_log_list' %}" {% if active_menu == 'duplicates:merge_log_list' %}class="is-active"{% endif %}>マージログ</a>
+  <div class="app-sidebar-flyout">
+    <div class="app-sidebar-flyout__trigger{% if active_menu == 'contacts:contact_import' or is_export_mode %} is-active{% endif %}"
+         role="button" tabindex="0" aria-haspopup="true" aria-expanded="false">
+      <span>エクスポート・インポート</span>
+      <i class="bi bi-chevron-right" style="font-size:11px; color:var(--app-muted);"></i>
+    </div>
+    <div class="app-sidebar-flyout__menu" role="menu">
+      {% if perms.contacts.import_contact %}
+        <a href="{% url 'contacts:contact_import' %}" role="menuitem">インポート</a>
+      {% endif %}
+      <a href="{% url 'mailings:list_list' %}?mode=export" role="menuitem">エクスポート</a>
+    </div>
+  </div>
 </nav>
+
+<script>
+  (function() {
+    var flyout = document.querySelector('.app-sidebar-flyout');
+    if (!flyout) return;
+    var trigger = flyout.querySelector('.app-sidebar-flyout__trigger');
+    var menu = flyout.querySelector('.app-sidebar-flyout__menu');
+    if (!trigger || !menu) return;
+
+    flyout.addEventListener('mouseenter', function() {
+      menu.style.display = 'block';
+      trigger.setAttribute('aria-expanded', 'true');
+    });
+    flyout.addEventListener('mouseleave', function() {
+      menu.style.display = '';
+      trigger.setAttribute('aria-expanded', 'false');
+    });
+    trigger.addEventListener('click', function(e) {
+      e.stopPropagation();
+      var isOpen = menu.style.display === 'block';
+      menu.style.display = isOpen ? 'none' : 'block';
+      trigger.setAttribute('aria-expanded', isOpen ? 'false' : 'true');
+    });
+    document.addEventListener('click', function(e) {
+      if (!flyout.contains(e.target)) {
+        menu.style.display = '';
+        trigger.setAttribute('aria-expanded', 'false');
+      }
+    });
+  })();
+</script>

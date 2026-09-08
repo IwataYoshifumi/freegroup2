@@ -176,8 +176,8 @@ def generate_mailing_list_csv(mailing_list, selected_keys):
     return "\ufeff" + buf.getvalue()
 
 
-def make_export_disposition_header(mailing_list):
-    """RFC 5987 準拠の Content-Disposition ヘッダー値を生成する。"""
+def make_export_filename(mailing_list) -> str:
+    """エクスポート用ファイル名を生成する。"""
     today_str = timezone.now().strftime("%Y%m%d")
     # ファイル名禁止文字・制御文字を置換
     safe_name = "".join(
@@ -185,7 +185,13 @@ def make_export_disposition_header(mailing_list):
     ).strip()
     if not safe_name:
         safe_name = "list"
-    filename_utf8 = f"メーリングリスト_{safe_name}_{today_str}.csv"
+    return f"メーリングリスト_{safe_name}_{today_str}.csv"
+
+
+def make_export_disposition_header(mailing_list):
+    """RFC 5987 準拠の Content-Disposition ヘッダー値を生成する。"""
+    today_str = timezone.now().strftime("%Y%m%d")
+    filename_utf8 = make_export_filename(mailing_list)
     fallback_filename = f"mailing_list_{mailing_list.pk}_{today_str}.csv"
     quoted = urllib.parse.quote(filename_utf8.encode("utf-8"))
     return f'attachment; filename="{fallback_filename}"; filename*=UTF-8\'\'{quoted}'

@@ -254,7 +254,7 @@ class MailingListListView(LoginRequiredMixin, PermissionRequiredMixin, ListView)
         context = super().get_context_data(**kwargs)
         back = BackNavigator(self.request)
         # 検索条件・ソート・ページ・選択モードも keys に含め「戻る」で一覧状態を復元する（HIG 6.1）。
-        back.push_current("", ["page", "status", "searched", "name", "sort", "select_for_campaign"])
+        back.push_current("", ["page", "status", "searched", "name", "sort", "select_for_campaign", "mode"])
 
         select_for_campaign = None
         campaign_id = self.request.GET.get("select_for_campaign", "").strip()
@@ -271,6 +271,7 @@ class MailingListListView(LoginRequiredMixin, PermissionRequiredMixin, ListView)
                 "selected_statuses": self._selected_statuses(),
                 "search_name": self.request.GET.get("name", ""),
                 "select_for_campaign": select_for_campaign,
+                "is_export_mode": self.request.GET.get("mode") == "export",
                 "column_storage_key": "mailing_list_list_visible_columns",
                 "column_defs": [
                     {"key": "description", "label": "説明", "default": False},
@@ -341,6 +342,7 @@ class MailingListDetailView(LoginRequiredMixin, PermissionRequiredMixin, DetailV
                 "current_sort": sort_key,
                 "current_dir": sort_dir,
                 "select_for_campaign": select_for_campaign,
+                "is_export_mode": self.request.GET.get("mode") == "export",
             }
         )
         return context
@@ -4194,11 +4196,14 @@ class MailingListMemberExportView(LoginRequiredMixin, PermissionRequiredMixin, V
             IMPORTABLE_KEYS,
             generate_mailing_list_csv,
             make_export_disposition_header,
+            make_export_filename,
         )
 
         mailing_list = get_object_or_404(MailingList, pk=pk)
-        selected = [f for f in request.POST.getlist("fields") if f in EXPORT_AVAILABLE_KEYS]
-        if not selected:
+        selected_fields = [
+            f for f in request.POST.getlist("fields") if f in EXPORT_AVAILABLE_KEYS
+        ]
+        if not selected_fields:
             messages.error(request, "1項目以上選択してください。")
             return render(
                 request,
@@ -4213,7 +4218,26 @@ class MailingListMemberExportView(LoginRequiredMixin, PermissionRequiredMixin, V
                 },
             )
 
-        csv_text = generate_mailing_list_csv(mailing_list, selected)
+        members = list(mailing_list.members.all())
+        filename = make_export_filename(mailing_list)
+
+        from actionlogs.models import ActionLog
+
+        ActionLog.record(
+            user=request.user,
+            action="contact_export",
+            object_repr=mailing_list.name,
+            note=f"メーリングリストCSVエクスポート完了: {len(members)}件 (リスト: {mailing_list.name})",
+            data={
+                "mailing_list_id": str(mailing_list.id),
+                "mailing_list_name": mailing_list.name,
+                "count": len(members),
+                "fields": selected_fields,
+                "filename": filename,
+            },
+        )
+
+        csv_text = generate_mailing_list_csv(mailing_list, selected_fields)
         response = HttpResponse(csv_text, content_type="text/csv; charset=utf-8")
         response["Content-Disposition"] = make_export_disposition_header(mailing_list)
         return response
