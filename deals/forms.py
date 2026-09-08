@@ -207,7 +207,7 @@ class DealPersonForm(forms.ModelForm):
         widgets = {
             "person": forms.Select(attrs={"class": "app-select app-input"}),
             "role": forms.Select(attrs={"class": "app-select app-input"}),
-            "is_primary": forms.CheckboxInput(attrs={"class": "app-checkbox"}),
+            "is_primary": forms.CheckboxInput(attrs={"class": "app-radio-toggle"}),
             "memo": forms.TextInput(attrs={"class": "app-input", "placeholder": "役割・関係メモ"}),
         }
 
@@ -227,6 +227,6 @@ class DealUserForm(forms.ModelForm):
         widgets = {
             "user": forms.Select(attrs={"class": "app-select app-input"}),
             "role": forms.Select(attrs={"class": "app-select app-input"}),
-            "can_edit": forms.CheckboxInput(attrs={"class": "app-checkbox"}),
+            "can_edit": forms.CheckboxInput(attrs={"class": "app-radio-toggle"}),
             "memo": forms.TextInput(attrs={"class": "app-input", "placeholder": "担当役割メモ"}),
         }

@@ -143,12 +143,12 @@ class DealModelValidationTests(TestCase):
         dp = DealPerson.objects.create(
             deal=deal,
             person=self.person2,
-            role=PersonRole.INFLUENCER,
+            role=PersonRole.DECISION_MAKER,
             is_primary=True,
-            memo="Key influencer",
+            memo="Key decision maker",
         )
         self.assertTrue(dp.is_primary)
-        self.assertEqual(dp.role, PersonRole.INFLUENCER)
+        self.assertEqual(dp.role, PersonRole.DECISION_MAKER)
 
     def test_deal_user_can_edit_and_roles(self):
         deal = Deal.objects.create(
@@ -625,5 +625,52 @@ class DealViewTests(TestCase):
         deal_persons = DealPerson.objects.filter(deal=self.deal)
         self.assertEqual(deal_persons.count(), 1)
         self.assertEqual(deal_persons.first().person, p3)
+
+    def test_deal_detail_view_candidate_persons_limit(self):
+        """DealDetailView の candidate_persons が100件以下に制限されることを検証。"""
+        self.client.login(username="deal_owner", password="password")
+
+        # 150件以上のパーソンを作成（一部は deal.company に所属、残りは他社または会社なし）
+        other_company = Company.objects.create(organization="別会社")
+        bulk_persons = [Person() for _ in range(160)]
+        Person.objects.bulk_create(bulk_persons)
+
+        created_persons = list(Person.objects.filter(id__in=[p.id for p in bulk_persons]))
+        contacts = []
+        for i, p in enumerate(created_persons):
+            comp = self.company if i < 70 else other_company
+            contacts.append(Contact(person=p, company=comp, last_name=f"姓{i}", first_name=f"名{i}"))
+        Contact.objects.bulk_create(contacts)
+
+        # primary_contact を Person に紐づけ
+        saved_contacts = Contact.objects.filter(person__in=created_persons).select_related("person")
+        for c in saved_contacts:
+            c.person.primary_contact = c
+        Person.objects.bulk_update([c.person for c in saved_contacts], ["primary_contact"])
+
+        # 会社設定ありの案件での検証
+        response = self.client.get(reverse("deals:deal_detail", kwargs={"pk": self.deal.pk}))
+        self.assertEqual(response.status_code, 200)
+        candidates = response.context["candidate_persons"]
+        self.assertLessEqual(len(candidates), 100)
+        # 当該会社のパーソンは最大50件
+        company_candidates = [
+            p for p in candidates
+            if p.primary_contact and p.primary_contact.company_id == self.deal.company_id
+        ]
+        self.assertLessEqual(len(company_candidates), 50)
+
+        # 会社未設定の案件での検証
+        deal_no_company = Deal.objects.create(
+            name="会社未設定案件",
+            primary_person=self.person,
+            company=None,
+            owner=self.owner,
+        )
+        response_no_comp = self.client.get(reverse("deals:deal_detail", kwargs={"pk": deal_no_company.pk}))
+        self.assertEqual(response_no_comp.status_code, 200)
+        candidates_no_comp = response_no_comp.context["candidate_persons"]
+        self.assertLessEqual(len(candidates_no_comp), 100)
+
 
 

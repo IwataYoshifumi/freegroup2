@@ -178,7 +178,7 @@
     <section class="app-card">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
         <h2 style="font-size:16px; margin:0;">社外関係者（パーソン）</h2>
-        <span class="app-badge app-badge--muted">{{ deal_persons|length }}名</span>
+        <span class="app-status-badge">{{ deal_persons|length }}名</span>
       </div>
 
       {# 登録済みリスト #}
@@ -231,7 +231,7 @@
           <div style="margin-bottom:8px;">
             <input type="text"
                    id="person-search-input"
-                   class="app-input app-input--sm"
+                   class="app-input app-input--compact"
                    placeholder="氏名・会社名・役職で候補を検索..."
                    autocomplete="off"
                    style="width:100%;">
@@ -301,7 +301,7 @@
     <section class="app-card">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
         <h2 style="font-size:16px; margin:0;">社内担当者（ユーザー）</h2>
-        <span class="app-badge app-badge--muted">{{ deal_users|length }}名</span>
+        <span class="app-status-badge">{{ deal_users|length }}名</span>
       </div>
 
       {# 登録済みリスト #}
@@ -347,7 +347,7 @@
           <div style="margin-bottom:8px;">
             <input type="text"
                    id="user-search-input"
-                   class="app-input app-input--sm"
+                   class="app-input app-input--compact"
                    placeholder="氏名・ユーザー名で候補を検索..."
                    autocomplete="off"
                    style="width:100%;">

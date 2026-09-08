@@ -155,16 +155,17 @@ class DealDetailView(LoginRequiredMixin, DetailView):
         # 関連会社に紐づくパーソンを優先、または有効なパーソン
         person_qs = Person.objects.exclude(status=Person.Status.MERGED).exclude(id__in=existing_person_ids).select_related("primary_contact__company")
         if deal.company_id:
-            # 関連会社優先でソート
-            context["candidate_persons"] = sorted(
-                person_qs,
-                key=lambda p: (
-                    0 if (p.primary_contact and p.primary_contact.company_id == deal.company_id) else 1,
-                    p.primary_contact.full_name if p.primary_contact and p.primary_contact.full_name else ""
-                )
+            company_persons = list(
+                person_qs.filter(primary_contact__company_id=deal.company_id).order_by("-created_at")[:50]
             )
+            company_person_ids = {p.id for p in company_persons}
+            remaining_limit = 100 - len(company_persons)
+            other_persons = list(
+                person_qs.exclude(id__in=company_person_ids).order_by("-created_at")[:remaining_limit]
+            )
+            context["candidate_persons"] = (company_persons + other_persons)[:100]
         else:
-            context["candidate_persons"] = person_qs.order_by("-created_at")[:100]
+            context["candidate_persons"] = list(person_qs.order_by("-created_at")[:100])
 
         existing_user_ids = set(deal.deal_users.values_list("user_id", flat=True))
         if deal.owner_id:

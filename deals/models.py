@@ -46,10 +46,8 @@ class PersonRole(models.TextChoices):
     """社外の相手方の役割（仕様書 v1.5 §2.9.4）。"""
 
     DECISION_MAKER = "decision_maker", _("決裁者")
-    INFLUENCER = "influencer", _("影響者")
-    CONTACT_WINDOW = "contact_window", _("窓口")
-    TECHNICAL = "technical", _("技術担当")
-    USER = "user", _("エンドユーザー")
+    CONTACT_WINDOW = "contact_window", _("担当窓口")
+    TECHNICAL = "technical", _("技術・実務評価者")
     ATTENDEE = "attendee", _("同席者")
     OTHER = "other", _("その他")
 
@@ -57,13 +55,10 @@ class PersonRole(models.TextChoices):
 class UserRole(models.TextChoices):
     """社内の担当者の役割（仕様書 v1.5 §2.9.5）。"""
 
-    OWNER = "owner", _("主担当")
     PRIMARY = "primary", _("主担当")
-    SUB = "sub", _("サブ担当")
-    SUPPORT = "support", _("協力担当")
-    APPROVER = "approver", _("承認者")
+    SUPPORT = "support", _("サポート")
+    APPROVER = "approver", _("上長承認者")
     OBSERVER = "observer", _("閲覧者")
-    VIEWER = "viewer", _("参照者")
     OTHER = "other", _("その他")
 
 
