@@ -52,7 +52,13 @@
             {% if form.company.errors %}<div class="app-form__error">{{ form.company.errors }}</div>{% endif %}
           </div>
         {% else %}
-          <div class="app-form__group app-form__group--full">
+          <div class="app-form__group">
+            <label class="app-form__label">相手方主担当（パーソン）</label>
+            <div style="padding: 6px 0; font-weight: 500;">
+              {{ form.instance.primary_person|default:"（未設定）" }}
+            </div>
+          </div>
+          <div class="app-form__group">
             <label class="app-form__label" for="{{ form.company.id_for_label }}">
               {{ form.company.label }}{% if form.company.field.required %} <span style="color:var(--app-color-danger, #ef4444);">*</span>{% endif %}
             </label>
@@ -60,6 +66,26 @@
             {% if form.company.errors %}<div class="app-form__error">{{ form.company.errors }}</div>{% endif %}
           </div>
         {% endif %}
+
+        {# 2b. 相手方関係者（DealPerson）: 主担当直下に新設・全幅 #}
+        <div class="app-form__group app-form__group--full" id="related-persons-area" data-primary-person-id="{{ form.instance.primary_person_id|default:'' }}">
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+            <label class="app-form__label" style="margin-bottom: 0;">
+              関係者（同席・関連）
+            </label>
+            <button type="button" class="app-btn app-btn--secondary app-btn--sm" data-action="open-modal" data-target="relatedPersonModal">
+              ＋ 関係者を追加
+            </button>
+          </div>
+          <div id="related-persons-chips-container" style="display: flex; flex-wrap: wrap; gap: 8px; min-height: 36px; align-items: center; padding: 8px 12px; background: #f8fafc; border: 1px dashed var(--app-border, #cbd5e1); border-radius: 8px;">
+            <span class="app-muted" id="related-persons-empty" style="font-size: 13px;">（関係者は指定されていません）</span>
+            <div id="related-persons-chips" style="display: inline-flex; flex-wrap: wrap; gap: 6px;"></div>
+          </div>
+          <input type="hidden" name="related_person_ids" id="id_related_person_ids" value="">
+          <small class="app-muted" style="display: block; margin-top: 4px; font-size: 12px;">
+            ※ 商談の同席者や関連パーソン（DealPerson）を登録できます。主担当者は選択できません。
+          </small>
+        </div>
 
         {# 3. 社内担当者 & ステージ: 2列横並び (1:1) #}
         {% if form.owner %}
@@ -159,4 +185,353 @@
       </div>
     </form>
   </section>
+
+  {# ==================== 相手方関係者 複数選択モーダル ==================== #}
+  <div class="app-modal-backdrop" hidden></div>
+  <div class="app-modal" id="relatedPersonModal" hidden role="dialog" aria-modal="true" aria-labelledby="relatedPersonModalTitle">
+    <div class="app-modal__panel" style="width: min(720px, 95vw); max-height: 85vh;">
+      <div class="app-modal__header">
+        <h2 id="relatedPersonModalTitle" style="font-size: 16px; font-weight: 700; margin: 0;">相手方関係者の選択</h2>
+        <button type="button" class="app-btn--icon" data-action="close-modal" aria-label="閉じる" style="border:none; background:transparent; font-size:18px; cursor:pointer; color:var(--app-muted);">&times;</button>
+      </div>
+      <div class="app-modal__body" style="padding: 16px; display: flex; flex-direction: column; gap: 12px; overflow: hidden;">
+        <div>
+          <input type="text"
+                 id="related-person-search"
+                 class="app-input app-input--sm"
+                 placeholder="氏名・会社名・役職でフィルタ..."
+                 autocomplete="off"
+                 style="width: 100%;">
+        </div>
+        <div style="flex: 1; overflow-y: auto; border: 1px solid var(--app-border); border-radius: 6px; max-height: 380px;">
+          <table class="app-table" style="min-width: 100%; border-collapse: collapse; font-size: 13px;">
+            <thead style="position: sticky; top: 0; background: #f8fafc; z-index: 1;">
+              <tr>
+                <th style="width: 40px; text-align: center; padding: 8px;">
+                  <input type="checkbox" id="related-person-select-all" title="すべて選択/解除">
+                </th>
+                <th style="padding: 8px;">氏名</th>
+                <th style="padding: 8px;">会社名</th>
+                <th style="padding: 8px;">役職</th>
+              </tr>
+            </thead>
+            <tbody id="related-person-table-body">
+              {% for p in candidate_persons %}
+                <tr class="js-candidate-row"
+                    data-person-id="{{ p.id }}"
+                    data-person-name="{% if p.primary_contact and p.primary_contact.full_name %}{{ p.primary_contact.full_name }}{% else %}{{ p }}{% endif %}"
+                    data-company-name="{% if p.primary_contact and p.primary_contact.company %}{{ p.primary_contact.company.organization }}{% elif p.primary_contact %}{{ p.primary_contact.organization }}{% endif %}"
+                    data-title="{% if p.primary_contact %}{{ p.primary_contact.title }}{% endif %}"
+                    style="cursor: pointer;">
+                  <td style="text-align: center; padding: 8px;" onclick="event.stopPropagation();">
+                    <input type="checkbox"
+                           class="js-candidate-checkbox"
+                           value="{{ p.id }}">
+                  </td>
+                  <td style="padding: 8px; font-weight: 500;">
+                    <span class="js-person-name">{% if p.primary_contact and p.primary_contact.full_name %}{{ p.primary_contact.full_name }}{% else %}{{ p }}{% endif %}</span>
+                    <span class="js-primary-badge app-status-badge app-status-badge--muted" style="display:none; font-size:11px; margin-left:4px;">主担当</span>
+                  </td>
+                  <td style="padding: 8px; color: var(--app-muted);">
+                    {% if p.primary_contact and p.primary_contact.company %}
+                      {{ p.primary_contact.company.organization }}
+                    {% elif p.primary_contact and p.primary_contact.organization %}
+                      {{ p.primary_contact.organization }}
+                    {% else %}
+                      -
+                    {% endif %}
+                  </td>
+                  <td style="padding: 8px; color: var(--app-muted);">
+                    {{ p.primary_contact.title|default:"-" }}
+                  </td>
+                </tr>
+              {% empty %}
+                <tr>
+                  <td colspan="4" style="text-align: center; padding: 24px; color: var(--app-muted);">
+                    選択可能なパーソンが登録されていません。
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: var(--app-muted);">
+          <span id="related-person-selected-count">0 件選択中</span>
+          <span id="related-person-filter-count"></span>
+        </div>
+      </div>
+      <div class="app-modal__footer" style="padding: 12px 16px; border-top: 1px solid var(--app-border); display: flex; justify-content: flex-end; gap: 8px;">
+        <button type="button" class="app-btn app-btn--secondary app-btn--sm" data-action="close-modal">閉じる</button>
+        <button type="button" class="app-btn app-btn--primary app-btn--sm" id="btn-add-related-persons">選択した関係者を追加</button>
+      </div>
+    </div>
+  </div>
+
+  {{ initial_related_persons|json_script:"initial-related-persons-data" }}
+
+  <script>
+    (function() {
+      var selectedPersonsMap = new Map();
+      var chipsContainer = document.getElementById('related-persons-chips');
+      var emptyNotice = document.getElementById('related-persons-empty');
+      var hiddenInput = document.getElementById('id_related_person_ids');
+      var modal = document.getElementById('relatedPersonModal');
+      if (!modal || !chipsContainer || !hiddenInput) return;
+
+      var searchInput = document.getElementById('related-person-search');
+      var selectAllCb = document.getElementById('related-person-select-all');
+      var countEl = document.getElementById('related-person-selected-count');
+      var filterCountEl = document.getElementById('related-person-filter-count');
+      var btnAdd = document.getElementById('btn-add-related-persons');
+      var candidateRows = Array.prototype.slice.call(modal.querySelectorAll('.js-candidate-row'));
+      var tableBody = document.getElementById('related-person-table-body');
+
+      function getPrimaryPersonId() {
+        var select = document.getElementById('id_primary_person');
+        if (select) {
+          return select.value ? String(select.value).trim() : '';
+        }
+        var area = document.getElementById('related-persons-area');
+        return area ? (area.getAttribute('data-primary-person-id') || '').trim() : '';
+      }
+
+      function renderChips() {
+        chipsContainer.innerHTML = '';
+        var ids = [];
+        if (selectedPersonsMap.size === 0) {
+          if (emptyNotice) emptyNotice.style.display = '';
+        } else {
+          if (emptyNotice) emptyNotice.style.display = 'none';
+          selectedPersonsMap.forEach(function(person) {
+            ids.push(person.id);
+            var chip = document.createElement('span');
+            chip.className = 'app-status-badge app-status-badge--info';
+            chip.style.display = 'inline-flex';
+            chip.style.alignItems = 'center';
+            chip.style.gap = '6px';
+            chip.style.padding = '4px 10px';
+            chip.style.fontSize = '13px';
+            chip.style.fontWeight = '500';
+
+            var labelSpan = document.createElement('span');
+            var labelText = person.name;
+            if (person.company) {
+              labelText += ' (' + person.company + ')';
+            }
+            labelSpan.textContent = labelText;
+            chip.appendChild(labelSpan);
+
+            var delBtn = document.createElement('button');
+            delBtn.type = 'button';
+            delBtn.className = 'js-remove-related-person';
+            delBtn.dataset.personId = person.id;
+            delBtn.setAttribute('aria-label', person.name + ' を削除');
+            delBtn.style.background = 'none';
+            delBtn.style.border = 'none';
+            delBtn.style.color = 'inherit';
+            delBtn.style.cursor = 'pointer';
+            delBtn.style.fontSize = '14px';
+            delBtn.style.lineHeight = '1';
+            delBtn.style.padding = '0 0 0 2px';
+            delBtn.style.fontWeight = 'bold';
+            delBtn.innerHTML = '&times;';
+
+            chip.appendChild(delBtn);
+            chipsContainer.appendChild(chip);
+          });
+        }
+        hiddenInput.value = ids.join(',');
+      }
+
+      // 親画面のチップ削除ボタンクリック
+      chipsContainer.addEventListener('click', function(e) {
+        var delBtn = e.target.closest('.js-remove-related-person');
+        if (delBtn) {
+          var pid = delBtn.dataset.personId;
+          if (pid && selectedPersonsMap.has(pid)) {
+            selectedPersonsMap.delete(pid);
+            renderChips();
+          }
+        }
+      });
+
+      // 主担当者（primary_person）セレクトの変更監視：主担当になったパーソンは関係者から自動除外
+      var primaryPersonSelect = document.getElementById('id_primary_person');
+      if (primaryPersonSelect) {
+        primaryPersonSelect.addEventListener('change', function() {
+          var newPrimaryId = primaryPersonSelect.value ? String(primaryPersonSelect.value).trim() : '';
+          if (newPrimaryId && selectedPersonsMap.has(newPrimaryId)) {
+            selectedPersonsMap.delete(newPrimaryId);
+            renderChips();
+          }
+        });
+      }
+
+      function updateSelectionCount() {
+        var count = 0;
+        candidateRows.forEach(function(row) {
+          var cb = row.querySelector('.js-candidate-checkbox');
+          if (cb && cb.checked && !cb.disabled) {
+            count++;
+          }
+        });
+        if (countEl) {
+          countEl.textContent = count + ' 件選択中';
+        }
+      }
+
+      function filterRows() {
+        var q = searchInput ? searchInput.value.trim().toLowerCase() : '';
+        var visible = 0;
+        candidateRows.forEach(function(row) {
+          var name = (row.dataset.personName || '').toLowerCase();
+          var company = (row.dataset.companyName || '').toLowerCase();
+          var title = (row.dataset.title || '').toLowerCase();
+          var match = !q || (name.indexOf(q) !== -1 || company.indexOf(q) !== -1 || title.indexOf(q) !== -1);
+          row.style.display = match ? '' : 'none';
+          if (match) visible++;
+        });
+        if (filterCountEl) {
+          filterCountEl.textContent = q ? ('表示 ' + visible + ' / ' + candidateRows.length + ' 件') : ('全 ' + candidateRows.length + ' 件');
+        }
+      }
+
+      if (searchInput) {
+        searchInput.addEventListener('input', filterRows);
+      }
+
+      function syncModalOnOpen() {
+        var primaryId = getPrimaryPersonId();
+        if (searchInput) searchInput.value = '';
+        filterRows();
+
+        candidateRows.forEach(function(row) {
+          var pid = row.dataset.personId;
+          var cb = row.querySelector('.js-candidate-checkbox');
+          var badge = row.querySelector('.js-primary-badge');
+          var isPrimary = (primaryId && pid === primaryId);
+
+          if (isPrimary) {
+            if (cb) {
+              cb.checked = false;
+              cb.disabled = true;
+            }
+            if (badge) badge.style.display = 'inline-flex';
+            row.style.opacity = '0.55';
+            row.title = '主担当者として選択されているため関係者には追加できません';
+          } else {
+            if (cb) {
+              cb.disabled = false;
+              cb.checked = selectedPersonsMap.has(pid);
+            }
+            if (badge) badge.style.display = 'none';
+            row.style.opacity = '';
+            row.title = '';
+          }
+        });
+
+        if (selectAllCb) selectAllCb.checked = false;
+        updateSelectionCount();
+        setTimeout(function() {
+          if (searchInput) searchInput.focus();
+        }, 60);
+      }
+
+      // モーダルオープンボタン（＋ 関係者を追加）押下時の同期
+      var openModalBtn = document.querySelector('[data-action="open-modal"][data-target="relatedPersonModal"]');
+      if (openModalBtn) {
+        openModalBtn.addEventListener('click', syncModalOnOpen);
+      }
+
+      // 全選択チェックボックス
+      if (selectAllCb) {
+        selectAllCb.addEventListener('change', function() {
+          var checked = selectAllCb.checked;
+          candidateRows.forEach(function(row) {
+            if (row.style.display !== 'none') {
+              var cb = row.querySelector('.js-candidate-checkbox');
+              if (cb && !cb.disabled) {
+                cb.checked = checked;
+              }
+            }
+          });
+          updateSelectionCount();
+        });
+      }
+
+      // 行クリックでチェックボックス反転（チェックボックス直接クリック時はイベント二重発火抑止）
+      if (tableBody) {
+        tableBody.addEventListener('click', function(e) {
+          if (e.target.tagName === 'INPUT') return;
+          var row = e.target.closest('.js-candidate-row');
+          if (!row) return;
+          var cb = row.querySelector('.js-candidate-checkbox');
+          if (cb && !cb.disabled) {
+            cb.checked = !cb.checked;
+            updateSelectionCount();
+          }
+        });
+
+        tableBody.addEventListener('change', function(e) {
+          if (e.target && e.target.classList.contains('js-candidate-checkbox')) {
+            updateSelectionCount();
+          }
+        });
+      }
+
+      function closeModal() {
+        var closeBtn = modal.querySelector('[data-action="close-modal"]');
+        if (closeBtn) {
+          closeBtn.click();
+        } else {
+          modal.hidden = true;
+          var backdrop = document.querySelector('.app-modal-backdrop');
+          if (backdrop) backdrop.hidden = true;
+        }
+      }
+
+      // 「選択した関係者を追加」ボタン
+      if (btnAdd) {
+        btnAdd.addEventListener('click', function() {
+          var primaryId = getPrimaryPersonId();
+          selectedPersonsMap.clear();
+          candidateRows.forEach(function(row) {
+            var pid = row.dataset.personId;
+            var cb = row.querySelector('.js-candidate-checkbox');
+            if (cb && cb.checked && !cb.disabled && pid !== primaryId) {
+              selectedPersonsMap.set(pid, {
+                id: pid,
+                name: row.dataset.personName || '',
+                company: row.dataset.companyName || ''
+              });
+            }
+          });
+          renderChips();
+          closeModal();
+        });
+      }
+
+      // 初期値の読み込み
+      var initialDataEl = document.getElementById('initial-related-persons-data');
+      if (initialDataEl) {
+        try {
+          var initialList = JSON.parse(initialDataEl.textContent);
+          if (Array.isArray(initialList)) {
+            initialList.forEach(function(p) {
+              if (p && p.id) {
+                selectedPersonsMap.set(p.id, {
+                  id: p.id,
+                  name: p.name || '',
+                  company: p.company || ''
+                });
+              }
+            });
+          }
+        } catch (err) {
+          console.error('Failed to parse initial related persons', err);
+        }
+      }
+      renderChips();
+    })();
+  </script>
 {% endblock %}

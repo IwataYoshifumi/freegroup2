@@ -500,4 +500,66 @@ class DealViewTests(TestCase):
         self.deal.refresh_from_db()
         self.assertTrue(self.deal.is_archived)
 
+    def test_deal_create_view_with_related_persons(self):
+        self.client.login(username="deal_owner", password="password")
+        url = reverse("deals:deal_create")
+        p2 = Person.objects.create()
+        p3 = Person.objects.create()
+
+        # primary_person を含めて送信しても除外され、p2, p3 のみが登録されること
+        post_data = {
+            "name": "関係者付き新規案件",
+            "primary_person": str(self.person.id),
+            "stage": Stage.INITIAL_MEETING,
+            "probability": 50,
+            "deal_type": DealType.NEW,
+            "amount": 2000000,
+            "related_person_ids": f"{p2.id},{p3.id},{self.person.id}",
+        }
+        response = self.client.post(url, data=post_data)
+        self.assertEqual(response.status_code, 302)
+        new_deal = Deal.objects.get(name="関係者付き新規案件")
+
+        # DealPerson の検証
+        deal_persons = DealPerson.objects.filter(deal=new_deal)
+        self.assertEqual(deal_persons.count(), 2)
+        person_ids = set(deal_persons.values_list("person_id", flat=True))
+        self.assertIn(p2.id, person_ids)
+        self.assertIn(p3.id, person_ids)
+        self.assertNotIn(self.person.id, person_ids)
+        for dp in deal_persons:
+            self.assertEqual(dp.role, PersonRole.ATTENDEE)
+
+    def test_deal_update_view_with_related_persons_sync(self):
+        self.client.login(username="deal_owner", password="password")
+        p2 = Person.objects.create()
+        p3 = Person.objects.create()
+
+        # 事前に p2 を関係者として登録
+        DealPerson.objects.create(deal=self.deal, person=p2, role=PersonRole.ATTENDEE)
+        self.assertEqual(DealPerson.objects.filter(deal=self.deal).count(), 1)
+
+        url = reverse("deals:deal_update", kwargs={"pk": self.deal.pk})
+        get_response = self.client.get(url)
+        self.assertEqual(get_response.status_code, 200)
+        self.assertIn("candidate_persons", get_response.context)
+        self.assertIn("initial_related_persons", get_response.context)
+        initial_ids = [item["id"] for item in get_response.context["initial_related_persons"]]
+        self.assertIn(str(p2.id), initial_ids)
+
+        # p2 を解除し、p3 を新規追加
+        response = self.client.post(url, data={
+            "name": self.deal.name,
+            "company": str(self.company.id),
+            "stage": self.deal.stage,
+            "probability": self.deal.probability,
+            "amount": self.deal.amount,
+            "related_person_ids": str(p3.id),
+        })
+        self.assertEqual(response.status_code, 302)
+
+        deal_persons = DealPerson.objects.filter(deal=self.deal)
+        self.assertEqual(deal_persons.count(), 1)
+        self.assertEqual(deal_persons.first().person, p3)
+
 
