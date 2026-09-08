@@ -1,7 +1,9 @@
+from collections import defaultdict
+
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin, PermissionRequiredMixin
 from django.core.exceptions import PermissionDenied
-from django.db.models import Q
+from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views import View
 from django.views.generic import CreateView, DetailView, FormView, ListView, UpdateView
@@ -168,26 +170,140 @@ class CompanyArchiveView(LoginRequiredMixin, PermissionRequiredMixin, View):
         return redirect("companies:company_list")
 
 
-class CompanyDuplicateCandidateListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
-    """重複会社候補レビュー一覧画面（仕様書 v1.5 §6.5.3, §7.5）。"""
+def _build_duplicate_groups():
+    """pending 状態の候補ペアから、連結している会社群をグルーピングして返す。"""
+    pending_candidates = list(
+        CompanyDuplicateCandidate.objects.filter(
+            review_status=CompanyDuplicateCandidate.ReviewStatus.PENDING
+        ).select_related("company_a", "company_b")
+    )
+    if not pending_candidates:
+        return []
 
-    model = CompanyDuplicateCandidate
+    # 1. Union-Find で連結成分を算出
+    parent = {}
+
+    def find(i):
+        path = []
+        while parent.get(i, i) != i:
+            path.append(i)
+            i = parent[i]
+        for node in path:
+            parent[node] = i
+        return i
+
+    def union(i, j):
+        root_i = find(i)
+        root_j = find(j)
+        if root_i != root_j:
+            parent[root_i] = root_j
+
+    company_ids = set()
+    for cand in pending_candidates:
+        cid_a = cand.company_a_id
+        cid_b = cand.company_b_id
+        company_ids.add(cid_a)
+        company_ids.add(cid_b)
+        if cid_a not in parent:
+            parent[cid_a] = cid_a
+        if cid_b not in parent:
+            parent[cid_b] = cid_b
+        union(cid_a, cid_b)
+
+    groups_dict = defaultdict(list)
+    for cid in company_ids:
+        groups_dict[find(cid)].append(cid)
+
+    # 2. 会社情報の一括取得とコンタクト件数注釈（N+1防止）
+    companies_qs = (
+        Company.objects.filter(id__in=company_ids)
+        .annotate(contacts_count=Count("contacts", distinct=True))
+    )
+    company_map = {c.id: c for c in companies_qs}
+
+    group_candidates_map = defaultdict(list)
+    for cand in pending_candidates:
+        root = find(cand.company_a_id)
+        group_candidates_map[root].append(cand)
+
+    RANK_PRIORITY = {
+        CompanyDuplicateCandidate.Rank.EXACT_MATCH: 4,
+        CompanyDuplicateCandidate.Rank.POSSIBLE_HIGH: 3,
+        CompanyDuplicateCandidate.Rank.POSSIBLE_MID: 2,
+        CompanyDuplicateCandidate.Rank.POSSIBLE_LOW: 1,
+    }
+    rank_choices = dict(CompanyDuplicateCandidate.Rank.choices)
+
+    def company_sort_key(c):
+        richness = 0
+        if c.domain:
+            richness += 2
+        if c.phone:
+            richness += 1
+        if c.address:
+            richness += 1
+        if c.website:
+            richness += 1
+        richness += getattr(c, "contacts_count", 0) or 0
+        created_ts = c.created_at.timestamp() if c.created_at else 0
+        return (-richness, created_ts)
+
+    result_groups = []
+    for idx, (root, cids) in enumerate(groups_dict.items(), start=1):
+        comps = [company_map[cid] for cid in cids if cid in company_map]
+        if not comps:
+            continue
+        comps.sort(key=company_sort_key)
+        cand_pairs = group_candidates_map.get(root, [])
+
+        best_prio = 0
+        best_rank = CompanyDuplicateCandidate.Rank.POSSIBLE_LOW
+        max_score = 0
+        for cand in cand_pairs:
+            prio = RANK_PRIORITY.get(cand.rank, 0)
+            if prio > best_prio:
+                best_prio = prio
+                best_rank = cand.rank
+            if cand.score > max_score:
+                max_score = cand.score
+
+        group_obj = {
+            "id": f"grp_{idx}",
+            "name": comps[0].organization,
+            "rank": best_rank,
+            "rank_display": rank_choices.get(best_rank, best_rank),
+            "max_score": max_score,
+            "company_count": len(comps),
+            "companies": comps,
+            "candidate_ids": [str(c.id) for c in cand_pairs],
+            "candidate_ids_str": ",".join(str(c.id) for c in cand_pairs),
+            "all_company_ids_str": ",".join(str(c.id) for c in comps),
+        }
+        result_groups.append(group_obj)
+
+    result_groups.sort(
+        key=lambda g: (RANK_PRIORITY.get(g["rank"], 0), g["max_score"]),
+        reverse=True,
+    )
+    return result_groups
+
+
+class CompanyDuplicateCandidateListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
+    """重複会社候補レビュー一覧画面（仕様書 v1.5 §6.5.3, §7.5）。
+    同一ランク・同一社名・連結ペアを持つ会社群を1つのグループとして集約。
+    """
+
     template_name = "companies/company_candidate_list.html"
-    context_object_name = "candidates"
+    context_object_name = "groups"
     permission_required = "companies.merge_company"
-    paginate_by = 30
+    paginate_by = 15
 
     def get_queryset(self):
-        return (
-            CompanyDuplicateCandidate.objects.filter(
-                review_status=CompanyDuplicateCandidate.ReviewStatus.PENDING
-            )
-            .select_related("company_a", "company_b")
-            .order_by("-score", "-created_at")
-        )
+        return _build_duplicate_groups()
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
+        context["candidates"] = context["groups"]
         back = BackNavigator(self.request)
         back.push_current(title="重複会社候補", keys=["page"])
         context["back"] = back
@@ -241,29 +357,61 @@ class CompanyMergeView(LoginRequiredMixin, PermissionRequiredMixin, View):
         )
 
     def post(self, request, *args, **kwargs):
-        form = CompanyMergeConfirmForm(request.POST)
-        if form.is_valid():
-            surviving_company_id = form.cleaned_data["surviving_company_id"]
-            target_company_ids = form.cleaned_data["target_company_ids"]
-            surviving_company = get_object_or_404(Company, pk=surviving_company_id)
-            target_companies = list(Company.objects.filter(id__in=target_company_ids))
+        # 1. 存続会社IDの取得（surviving_company_id または surviving_company_{group_id}）
+        surviving_company_id = request.POST.get("surviving_company_id")
+        if not surviving_company_id:
+            group_id = request.POST.get("group_id")
+            if group_id and f"surviving_company_{group_id}" in request.POST:
+                surviving_company_id = request.POST.get(f"surviving_company_{group_id}")
+            else:
+                for key, val in request.POST.items():
+                    if key.startswith("surviving_company_") and val:
+                        surviving_company_id = val
+                        break
 
-            try:
-                execute_company_merge(
-                    surviving_company=surviving_company,
-                    target_companies=target_companies,
-                    user=request.user,
-                )
-                messages.success(
-                    request,
-                    f"会社「{surviving_company.organization}」への統合が完了しました。",
-                )
-                return redirect("companies:company_detail", pk=surviving_company.pk)
-            except Exception as e:
-                messages.error(request, f"統合処理中にエラーが発生しました: {e}")
-                return redirect("companies:company_candidate_list")
+        # 2. 統合対象会社IDリストの取得
+        raw_merge_ids = request.POST.getlist("merge_company_ids")
+        if not raw_merge_ids:
+            raw_merge_ids_str = request.POST.get("merge_company_ids") or request.POST.get("target_company_ids", "")
+            raw_merge_ids = [i.strip() for i in raw_merge_ids_str.split(",") if i.strip()]
         else:
-            messages.error(request, "入力内容に不備があります。")
+            expanded = []
+            for item in raw_merge_ids:
+                expanded.extend([i.strip() for i in item.split(",") if i.strip()])
+            raw_merge_ids = expanded
+
+        if not surviving_company_id:
+            messages.error(request, "存続会社が選択されていません。")
+            return redirect("companies:company_candidate_list")
+
+        # 存続会社IDを統合対象から除外
+        target_company_ids = [cid for cid in raw_merge_ids if str(cid) != str(surviving_company_id)]
+
+        if not target_company_ids:
+            messages.error(request, "統合対象の会社が指定されていません。")
+            return redirect("companies:company_candidate_list")
+
+        surviving_company = get_object_or_404(Company, pk=surviving_company_id)
+        target_companies = list(Company.objects.filter(id__in=target_company_ids))
+
+        try:
+            execute_company_merge(
+                surviving_company=surviving_company,
+                target_companies=target_companies,
+                user=request.user,
+            )
+            messages.success(
+                request,
+                f"会社「{surviving_company.organization}」への統合が完了しました（{len(target_companies)}社を統合）。",
+            )
+            next_url = request.POST.get("next")
+            if next_url:
+                return redirect(next_url)
+            if "candidates" in request.META.get("HTTP_REFERER", ""):
+                return redirect("companies:company_candidate_list")
+            return redirect("companies:company_detail", pk=surviving_company.pk)
+        except Exception as e:
+            messages.error(request, f"統合処理中にエラーが発生しました: {e}")
             return redirect("companies:company_candidate_list")
 
 
@@ -272,10 +420,32 @@ class CompanyMarkDifferentView(LoginRequiredMixin, PermissionRequiredMixin, View
 
     permission_required = "companies.merge_company"
 
-    def post(self, request, pk):
-        candidate = mark_as_different_company(candidate_id=pk, user=request.user)
+    def post(self, request, pk=None):
+        candidate_ids_raw = request.POST.getlist("candidate_ids") or request.POST.get("candidate_ids", "")
+        if isinstance(candidate_ids_raw, str):
+            candidate_ids = [c.strip() for c in candidate_ids_raw.split(",") if c.strip()]
+        else:
+            candidate_ids = []
+            for item in candidate_ids_raw:
+                candidate_ids.extend([c.strip() for c in item.split(",") if c.strip()])
+
+        if pk:
+            candidate_ids.append(str(pk))
+
+        if not candidate_ids:
+            messages.error(request, "対象の候補が指定されていません。")
+            return redirect("companies:company_candidate_list")
+
+        count = 0
+        for cid in set(candidate_ids):
+            try:
+                mark_as_different_company(candidate_id=cid, user=request.user)
+                count += 1
+            except Exception:
+                pass
+
         messages.success(
             request,
-            f"「{candidate.company_a.organization}」と「{candidate.company_b.organization}」を別会社として記録しました。",
+            f"{count} 件の候補ペアを別会社として記録しました。",
         )
         return redirect("companies:company_candidate_list")

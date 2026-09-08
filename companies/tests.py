@@ -141,9 +141,17 @@ class CompanyServiceTests(TestCase):
             "田中商店", "gmail.com", "", "", "",
             "田中商店", "gmail.com", "", "", "",
         )
-        # ドメイン一致は加点されず、会社名のみ100点 -> possible_mid
-        self.assertEqual(score, 100)
-        self.assertEqual(rank, CompanyDuplicateCandidate.Rank.POSSIBLE_MID)
+        # ドメイン一致は加点されず、会社名のみ一致（120点）の場合は同名別会社誤結合防止のため候補外（""）
+        self.assertEqual(score, 120)
+        self.assertEqual(rank, "")
+
+        # 追加の裏付け（電話等）がある場合は候補となる
+        score_phone, rank_phone = calculate_company_score(
+            "田中商店", "gmail.com", "03-1234-5678", "", "",
+            "田中商店", "gmail.com", "03-1234-5678", "", "",
+        )
+        self.assertEqual(score_phone, 180)  # 120 + 60
+        self.assertEqual(rank_phone, CompanyDuplicateCandidate.Rank.POSSIBLE_MID)
 
     def test_link_contact_to_company_exact_match(self):
         from companies.services import link_contact_to_company
@@ -445,6 +453,104 @@ class CompanyViewTests(TestCase):
         target_merge.refresh_from_db()
         self.assertEqual(target_merge.status, Company.Status.MERGED)
         self.assertEqual(target_merge.merged_into, self.company)
+
+    def test_company_duplicate_candidate_grouping_view(self):
+        self.client.login(username="comp_user", password="password")
+        # 3社を作成し、A-B, B-C の2ペアを登録（1つのグループに集約される）
+        comp_b = Company.objects.create(organization="テスト株式会社 分社B", domain="b.example.jp")
+        comp_c = Company.objects.create(organization="テスト株式会社 分社C", domain="c.example.jp")
+        cand1 = CompanyDuplicateCandidate.objects.create(
+            company_a=self.company,
+            company_b=comp_b,
+            score=120,
+            rank=CompanyDuplicateCandidate.Rank.POSSIBLE_HIGH,
+        )
+        cand2 = CompanyDuplicateCandidate.objects.create(
+            company_a=comp_b,
+            company_b=comp_c,
+            score=95,
+            rank=CompanyDuplicateCandidate.Rank.POSSIBLE_MID,
+        )
+
+        resp = self.client.get(reverse("companies:company_candidate_list"))
+        self.assertEqual(resp.status_code, 200)
+        # グループ化されたカードが1つ存在し、3社すべてが含まれること
+        groups = resp.context["groups"]
+        self.assertEqual(len(groups), 1)
+        group = groups[0]
+        self.assertEqual(group["company_count"], 3)
+        self.assertEqual(group["max_score"], 120)
+        self.assertEqual(group["rank"], CompanyDuplicateCandidate.Rank.POSSIBLE_HIGH)
+        # HTML内に各社情報とラジオボタン、一括統合ボタンが表示されていること
+        self.assertContains(resp, "テスト株式会社")
+        self.assertContains(resp, "テスト株式会社 分社B")
+        self.assertContains(resp, "テスト株式会社 分社C")
+        self.assertContains(resp, "選択した会社に一括統合")
+        self.assertContains(resp, "別会社")
+        self.assertContains(resp, f'name="surviving_company_{group["id"]}"')
+
+    def test_group_batch_merge_and_mark_different(self):
+        self.client.login(username="comp_user", password="password")
+        # 3社のグループを作成
+        c1 = Company.objects.create(organization="グループ統合社1", domain="g1.jp")
+        c2 = Company.objects.create(organization="グループ統合社2", domain="g2.jp")
+        c3 = Company.objects.create(organization="グループ統合社3", domain="g3.jp")
+        cand1 = CompanyDuplicateCandidate.objects.create(
+            company_a=c1,
+            company_b=c2,
+            score=100,
+            rank=CompanyDuplicateCandidate.Rank.POSSIBLE_HIGH,
+        )
+        cand2 = CompanyDuplicateCandidate.objects.create(
+            company_a=c2,
+            company_b=c3,
+            score=90,
+            rank=CompanyDuplicateCandidate.Rank.POSSIBLE_HIGH,
+        )
+
+        # 1. バッチ「別会社」判定テスト
+        resp_diff = self.client.post(
+            reverse("companies:company_mark_different_batch"),
+            {"candidate_ids": f"{cand1.id},{cand2.id}"},
+        )
+        self.assertEqual(resp_diff.status_code, 302)
+        cand1.refresh_from_db()
+        cand2.refresh_from_db()
+        self.assertEqual(cand1.review_status, CompanyDuplicateCandidate.ReviewStatus.DIFFERENT_COMPANY)
+        self.assertEqual(cand2.review_status, CompanyDuplicateCandidate.ReviewStatus.DIFFERENT_COMPANY)
+
+        # 2. 一括統合テスト（m1をsurvivingとし、m2, m3をマージ）
+        m1 = Company.objects.create(organization="マージ元社1", domain="m1.jp")
+        m2 = Company.objects.create(organization="マージ元社2", domain="m2.jp")
+        m3 = Company.objects.create(organization="マージ元社3", domain="m3.jp")
+        mcand1 = CompanyDuplicateCandidate.objects.create(
+            company_a=m1, company_b=m2, score=100, rank=CompanyDuplicateCandidate.Rank.POSSIBLE_HIGH
+        )
+        mcand2 = CompanyDuplicateCandidate.objects.create(
+            company_a=m2, company_b=m3, score=100, rank=CompanyDuplicateCandidate.Rank.POSSIBLE_HIGH
+        )
+
+        resp_merge = self.client.post(
+            reverse("companies:company_merge"),
+            {
+                "group_id": "grp_test",
+                "surviving_company_grp_test": str(m1.id),
+                "merge_company_ids": f"{m1.id},{m2.id},{m3.id}",
+                "next": reverse("companies:company_candidate_list"),
+            },
+        )
+        self.assertEqual(resp_merge.status_code, 302)
+        self.assertRedirects(resp_merge, reverse("companies:company_candidate_list"))
+        m2.refresh_from_db()
+        m3.refresh_from_db()
+        self.assertEqual(m2.status, Company.Status.MERGED)
+        self.assertEqual(m2.merged_into, m1)
+        self.assertEqual(m3.status, Company.Status.MERGED)
+        self.assertEqual(m3.merged_into, m1)
+        mcand1.refresh_from_db()
+        mcand2.refresh_from_db()
+        self.assertEqual(mcand1.review_status, CompanyDuplicateCandidate.ReviewStatus.MERGED)
+        self.assertEqual(mcand2.review_status, CompanyDuplicateCandidate.ReviewStatus.MERGED)
 
 
 class LinkCompaniesCommandTests(TestCase):

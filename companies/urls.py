@@ -31,6 +31,11 @@ urlpatterns = [
     ),
     path("merge/", CompanyMergeView.as_view(), name="company_merge"),
     path(
+        "candidates/different/",
+        CompanyMarkDifferentView.as_view(),
+        name="company_mark_different_batch",
+    ),
+    path(
         "candidates/<uuid:pk>/different/",
         CompanyMarkDifferentView.as_view(),
         name="company_mark_different",

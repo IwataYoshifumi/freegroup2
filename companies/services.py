@@ -1,3 +1,4 @@
+import re
 import uuid
 from dataclasses import dataclass
 from urllib.parse import urlparse
@@ -9,8 +10,19 @@ from actionlogs.models import ActionLog
 from companies.models import Company, CompanyDuplicateCandidate
 from contacts.services.generic_email_domains import is_generic_email_domain
 from contacts.services.normalization import (
+    derive_org_domain_name,
     normalize_organization,
     normalize_phone_value,
+)
+
+PREFECTURES = (
+    "北海道", "青森県", "岩手県", "宮城県", "秋田県", "山形県", "福島県",
+    "茨城県", "栃木県", "群馬県", "埼玉県", "千葉県", "東京都", "神奈川県",
+    "新潟県", "富山県", "石川県", "福井県", "山梨県", "長野県", "岐阜県",
+    "静岡県", "愛知県", "三重県", "滋賀県", "京都府", "大阪府", "兵庫県",
+    "奈良県", "和歌山県", "鳥取県", "島根県", "岡山県", "広島県", "山口県",
+    "徳島県", "香川県", "愛媛県", "高知県", "福岡県", "佐賀県", "長崎県",
+    "熊本県", "大分県", "宮崎県", "鹿児島県", "沖縄県",
 )
 
 
@@ -28,20 +40,56 @@ def normalize_website(url: str) -> str:
     return f"{netloc}/{first_segment}" if first_segment else netloc
 
 
-def _check_address_match(addr_a: str, addr_b: str) -> bool:
-    """住所の一致・前方一致判定（仕様書 §6.5.1、都道府県＋市区町村レベル）。"""
+def calculate_address_match(addr_a: str, addr_b: str) -> tuple[int, bool]:
+    """住所の一致判定（仕様書 §6.5.1）。
+    都道府県一致: +10点
+    市区町村一致（または住所前方一致）: +20点（最大 +30点）
+    Returns: (score, is_match)
+    """
     if not addr_a or not addr_b:
-        return False
+        return 0, False
+
     a = addr_a.replace(" ", "").replace("　", "").strip()
     b = addr_b.replace(" ", "").replace("　", "").strip()
     if not a or not b:
-        return False
+        return 0, False
+
+    pref_a = next((p for p in PREFECTURES if a.startswith(p)), "")
+    pref_b = next((p for p in PREFECTURES if b.startswith(p)), "")
+    pref_match = bool(pref_a and pref_b and pref_a == pref_b)
+
+    city_match = False
     if a == b:
-        return True
-    min_len = min(len(a), len(b))
-    if min_len >= 5 and (a.startswith(b) or b.startswith(a)):
-        return True
-    return False
+        pref_match = True
+        city_match = True
+    else:
+        if pref_match:
+            rem_a = a[len(pref_a):]
+            rem_b = b[len(pref_b):]
+            m_a = re.match(r"^(.+?[市区町村])", rem_a)
+            m_b = re.match(r"^(.+?[市区町村])", rem_b)
+            if m_a and m_b and m_a.group(1) == m_b.group(1):
+                city_match = True
+            elif rem_a and rem_b and (rem_a.startswith(rem_b) or rem_b.startswith(rem_a)):
+                city_match = True
+        else:
+            min_len = min(len(a), len(b))
+            if min_len >= 5 and (a.startswith(b) or b.startswith(a)):
+                city_match = True
+
+    score = 0
+    if pref_match:
+        score += 10
+    if city_match:
+        score += 20
+    score = min(score, 30)
+
+    return score, (score > 0)
+
+
+def _check_address_match(addr_a: str, addr_b: str) -> bool:
+    """住所の一致・前方一致判定（仕様書 §6.5.1、都道府県＋市区町村レベル）。"""
+    return calculate_address_match(addr_a, addr_b)[1]
 
 
 @dataclass
@@ -52,6 +100,8 @@ class CompanyMatchResult:
     name_match: bool
     domain_match: bool
     url_match: bool
+    phone_match: bool = False
+    address_match: bool = False
     rank: str = ""
 
 
@@ -89,7 +139,7 @@ def calculate_company_match(
     norm_phone_b = normalize_phone_value(phone_b)
     phone_match = bool(norm_phone_a) and norm_phone_a == norm_phone_b
 
-    address_match = _check_address_match(addr_a, addr_b)
+    address_score, address_match = calculate_address_match(addr_a, addr_b)
 
     norm_web_a = normalize_website(web_a)
     norm_web_b = normalize_website(web_b)
@@ -97,36 +147,67 @@ def calculate_company_match(
 
     score = 0
     if name_match:
-        score += 100
-    if domain_match:
         score += 120
+    if domain_match:
+        score += 150
     if phone_match:
-        score += 20
-    if address_match:
-        score += 20
+        score += 60
+    if address_score:
+        score += address_score
     if url_match:
         score += 20
 
-    rank = determine_company_rank(score, name_match, domain_match, url_match)
+    rank = determine_company_rank(
+        score=score,
+        name_match=name_match,
+        domain_match=domain_match,
+        url_match=url_match,
+        phone_match=phone_match,
+        address_match=address_match,
+    )
     return CompanyMatchResult(
         score=score,
         name_match=name_match,
         domain_match=domain_match,
         url_match=url_match,
+        phone_match=phone_match,
+        address_match=address_match,
         rank=rank or "",
     )
 
 
-def determine_company_rank(score: int, name_match: bool, domain_match: bool, url_match: bool) -> str | None:
-    """重複検出ランク判定（仕様書 §6.5.2）。"""
-    if name_match and domain_match:
+def determine_company_rank(
+    score: int,
+    name_match: bool,
+    domain_match: bool,
+    url_match: bool = False,
+    phone_match: bool = False,
+    address_match: bool = False,
+) -> str | None:
+    """重複検出ランク判定（仕様書 v1.5 §6.5.2）。"""
+    # 候補外（None）：120点未満、および会社名のみ一致（追加の電話・住所・ドメイン・URL一致が一切ない）ケース
+    has_additional_match = domain_match or phone_match or address_match or url_match
+    if name_match and not has_additional_match:
+        return None
+    if score < 120:
+        return None
+
+    # exact_match（完全一致）: スコア 230点 以上（かつ name_match と domain_match 必須）
+    if name_match and domain_match and score >= 230:
         return CompanyDuplicateCandidate.Rank.EXACT_MATCH
-    if score >= 120:
+
+    # possible_high（重複可能性大）: スコア 200点 以上
+    if score >= 200:
         return CompanyDuplicateCandidate.Rank.POSSIBLE_HIGH
-    if score >= 100:
+
+    # possible_mid（重複可能性中）: スコア 140点 以上
+    if score >= 140:
         return CompanyDuplicateCandidate.Rank.POSSIBLE_MID
-    if score >= 20:
+
+    # possible_low（重複可能性小）: スコア 120点 以上（※社名120点に加え、電話・住所等の追加一致がある場合のみ）
+    if score >= 120:
         return CompanyDuplicateCandidate.Rank.POSSIBLE_LOW
+
     return None
 
 
@@ -173,12 +254,14 @@ def get_companies_confirmed_as_different(company: Company) -> set[uuid.UUID]:
 
 
 def create_company_from_contact(contact, user=None) -> Company:
-    """exact_matchの候補が存在しない場合の新規Company作成（仕様書 §6.5.4）。"""
-    domain = (
-        contact.org_domain_name
-        if contact.org_domain_name and not is_generic_email_domain(contact.org_domain_name)
-        else ""
-    )
+    """exact_matchの候補が存在しない場合の新規Company作成（仕様書 §6.5.4）。
+    contact.org_domain_name が空の場合でも、contact.email から独自ドメインを抽出する（§6.4）。
+    """
+    org_domain = contact.org_domain_name or ""
+    if not org_domain and getattr(contact, "email", ""):
+        org_domain = derive_org_domain_name(contact.email)
+
+    domain = org_domain if org_domain and not is_generic_email_domain(org_domain) else ""
     return Company.objects.create(
         organization=contact.organization,
         domain=domain,
@@ -190,7 +273,7 @@ def create_company_from_contact(contact, user=None) -> Company:
 
 
 def maybe_fill_company_domain(company: Company, org_domain_name: str) -> bool:
-    """company.domain が空の場合のみ、org_domain_name で埋める（仕様書 §6.5.5）。"""
+    """company.domain が空の場合のみ、org_domain_name で埋める（仕様書 §6.5.6）。"""
     if company.domain:
         return False
     if org_domain_name and not is_generic_email_domain(org_domain_name):
@@ -204,6 +287,13 @@ def link_contact_to_company(contact, user=None) -> Company | None:
     """Contact 作成・更新時に呼び出され、Company と紐付ける（仕様書 §6.5.4）。"""
     if not contact.organization or not contact.organization.strip():
         return None
+
+    # contact.org_domain_name が未設定で email がある場合は補完（§6.4）
+    if not contact.org_domain_name and getattr(contact, "email", ""):
+        derived_dom = derive_org_domain_name(contact.email)
+        if derived_dom:
+            contact.org_domain_name = derived_dom
+            contact.save(update_fields=["org_domain_name", "updated_at"])
 
     active_companies = list(Company.objects.filter(status=Company.Status.ACTIVE))
 
@@ -233,6 +323,10 @@ def link_contact_to_company(contact, user=None) -> Company | None:
 
         contact.company = oldest
         contact.save(update_fields=["company", "updated_at"])
+
+        # ドメインの穴埋め（§6.5.6）：既存Companyのdomainが空の場合、紐づくContactの独自ドメインで穴埋め
+        if contact.org_domain_name:
+            maybe_fill_company_domain(oldest, contact.org_domain_name)
 
         # 余剰の exact_matches 候補とのペアリング
         confirmed_different = get_companies_confirmed_as_different(oldest)

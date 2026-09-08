@@ -7,6 +7,9 @@
   <div class="app-page-header">
     <div>
       <h1>重複会社候補レビュー</h1>
+      <p class="app-muted" style="margin-top:4px; margin-bottom:0;">
+        システムが自動検出した類似・重複の可能性がある会社グループの一覧です。存続会社（サバイブ会社）を1社指定して一括統合、または別会社判定を行ってください。
+      </p>
     </div>
     <div class="app-action-area">
       {% back_all_link back %}
@@ -14,82 +17,101 @@
     </div>
   </div>
 
-  <section class="app-card">
-    <p class="app-muted" style="margin-bottom:16px;">
-      システムが自動検出した類似・重複の可能性がある会社ペアの一覧です。確認の上、統合または別会社としての判定を行ってください。
-    </p>
+  <div style="display:flex; flex-direction:column; gap:20px;">
+    {% for group in groups %}
+      <section class="app-card" style="margin-bottom:0;">
+        <form method="post" action="{% url 'companies:company_merge' %}" style="margin:0;">
+          {% csrf_token %}
+          <input type="hidden" name="group_id" value="{{ group.id }}">
+          <input type="hidden" name="merge_company_ids" value="{{ group.all_company_ids_str }}">
+          <input type="hidden" name="candidate_ids" value="{{ group.candidate_ids_str }}">
+          <input type="hidden" name="next" value="{% url 'companies:company_candidate_list' %}">
 
-    <div class="app-table-wrapper">
-      <table class="app-table">
-        <thead>
-          <tr>
-            <th>会社 A</th>
-            <th>会社 B</th>
-            <th>一致スコア</th>
-            <th>判定ランク</th>
-            <th>検出日時</th>
-            <th style="width:180px;">操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for cand in candidates %}
-            <tr>
-              <td>
-                <a href="{% url 'companies:company_detail' pk=cand.company_a.id %}" target="_blank" style="font-weight:600;">
-                  {{ cand.company_a.organization }}
-                </a>
-                <div style="font-size:12px; color:var(--app-muted);">
-                  {{ cand.company_a.domain|default:"ドメインなし" }} / {{ cand.company_a.phone|default:"電話なし" }}
-                </div>
-              </td>
-              <td>
-                <a href="{% url 'companies:company_detail' pk=cand.company_b.id %}" target="_blank" style="font-weight:600;">
-                  {{ cand.company_b.organization }}
-                </a>
-                <div style="font-size:12px; color:var(--app-muted);">
-                  {{ cand.company_b.domain|default:"ドメインなし" }} / {{ cand.company_b.phone|default:"電話なし" }}
-                </div>
-              </td>
-              <td>
-                <strong>{{ cand.score }}</strong> 点
-              </td>
-              <td>
-                <span class="app-status-badge">{{ cand.get_rank_display }}</span>
-              </td>
-              <td>{{ cand.created_at|date:"Y-m-d H:i" }}</td>
-              <td>
-                <div style="display:flex; gap:6px;">
-                  <a href="{% url 'companies:company_merge' %}?candidate_id={{ cand.id }}" class="app-btn app-btn--primary app-btn--sm">
-                    統合確認
-                  </a>
-                  <form method="post" action="{% url 'companies:company_mark_different' pk=cand.id %}" style="margin:0;">
-                    {% csrf_token %}
-                    <button type="submit" class="app-btn app-btn--ghost app-btn--sm" onclick="return confirm('このペアを別会社として記録しますか？');">
-                      別会社
-                    </button>
-                  </form>
-                </div>
-              </td>
-            </tr>
-          {% empty %}
-            <tr>
-              <td colspan="6" class="app-muted" style="text-align:center; padding:24px;">現在、レビュー待ちの重複会社候補はありません。</td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+          <!-- グループヘッダー: 会社名 / 判定ランク（バッジ） / 候補社数 -->
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:14px; padding-bottom:10px; border-bottom:1px solid var(--app-border);">
+            <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+              <h2 style="margin:0; font-size:17px; font-weight:700;">{{ group.name }}</h2>
+              {% if group.rank == "exact_match" %}
+                <span class="app-status-badge app-status-badge--error">{{ group.rank_display }}</span>
+              {% elif group.rank == "possible_high" %}
+                <span class="app-status-badge app-status-badge--warning">{{ group.rank_display }}</span>
+              {% else %}
+                <span class="app-status-badge">{{ group.rank_display }}</span>
+              {% endif %}
+              <span style="font-size:13px; color:var(--app-muted); font-weight:600;">
+                候補 {{ group.company_count }} 社（最大一致スコア: {{ group.max_score }}点）
+              </span>
+            </div>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <button type="submit" class="app-btn app-btn--warning app-btn--sm" onclick="return confirm('選択した会社を存続会社として、他の候補会社を一括統合しますか？\n（紐づくコンタクトおよび案件が存続会社へ集約されます）');">
+                選択した会社に一括統合
+              </button>
+              <button type="submit" formaction="{% url 'companies:company_mark_different_batch' %}" formmethod="post" class="app-btn app-btn--secondary app-btn--sm" onclick="return confirm('このグループに含まれる候補ペアを別会社として記録しますか？');">
+                別会社
+              </button>
+            </div>
+          </div>
+
+          <!-- 候補会社テーブル -->
+          <div class="app-table-wrapper">
+            <table class="app-table">
+              <thead>
+                <tr>
+                  <th style="width:70px; text-align:center;">存続指定</th>
+                  <th>会社名</th>
+                  <th>ドメイン</th>
+                  <th>代表電話</th>
+                  <th>住所</th>
+                  <th style="width:100px; text-align:center;">紐づく名刺</th>
+                  <th style="width:140px;">作成日時</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for comp in group.companies %}
+                  <tr>
+                    <td style="text-align:center;">
+                      <input type="radio" name="surviving_company_{{ group.id }}" id="surviving_{{ group.id }}_{{ comp.id }}" value="{{ comp.id }}" {% if forloop.first %}checked{% endif %} style="cursor:pointer; width:16px; height:16px; accent-color:var(--app-color-primary);">
+                    </td>
+                    <td>
+                      <label for="surviving_{{ group.id }}_{{ comp.id }}" style="cursor:pointer; font-weight:600; color:var(--app-text);">
+                        {{ comp.organization }}
+                      </label>
+                      <a href="{% url 'companies:company_detail' pk=comp.id %}" target="_blank" style="margin-left:6px; font-size:12px; color:var(--app-color-primary);" title="詳細を新しいタブで確認">
+                        詳細 ↗
+                      </a>
+                    </td>
+                    <td>{{ comp.domain|default:"—" }}</td>
+                    <td>{{ comp.phone|default:"—" }}</td>
+                    <td style="max-width:240px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="{{ comp.address }}">
+                      {{ comp.address|default:"—" }}
+                    </td>
+                    <td style="text-align:center;">
+                      <strong>{{ comp.contacts_count }}</strong> 件
+                    </td>
+                    <td style="font-size:13px; color:var(--app-muted);">{{ comp.created_at|date:"Y-m-d H:i" }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </form>
+      </section>
+    {% empty %}
+      <section class="app-card" style="text-align:center; padding:36px 16px;">
+        <p class="app-muted" style="margin:0; font-size:15px;">現在、レビュー待ちの重複会社候補はありません。</p>
+      </section>
+    {% endfor %}
+  </div>
+
+  {% if is_paginated %}
+    <div class="app-pagination" style="display:flex; justify-content:center; gap:8px; margin-top:20px;">
+      {% if page_obj.has_previous %}
+        <a href="?page={{ page_obj.previous_page_number }}" class="app-btn app-btn--secondary app-btn--sm">前へ</a>
+      {% endif %}
+      <span style="align-self:center; font-size:14px;">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span>
+      {% if page_obj.has_next %}
+        <a href="?page={{ page_obj.next_page_number }}" class="app-btn app-btn--secondary app-btn--sm">次へ</a>
+      {% endif %}
     </div>
-
-    {% if is_paginated %}
-      <div class="app-pagination" style="display:flex; justify-content:center; gap:8px; margin-top:16px;">
-        {% if page_obj.has_previous %}
-          <a href="?page={{ page_obj.previous_page_number }}" class="app-btn app-btn--secondary app-btn--sm">前へ</a>
-        {% endif %}
-        <span style="align-self:center; font-size:14px;">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span>
-        {% if page_obj.has_next %}
-          <a href="?page={{ page_obj.next_page_number }}" class="app-btn app-btn--secondary app-btn--sm">次へ</a>
-        {% endif %}
-      </div>
-    {% endif %}
-  </section>
+  {% endif %}
 {% endblock %}

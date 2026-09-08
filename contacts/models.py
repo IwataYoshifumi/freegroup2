@@ -497,9 +497,16 @@ class Contact(models.Model):
             if new_address != self.address:
                 self.address = new_address
                 update_fields = kwargs.get("update_fields")
+        # org_domain_name の自動補完（仕様書 §6.4）。未設定時のみ email から抽出
+        if not self.org_domain_name and self.email:
+            from contacts.services.normalization import derive_org_domain_name
+            derived_domain = derive_org_domain_name(self.email)
+            if derived_domain:
+                self.org_domain_name = derived_domain
+                update_fields = kwargs.get("update_fields")
                 if update_fields is not None:
                     update_fields = set(update_fields)
-                    update_fields.add("address")
+                    update_fields.add("org_domain_name")
                     kwargs["update_fields"] = update_fields
 
         super().save(*args, **kwargs)
