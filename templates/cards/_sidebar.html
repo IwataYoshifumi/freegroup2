@@ -76,17 +76,36 @@
 
 <nav class="app-sidebar" aria-label="名刺管理メニュー">
   <div class="app-sidebar__section-title">名刺管理</div>
-  <a href="{% url 'cards:card_upload' %}" {% if active_menu == 'cards:card_upload' %}class="is-active"{% endif %}>名刺アップロード</a>
+  <a href="{% url 'cards:card_upload' %}" {% if active_menu == 'cards:card_upload' %}class="is-active"{% endif %}>名刺画像アップロード</a>
   <a href="{% url 'persons:person_list' %}" {% if active_menu == 'persons:person_list' %}class="is-active"{% endif %}>パーソン一覧</a>
+  <a href="{% url 'companies:company_list' %}" {% if active_menu == 'companies:company_list' %}class="is-active"{% endif %}>会社一覧</a>
   <a href="{% url 'cards:card_list' %}" {% if active_menu == 'cards:card_list' %}class="is-active"{% endif %}>名刺一覧</a>
   <a href="{% url 'contacts:contact_list' %}" {% if active_menu == 'contacts:contact_list' %}class="is-active"{% endif %}>コンタクト一覧</a>
-  <a href="{% url 'duplicates:duplicate_group_list' %}" {% if active_menu == 'duplicates:duplicate_group_list' %}class="is-active"{% endif %}>重複候補一覧</a>
   <a href="{% url 'originals:original_list' %}" {% if active_menu == 'originals:original_list' %}class="is-active"{% endif %}>元画像一覧</a>
-  <a href="{% url 'duplicates:merge_log_list' %}" {% if active_menu == 'duplicates:merge_log_list' %}class="is-active"{% endif %}>マージログ</a>
-  <a href="{% url 'companies:company_list' %}" {% if active_menu == 'companies:company_list' %}class="is-active"{% endif %}>会社一覧</a>
+
+  <div class="app-sidebar__section-title" style="margin-top: 1.5rem;">
+    重複チェック
+    {% if person_duplicate_count > 0 or company_duplicate_count > 0 %}
+      <span style="color:#e11d48; margin-left:4px; font-size:10px;">●</span>
+    {% endif %}
+  </div>
+  <a href="{% url 'duplicates:duplicate_group_list' %}" {% if active_menu == 'duplicates:duplicate_group_list' %}class="is-active"{% endif %}>
+    重複候補一覧（パーソン）
+    {% if person_duplicate_count > 0 %}
+      <span style="color:#e11d48; margin-left:4px; font-size:10px;">●</span>
+    {% endif %}
+  </a>
   {% if perms.companies.merge_company %}
-    <a href="{% url 'companies:candidate_list' %}" {% if active_menu == 'companies:company_candidate_list' or active_menu == 'companies:candidate_list' %}class="is-active"{% endif %}>重複会社候補</a>
+    <a href="{% url 'companies:candidate_list' %}" {% if active_menu == 'companies:company_candidate_list' or active_menu == 'companies:candidate_list' %}class="is-active"{% endif %}>
+      重複候補一覧（会社）
+      {% if company_duplicate_count > 0 %}
+        <span style="color:#e11d48; margin-left:4px; font-size:10px;">●</span>
+      {% endif %}
+    </a>
   {% endif %}
+  <a href="{% url 'duplicates:merge_log_list' %}" {% if active_menu == 'duplicates:merge_log_list' %}class="is-active"{% endif %}>マージログ</a>
+
+  <div class="app-sidebar__section-title" style="margin-top: 1.5rem;">その他</div>
   <div class="app-sidebar-flyout">
     <div class="app-sidebar-flyout__trigger{% if active_menu == 'contacts:contact_import' or is_export_mode %} is-active{% endif %}"
          role="button" tabindex="0" aria-haspopup="true" aria-expanded="false">

@@ -51,7 +51,7 @@
       <table class="app-table app-table--nowrap">
         <thead>
           <tr>
-            <th style="width:60px;">操作</th>
+            <th style="width:70px; min-width:70px; white-space:nowrap;">操作</th>
             <th>会社名</th>
             <th>ドメイン</th>
             <th>電話番号</th>
@@ -64,7 +64,7 @@
           {% for company in companies %}
             {% url 'companies:company_detail' pk=company.id as detail_url %}
             <tr>
-              <td>
+              <td style="white-space:nowrap;">
                 <a href="{% append_back_url detail_url back %}" class="app-btn app-btn--ghost app-btn--sm">詳細</a>
               </td>
               <td>
