@@ -1,76 +1,16 @@
 {# 名刺管理サイドバー部品（include 専用）。app_base.html から呼ばれる。 #}
 <style>
-  .app-sidebar {
-    overflow: visible !important;
+  .app-sidebar-group {
+    margin-top: 1.5rem;
   }
-  .app-sidebar-flyout {
-    position: relative;
-  }
-  .app-sidebar-flyout__trigger {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 10px 12px;
-    border-radius: 8px;
-    margin-bottom: 2px;
+  .app-sidebar-group > summary {
     cursor: pointer;
-    color: var(--app-text);
-    text-decoration: none;
+    margin: 8px 0;
     user-select: none;
-    transition: background 0.15s ease, color 0.15s ease;
+    list-style: none;
   }
-  .app-sidebar-flyout__trigger:hover,
-  .app-sidebar-flyout:hover .app-sidebar-flyout__trigger,
-  .app-sidebar-flyout__trigger.is-active {
-    background: #eff6ff;
-    color: var(--app-color-primary);
-    font-weight: 600;
-  }
-  .app-sidebar-flyout__trigger:hover i,
-  .app-sidebar-flyout:hover .app-sidebar-flyout__trigger i,
-  .app-sidebar-flyout__trigger.is-active i {
-    color: var(--app-color-primary);
-  }
-  .app-sidebar-flyout__menu {
+  .app-sidebar-group > summary::-webkit-details-marker {
     display: none;
-    position: absolute;
-    left: calc(100% + 4px);
-    top: 0;
-    min-width: 140px;
-    background: var(--app-surface, #fff);
-    border: 1px solid var(--app-border, #e2e8f0);
-    border-radius: 8px;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
-    padding: 4px;
-    z-index: 1050;
-  }
-  .app-sidebar-flyout__menu::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: -8px;
-    width: 8px;
-    height: 100%;
-  }
-  .app-sidebar-flyout:hover .app-sidebar-flyout__menu,
-  .app-sidebar-flyout:focus-within .app-sidebar-flyout__menu {
-    display: block !important;
-  }
-  .app-sidebar-flyout__menu a {
-    display: block;
-    padding: 8px 12px;
-    border-radius: 6px;
-    color: var(--app-text);
-    text-decoration: none;
-    font-size: 14px;
-    white-space: nowrap;
-    margin-bottom: 2px;
-    transition: background 0.15s ease, color 0.15s ease;
-  }
-  .app-sidebar-flyout__menu a:hover {
-    background: #eff6ff;
-    color: var(--app-color-primary);
-    font-weight: 600;
   }
 </style>
 
@@ -83,8 +23,8 @@
   <a href="{% url 'contacts:contact_list' %}" {% if active_menu == 'contacts:contact_list' %}class="is-active"{% endif %}>コンタクト一覧</a>
   <a href="{% url 'originals:original_list' %}" {% if active_menu == 'originals:original_list' %}class="is-active"{% endif %}>元画像一覧</a>
 
-  <details class="app-sidebar-group" style="margin-top: 1.5rem;" {% if active_menu in 'duplicates:duplicate_group_list companies:company_candidate_list companies:candidate_list duplicates:merge_log_list' %}open{% endif %}>
-    <summary class="app-sidebar__section-title" style="cursor: pointer; margin-top: 0; user-select: none;">
+  <details class="app-sidebar-group" {% if active_menu == 'duplicates:duplicate_group_list' or active_menu == 'companies:company_candidate_list' or active_menu == 'companies:candidate_list' or active_menu == 'duplicates:merge_log_list' %}open{% endif %}>
+    <summary class="app-sidebar__section-title">
       重複チェック
       {% if person_duplicate_count > 0 or company_duplicate_count > 0 %}
         <span style="color:#e11d48; margin-left:4px; font-size:10px;">●</span>
@@ -107,8 +47,8 @@
     <a href="{% url 'duplicates:merge_log_list' %}" {% if active_menu == 'duplicates:merge_log_list' %}class="is-active"{% endif %}>マージログ</a>
   </details>
 
-  <details class="app-sidebar-group" style="margin-top: 1.5rem;" {% if active_menu == 'contacts:contact_import' or is_export_mode %}open{% endif %}>
-    <summary class="app-sidebar__section-title" style="cursor: pointer; margin-top: 0; user-select: none;">その他</summary>
+  <details class="app-sidebar-group" {% if active_menu == 'contacts:contact_import' or is_export_mode %}open{% endif %}>
+    <summary class="app-sidebar__section-title">その他</summary>
     {% if perms.contacts.import_contact %}
       <a href="{% url 'contacts:contact_import' %}" {% if active_menu == 'contacts:contact_import' %}class="is-active"{% endif %}>インポート</a>
     {% endif %}

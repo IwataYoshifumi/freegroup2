@@ -77,7 +77,6 @@ class CompanyDetailView(LoginRequiredMixin, DetailView):
         context["activities"] = (
             Activity.objects.filter(deal__in=deals, is_archived=False)
             .select_related("deal", "user")
-            .prefetch_related("activity_persons__person")
             .order_by("-occurred_at")
         )
         context["can_edit"] = self.request.user.has_perm("companies.change_company")
