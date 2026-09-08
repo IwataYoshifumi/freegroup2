@@ -141,8 +141,8 @@ class CompanyServiceTests(TestCase):
             "田中商店", "gmail.com", "", "", "",
             "田中商店", "gmail.com", "", "", "",
         )
-        # ドメイン一致は加点されず、会社名のみ一致（120点）の場合は同名別会社誤結合防止のため候補外（""）
-        self.assertEqual(score, 120)
+        # ドメイン一致は加点されず、会社名単独一致（100点）の場合は同名別会社誤結合防止のため候補外（""）
+        self.assertEqual(score, 100)
         self.assertEqual(rank, "")
 
         # 追加の裏付け（電話等）がある場合は候補となる
@@ -150,8 +150,36 @@ class CompanyServiceTests(TestCase):
             "田中商店", "gmail.com", "03-1234-5678", "", "",
             "田中商店", "gmail.com", "03-1234-5678", "", "",
         )
-        self.assertEqual(score_phone, 180)  # 120 + 60
-        self.assertEqual(rank_phone, CompanyDuplicateCandidate.Rank.POSSIBLE_MID)
+        self.assertEqual(score_phone, 120)  # 100 + 20
+        self.assertEqual(rank_phone, CompanyDuplicateCandidate.Rank.POSSIBLE_LOW)
+
+    def test_mark_as_different_company_records_action_log(self):
+        from actionlogs.models import ActionLog
+        from companies.services import mark_as_different_company, register_company_candidate
+
+        comp_a = Company.objects.create(organization="別会社テストA", domain="diff-a.example.jp")
+        comp_b = Company.objects.create(organization="別会社テストB", domain="diff-b.example.jp")
+        cand = CompanyDuplicateCandidate.objects.create(
+            company_a=comp_a,
+            company_b=comp_b,
+            score=140,
+            rank=CompanyDuplicateCandidate.Rank.POSSIBLE_MID,
+        )
+
+        resolved = mark_as_different_company(cand.id, self.user, note="別法人であることを確認")
+        self.assertEqual(resolved.review_status, CompanyDuplicateCandidate.ReviewStatus.DIFFERENT_COMPANY)
+        self.assertEqual(resolved.reviewed_by, self.user)
+        self.assertIsNotNone(resolved.reviewed_at)
+
+        # ActionLog の記録検証（仕様書 §6.5.5.1）
+        log = ActionLog.objects.filter(
+            action="company_different_company",
+            user=self.user,
+        ).first()
+        self.assertIsNotNone(log)
+        self.assertEqual(log.data.get("company_a_id"), str(comp_a.id))
+        self.assertEqual(log.data.get("company_b_id"), str(comp_b.id))
+        self.assertEqual(log.note, "別法人であることを確認")
 
     def test_link_contact_to_company_exact_match(self):
         from companies.services import link_contact_to_company
@@ -161,6 +189,7 @@ class CompanyServiceTests(TestCase):
         existing_comp = Company.objects.create(
             organization="株式会社テスト商事",
             domain="test-shoji.example.com",
+            phone="03-1234-5678",
         )
         person = Person.objects.create()
         contact = Contact.objects.create(
@@ -168,6 +197,7 @@ class CompanyServiceTests(TestCase):
             full_name="山田太郎",
             organization="㈱テスト商事",
             org_domain_name="test-shoji.example.com",
+            org_phone="03-1234-5678",
         )
         linked = link_contact_to_company(contact, user=self.user)
         self.assertEqual(linked, existing_comp)
@@ -204,9 +234,17 @@ class CompanyServiceTests(TestCase):
         from contacts.models import Contact
         from persons.models import Person
 
-        # 2つの同名・同ドメイン Company が存在（古い方が代表）
-        comp_a = Company.objects.create(organization="株式会社同名", domain="doumei.example.com")
-        comp_b = Company.objects.create(organization="株式会社同名", domain="doumei.example.com")
+        # 2つの同名・同ドメイン・同電話 Company が存在（古い方が代表、exact_match 220点）
+        comp_a = Company.objects.create(
+            organization="株式会社同名",
+            domain="doumei.example.com",
+            phone="03-0000-1111",
+        )
+        comp_b = Company.objects.create(
+            organization="株式会社同名",
+            domain="doumei.example.com",
+            phone="03-0000-1111",
+        )
 
         # 事前に comp_a と comp_b が different_company と判定されている
         candidate = register_company_candidate(comp_a, comp_b)
@@ -218,6 +256,7 @@ class CompanyServiceTests(TestCase):
             full_name="鈴木一郎",
             organization="株式会社同名",
             org_domain_name="doumei.example.com",
+            org_phone="03-0000-1111",
         )
         linked = link_contact_to_company(contact, user=self.user)
         self.assertEqual(linked, comp_a)
@@ -583,11 +622,13 @@ class LinkCompaniesCommandTests(TestCase):
         existing_comp = Company.objects.create(
             organization="株式会社ベータ既存",
             domain="beta-existing.co.jp",
+            phone="03-5555-6666",
         )
         contact = Contact.objects.create(
             person=self.person,
             organization="株式会社ベータ既存",
             org_domain_name="beta-existing.co.jp",
+            org_phone="03-5555-6666",
         )
 
         out = io.StringIO()

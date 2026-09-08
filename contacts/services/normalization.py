@@ -65,40 +65,209 @@ _ADDRESS_DASH_CHARS = "‐‑‒–—―−－"
 # confidence の 1 段下げ表（high → mid → low、low は据え置き）
 _DOWNGRADE = {"high": "mid", "mid": "low", "low": "low"}
 
-# 汎用フリーメール・プロバイダドメインの無視リスト（マスター、§11.9.6）。
-# org_domain_name の値自体は名刺どおり残す（空にしない）。重複検出側がこの判定を
-# 会社一致判定の除外に使う。
-_GENERIC_EMAIL_DOMAINS = frozenset(
-    {
-        "gmail.com",
-        "googlemail.com",
-        "yahoo.co.jp",
-        "yahoo.com",
-        "ymail.com",
-        "hotmail.com",
-        "hotmail.co.jp",
-        "outlook.com",
-        "outlook.jp",
-        "live.com",
-        "live.jp",
-        "msn.com",
-        "icloud.com",
-        "me.com",
-        "mac.com",
-        "aol.com",
-        "ezweb.ne.jp",
-        "docomo.ne.jp",
-        "softbank.ne.jp",
-        "i.softbank.jp",
-        "au.com",
-        "nifty.com",
-        "biglobe.ne.jp",
-        "ybb.ne.jp",
-        "ocn.ne.jp",
-        "so-net.ne.jp",
-        "infoseek.jp",
-        "excite.co.jp",
-    }
+# =============================================================================
+# 汎用メールドメイン マスターリスト（仕様書 §6.4 / §6.5.1 / §11.9.6）
+# =============================================================================
+GENERIC_EMAIL_DOMAINS = frozenset({
+    # --- 海外系フリーメール（大手） -----------------------------------
+    "gmail.com",
+    "googlemail.com",
+    "outlook.com",
+    "outlook.jp",
+    "hotmail.com",
+    "hotmail.co.jp",
+    "live.com",
+    "live.jp",
+    "msn.com",
+    "yahoo.com",
+    "yahoo.co.jp",
+    "yahoo.ne.jp",       # Y!mobile契約者向け
+    "ymail.com",
+    "rocketmail.com",
+    "icloud.com",
+    "me.com",
+    "mac.com",
+    "aol.com",
+    "aim.com",
+
+    # --- 海外系フリーメール（プライバシー志向・その他） ---------------
+    "protonmail.com",
+    "proton.me",
+    "pm.me",
+    "gmx.com",
+    "gmx.net",
+    "gmx.de",
+    "mail.com",
+    "yandex.com",
+    "yandex.ru",
+    "mail.ru",
+    "zoho.com",
+    "zohomail.com",
+    "tutanota.com",
+    "tuta.io",
+    "fastmail.com",
+    "hushmail.com",
+
+    # --- 欧州の国別フリーメール ---------------------------------------
+    "web.de",           # ドイツ
+    "freenet.de",       # ドイツ
+    "t-online.de",      # ドイツ
+    "libero.it",        # イタリア
+    "orange.fr",        # フランス
+    "laposte.net",      # フランス
+    "free.fr",          # フランス
+    "ziggo.nl",         # オランダ
+
+    # --- 中華圏・韓国のフリーメール -----------------------------------
+    "qq.com",
+    "foxmail.com",
+    "163.com",
+    "126.com",
+    "sina.com",
+    "sohu.com",
+    "naver.com",
+    "hanmail.net",
+    "daum.net",
+    "nate.com",
+
+    # --- 日本の携帯キャリアメール -------------------------------------
+    "docomo.ne.jp",
+    "ezweb.ne.jp",
+    "au.com",
+    "softbank.ne.jp",
+    "i.softbank.jp",
+    "disney.ne.jp",
+    "ymobile.ne.jp",
+    "y-mobile.ne.jp",
+    "rakuten.jp",
+    "mineo.jp",
+    "uqmobile.jp",
+
+    # --- 日本の大手プロバイダ・回線一体型ISP --------------------------
+    "nifty.com",
+    "nifty.jp",
+    "asahi-net.or.jp",
+    "asahi-net.jp",
+    "au-one.jp",
+    "dream.jp",
+    "eaccess.ne.jp",
+    "e-mobile.ne.jp",
+    "emobile.ad.jp",
+    "gol.ne.jp",
+    "gol.com",
+    "hi-ho.ne.jp",
+    "infoweb.ne.jp",
+    "itscom.net",
+    "itscom.jp",
+    "enjoy.ne.jp",
+    "megaegg.ne.jp",
+    "commufa.jp",
+    "sannet.ne.jp",
+    "t-com.ne.jp",
+    "tokai.or.jp",
+    "tnc.ne.jp",
+    "ucom.ne.jp",
+    "vectant.ne.jp",
+    "wakwak.com",
+    "excite.co.jp",
+    "infoseek.jp",
+    "goo.jp",
+    "mail.goo.ne.jp",
+    "rakuten.ne.jp",
+    "rakumail.jp",
+    "freebit.net",
+    "ybb.ne.jp",
+    "ymail.ne.jp",
+    "odn.ne.jp",
+    "mopera.ne.jp",
+    "mopera.net",
+    "gyao.ne.jp",
+    "cyberhome.ne.jp",
+    "em-net.ne.jp",
+    "spice.or.jp",
+    "email.ne.jp",
+    "rim.or.jp",
+    "tiki.ne.jp",
+    "valley.ne.jp",
+    "kcn.jp",
+    "willcom.com",
+    "pdx.ne.jp",
+    # サブドメインなし形式で渡された場合の保険
+    "ocn.ne.jp",
+    "biglobe.ne.jp",
+    "so-net.ne.jp",
+
+    # --- 日本のケーブルテレビ局 ---------------------------------------
+    "jcom.home.ne.jp",
+    "cts.ne.jp",
+    "c-able.ne.jp",
+    "actv.ne.jp",
+    "cc9.ne.jp",
+    "cc9.jp",
+    "icntv.ne.jp",
+    "ztv.co.jp",
+    "mx.scn.tv",
+    "catv296.ne.jp",
+})
+
+# 後方互換用エイリアス
+_GENERIC_EMAIL_DOMAINS = GENERIC_EMAIL_DOMAINS
+
+# 末尾一致で判定するドメイン（サブドメイン必須ISP・レンタルサーバー等）
+GENERIC_EMAIL_DOMAIN_SUFFIXES = (
+    # --- サブドメイン必須で発行される老舗ISP --------------------------
+    ".ocn.ne.jp",
+    ".biglobe.ne.jp",
+    ".so-net.ne.jp",
+    ".plala.or.jp",
+    ".nifty.ne.jp",
+    ".zaq.ne.jp",
+    ".zaq.jp",
+    ".dion.ne.jp",
+    ".auone-net.jp",
+    ".iij4u.or.jp",
+    ".dti.ne.jp",
+    ".bekkoame.or.jp",
+    ".hi-ho.ne.jp",
+    ".vodafone.ne.jp",
+    ".pdx.ne.jp",
+    ".bbexcite.jp",
+    ".eonet.ne.jp",
+    ".bbiq.jp",
+    ".pikara.ne.jp",
+    ".pikara.or.jp",
+    ".enjoy.ne.jp",
+    ".megaegg.ne.jp",
+    ".commufa.jp",
+
+    # --- 国内レンタルサーバー -----------------------------------------
+    ".sakura.ne.jp",
+    ".xsrv.jp",
+    ".xserver.jp",
+    ".lolipop.jp",
+    ".heteml.jp",
+    ".conoha.jp",
+    ".mixh.jp",
+    ".coreserver.jp",
+    ".colorfulbox.jp",
+    ".star-domain.jp",
+    ".kagoya.ne.jp",
+    ".value-domain.com",
+    ".xrea.com",
+    ".wpx.jp",
+    ".web.fc2.com",
+    ".main.jp",
+    ".moo.jp",
+    ".sub.jp",
+    ".bitter.jp",
+
+    # --- 海外系（EC店舗・仮メール等） ---------------------------------
+    ".myshopify.com",
+    ".wixsite.com",
+    ".000webhostapp.com",
+    ".jimdofree.com",
+    ".jimdosite.com",
+    ".weebly.com",
 )
 
 
@@ -786,19 +955,33 @@ def normalize_original_script_for_full_name(raw):
 # ----------------------------------------------------------------------
 
 
-def is_generic_email_domain(domain):
-    """汎用フリーメール・プロバイダドメインか判定する（仕様書 §11.9.6）。
+def is_generic_email_domain(domain: str) -> bool:
+    """会社名の識別子として使えない、汎用的なメールドメインかどうかを判定する（仕様書 §6.4 / §6.5.1 / §11.9.6）。
 
     [性質] 純関数（DB 操作なし・副作用なし）
-    [入力] domain: str（ドメイン名。例 "gmail.com"）
+    [入力] domain: str（ドメイン名。例："gmail.com"、"estate.ocn.ne.jp"）
     [出力] bool（汎用ドメインなら True、それ以外 / 空入力なら False）
 
-    重複検出側が会社一致判定の除外に使えるよう公開関数として export する。無視リストは
-    本モジュール内の定数 ``_GENERIC_EMAIL_DOMAINS`` で管理する。
+    Company重複検出（仕様書 §6.5.1）のドメイン一致スコアリングにおいて、
+    汎用ドメイン同士が一致しても加点しないためのガード関数として使う。
+    メールアドレス全体（user@gmail.com）が渡された場合も @ 以降を切り出して判定する。
     """
     if not domain:
         return False
-    return domain.strip().lower() in _GENERIC_EMAIL_DOMAINS
+
+    normalized = domain.strip().lower()
+
+    # メールアドレス全体が渡された場合、最後の "@" より後ろをドメインとみなす
+    if "@" in normalized:
+        normalized = normalized.rsplit("@", 1)[-1]
+
+    if normalized in GENERIC_EMAIL_DOMAINS:
+        return True
+
+    if normalized.endswith(GENERIC_EMAIL_DOMAIN_SUFFIXES):
+        return True
+
+    return False
 
 
 # ----------------------------------------------------------------------

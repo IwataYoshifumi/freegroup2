@@ -8,9 +8,9 @@ from django.utils import timezone
 
 from actionlogs.models import ActionLog
 from companies.models import Company, CompanyDuplicateCandidate
-from contacts.services.generic_email_domains import is_generic_email_domain
 from contacts.services.normalization import (
     derive_org_domain_name,
+    is_generic_email_domain,
     normalize_organization,
     normalize_phone_value,
 )
@@ -40,56 +40,26 @@ def normalize_website(url: str) -> str:
     return f"{netloc}/{first_segment}" if first_segment else netloc
 
 
-def calculate_address_match(addr_a: str, addr_b: str) -> tuple[int, bool]:
-    """住所の一致判定（仕様書 §6.5.1）。
-    都道府県一致: +10点
-    市区町村一致（または住所前方一致）: +20点（最大 +30点）
-    Returns: (score, is_match)
-    """
+def _check_address_match(addr_a: str, addr_b: str) -> bool:
+    """住所の一致・前方一致判定（仕様書 §6.5.1）。"""
     if not addr_a or not addr_b:
-        return 0, False
-
+        return False
     a = addr_a.replace(" ", "").replace("　", "").strip()
     b = addr_b.replace(" ", "").replace("　", "").strip()
     if not a or not b:
-        return 0, False
-
-    pref_a = next((p for p in PREFECTURES if a.startswith(p)), "")
-    pref_b = next((p for p in PREFECTURES if b.startswith(p)), "")
-    pref_match = bool(pref_a and pref_b and pref_a == pref_b)
-
-    city_match = False
+        return False
     if a == b:
-        pref_match = True
-        city_match = True
-    else:
-        if pref_match:
-            rem_a = a[len(pref_a):]
-            rem_b = b[len(pref_b):]
-            m_a = re.match(r"^(.+?[市区町村])", rem_a)
-            m_b = re.match(r"^(.+?[市区町村])", rem_b)
-            if m_a and m_b and m_a.group(1) == m_b.group(1):
-                city_match = True
-            elif rem_a and rem_b and (rem_a.startswith(rem_b) or rem_b.startswith(rem_a)):
-                city_match = True
-        else:
-            min_len = min(len(a), len(b))
-            if min_len >= 5 and (a.startswith(b) or b.startswith(a)):
-                city_match = True
-
-    score = 0
-    if pref_match:
-        score += 10
-    if city_match:
-        score += 20
-    score = min(score, 30)
-
-    return score, (score > 0)
+        return True
+    min_len = min(len(a), len(b))
+    if min_len >= 5 and (a.startswith(b) or b.startswith(a)):
+        return True
+    return False
 
 
-def _check_address_match(addr_a: str, addr_b: str) -> bool:
-    """住所の一致・前方一致判定（仕様書 §6.5.1、都道府県＋市区町村レベル）。"""
-    return calculate_address_match(addr_a, addr_b)[1]
+def calculate_address_match(addr_a: str, addr_b: str) -> tuple[int, bool]:
+    """住所の一致判定（仕様書 §6.5.1）。一致時は20点固定。"""
+    is_match = _check_address_match(addr_a, addr_b)
+    return (20 if is_match else 0), is_match
 
 
 @dataclass
@@ -139,7 +109,7 @@ def calculate_company_match(
     norm_phone_b = normalize_phone_value(phone_b)
     phone_match = bool(norm_phone_a) and norm_phone_a == norm_phone_b
 
-    address_score, address_match = calculate_address_match(addr_a, addr_b)
+    address_match = _check_address_match(addr_a, addr_b)
 
     norm_web_a = normalize_website(web_a)
     norm_web_b = normalize_website(web_b)
@@ -147,14 +117,14 @@ def calculate_company_match(
 
     score = 0
     if name_match:
-        score += 120
+        score += 100
     if domain_match:
-        score += 150
-    if phone_match:
-        score += 60
-    if address_score:
-        score += address_score
+        score += 100
     if url_match:
+        score += 100
+    if phone_match:
+        score += 20
+    if address_match:
         score += 20
 
     rank = determine_company_rank(
@@ -185,15 +155,15 @@ def determine_company_rank(
     address_match: bool = False,
 ) -> str | None:
     """重複検出ランク判定（仕様書 v1.5 §6.5.2）。"""
-    # 候補外（None）：120点未満、および会社名のみ一致（追加の電話・住所・ドメイン・URL一致が一切ない）ケース
-    has_additional_match = domain_match or phone_match or address_match or url_match
+    # 候補外（None）：100点未満、および会社名単独一致（追加のドメイン・URL・電話・住所一致が一切ない）ケース
+    has_additional_match = domain_match or url_match or phone_match or address_match
     if name_match and not has_additional_match:
         return None
-    if score < 120:
+    if score < 100:
         return None
 
-    # exact_match（完全一致）: スコア 230点 以上（かつ name_match と domain_match 必須）
-    if name_match and domain_match and score >= 230:
+    # exact_match（完全一致）: 会社名一致 AND (ドメイン一致 OR URL一致) かつ スコア 220点 以上
+    if name_match and (domain_match or url_match) and score >= 220:
         return CompanyDuplicateCandidate.Rank.EXACT_MATCH
 
     # possible_high（重複可能性大）: スコア 200点 以上
@@ -204,8 +174,9 @@ def determine_company_rank(
     if score >= 140:
         return CompanyDuplicateCandidate.Rank.POSSIBLE_MID
 
-    # possible_low（重複可能性小）: スコア 120点 以上（※社名120点に加え、電話・住所等の追加一致がある場合のみ）
-    if score >= 120:
+    # possible_low（重複可能性小）: いずれか1つ以上の一致があり かつ スコア 100点 以上
+    has_any_match = name_match or domain_match or url_match or phone_match or address_match
+    if has_any_match and score >= 100:
         return CompanyDuplicateCandidate.Rank.POSSIBLE_LOW
 
     return None
@@ -295,7 +266,43 @@ def link_contact_to_company(contact, user=None) -> Company | None:
             contact.org_domain_name = derived_dom
             contact.save(update_fields=["org_domain_name", "updated_at"])
 
-    active_companies = list(Company.objects.filter(status=Company.Status.ACTIVE))
+    # SQL プレフィルタ（仕様書 §6.5.4 性能対策）
+    q_filter = models.Q()
+
+    # (a) 独自ドメインによる絞り込み（汎用ドメイン以外）
+    if contact.org_domain_name and not is_generic_email_domain(contact.org_domain_name):
+        q_filter |= models.Q(domain__iexact=contact.org_domain_name.strip())
+
+    # (b) 会社名による絞り込み（完全・部分一致および法人格除去コアキーワード）
+    raw_org = (contact.organization or "").strip()
+    if raw_org:
+        q_filter |= models.Q(organization__icontains=raw_org)
+
+        # 法人格（株式会社、有限会社、合同会社、㈱、㈲等）を取り除いたコアキーワードでも検索
+        core_org = raw_org
+        for term in (
+            "株式会社", "有限会社", "合同会社", "合資会社", "合名会社",
+            "一般社団法人", "公益社団法人", "一般財団法人", "公益財団法人",
+            "医療法人", "学校法人", "社会福祉法人",
+            "㈱", "㈲", "(株)", "（株）", "(有)", "（有）",
+        ):
+            core_org = core_org.replace(term, "")
+        core_org = core_org.replace(" ", "").replace("　", "").strip()
+        if len(core_org) >= 2:
+            q_filter |= models.Q(organization__icontains=core_org)
+
+    # (c) Webサイト（URL）による絞り込み
+    raw_web = getattr(contact, "website", "") or ""
+    norm_web = normalize_website(raw_web)
+    if norm_web:
+        web_host = norm_web.split("/")[0]
+        if web_host and len(web_host) >= 3:
+            q_filter |= models.Q(website__icontains=web_host)
+
+    # プレフィルタで対象 Company を事前絞り込み
+    active_companies = list(
+        Company.objects.filter(status=Company.Status.ACTIVE).filter(q_filter)
+    )
 
     exact_matches = []
     other_candidates = []
@@ -431,11 +438,23 @@ def execute_company_merge(surviving_company: Company, target_companies: list[Com
     return surviving_company
 
 
-def mark_as_different_company(candidate_id, user) -> CompanyDuplicateCandidate:
-    """レビュー状態を 'different_company' に更新し、監査情報を記録する（仕様書 §6.5.3）。"""
-    candidate = CompanyDuplicateCandidate.objects.get(pk=candidate_id)
-    candidate.review_status = CompanyDuplicateCandidate.ReviewStatus.DIFFERENT_COMPANY
-    candidate.reviewed_by = user
-    candidate.reviewed_at = timezone.now()
-    candidate.save(update_fields=["review_status", "reviewed_by", "reviewed_at", "updated_at"])
-    return candidate
+def mark_as_different_company(candidate_id, user, note="") -> CompanyDuplicateCandidate:
+    """レビュー状態を 'different_company' に更新し、監査情報を記録する（仕様書 §6.5.5.1）。"""
+    with transaction.atomic():
+        candidate = CompanyDuplicateCandidate.objects.get(pk=candidate_id)
+        candidate.review_status = CompanyDuplicateCandidate.ReviewStatus.DIFFERENT_COMPANY
+        candidate.reviewed_by = user
+        candidate.reviewed_at = timezone.now()
+        candidate.save(update_fields=["review_status", "reviewed_by", "reviewed_at", "updated_at"])
+        ActionLog.record(
+            user=user,
+            action="company_different_company",
+            content_object=candidate,
+            object_repr=str(candidate),
+            data={
+                "company_a_id": str(candidate.company_a_id),
+                "company_b_id": str(candidate.company_b_id),
+            },
+            note=note,
+        )
+        return candidate
