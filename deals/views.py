@@ -143,6 +143,36 @@ class DealDetailView(LoginRequiredMixin, DetailView):
         from attachments.forms import AttachmentUploadForm
 
         context["attachment_form"] = AttachmentUploadForm()
+
+        # 検索・選択・追加UI用候補リスト
+        from django.contrib.auth import get_user_model
+        from persons.models import Person
+
+        existing_person_ids = set(deal.deal_persons.values_list("person_id", flat=True))
+        if deal.primary_person_id:
+            existing_person_ids.add(deal.primary_person_id)
+
+        # 関連会社に紐づくパーソンを優先、または有効なパーソン
+        person_qs = Person.objects.exclude(status=Person.Status.MERGED).exclude(id__in=existing_person_ids).select_related("primary_contact__company")
+        if deal.company_id:
+            # 関連会社優先でソート
+            context["candidate_persons"] = sorted(
+                person_qs,
+                key=lambda p: (
+                    0 if (p.primary_contact and p.primary_contact.company_id == deal.company_id) else 1,
+                    p.primary_contact.full_name if p.primary_contact and p.primary_contact.full_name else ""
+                )
+            )
+        else:
+            context["candidate_persons"] = person_qs.order_by("-created_at")[:100]
+
+        existing_user_ids = set(deal.deal_users.values_list("user_id", flat=True))
+        if deal.owner_id:
+            existing_user_ids.add(deal.owner_id)
+
+        User = get_user_model()
+        context["candidate_users"] = User.objects.filter(is_active=True).exclude(id__in=existing_user_ids).order_by("username")
+
         context["back"] = BackNavigator(self.request)
         context["active_menu"] = "deals:deal_list"
         return context

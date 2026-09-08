@@ -4,6 +4,7 @@ from django.utils import timezone
 from actionlogs.models import ActionLog
 from deals.models import Deal
 from deals.permissions import (
+    can_approve_deal,
     can_archive_deal,
     can_edit_deal,
     can_reassign_deal_owner,

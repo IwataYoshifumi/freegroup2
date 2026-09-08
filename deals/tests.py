@@ -134,6 +134,39 @@ class DealModelValidationTests(TestCase):
         with self.assertRaises(IntegrityError):
             DealUser.objects.create(deal=deal, user=self.user2, role=UserRole.APPROVER)
 
+    def test_deal_person_is_primary_and_roles(self):
+        deal = Deal.objects.create(
+            name="Test Deal",
+            primary_person=self.primary_person,
+            owner=self.owner,
+        )
+        dp = DealPerson.objects.create(
+            deal=deal,
+            person=self.person2,
+            role=PersonRole.INFLUENCER,
+            is_primary=True,
+            memo="Key influencer",
+        )
+        self.assertTrue(dp.is_primary)
+        self.assertEqual(dp.role, PersonRole.INFLUENCER)
+
+    def test_deal_user_can_edit_and_roles(self):
+        deal = Deal.objects.create(
+            name="Test Deal",
+            primary_person=self.primary_person,
+            owner=self.owner,
+        )
+        du = DealUser.objects.create(
+            deal=deal,
+            user=self.user2,
+            role=UserRole.APPROVER,
+            can_edit=False,
+            memo="Approver with view only",
+        )
+        self.assertFalse(du.can_edit)
+        self.assertEqual(du.role, UserRole.APPROVER)
+
+
 
 class DealAdminTests(TestCase):
     """DealAdmin の保護制御検証（仕様書 §7.6.1）。"""
@@ -307,11 +340,42 @@ class DealPermissionTests(TestCase):
         self.assertTrue(can_edit_deal(self.privileged_user, self.deal))
         self.assertFalse(can_edit_deal(self.outsider, self.deal))
 
+        # DealUser の can_edit が False の場合、change_deal 権限があっても編集不可
+        deal_user = DealUser.objects.get(deal=self.deal, user=self.member)
+        deal_user.can_edit = False
+        deal_user.save()
+        self.assertFalse(can_edit_deal(self.member, self.deal))
+        # 復元
+        deal_user.can_edit = True
+        deal_user.save()
+
         # change_deal 権限を剥奪された場合は owner でも不可（仕様書 §7.1 の AND 条件厳守）
         from django.contrib.auth.models import Permission
         self.owner.user_permissions.remove(Permission.objects.get(codename="change_deal"))
         self.owner = User.objects.get(pk=self.owner.pk)
         self.assertFalse(can_edit_deal(self.owner, self.deal))
+
+    def test_can_approve_deal(self):
+        from deals.permissions import can_approve_deal
+
+        # privileged_user は edit_all_deals を持つため承認可能
+        self.assertTrue(can_approve_deal(self.privileged_user, self.deal))
+
+        # member は role=SUPPORT のため承認不可
+        self.assertFalse(can_approve_deal(self.member, self.deal))
+
+        # member の role を APPROVER に更新すると承認可能
+        deal_user = DealUser.objects.get(deal=self.deal, user=self.member)
+        deal_user.role = UserRole.APPROVER
+        deal_user.save()
+        self.assertTrue(can_approve_deal(self.member, self.deal))
+
+        # change_deal 権限がなくなると APPROVER でも不可
+        from django.contrib.auth.models import Permission
+        self.member.user_permissions.remove(Permission.objects.get(codename="change_deal"))
+        self.member = User.objects.get(pk=self.member.pk)
+        self.assertFalse(can_approve_deal(self.member, self.deal))
+
 
     def test_can_archive_deal(self):
         from deals.permissions import can_archive_deal

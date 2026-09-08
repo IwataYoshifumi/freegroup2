@@ -20,7 +20,17 @@ def can_edit_deal(user, deal: Deal) -> bool:
         return False
     if deal.owner_id == user.id:
         return True
-    return deal.deal_users.filter(user=user).exists()
+    return deal.deal_users.filter(user=user, can_edit=True).exists()
+
+
+def can_approve_deal(user, deal: Deal) -> bool:
+    """案件の承認権限判定（DealUser.role == 'approver' または edit_all_deals 保持者）。"""
+    if user.has_perm("deals.edit_all_deals"):
+        return True
+    if not user.has_perm("deals.change_deal"):
+        return False
+    from deals.models import UserRole
+    return deal.deal_users.filter(user=user, role=UserRole.APPROVER).exists()
 
 
 def can_archive_deal(user, deal: Deal) -> bool:

@@ -197,15 +197,17 @@ class DealPersonForm(forms.ModelForm):
 
     class Meta:
         model = DealPerson
-        fields = ["person", "role", "memo"]
+        fields = ["person", "role", "is_primary", "memo"]
         labels = {
             "person": "相手方関係者（パーソン）",
             "role": "役割",
+            "is_primary": "主担当",
             "memo": "メモ",
         }
         widgets = {
             "person": forms.Select(attrs={"class": "app-select app-input"}),
             "role": forms.Select(attrs={"class": "app-select app-input"}),
+            "is_primary": forms.CheckboxInput(attrs={"class": "app-checkbox"}),
             "memo": forms.TextInput(attrs={"class": "app-input", "placeholder": "役割・関係メモ"}),
         }
 
@@ -215,14 +217,16 @@ class DealUserForm(forms.ModelForm):
 
     class Meta:
         model = DealUser
-        fields = ["user", "role", "memo"]
+        fields = ["user", "role", "can_edit", "memo"]
         labels = {
             "user": "社内担当者",
             "role": "担当役割",
+            "can_edit": "編集権限",
             "memo": "メモ",
         }
         widgets = {
             "user": forms.Select(attrs={"class": "app-select app-input"}),
             "role": forms.Select(attrs={"class": "app-select app-input"}),
+            "can_edit": forms.CheckboxInput(attrs={"class": "app-checkbox"}),
             "memo": forms.TextInput(attrs={"class": "app-input", "placeholder": "担当役割メモ"}),
         }
