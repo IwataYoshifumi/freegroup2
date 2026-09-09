@@ -1,4 +1,5 @@
 from datetime import timedelta
+from decimal import Decimal
 from django.contrib.admin.sites import AdminSite
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
@@ -562,65 +563,79 @@ class DealViewTests(TestCase):
         self.deal.refresh_from_db()
         self.assertTrue(self.deal.is_archived)
 
-    def test_deal_create_view_with_related_persons(self):
+    def test_deal_form_does_not_contain_related_persons_ui_or_context(self):
+        """案件新規・編集画面に関係者（同席・関連）UIやモーダル、相手方主担当、および関連コンテキストが存在しないことを検証。"""
         self.client.login(username="deal_owner", password="password")
-        url = reverse("deals:deal_create")
-        p2 = Person.objects.create()
-        p3 = Person.objects.create()
 
-        # primary_person なしで p2, p3 が関連者として登録されること
-        post_data = {
-            "name": "関係者付き新規案件",
-            "stage": Stage.INITIAL_MEETING,
-            "probability": 50,
-            "deal_type": DealType.NEW,
-            "amount": 2000000,
-            "related_person_ids": f"{p2.id},{p3.id}",
-        }
-        response = self.client.post(url, data=post_data)
-        self.assertEqual(response.status_code, 302)
-        new_deal = Deal.objects.get(name="関係者付き新規案件")
+        # 編集画面
+        update_url = reverse("deals:deal_update", kwargs={"pk": self.deal.pk})
+        update_res = self.client.get(update_url)
+        self.assertEqual(update_res.status_code, 200)
+        self.assertNotIn("candidate_persons", update_res.context)
+        self.assertNotIn("initial_related_persons", update_res.context)
+        self.assertNotContains(update_res, "related-persons-area")
+        self.assertNotContains(update_res, "relatedPersonModal")
+        self.assertNotContains(update_res, "相手方主担当（パーソン）")
 
-        # DealPerson の検証
-        deal_persons = DealPerson.objects.filter(deal=new_deal)
-        self.assertEqual(deal_persons.count(), 2)
-        person_ids = set(deal_persons.values_list("person_id", flat=True))
-        self.assertIn(p2.id, person_ids)
-        self.assertIn(p3.id, person_ids)
-        for dp in deal_persons:
-            self.assertEqual(dp.role, PersonRole.ATTENDEE)
+        # 新規作成画面
+        create_url = reverse("deals:deal_create")
+        create_res = self.client.get(create_url)
+        self.assertEqual(create_res.status_code, 200)
+        self.assertNotIn("candidate_persons", create_res.context)
+        self.assertNotIn("initial_related_persons", create_res.context)
+        self.assertNotContains(create_res, "related-persons-area")
+        self.assertNotContains(create_res, "relatedPersonModal")
 
-    def test_deal_update_view_with_related_persons_sync(self):
+    def test_company_search_api(self):
+        """会社検索エンドポイント（JSON返却）の認可・検索機能を検証。"""
+        url = reverse("deals:company_search")
+
+        # 未ログインはリダイレクト
+        res = self.client.get(url)
+        self.assertEqual(res.status_code, 302)
+
+        # ログイン
         self.client.login(username="deal_owner", password="password")
-        p2 = Person.objects.create()
-        p3 = Person.objects.create()
+        res = self.client.get(url)
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertIn("results", data)
+        self.assertTrue(any(c["id"] == str(self.company.id) for c in data["results"]))
 
-        # 事前に p2 を関係者として登録
-        DealPerson.objects.create(deal=self.deal, person=p2, role=PersonRole.ATTENDEE)
-        self.assertEqual(DealPerson.objects.filter(deal=self.deal).count(), 1)
+        # キーワード検索
+        c2 = Company.objects.create(organization="グローバル先端技術株式会社", domain="global-tech.example.com")
+        res_q = self.client.get(f"{url}?q=先端技術")
+        self.assertEqual(res_q.status_code, 200)
+        data_q = res_q.json()["results"]
+        self.assertEqual(len(data_q), 1)
+        self.assertEqual(data_q[0]["id"], str(c2.id))
 
-        url = reverse("deals:deal_update", kwargs={"pk": self.deal.pk})
-        get_response = self.client.get(url)
-        self.assertEqual(get_response.status_code, 200)
-        self.assertIn("candidate_persons", get_response.context)
-        self.assertIn("initial_related_persons", get_response.context)
-        initial_ids = [item["id"] for item in get_response.context["initial_related_persons"]]
-        self.assertIn(str(p2.id), initial_ids)
+    def test_deal_form_company_modal_ui(self):
+        """案件フォームに会社検索ダイアログとhidden inputが存在し正しくレンダリングされることを検証。"""
+        self.client.login(username="deal_owner", password="password")
 
-        # p2 を解除し、p3 を新規追加
-        response = self.client.post(url, data={
-            "name": self.deal.name,
-            "company": str(self.company.id),
-            "stage": self.deal.stage,
-            "probability": self.deal.probability,
-            "amount": self.deal.amount,
-            "related_person_ids": str(p3.id),
-        })
-        self.assertEqual(response.status_code, 302)
+        # 編集画面
+        update_url = reverse("deals:deal_update", kwargs={"pk": self.deal.pk})
+        res = self.client.get(update_url)
+        self.assertEqual(res.status_code, 200)
+        self.assertContains(res, 'id="companySearchModal"')
+        self.assertContains(res, 'id="id_company"')
+        self.assertContains(res, 'id="company-search-input"')
+        self.assertContains(res, 'id="company-search-initial-notice"')
+        self.assertContains(res, 'id="company-search-table-wrapper"')
+        self.assertContains(res, '会社名またはドメインを入力して検索してください')
+        self.assertContains(res, self.company.organization)
 
-        deal_persons = DealPerson.objects.filter(deal=self.deal)
-        self.assertEqual(deal_persons.count(), 1)
-        self.assertEqual(deal_persons.first().person, p3)
+        # 新規作成画面
+        create_url = reverse("deals:deal_create")
+        res_create = self.client.get(create_url)
+        self.assertEqual(res_create.status_code, 200)
+        self.assertContains(res_create, 'id="companySearchModal"')
+        self.assertContains(res_create, 'id="id_company"')
+        self.assertContains(res_create, 'id="company-search-initial-notice"')
+        self.assertContains(res_create, 'id="company-search-table-wrapper"')
+        self.assertContains(res_create, '会社名またはドメインを入力して検索してください')
+        self.assertContains(res_create, '（未設定）')
 
     def test_deal_persons_manage_view_candidate_limit(self):
         """DealPersonManageView の candidate_persons が制限されることを検証。"""
@@ -904,6 +919,80 @@ class DealViewTests(TestCase):
         self.assertEqual(du2.role, UserRole.OBSERVER)
         self.assertFalse(du2.can_edit)
         self.assertEqual(du2.memo, "閲覧専用メンバー")
+
+    def test_deal_create_view_with_comma_amount(self):
+        """カンマ付き金額（例: 10,500,000）をPOSTして正常に数値として作成されることを検証。"""
+        self.client.login(username="deal_owner", password="password")
+        url = reverse("deals:deal_create")
+        post_data = {
+            "name": "カンマ付き金額案件",
+            "company": str(self.company.id),
+            "stage": Stage.INITIAL_MEETING,
+            "probability": 50,
+            "deal_type": DealType.NEW,
+            "amount": "10,500,000",
+        }
+        response = self.client.post(url, data=post_data)
+        self.assertEqual(response.status_code, 302)
+        created_deal = Deal.objects.get(name="カンマ付き金額案件")
+        self.assertEqual(created_deal.amount, Decimal("10500000"))
+
+    def test_deal_update_view_with_comma_amount(self):
+        """カンマ付き金額（例: 7,800,000）をPOSTして正常に数値として更新されることを検証。"""
+        self.client.login(username="deal_owner", password="password")
+        url = reverse("deals:deal_update", kwargs={"pk": self.deal.pk})
+        post_data = {
+            "name": "基幹システム導入（カンマ更新）",
+            "company": str(self.company.id),
+            "stage": Stage.UNDER_REVIEW,
+            "probability": 75,
+            "deal_type": DealType.EXPANSION,
+            "amount": "7,800,000",
+        }
+        response = self.client.post(url, data=post_data)
+        self.assertEqual(response.status_code, 302)
+        self.deal.refresh_from_db()
+        self.assertEqual(self.deal.name, "基幹システム導入（カンマ更新）")
+        self.assertEqual(self.deal.amount, Decimal("7800000"))
+
+    def test_deal_forms_amount_clean(self):
+        """DealCreateForm および DealUpdateForm がカンマ付き文字列をDecimalに正規化することを単体検証。"""
+        from deals.forms import DealCreateForm, DealUpdateForm
+
+        # DealCreateForm
+        create_form = DealCreateForm(data={
+            "name": "フォームテスト案件",
+            "company": str(self.company.id),
+            "stage": Stage.INITIAL_MEETING,
+            "amount": "99,999,999",
+        })
+        self.assertTrue(create_form.is_valid(), create_form.errors)
+        self.assertEqual(create_form.cleaned_data["amount"], Decimal("99999999"))
+
+        # DealUpdateForm
+        update_form = DealUpdateForm(instance=self.deal, data={
+            "name": "フォームテスト案件2",
+            "company": str(self.company.id),
+            "stage": Stage.UNDER_REVIEW,
+            "amount": "1,234,567",
+        })
+        self.assertTrue(update_form.is_valid(), update_form.errors)
+        self.assertEqual(update_form.cleaned_data["amount"], Decimal("1234567"))
+
+    def test_deal_form_amount_inputmode_and_layout(self):
+        """案件フォームでamountにinputmode="numeric"が設定され、カンマ自動整形スクリプトが存在することを検証。"""
+        self.client.login(username="deal_owner", password="password")
+
+        create_res = self.client.get(reverse("deals:deal_create"))
+        self.assertEqual(create_res.status_code, 200)
+        self.assertContains(create_res, 'inputmode="numeric"')
+        self.assertContains(create_res, 'toLocaleString')
+
+        update_res = self.client.get(reverse("deals:deal_update", kwargs={"pk": self.deal.pk}))
+        self.assertEqual(update_res.status_code, 200)
+        self.assertContains(update_res, 'inputmode="numeric"')
+        self.assertContains(update_res, 'toLocaleString')
+
 
 
 

@@ -1,6 +1,7 @@
 from django.urls import path
 
 from deals.views import (
+    CompanySearchView,
     DealAddPersonView,
     DealAddUserView,
     DealArchiveView,
@@ -21,6 +22,7 @@ app_name = "deals"
 
 urlpatterns = [
     path("", DealListView.as_view(), name="deal_list"),
+    path("company-search/", CompanySearchView.as_view(), name="company_search"),
     path("create/", DealCreateView.as_view(), name="deal_create"),
     path("<uuid:pk>/", DealDetailView.as_view(), name="deal_detail"),
     path("<uuid:pk>/edit/", DealUpdateView.as_view(), name="deal_update"),

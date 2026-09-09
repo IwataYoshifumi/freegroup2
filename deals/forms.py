@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django import forms
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
@@ -9,8 +11,39 @@ from persons.models import Person
 User = get_user_model()
 
 
-class DealForm(forms.ModelForm):
+class CommaDecimalField(forms.DecimalField):
+    """カンマ付き数値を許容するDecimalField。"""
+
+    def to_python(self, value):
+        if isinstance(value, str):
+            value = value.replace(",", "").strip()
+        return super().to_python(value)
+
+
+class DealAmountCleanMixin:
+    """金額フィールドのカンマ除去およびDecimal正規化を行うMixin。"""
+
+    def clean_amount(self):
+        amount = self.cleaned_data.get("amount")
+        if isinstance(amount, str):
+            amount = amount.replace(",", "").strip()
+            if not amount:
+                return None
+            return Decimal(amount)
+        return amount
+
+
+class DealForm(DealAmountCleanMixin, forms.ModelForm):
     """案件新規作成用フォーム（仕様書 v1.5 §2.1, §0.16）。"""
+
+    amount = CommaDecimalField(
+        required=False,
+        max_digits=12,
+        decimal_places=0,
+        min_value=0,
+        label="金額（円）",
+        widget=forms.TextInput(attrs={"class": "app-input", "inputmode": "numeric", "placeholder": "金額（円）"}),
+    )
 
     class Meta:
         model = Deal
@@ -77,8 +110,17 @@ class DealForm(forms.ModelForm):
         return cleaned_data
 
 
-class DealCreateForm(forms.ModelForm):
+class DealCreateForm(DealAmountCleanMixin, forms.ModelForm):
     """案件新規起票専用フォーム（スリム化：10項目）。"""
+
+    amount = CommaDecimalField(
+        required=False,
+        max_digits=12,
+        decimal_places=0,
+        min_value=0,
+        label="金額（円）",
+        widget=forms.TextInput(attrs={"class": "app-input", "inputmode": "numeric", "placeholder": "金額（円）"}),
+    )
 
     class Meta:
         model = Deal
@@ -108,10 +150,9 @@ class DealCreateForm(forms.ModelForm):
         }
         widgets = {
             "name": forms.TextInput(attrs={"class": "app-input", "placeholder": "案件名を入力"}),
-            "company": forms.Select(attrs={"class": "app-select app-input"}),
+            "company": forms.HiddenInput(),
             "owner": forms.Select(attrs={"class": "app-select app-input"}),
             "stage": forms.Select(attrs={"class": "app-select app-input"}),
-            "amount": forms.NumberInput(attrs={"class": "app-input", "min": 0, "placeholder": "金額（円）"}),
             "expected_close_date": forms.DateInput(attrs={"class": "app-input app-input--date", "type": "date"}),
             "probability": forms.NumberInput(attrs={"class": "app-input", "min": 0, "max": 100, "placeholder": "0〜100"}),
             "deal_type": forms.Select(attrs={"class": "app-select app-input"}),
@@ -120,10 +161,19 @@ class DealCreateForm(forms.ModelForm):
         }
 
 
-class DealUpdateForm(forms.ModelForm):
+class DealUpdateForm(DealAmountCleanMixin, forms.ModelForm):
     """案件通常編集用フォーム（仕様書 v1.5 §2.6, §0.15）。
     ※ owner, primary_person, is_archived は除外。
     """
+
+    amount = CommaDecimalField(
+        required=False,
+        max_digits=12,
+        decimal_places=0,
+        min_value=0,
+        label="金額（円）",
+        widget=forms.TextInput(attrs={"class": "app-input", "inputmode": "numeric", "placeholder": "金額（円）"}),
+    )
 
     class Meta:
         model = Deal
@@ -153,11 +203,10 @@ class DealUpdateForm(forms.ModelForm):
         }
         widgets = {
             "name": forms.TextInput(attrs={"class": "app-input"}),
-            "company": forms.Select(attrs={"class": "app-select app-input"}),
+            "company": forms.HiddenInput(),
             "stage": forms.Select(attrs={"class": "app-select app-input"}),
             "probability": forms.NumberInput(attrs={"class": "app-input", "min": 0, "max": 100}),
             "deal_type": forms.Select(attrs={"class": "app-select app-input"}),
-            "amount": forms.NumberInput(attrs={"class": "app-input", "min": 0}),
             "expected_close_date": forms.DateInput(attrs={"class": "app-input app-input--date", "type": "date"}),
             "lead_source": forms.Select(attrs={"class": "app-select app-input"}),
             "source_campaign": forms.Select(attrs={"class": "app-select app-input"}),

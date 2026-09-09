@@ -6,6 +6,7 @@ from django.contrib.auth.mixins import LoginRequiredMixin, PermissionRequiredMix
 from django.core.exceptions import PermissionDenied
 from django.db import models, transaction
 from django.db.models import OuterRef, Q, Subquery
+from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views import View
@@ -14,6 +15,7 @@ from django.views.generic import CreateView, DetailView, FormView, ListView, Upd
 from actionlogs.models import ActionLog
 from activities.models import Activity
 from back_navigator.back_navigator import BackNavigator
+from companies.models import Company
 from deals.forms import (
     DealCloseForm,
     DealCreateForm,
@@ -148,114 +150,7 @@ class DealDetailView(LoginRequiredMixin, DetailView):
         return context
 
 
-class _RelatedPersonsSyncMixin:
-    """相手方関係者（DealPerson）の同期および選択肢コンテキスト提供Mixin。"""
-
-    def _get_candidate_persons(self):
-        return (
-            Person.objects.exclude(status=Person.Status.MERGED)
-            .select_related("primary_contact__company")
-            .order_by("-created_at")
-        )
-
-    def _sync_related_persons(self, deal):
-        raw_ids = self.request.POST.getlist("related_person_ids")
-        target_person_ids = set()
-        for item in raw_ids:
-            for part in str(item).split(","):
-                part = part.strip()
-                if part:
-                    try:
-                        target_person_ids.add(uuid.UUID(part))
-                    except (ValueError, AttributeError):
-                        pass
-
-        # 主担当者（primary_person）と重複しているIDは除外（DealPerson.clean()ガード準拠）
-        if deal.primary_person_id:
-            target_person_ids.discard(deal.primary_person_id)
-
-        # 解除されたDealPersonは削除
-        DealPerson.objects.filter(deal=deal).exclude(
-            person_id__in=target_person_ids
-        ).delete()
-
-        # 選択されたPersonをDealPersonとして登録
-        if target_person_ids:
-            valid_persons = Person.objects.filter(id__in=target_person_ids)
-            for person in valid_persons:
-                DealPerson.objects.get_or_create(
-                    deal=deal,
-                    person=person,
-                    defaults={"role": PersonRole.ATTENDEE},
-                )
-
-    def _get_initial_related_persons(self, deal=None):
-        if self.request.method == "POST":
-            raw_ids = self.request.POST.getlist("related_person_ids")
-            p_ids = []
-            for item in raw_ids:
-                for part in str(item).split(","):
-                    part = part.strip()
-                    if part and part not in p_ids:
-                        try:
-                            uuid.UUID(part)
-                            p_ids.append(part)
-                        except ValueError:
-                            pass
-            if p_ids:
-                persons = Person.objects.filter(id__in=p_ids).select_related(
-                    "primary_contact__company"
-                )
-                return [
-                    {
-                        "id": str(p.id),
-                        "name": (
-                            p.primary_contact.full_name
-                            if p.primary_contact and p.primary_contact.full_name
-                            else str(p)
-                        ),
-                        "company": (
-                            p.primary_contact.company.organization
-                            if p.primary_contact and p.primary_contact.company
-                            else (
-                                p.primary_contact.organization
-                                if p.primary_contact
-                                else ""
-                            )
-                        ),
-                    }
-                    for p in persons
-                ]
-            return []
-
-        if deal and deal.pk:
-            return [
-                {
-                    "id": str(dp.person_id),
-                    "name": (
-                        dp.person.primary_contact.full_name
-                        if dp.person.primary_contact and dp.person.primary_contact.full_name
-                        else str(dp.person)
-                    ),
-                    "company": (
-                        dp.person.primary_contact.company.organization
-                        if dp.person.primary_contact
-                        and dp.person.primary_contact.company
-                        else (
-                            dp.person.primary_contact.organization
-                            if dp.person.primary_contact
-                            else ""
-                        )
-                    ),
-                }
-                for dp in deal.deal_persons.select_related(
-                    "person__primary_contact__company"
-                ).all()
-            ]
-        return []
-
-
-class DealCreateView(LoginRequiredMixin, PermissionRequiredMixin, _RelatedPersonsSyncMixin, CreateView):
+class DealCreateView(LoginRequiredMixin, PermissionRequiredMixin, CreateView):
     """案件新規作成画面（仕様書 v1.5 §2.1）。"""
 
     model = Deal
@@ -279,7 +174,6 @@ class DealCreateView(LoginRequiredMixin, PermissionRequiredMixin, _RelatedPerson
         if not deal.owner_id:
             deal.owner = self.request.user
         deal.save()
-        self._sync_related_persons(deal)
         ActionLog.record(
             user=self.request.user,
             action="deal_created",
@@ -294,12 +188,16 @@ class DealCreateView(LoginRequiredMixin, PermissionRequiredMixin, _RelatedPerson
         context["is_create"] = True
         context["back"] = BackNavigator(self.request)
         context["active_menu"] = "deals:deal_list"
-        context["candidate_persons"] = self._get_candidate_persons()
-        context["initial_related_persons"] = self._get_initial_related_persons()
+        company_val = self.request.POST.get("company") or self.request.GET.get("company_id")
+        if company_val:
+            try:
+                context["selected_company"] = Company.objects.filter(pk=company_val).first()
+            except Exception:
+                pass
         return context
 
 
-class DealUpdateView(LoginRequiredMixin, PermissionRequiredMixin, _RelatedPersonsSyncMixin, UpdateView):
+class DealUpdateView(LoginRequiredMixin, PermissionRequiredMixin, UpdateView):
     """案件通常編集画面（仕様書 v1.5 §2.6, §0.15）。"""
 
     model = Deal
@@ -318,7 +216,6 @@ class DealUpdateView(LoginRequiredMixin, PermissionRequiredMixin, _RelatedPerson
         deal = form.save(commit=False)
         deal.updated_by = self.request.user
         deal.save()
-        self._sync_related_persons(deal)
         ActionLog.record(
             user=self.request.user,
             action="deal_updated",
@@ -333,9 +230,40 @@ class DealUpdateView(LoginRequiredMixin, PermissionRequiredMixin, _RelatedPerson
         context["is_create"] = False
         context["back"] = BackNavigator(self.request)
         context["active_menu"] = "deals:deal_list"
-        context["candidate_persons"] = self._get_candidate_persons()
-        context["initial_related_persons"] = self._get_initial_related_persons(deal=self.object)
+        company_val = self.request.POST.get("company")
+        if company_val:
+            try:
+                context["selected_company"] = Company.objects.filter(pk=company_val).first()
+            except Exception:
+                pass
+        elif self.object and self.object.company:
+            context["selected_company"] = self.object.company
         return context
+
+
+class CompanySearchView(LoginRequiredMixin, View):
+    """案件フォーム用会社検索エンドポイント（JSON返却）。"""
+
+    def get(self, request, *args, **kwargs):
+        q = request.GET.get("q", "").strip()
+        qs = Company.objects.exclude(status=Company.Status.MERGED)
+        if q:
+            qs = qs.filter(
+                Q(organization__icontains=q)
+                | Q(domain__icontains=q)
+                | Q(address__icontains=q)
+            )
+        qs = qs.order_by("organization")[:30]
+        results = [
+            {
+                "id": str(c.id),
+                "organization": c.organization,
+                "domain": c.domain or "",
+                "address": c.address or "",
+            }
+            for c in qs
+        ]
+        return JsonResponse({"results": results})
 
 
 class DealCloseView(LoginRequiredMixin, PermissionRequiredMixin, FormView):

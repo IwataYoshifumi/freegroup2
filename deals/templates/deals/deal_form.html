@@ -35,111 +35,92 @@
           {% if form.name.errors %}<div class="app-form__error">{{ form.name.errors }}</div>{% endif %}
         </div>
 
-        {# 2. 相手方主担当（パーソン） & 会社名 #}
-        {% if form.primary_person %}
-          <div class="app-form__group">
-            <label class="app-form__label" for="{{ form.primary_person.id_for_label }}">
-              {{ form.primary_person.label }}{% if form.primary_person.field.required %} <span style="color:var(--app-color-danger, #ef4444);">*</span>{% endif %}
-            </label>
-            {{ form.primary_person }}
-            {% if form.primary_person.errors %}<div class="app-form__error">{{ form.primary_person.errors }}</div>{% endif %}
-          </div>
-          <div class="app-form__group">
-            <label class="app-form__label" for="{{ form.company.id_for_label }}">
-              {{ form.company.label }}{% if form.company.field.required %} <span style="color:var(--app-color-danger, #ef4444);">*</span>{% endif %}
-            </label>
-            {{ form.company }}
-            {% if form.company.errors %}<div class="app-form__error">{{ form.company.errors }}</div>{% endif %}
-          </div>
-        {% elif not is_create %}
-          <div class="app-form__group">
-            <label class="app-form__label">相手方主担当（パーソン）</label>
-            <div style="padding: 6px 0; font-weight: 500;">
-              {{ form.instance.primary_person|default:"（未設定）" }}
+        {# 2. 会社名: ダイアログ選択UI・全幅 #}
+        <div class="app-form__group app-form__group--full">
+          <label class="app-form__label">
+            {{ form.company.label }}{% if form.company.field.required %} <span style="color:var(--app-color-danger, #ef4444);">*</span>{% endif %}
+          </label>
+          <input type="hidden" name="company" id="id_company" value="{% if form.company.value %}{{ form.company.value }}{% elif form.instance.company_id %}{{ form.instance.company_id }}{% endif %}">
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 12px; background: #f8fafc; border: 1px solid var(--app-border, #cbd5e1); border-radius: 6px; min-height: 42px;">
+            <div style="display: flex; align-items: center; gap: 8px; flex: 1;">
+              <span id="company-display-name" style="font-weight: 500; font-size: 14px;">
+                {% if selected_company %}
+                  {{ selected_company.organization }}
+                {% elif form.instance.company %}
+                  {{ form.instance.company.organization }}
+                {% else %}
+                  <span class="app-muted">（未設定）</span>
+                {% endif %}
+              </span>
             </div>
-          </div>
-          <div class="app-form__group">
-            <label class="app-form__label" for="{{ form.company.id_for_label }}">
-              {{ form.company.label }}{% if form.company.field.required %} <span style="color:var(--app-color-danger, #ef4444);">*</span>{% endif %}
-            </label>
-            {{ form.company }}
-            {% if form.company.errors %}<div class="app-form__error">{{ form.company.errors }}</div>{% endif %}
-          </div>
-        {% else %}
-          <div class="app-form__group app-form__group--full">
-            <label class="app-form__label" for="{{ form.company.id_for_label }}">
-              {{ form.company.label }}{% if form.company.field.required %} <span style="color:var(--app-color-danger, #ef4444);">*</span>{% endif %}
-            </label>
-            {{ form.company }}
-            {% if form.company.errors %}<div class="app-form__error">{{ form.company.errors }}</div>{% endif %}
-          </div>
-        {% endif %}
-
-        {% if not is_create %}
-          {# 2b. 相手方関係者（DealPerson）: 編集時のみ表示 #}
-          <div class="app-form__group app-form__group--full" id="related-persons-area" data-primary-person-id="{{ form.instance.primary_person_id|default:'' }}">
-            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-              <label class="app-form__label" style="margin-bottom: 0;">
-                関係者（同席・関連）
-              </label>
-              <button type="button" class="app-btn app-btn--secondary app-btn--sm" data-action="open-modal" data-target="relatedPersonModal">
-                ＋ 関係者を追加
+            <div style="display: flex; gap: 8px;">
+              <button type="button" class="app-btn app-btn--secondary app-btn--sm" id="btn-open-company-modal" data-action="open-modal" data-target="companySearchModal">
+                会社を検索・選択
+              </button>
+              <button type="button" class="app-btn app-btn--ghost app-btn--sm" id="btn-clear-company" style="color: var(--app-color-danger, #ef4444); {% if not selected_company and not form.instance.company and not form.company.value %}display: none;{% endif %}">
+                解除
               </button>
             </div>
-            <div id="related-persons-chips-container" style="display: flex; flex-wrap: wrap; gap: 8px; min-height: 36px; align-items: center; padding: 8px 12px; background: #f8fafc; border: 1px dashed var(--app-border, #cbd5e1); border-radius: 8px;">
-              <span class="app-muted" id="related-persons-empty" style="font-size: 13px;">（関係者は指定されていません）</span>
-              <div id="related-persons-chips" style="display: inline-flex; flex-wrap: wrap; gap: 6px;"></div>
-            </div>
-            <input type="hidden" name="related_person_ids" id="id_related_person_ids" value="">
-            <small class="app-muted" style="display: block; margin-top: 4px; font-size: 12px;">
-              ※ 商談の同席者や関連パーソン（DealPerson）を登録できます。主担当者は選択できません。
-            </small>
           </div>
-        {% endif %}
+          {% if form.company.errors %}<div class="app-form__error">{{ form.company.errors }}</div>{% endif %}
+        </div>
 
-        {# 3. 社内担当者 & ステージ: 2列横並び (1:1) #}
+        {# 社内担当者: フォームに存在する場合のみ表示 #}
         {% if form.owner %}
-          <div class="app-form__group">
+          <div class="app-form__group app-form__group--full">
             <label class="app-form__label" for="{{ form.owner.id_for_label }}">
               {{ form.owner.label }}{% if form.owner.field.required %} <span style="color:var(--app-color-danger, #ef4444);">*</span>{% endif %}
             </label>
             {{ form.owner }}
             {% if form.owner.errors %}<div class="app-form__error">{{ form.owner.errors }}</div>{% endif %}
           </div>
-          <div class="app-form__group">
-            <label class="app-form__label" for="{{ form.stage.id_for_label }}">
-              {{ form.stage.label }}{% if form.stage.field.required %} <span style="color:var(--app-color-danger, #ef4444);">*</span>{% endif %}
-            </label>
-            {{ form.stage }}
-            {% if form.stage.errors %}<div class="app-form__error">{{ form.stage.errors }}</div>{% endif %}
-          </div>
-        {% else %}
-          <div class="app-form__group">
-            <label class="app-form__label" for="{{ form.stage.id_for_label }}">
-              {{ form.stage.label }}{% if form.stage.field.required %} <span style="color:var(--app-color-danger, #ef4444);">*</span>{% endif %}
-            </label>
-            {{ form.stage }}
-            {% if form.stage.errors %}<div class="app-form__error">{{ form.stage.errors }}</div>{% endif %}
-          </div>
-          <div class="app-form__group"></div>
         {% endif %}
 
-        {# 4. 確度（%） & 商談種別 #}
+        {# 3. 商談種別 / 流入経路 / 流入元キャンペーン: 横1行（3列横並び・1:1:1） #}
         <div class="app-form__group app-form__group--full">
-          <div style="display:flex; gap:16px; align-items:flex-start; flex-wrap:wrap;">
-            <div style="width:140px;">
-              <label class="app-form__label" for="{{ form.probability.id_for_label }}">
-                {{ form.probability.label }}{% if form.probability.field.required %} <span style="color:var(--app-color-danger, #ef4444);">*</span>{% endif %}
-              </label>
-              {{ form.probability }}
-              {% if form.probability.errors %}<div class="app-form__error">{{ form.probability.errors }}</div>{% endif %}
-            </div>
-            <div style="flex:1; min-width:200px;">
+          <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 180px;">
               <label class="app-form__label" for="{{ form.deal_type.id_for_label }}">
                 {{ form.deal_type.label }}{% if form.deal_type.field.required %} <span style="color:var(--app-color-danger, #ef4444);">*</span>{% endif %}
               </label>
               {{ form.deal_type }}
               {% if form.deal_type.errors %}<div class="app-form__error">{{ form.deal_type.errors }}</div>{% endif %}
+            </div>
+            <div style="flex: 1; min-width: 180px;">
+              <label class="app-form__label" for="{{ form.lead_source.id_for_label }}">
+                {{ form.lead_source.label }}{% if form.lead_source.field.required %} <span style="color:var(--app-color-danger, #ef4444);">*</span>{% endif %}
+              </label>
+              {{ form.lead_source }}
+              {% if form.lead_source.errors %}<div class="app-form__error">{{ form.lead_source.errors }}</div>{% endif %}
+            </div>
+            {% if form.source_campaign %}
+              <div style="flex: 1; min-width: 180px;">
+                <label class="app-form__label" for="{{ form.source_campaign.id_for_label }}">
+                  {{ form.source_campaign.label }}{% if form.source_campaign.field.required %} <span style="color:var(--app-color-danger, #ef4444);">*</span>{% endif %}
+                </label>
+                {{ form.source_campaign }}
+                {% if form.source_campaign.errors %}<div class="app-form__error">{{ form.source_campaign.errors }}</div>{% endif %}
+              </div>
+            {% endif %}
+          </div>
+        </div>
+
+        {# 4. ステージ / 確度（%）: 2列横並び（確度は幅140px、ステージは残りの幅） #}
+        <div class="app-form__group app-form__group--full">
+          <div style="display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 200px;">
+              <label class="app-form__label" for="{{ form.stage.id_for_label }}">
+                {{ form.stage.label }}{% if form.stage.field.required %} <span style="color:var(--app-color-danger, #ef4444);">*</span>{% endif %}
+              </label>
+              {{ form.stage }}
+              {% if form.stage.errors %}<div class="app-form__error">{{ form.stage.errors }}</div>{% endif %}
+            </div>
+            <div style="width: 140px;">
+              <label class="app-form__label" for="{{ form.probability.id_for_label }}">
+                {{ form.probability.label }}{% if form.probability.field.required %} <span style="color:var(--app-color-danger, #ef4444);">*</span>{% endif %}
+              </label>
+              {{ form.probability }}
+              {% if form.probability.errors %}<div class="app-form__error">{{ form.probability.errors }}</div>{% endif %}
             </div>
           </div>
         </div>
@@ -160,33 +141,7 @@
           {% if form.expected_close_date.errors %}<div class="app-form__error">{{ form.expected_close_date.errors }}</div>{% endif %}
         </div>
 
-        {# 6. 流入経路 & 流入元キャンペーン #}
-        {% if form.source_campaign %}
-          <div class="app-form__group">
-            <label class="app-form__label" for="{{ form.lead_source.id_for_label }}">
-              {{ form.lead_source.label }}{% if form.lead_source.field.required %} <span style="color:var(--app-color-danger, #ef4444);">*</span>{% endif %}
-            </label>
-            {{ form.lead_source }}
-            {% if form.lead_source.errors %}<div class="app-form__error">{{ form.lead_source.errors }}</div>{% endif %}
-          </div>
-          <div class="app-form__group">
-            <label class="app-form__label" for="{{ form.source_campaign.id_for_label }}">
-              {{ form.source_campaign.label }}{% if form.source_campaign.field.required %} <span style="color:var(--app-color-danger, #ef4444);">*</span>{% endif %}
-            </label>
-            {{ form.source_campaign }}
-            {% if form.source_campaign.errors %}<div class="app-form__error">{{ form.source_campaign.errors }}</div>{% endif %}
-          </div>
-        {% else %}
-          <div class="app-form__group app-form__group--full">
-            <label class="app-form__label" for="{{ form.lead_source.id_for_label }}">
-              {{ form.lead_source.label }}{% if form.lead_source.field.required %} <span style="color:var(--app-color-danger, #ef4444);">*</span>{% endif %}
-            </label>
-            {{ form.lead_source }}
-            {% if form.lead_source.errors %}<div class="app-form__error">{{ form.lead_source.errors }}</div>{% endif %}
-          </div>
-        {% endif %}
-
-        {# 7. メモ: 1行・全幅 #}
+        {# 6. メモ: 1行・全幅 #}
         <div class="app-form__group app-form__group--full">
           <label class="app-form__label" for="{{ form.memo.id_for_label }}">
             {{ form.memo.label }}{% if form.memo.field.required %} <span style="color:var(--app-color-danger, #ef4444);">*</span>{% endif %}
@@ -206,352 +161,247 @@
     </form>
   </section>
 
-  {# ==================== 相手方関係者 複数選択モーダル ==================== #}
-  <div class="app-modal-backdrop" hidden></div>
-  <div class="app-modal" id="relatedPersonModal" hidden role="dialog" aria-modal="true" aria-labelledby="relatedPersonModalTitle">
-    <div class="app-modal__panel" style="width: min(720px, 95vw); max-height: 85vh;">
+  {# ==================== 会社検索ダイアログ ==================== #}
+  <div class="app-modal-backdrop" id="companyModalBackdrop" hidden></div>
+  <div class="app-modal" id="companySearchModal" hidden role="dialog" aria-modal="true" aria-labelledby="companySearchModalTitle">
+    <div class="app-modal__panel" style="width: min(760px, 95vw); max-height: 85vh;">
       <div class="app-modal__header">
-        <h2 id="relatedPersonModalTitle" style="font-size: 16px; font-weight: 700; margin: 0;">相手方関係者の選択</h2>
+        <h2 id="companySearchModalTitle" style="font-size: 16px; font-weight: 700; margin: 0;">会社を検索・選択</h2>
         <button type="button" class="app-btn--icon" data-action="close-modal" aria-label="閉じる" style="border:none; background:transparent; font-size:18px; cursor:pointer; color:var(--app-muted);">&times;</button>
       </div>
       <div class="app-modal__body" style="padding: 16px; display: flex; flex-direction: column; gap: 12px; overflow: hidden;">
-        <div>
+        <div style="display: flex; gap: 8px;">
           <input type="text"
-                 id="related-person-search"
-                 class="app-input app-input--sm"
-                 placeholder="氏名・会社名・役職でフィルタ..."
+                 id="company-search-input"
+                 class="app-input"
+                 placeholder="会社名・ドメインで検索..."
                  autocomplete="off"
-                 style="width: 100%;">
+                 style="flex: 1;">
+          <button type="button" class="app-btn app-btn--primary app-btn--sm" id="company-search-button">検索</button>
         </div>
-        <div style="flex: 1; overflow-y: auto; border: 1px solid var(--app-border); border-radius: 6px; max-height: 380px;">
+
+        {# 初期案内メッセージ（検索前） #}
+        <div id="company-search-initial-notice" style="padding: 36px 16px; text-align: center; color: var(--app-muted); font-size: 14px; background: #f8fafc; border: 1px dashed var(--app-border, #cbd5e1); border-radius: 6px;">
+          会社名またはドメインを入力して検索してください
+        </div>
+
+        {# 検索結果テーブル（検索実行時のみ表示） #}
+        <div id="company-search-table-wrapper" style="display: none; flex: 1; overflow-y: auto; border: 1px solid var(--app-border, #cbd5e1); border-radius: 6px; max-height: 380px;">
           <table class="app-table" style="min-width: 100%; border-collapse: collapse; font-size: 13px;">
             <thead style="position: sticky; top: 0; background: #f8fafc; z-index: 1;">
               <tr>
-                <th style="width: 40px; text-align: center; padding: 8px;">
-                  <input type="checkbox" id="related-person-select-all" title="すべて選択/解除">
-                </th>
-                <th style="padding: 8px;">氏名</th>
-                <th style="padding: 8px;">会社名</th>
-                <th style="padding: 8px;">役職</th>
+                <th style="width: 64px; min-width: 64px; text-align: center; white-space: nowrap; padding: 8px 12px;">操作</th>
+                <th style="padding: 8px 12px;">会社名</th>
+                <th style="padding: 8px 12px;">ドメイン</th>
+                <th style="padding: 8px 12px;">住所</th>
               </tr>
             </thead>
-            <tbody id="related-person-table-body">
-              {% for p in candidate_persons %}
-                <tr class="js-candidate-row"
-                    data-person-id="{{ p.id }}"
-                    data-person-name="{% if p.primary_contact and p.primary_contact.full_name %}{{ p.primary_contact.full_name }}{% else %}{{ p }}{% endif %}"
-                    data-company-name="{% if p.primary_contact and p.primary_contact.company %}{{ p.primary_contact.company.organization }}{% elif p.primary_contact %}{{ p.primary_contact.organization }}{% endif %}"
-                    data-title="{% if p.primary_contact %}{{ p.primary_contact.title }}{% endif %}"
-                    style="cursor: pointer;">
-                  <td style="text-align: center; padding: 8px;" onclick="event.stopPropagation();">
-                    <input type="checkbox"
-                           class="js-candidate-checkbox"
-                           value="{{ p.id }}">
-                  </td>
-                  <td style="padding: 8px; font-weight: 500;">
-                    <span class="js-person-name">{% if p.primary_contact and p.primary_contact.full_name %}{{ p.primary_contact.full_name }}{% else %}{{ p }}{% endif %}</span>
-                    <span class="js-primary-badge app-status-badge app-status-badge--muted" style="display:none; font-size:11px; margin-left:4px;">主担当</span>
-                  </td>
-                  <td style="padding: 8px; color: var(--app-muted);">
-                    {% if p.primary_contact and p.primary_contact.company %}
-                      {{ p.primary_contact.company.organization }}
-                    {% elif p.primary_contact and p.primary_contact.organization %}
-                      {{ p.primary_contact.organization }}
-                    {% else %}
-                      -
-                    {% endif %}
-                  </td>
-                  <td style="padding: 8px; color: var(--app-muted);">
-                    {{ p.primary_contact.title|default:"-" }}
-                  </td>
-                </tr>
-              {% empty %}
-                <tr>
-                  <td colspan="4" style="text-align: center; padding: 24px; color: var(--app-muted);">
-                    選択可能なパーソンが登録されていません。
-                  </td>
-                </tr>
-              {% endfor %}
+            <tbody id="company-search-table-body">
             </tbody>
           </table>
         </div>
-        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: var(--app-muted);">
-          <span id="related-person-selected-count">0 件選択中</span>
-          <span id="related-person-filter-count"></span>
-        </div>
+        <div style="font-size: 12px; color: var(--app-muted);" id="company-search-count"></div>
       </div>
-      <div class="app-modal__footer" style="padding: 12px 16px; border-top: 1px solid var(--app-border); display: flex; justify-content: flex-end; gap: 8px;">
+      <div class="app-modal__footer" style="padding: 12px 16px; border-top: 1px solid var(--app-border, #cbd5e1); display: flex; justify-content: flex-end;">
         <button type="button" class="app-btn app-btn--secondary app-btn--sm" data-action="close-modal">閉じる</button>
-        <button type="button" class="app-btn app-btn--primary app-btn--sm" id="btn-add-related-persons">選択した関係者を追加</button>
       </div>
     </div>
   </div>
 
-  {{ initial_related_persons|json_script:"initial-related-persons-data" }}
-
   <script>
     (function() {
-      var selectedPersonsMap = new Map();
-      var chipsContainer = document.getElementById('related-persons-chips');
-      var emptyNotice = document.getElementById('related-persons-empty');
-      var hiddenInput = document.getElementById('id_related_person_ids');
-      var modal = document.getElementById('relatedPersonModal');
-      if (!modal || !chipsContainer || !hiddenInput) return;
+      var searchUrl = "{% url 'deals:company_search' %}";
+      var hiddenInput = document.getElementById('id_company');
+      var displayNameEl = document.getElementById('company-display-name');
+      var btnClear = document.getElementById('btn-clear-company');
+      var modal = document.getElementById('companySearchModal');
+      var backdrop = document.getElementById('companyModalBackdrop');
+      var searchInput = document.getElementById('company-search-input');
+      var searchBtn = document.getElementById('company-search-button');
+      var initialNotice = document.getElementById('company-search-initial-notice');
+      var tableWrapper = document.getElementById('company-search-table-wrapper');
+      var tableBody = document.getElementById('company-search-table-body');
+      var countEl = document.getElementById('company-search-count');
+      var openBtn = document.getElementById('btn-open-company-modal');
 
-      var searchInput = document.getElementById('related-person-search');
-      var selectAllCb = document.getElementById('related-person-select-all');
-      var countEl = document.getElementById('related-person-selected-count');
-      var filterCountEl = document.getElementById('related-person-filter-count');
-      var btnAdd = document.getElementById('btn-add-related-persons');
-      var candidateRows = Array.prototype.slice.call(modal.querySelectorAll('.js-candidate-row'));
-      var tableBody = document.getElementById('related-person-table-body');
+      if (!hiddenInput || !modal) return;
 
-      function getPrimaryPersonId() {
-        var select = document.getElementById('id_primary_person');
-        if (select) {
-          return select.value ? String(select.value).trim() : '';
-        }
-        var area = document.getElementById('related-persons-area');
-        return area ? (area.getAttribute('data-primary-person-id') || '').trim() : '';
-      }
-
-      function renderChips() {
-        chipsContainer.innerHTML = '';
-        var ids = [];
-        if (selectedPersonsMap.size === 0) {
-          if (emptyNotice) emptyNotice.style.display = '';
-        } else {
-          if (emptyNotice) emptyNotice.style.display = 'none';
-          selectedPersonsMap.forEach(function(person) {
-            ids.push(person.id);
-            var chip = document.createElement('span');
-            chip.className = 'app-status-badge app-status-badge--info';
-            chip.style.display = 'inline-flex';
-            chip.style.alignItems = 'center';
-            chip.style.gap = '6px';
-            chip.style.padding = '4px 10px';
-            chip.style.fontSize = '13px';
-            chip.style.fontWeight = '500';
-
-            var labelSpan = document.createElement('span');
-            var labelText = person.name;
-            if (person.company) {
-              labelText += ' (' + person.company + ')';
-            }
-            labelSpan.textContent = labelText;
-            chip.appendChild(labelSpan);
-
-            var delBtn = document.createElement('button');
-            delBtn.type = 'button';
-            delBtn.className = 'js-remove-related-person';
-            delBtn.dataset.personId = person.id;
-            delBtn.setAttribute('aria-label', person.name + ' を削除');
-            delBtn.style.background = 'none';
-            delBtn.style.border = 'none';
-            delBtn.style.color = 'inherit';
-            delBtn.style.cursor = 'pointer';
-            delBtn.style.fontSize = '14px';
-            delBtn.style.lineHeight = '1';
-            delBtn.style.padding = '0 0 0 2px';
-            delBtn.style.fontWeight = 'bold';
-            delBtn.innerHTML = '&times;';
-
-            chip.appendChild(delBtn);
-            chipsContainer.appendChild(chip);
-          });
-        }
-        hiddenInput.value = ids.join(',');
-      }
-
-      // 親画面のチップ削除ボタンクリック
-      chipsContainer.addEventListener('click', function(e) {
-        var delBtn = e.target.closest('.js-remove-related-person');
-        if (delBtn) {
-          var pid = delBtn.dataset.personId;
-          if (pid && selectedPersonsMap.has(pid)) {
-            selectedPersonsMap.delete(pid);
-            renderChips();
-          }
-        }
-      });
-
-      // 主担当者（primary_person）セレクトの変更監視：主担当になったパーソンは関係者から自動除外
-      var primaryPersonSelect = document.getElementById('id_primary_person');
-      if (primaryPersonSelect) {
-        primaryPersonSelect.addEventListener('change', function() {
-          var newPrimaryId = primaryPersonSelect.value ? String(primaryPersonSelect.value).trim() : '';
-          if (newPrimaryId && selectedPersonsMap.has(newPrimaryId)) {
-            selectedPersonsMap.delete(newPrimaryId);
-            renderChips();
-          }
-        });
-      }
-
-      function updateSelectionCount() {
-        var count = 0;
-        candidateRows.forEach(function(row) {
-          var cb = row.querySelector('.js-candidate-checkbox');
-          if (cb && cb.checked && !cb.disabled) {
-            count++;
-          }
-        });
-        if (countEl) {
-          countEl.textContent = count + ' 件選択中';
-        }
-      }
-
-      function filterRows() {
-        var q = searchInput ? searchInput.value.trim().toLowerCase() : '';
-        var visible = 0;
-        candidateRows.forEach(function(row) {
-          var name = (row.dataset.personName || '').toLowerCase();
-          var company = (row.dataset.companyName || '').toLowerCase();
-          var title = (row.dataset.title || '').toLowerCase();
-          var match = !q || (name.indexOf(q) !== -1 || company.indexOf(q) !== -1 || title.indexOf(q) !== -1);
-          row.style.display = match ? '' : 'none';
-          if (match) visible++;
-        });
-        if (filterCountEl) {
-          filterCountEl.textContent = q ? ('表示 ' + visible + ' / ' + candidateRows.length + ' 件') : ('全 ' + candidateRows.length + ' 件');
-        }
-      }
-
-      if (searchInput) {
-        searchInput.addEventListener('input', filterRows);
-      }
-
-      function syncModalOnOpen() {
-        var primaryId = getPrimaryPersonId();
-        if (searchInput) searchInput.value = '';
-        filterRows();
-
-        candidateRows.forEach(function(row) {
-          var pid = row.dataset.personId;
-          var cb = row.querySelector('.js-candidate-checkbox');
-          var badge = row.querySelector('.js-primary-badge');
-          var isPrimary = (primaryId && pid === primaryId);
-
-          if (isPrimary) {
-            if (cb) {
-              cb.checked = false;
-              cb.disabled = true;
-            }
-            if (badge) badge.style.display = 'inline-flex';
-            row.style.opacity = '0.55';
-            row.title = '主担当者として選択されているため関係者には追加できません';
-          } else {
-            if (cb) {
-              cb.disabled = false;
-              cb.checked = selectedPersonsMap.has(pid);
-            }
-            if (badge) badge.style.display = 'none';
-            row.style.opacity = '';
-            row.title = '';
-          }
-        });
-
-        if (selectAllCb) selectAllCb.checked = false;
-        updateSelectionCount();
+      function openModal() {
+        modal.hidden = false;
+        if (backdrop) backdrop.hidden = false;
+        searchInput.value = '';
+        if (initialNotice) initialNotice.style.display = 'block';
+        if (tableWrapper) tableWrapper.style.display = 'none';
+        if (countEl) countEl.textContent = '';
         setTimeout(function() {
-          if (searchInput) searchInput.focus();
+          searchInput.focus();
         }, 60);
       }
 
-      // モーダルオープンボタン（＋ 関係者を追加）押下時の同期
-      var openModalBtn = document.querySelector('[data-action="open-modal"][data-target="relatedPersonModal"]');
-      if (openModalBtn) {
-        openModalBtn.addEventListener('click', syncModalOnOpen);
-      }
-
-      // 全選択チェックボックス
-      if (selectAllCb) {
-        selectAllCb.addEventListener('change', function() {
-          var checked = selectAllCb.checked;
-          candidateRows.forEach(function(row) {
-            if (row.style.display !== 'none') {
-              var cb = row.querySelector('.js-candidate-checkbox');
-              if (cb && !cb.disabled) {
-                cb.checked = checked;
-              }
-            }
-          });
-          updateSelectionCount();
-        });
-      }
-
-      // 行クリックでチェックボックス反転（チェックボックス直接クリック時はイベント二重発火抑止）
-      if (tableBody) {
-        tableBody.addEventListener('click', function(e) {
-          if (e.target.tagName === 'INPUT') return;
-          var row = e.target.closest('.js-candidate-row');
-          if (!row) return;
-          var cb = row.querySelector('.js-candidate-checkbox');
-          if (cb && !cb.disabled) {
-            cb.checked = !cb.checked;
-            updateSelectionCount();
-          }
-        });
-
-        tableBody.addEventListener('change', function(e) {
-          if (e.target && e.target.classList.contains('js-candidate-checkbox')) {
-            updateSelectionCount();
-          }
-        });
-      }
-
       function closeModal() {
-        var closeBtn = modal.querySelector('[data-action="close-modal"]');
-        if (closeBtn) {
-          closeBtn.click();
-        } else {
-          modal.hidden = true;
-          var backdrop = document.querySelector('.app-modal-backdrop');
-          if (backdrop) backdrop.hidden = true;
-        }
+        modal.hidden = true;
+        if (backdrop) backdrop.hidden = true;
       }
 
-      // 「選択した関係者を追加」ボタン
-      if (btnAdd) {
-        btnAdd.addEventListener('click', function() {
-          var primaryId = getPrimaryPersonId();
-          selectedPersonsMap.clear();
-          candidateRows.forEach(function(row) {
-            var pid = row.dataset.personId;
-            var cb = row.querySelector('.js-candidate-checkbox');
-            if (cb && cb.checked && !cb.disabled && pid !== primaryId) {
-              selectedPersonsMap.set(pid, {
-                id: pid,
-                name: row.dataset.personName || '',
-                company: row.dataset.companyName || ''
-              });
-            }
-          });
-          renderChips();
-          closeModal();
+      if (openBtn) {
+        openBtn.addEventListener('click', openModal);
+      }
+
+      modal.querySelectorAll('[data-action="close-modal"]').forEach(function(btn) {
+        btn.addEventListener('click', closeModal);
+      });
+      if (backdrop) {
+        backdrop.addEventListener('click', closeModal);
+      }
+
+      if (btnClear) {
+        btnClear.addEventListener('click', function() {
+          hiddenInput.value = '';
+          displayNameEl.innerHTML = '<span class="app-muted">（未設定）</span>';
+          btnClear.style.display = 'none';
         });
       }
 
-      // 初期値の読み込み
-      var initialDataEl = document.getElementById('initial-related-persons-data');
-      if (initialDataEl) {
-        try {
-          var initialList = JSON.parse(initialDataEl.textContent);
-          if (Array.isArray(initialList)) {
-            initialList.forEach(function(p) {
-              if (p && p.id) {
-                selectedPersonsMap.set(p.id, {
-                  id: p.id,
-                  name: p.name || '',
-                  company: p.company || ''
-                });
-              }
-            });
+      function executeSearch() {
+        var q = searchInput.value.trim();
+        if (initialNotice) initialNotice.style.display = 'none';
+        if (tableWrapper) tableWrapper.style.display = 'block';
+        fetchCompanies(q);
+      }
+
+      function fetchCompanies(q) {
+        tableBody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:20px; color:var(--app-muted);">検索中...</td></tr>';
+        if (countEl) countEl.textContent = '';
+        fetch(searchUrl + '?q=' + encodeURIComponent(q))
+          .then(function(res) { return res.json(); })
+          .then(function(data) {
+            renderTable(data.results || []);
+          })
+          .catch(function() {
+            tableBody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:20px; color:var(--app-color-danger, #ef4444);">検索に失敗しました。</td></tr>';
+          });
+      }
+
+      function renderTable(results) {
+        if (countEl) {
+          countEl.textContent = results.length > 0 ? (results.length + ' 件見つかりました') : '';
+        }
+        if (!results || results.length === 0) {
+          tableBody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:24px; color:var(--app-muted);">該当する会社が見つかりませんでした。</td></tr>';
+          return;
+        }
+        tableBody.innerHTML = '';
+        results.forEach(function(c) {
+          var tr = document.createElement('tr');
+          tr.style.cursor = 'pointer';
+
+          // 1. 操作（選択ボタン）: 最左端列、折り返し防止
+          var tdAction = document.createElement('td');
+          tdAction.style.width = '64px';
+          tdAction.style.minWidth = '64px';
+          tdAction.style.textAlign = 'center';
+          tdAction.style.whiteSpace = 'nowrap';
+          tdAction.style.padding = '8px 12px';
+          var selectBtn = document.createElement('button');
+          selectBtn.type = 'button';
+          selectBtn.className = 'app-btn app-btn--primary app-btn--sm';
+          selectBtn.style.whiteSpace = 'nowrap';
+          selectBtn.style.display = 'inline-block';
+          selectBtn.textContent = '選択';
+          selectBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            selectCompany(c);
+          });
+          tdAction.appendChild(selectBtn);
+          tr.appendChild(tdAction);
+
+          // 2. 会社名
+          var tdName = document.createElement('td');
+          tdName.style.padding = '8px 12px';
+          tdName.style.fontWeight = '500';
+          tdName.textContent = c.organization || '-';
+          tr.appendChild(tdName);
+
+          // 3. ドメイン
+          var tdDomain = document.createElement('td');
+          tdDomain.style.padding = '8px 12px';
+          tdDomain.style.color = 'var(--app-muted)';
+          tdDomain.textContent = c.domain || '-';
+          tr.appendChild(tdDomain);
+
+          // 4. 住所
+          var tdAddr = document.createElement('td');
+          tdAddr.style.padding = '8px 12px';
+          tdAddr.style.color = 'var(--app-muted)';
+          tdAddr.textContent = c.address || '-';
+          tr.appendChild(tdAddr);
+
+          tr.addEventListener('click', function() {
+            selectCompany(c);
+          });
+
+          tableBody.appendChild(tr);
+        });
+      }
+
+      function selectCompany(c) {
+        hiddenInput.value = c.id;
+        displayNameEl.textContent = c.organization;
+        if (btnClear) btnClear.style.display = 'inline-block';
+        closeModal();
+      }
+
+      searchInput.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          executeSearch();
+        }
+      });
+
+      if (searchBtn) {
+        searchBtn.addEventListener('click', function() {
+          executeSearch();
+        });
+      }
+
+      // ==================== 金額（amount）の自動カンマ表示・整形 ====================
+      var amountInput = document.getElementById('{{ form.amount.id_for_label }}') || document.getElementById('id_amount');
+      if (amountInput) {
+        amountInput.type = 'text';
+        amountInput.inputMode = 'numeric';
+
+        function formatWithComma(val) {
+          if (!val && val !== 0) return '';
+          var raw = String(val).replace(/[^\d]/g, '');
+          if (!raw) return '';
+          return Number(raw).toLocaleString('ja-JP');
+        }
+
+        // 初期表示: 既存値があれば3桁カンマ付きで表示
+        if (amountInput.value) {
+          amountInput.value = formatWithComma(amountInput.value);
+        }
+
+        // リアルタイム整形: inputイベント
+        amountInput.addEventListener('input', function() {
+          var rawVal = this.value.replace(/[^\d]/g, '');
+          if (!rawVal) {
+            this.value = '';
+            return;
           }
-        } catch (err) {
-          console.error('Failed to parse initial related persons', err);
+          this.value = Number(rawVal).toLocaleString('ja-JP');
+        });
+
+        // 送信時サニタイズ: submitイベントでカンマを除去して整数値に戻す
+        var dealForm = amountInput.closest('form');
+        if (dealForm) {
+          dealForm.addEventListener('submit', function() {
+            if (amountInput.value) {
+              amountInput.value = amountInput.value.replace(/,/g, '');
+            }
+          });
         }
       }
-      renderChips();
     })();
   </script>
 {% endblock %}
