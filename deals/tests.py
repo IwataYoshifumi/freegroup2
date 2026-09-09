@@ -134,7 +134,7 @@ class DealModelValidationTests(TestCase):
         with self.assertRaises(IntegrityError):
             DealUser.objects.create(deal=deal, user=self.user2, role=UserRole.APPROVER)
 
-    def test_deal_person_is_primary_and_roles(self):
+    def test_deal_person_roles(self):
         deal = Deal.objects.create(
             name="Test Deal",
             primary_person=self.primary_person,
@@ -144,10 +144,8 @@ class DealModelValidationTests(TestCase):
             deal=deal,
             person=self.person2,
             role=PersonRole.DECISION_MAKER,
-            is_primary=True,
             memo="Key decision maker",
         )
-        self.assertTrue(dp.is_primary)
         self.assertEqual(dp.role, PersonRole.DECISION_MAKER)
 
     def test_deal_user_can_edit_and_roles(self):
@@ -626,8 +624,8 @@ class DealViewTests(TestCase):
         self.assertEqual(deal_persons.count(), 1)
         self.assertEqual(deal_persons.first().person, p3)
 
-    def test_deal_detail_view_candidate_persons_limit(self):
-        """DealDetailView の candidate_persons が100件以下に制限されることを検証。"""
+    def test_deal_persons_manage_view_candidate_limit(self):
+        """DealPersonManageView の candidate_persons が制限されることを検証。"""
         self.client.login(username="deal_owner", password="password")
 
         # 150件以上のパーソンを作成（一部は deal.company に所属、残りは他社または会社なし）
@@ -649,16 +647,16 @@ class DealViewTests(TestCase):
         Person.objects.bulk_update([c.person for c in saved_contacts], ["primary_contact"])
 
         # 会社設定ありの案件での検証
-        response = self.client.get(reverse("deals:deal_detail", kwargs={"pk": self.deal.pk}))
+        response = self.client.get(reverse("deals:deal_persons_manage", kwargs={"pk": self.deal.pk}))
         self.assertEqual(response.status_code, 200)
         candidates = response.context["candidate_persons"]
-        self.assertLessEqual(len(candidates), 100)
-        # 当該会社のパーソンは最大50件
+        self.assertLessEqual(len(candidates), 50)
+        # 当該会社のパーソンは最大30件
         company_candidates = [
             p for p in candidates
             if p.primary_contact and p.primary_contact.company_id == self.deal.company_id
         ]
-        self.assertLessEqual(len(company_candidates), 50)
+        self.assertLessEqual(len(company_candidates), 30)
 
         # 会社未設定の案件での検証
         deal_no_company = Deal.objects.create(
@@ -667,10 +665,248 @@ class DealViewTests(TestCase):
             company=None,
             owner=self.owner,
         )
-        response_no_comp = self.client.get(reverse("deals:deal_detail", kwargs={"pk": deal_no_company.pk}))
+        response_no_comp = self.client.get(reverse("deals:deal_persons_manage", kwargs={"pk": deal_no_company.pk}))
         self.assertEqual(response_no_comp.status_code, 200)
         candidates_no_comp = response_no_comp.context["candidate_persons"]
-        self.assertLessEqual(len(candidates_no_comp), 100)
+        self.assertLessEqual(len(candidates_no_comp), 50)
+
+    def test_deal_detail_view_has_manage_buttons(self):
+        """案件詳細画面に管理画面への遷移ボタンが存在し、インライン検索入力が存在しないことを検証。"""
+        self.client.login(username="deal_owner", password="password")
+        response = self.client.get(reverse("deals:deal_detail", kwargs={"pk": self.deal.pk}))
+        self.assertEqual(response.status_code, 200)
+        html = response.content.decode("utf-8")
+        self.assertIn("関係者を管理・追加", html)
+        self.assertIn("担当者を管理・追加", html)
+        self.assertIn(reverse("deals:deal_persons_manage", kwargs={"pk": self.deal.pk}), html)
+        self.assertIn(reverse("deals:deal_users_manage", kwargs={"pk": self.deal.pk}), html)
+        self.assertNotIn('id="person-search-input"', html)
+        self.assertNotIn('id="user-search-input"', html)
+
+    def test_deal_persons_manage_flow(self):
+        """社外関係者管理画面での検索・追加・削除フローを検証。"""
+        self.client.login(username="deal_owner", password="password")
+        manage_url = reverse("deals:deal_persons_manage", kwargs={"pk": self.deal.pk})
+
+        # 1. 画面表示確認
+        response = self.client.get(manage_url)
+        self.assertEqual(response.status_code, 200)
+
+        # 2. 検索機能
+        target_p = Person.objects.create()
+        Contact.objects.create(person=target_p, last_name="特異名字テスト", first_name="太郎")
+        target_p.primary_contact = Contact.objects.get(person=target_p)
+        target_p.save()
+
+        search_res = self.client.get(f"{manage_url}?q=特異名字テスト")
+        self.assertEqual(search_res.status_code, 200)
+        self.assertIn(target_p, search_res.context["candidate_persons"])
+
+        # 3. 追加POST（nextパラメータ付きで管理画面へリダイレクト）
+        add_url = reverse("deals:deal_add_person", kwargs={"pk": self.deal.pk})
+        post_res = self.client.post(add_url, data={
+            "person": str(target_p.id),
+            "role": PersonRole.DECISION_MAKER,
+            "memo": "決裁権限あり",
+            "next": manage_url,
+        })
+        self.assertRedirects(post_res, manage_url)
+
+        dp = DealPerson.objects.get(deal=self.deal, person=target_p)
+        self.assertEqual(dp.role, PersonRole.DECISION_MAKER)
+        self.assertEqual(dp.memo, "決裁権限あり")
+
+        # 4. 削除POST（nextパラメータ付きで管理画面へリダイレクト）
+        del_url = reverse("deals:deal_delete_person", kwargs={"pk": self.deal.pk, "person_rel_id": dp.id})
+        del_res = self.client.post(del_url, data={"next": manage_url})
+        self.assertRedirects(del_res, manage_url)
+        self.assertFalse(DealPerson.objects.filter(id=dp.id).exists())
+
+    def test_deal_users_manage_flow(self):
+        """社内担当者管理画面での検索・追加・権限設定・削除フローを検証。"""
+        self.client.login(username="deal_owner", password="password")
+        manage_url = reverse("deals:deal_users_manage", kwargs={"pk": self.deal.pk})
+
+        # 1. 画面表示確認
+        response = self.client.get(manage_url)
+        self.assertEqual(response.status_code, 200)
+
+        # 2. 検索機能（ユーザー自身のフィールドおよび紐づくPersonの氏名検索）
+        target_u = User.objects.create_user(username="unique_test_user", password="password", first_name="特異太郎")
+        search_res = self.client.get(f"{manage_url}?q=unique_test_user")
+        self.assertEqual(search_res.status_code, 200)
+        self.assertIn(target_u, search_res.context["candidate_users"])
+
+        # 紐づくPersonの漢字氏名による検索
+        person_linked_user = User.objects.create_user(username="iwata_test_user", password="password", first_name="", last_name="")
+        p = Person.objects.create()
+        Contact.objects.create(person=p, last_name="岩田", first_name="太郎", full_name="岩田 太郎")
+        p.primary_contact = Contact.objects.get(person=p)
+        p.save()
+        person_linked_user.person = p
+        person_linked_user.save()
+
+        search_person_res = self.client.get(f"{manage_url}?q=岩田")
+        self.assertEqual(search_person_res.status_code, 200)
+        self.assertIn(person_linked_user, search_person_res.context["candidate_users"])
+
+        # UI要素の検証（戻るボタン、追加ボタン、ゴミ箱ボタン）
+        html = search_person_res.content.decode("utf-8")
+        self.assertIn("← 戻る", html)
+        self.assertIn("＋ 追加", html)
+
+        # 3. 追加POST（役割・編集権限・メモ設定、nextパラメータ付き）
+        add_url = reverse("deals:deal_add_user", kwargs={"pk": self.deal.pk})
+        post_res = self.client.post(add_url, data={
+            "user": str(target_u.id),
+            "role": UserRole.SUPPORT,
+            "can_edit": "on",
+            "memo": "技術サポート担当",
+            "next": manage_url,
+        })
+        self.assertRedirects(post_res, manage_url)
+
+        du = DealUser.objects.get(deal=self.deal, user=target_u)
+        self.assertEqual(du.role, UserRole.SUPPORT)
+        self.assertTrue(du.can_edit)
+        self.assertEqual(du.memo, "技術サポート担当")
+
+        # 4. 削除POST（nextパラメータ付きで管理画面へリダイレクト）
+        del_url = reverse("deals:deal_delete_user", kwargs={"pk": self.deal.pk, "user_rel_id": du.id})
+        del_res = self.client.post(del_url, data={"next": manage_url})
+        self.assertRedirects(del_res, manage_url)
+        self.assertFalse(DealUser.objects.filter(id=du.id).exists())
+
+    def test_deal_persons_one_click_add_and_batch_update(self):
+        """社外関係者のワンクリック追加および一括更新（編集モード）のテスト。"""
+        self.client.login(username="deal_owner", password="password")
+        manage_url = reverse("deals:deal_persons_manage", kwargs={"pk": self.deal.pk})
+
+        # 1. 2名のパーソンを作成
+        p1 = Person.objects.create()
+        Contact.objects.create(person=p1, last_name="田中", first_name="一郎")
+        p1.primary_contact = Contact.objects.get(person=p1)
+        p1.save()
+
+        p2 = Person.objects.create()
+        Contact.objects.create(person=p2, last_name="佐藤", first_name="二郎")
+        p2.primary_contact = Contact.objects.get(person=p2)
+        p2.save()
+
+        # ワンクリック追加 (p1: role=contact_window, memo="")
+        add_url = reverse("deals:deal_add_person", kwargs={"pk": self.deal.pk})
+        self.client.post(add_url, data={
+            "person": str(p1.id),
+            "role": "contact_window",
+            "memo": "",
+            "next": manage_url,
+        })
+        # ワンクリック追加 (p2: role=contact_window, memo="")
+        self.client.post(add_url, data={
+            "person": str(p2.id),
+            "role": "contact_window",
+            "memo": "",
+            "next": manage_url,
+        })
+
+        dp1 = DealPerson.objects.get(deal=self.deal, person=p1)
+        dp2 = DealPerson.objects.get(deal=self.deal, person=p2)
+        self.assertEqual(dp1.role, PersonRole.CONTACT_WINDOW)
+        self.assertEqual(dp2.role, PersonRole.CONTACT_WINDOW)
+
+        # 2. 一括編集モード表示確認 (?edit=1)
+        edit_res = self.client.get(f"{manage_url}?edit=1")
+        self.assertEqual(edit_res.status_code, 200)
+        self.assertTrue(edit_res.context["is_edit_mode"])
+        edit_html = edit_res.content.decode("utf-8")
+        self.assertIn(f'name="person_{dp1.id}_role"', edit_html)
+        self.assertIn(f'name="person_{dp2.id}_role"', edit_html)
+        self.assertIn("適用", edit_html)
+        self.assertIn("キャンセル", edit_html)
+
+        # 3. 一括更新POST (dp1: decision_maker, dp2: technical)
+        update_res = self.client.post(manage_url, data={
+            f"person_{dp1.id}_exists": "1",
+            f"person_{dp1.id}_role": PersonRole.DECISION_MAKER,
+            f"person_{dp1.id}_memo": "決裁者メモ",
+            f"person_{dp2.id}_exists": "1",
+            f"person_{dp2.id}_role": PersonRole.TECHNICAL,
+            f"person_{dp2.id}_memo": "技術担当メモ",
+        })
+        self.assertRedirects(update_res, manage_url)
+
+        dp1.refresh_from_db()
+        dp2.refresh_from_db()
+        self.assertEqual(dp1.role, PersonRole.DECISION_MAKER)
+        self.assertEqual(dp1.memo, "決裁者メモ")
+        self.assertEqual(dp2.role, PersonRole.TECHNICAL)
+        self.assertEqual(dp2.memo, "技術担当メモ")
+
+    def test_deal_users_one_click_add_and_batch_update(self):
+        """社内担当者のワンクリック追加および一括更新（編集モード）のテスト。"""
+        self.client.login(username="deal_owner", password="password")
+        manage_url = reverse("deals:deal_users_manage", kwargs={"pk": self.deal.pk})
+
+        u1 = User.objects.create_user(username="batch_u1", password="password")
+        u2 = User.objects.create_user(username="batch_u2", password="password")
+
+        # ワンクリック追加 (u1: role=support, can_edit=on, memo="")
+        add_url = reverse("deals:deal_add_user", kwargs={"pk": self.deal.pk})
+        self.client.post(add_url, data={
+            "user": str(u1.id),
+            "role": "support",
+            "can_edit": "on",
+            "memo": "",
+            "next": manage_url,
+        })
+        # ワンクリック追加 (u2: role=support, can_edit=on, memo="")
+        self.client.post(add_url, data={
+            "user": str(u2.id),
+            "role": "support",
+            "can_edit": "on",
+            "memo": "",
+            "next": manage_url,
+        })
+
+        du1 = DealUser.objects.get(deal=self.deal, user=u1)
+        du2 = DealUser.objects.get(deal=self.deal, user=u2)
+        self.assertEqual(du1.role, UserRole.SUPPORT)
+        self.assertTrue(du1.can_edit)
+        self.assertEqual(du2.role, UserRole.SUPPORT)
+        self.assertTrue(du2.can_edit)
+
+        # 2. 一括編集モード表示確認 (?edit=1)
+        edit_res = self.client.get(f"{manage_url}?edit=1")
+        self.assertEqual(edit_res.status_code, 200)
+        self.assertTrue(edit_res.context["is_edit_mode"])
+        edit_html = edit_res.content.decode("utf-8")
+        self.assertIn(f'name="user_{du1.id}_role"', edit_html)
+        self.assertIn(f'name="user_{du2.id}_role"', edit_html)
+        self.assertIn("適用", edit_html)
+        self.assertIn("キャンセル", edit_html)
+
+        # 3. 一括更新POST (du1: approver, can_edit=True; du2: viewer, can_edit=False)
+        update_res = self.client.post(manage_url, data={
+            f"user_{du1.id}_exists": "1",
+            f"user_{du1.id}_role": UserRole.APPROVER,
+            f"user_{du1.id}_can_edit": "1",
+            f"user_{du1.id}_memo": "最終承認者",
+            f"user_{du2.id}_exists": "1",
+            f"user_{du2.id}_role": UserRole.OBSERVER,
+            # can_editはチェックなし -> False
+            f"user_{du2.id}_memo": "閲覧専用メンバー",
+        })
+        self.assertRedirects(update_res, manage_url)
+
+        du1.refresh_from_db()
+        du2.refresh_from_db()
+        self.assertEqual(du1.role, UserRole.APPROVER)
+        self.assertTrue(du1.can_edit)
+        self.assertEqual(du1.memo, "最終承認者")
+        self.assertEqual(du2.role, UserRole.OBSERVER)
+        self.assertFalse(du2.can_edit)
+        self.assertEqual(du2.memo, "閲覧専用メンバー")
+
 
 
 

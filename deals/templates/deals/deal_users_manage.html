@@ -1,0 +1,234 @@
+{% extends "deals/app_base.html" %}
+{% load back_tags %}
+
+{% block title %}社内担当者管理 — {{ deal.name }} — FreeGroup2{% endblock %}
+
+{% block content %}
+<div style="max-width:1040px; margin:0 auto;">
+  <div class="app-page-header">
+    <div>
+      <div style="font-size:13px; color:var(--app-muted); margin-bottom:4px;">
+        案件: <strong>{{ deal.name }}</strong>
+      </div>
+      <h1>社内担当者（ユーザー）管理</h1>
+    </div>
+    <div class="app-action-area">
+      {% back_all_link back %}
+      {% back_link back %}
+      <a href="{{ deal_detail_url }}" class="app-btn app-btn--ghost app-btn--sm">← 戻る</a>
+    </div>
+  </div>
+
+  {# 1. 登録済み担当者セクション（一括編集対応） #}
+  <section class="app-card" style="margin-bottom:24px;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <h2 style="font-size:16px; margin:0;">登録済みの担当者</h2>
+        <span class="app-status-badge">{{ deal_users|length }}名</span>
+      </div>
+      <div style="display:flex; align-items:center; gap:8px;">
+        {% if is_edit_mode %}
+          <a href="{% url 'deals:deal_users_manage' pk=deal.id %}{% if current_q %}?q={{ current_q|urlencode }}{% endif %}" class="app-btn app-btn--ghost app-btn--sm">キャンセル</a>
+          <button type="submit" form="batch-update-users-form" class="app-btn app-btn--primary app-btn--sm">適用</button>
+        {% else %}
+          {% if deal_users %}
+            <a href="?{% if current_q %}q={{ current_q|urlencode }}&{% endif %}edit=1" class="app-btn app-btn--secondary app-btn--sm">一括編集</a>
+          {% endif %}
+        {% endif %}
+      </div>
+    </div>
+
+    {% if is_edit_mode %}
+      <form method="post" action="{% url 'deals:deal_users_manage' pk=deal.id %}" id="batch-update-users-form">
+        {% csrf_token %}
+        <input type="hidden" name="q" value="{{ current_q }}">
+        <div class="app-table-wrapper">
+          <table class="app-table">
+            <thead>
+              <tr>
+                <th style="min-width:160px;">ユーザー</th>
+                <th style="min-width:160px;">役割</th>
+                <th style="min-width:100px; text-align:center;">編集権限</th>
+                <th style="min-width:200px;">担当メモ</th>
+                <th style="width:50px; text-align:center;"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for du in deal_users %}
+                <tr>
+                  <td>
+                    <input type="hidden" name="user_{{ du.id }}_exists" value="1">
+                    <strong>
+                      {% if du.user.get_full_name %}
+                        {{ du.user.get_full_name }}
+                      {% elif du.user.person and du.user.person.primary_contact and du.user.person.primary_contact.full_name %}
+                        {{ du.user.person.primary_contact.full_name }}
+                      {% else %}
+                        {{ du.user.username }}
+                      {% endif %}
+                    </strong>
+                    <span style="color:var(--app-muted); font-size:12px; margin-left:4px;">@{{ du.user.username }}</span>
+                  </td>
+                  <td>
+                    <select name="user_{{ du.id }}_role" class="app-select app-input" style="padding:4px 8px; font-size:13px;">
+                      {% for val, label in user_roles %}
+                        <option value="{{ val }}" {% if du.role == val %}selected{% endif %}>{{ label }}</option>
+                      {% endfor %}
+                    </select>
+                  </td>
+                  <td style="text-align:center;">
+                    <label style="display:inline-flex; align-items:center; gap:4px; font-size:13px; cursor:pointer;">
+                      <input type="checkbox" name="user_{{ du.id }}_can_edit" value="1" class="app-radio-toggle" {% if du.can_edit %}checked{% endif %}>
+                      <span>許可</span>
+                    </label>
+                  </td>
+                  <td>
+                    <input type="text" name="user_{{ du.id }}_memo" value="{{ du.memo }}" class="app-input" style="padding:4px 8px; font-size:13px;" placeholder="担当メモ">
+                  </td>
+                  <td style="text-align:center;">
+                    <span class="app-muted" style="font-size:12px;">-</span>
+                  </td>
+                </tr>
+              {% empty %}
+                <tr>
+                  <td colspan="5" class="app-muted" style="text-align:center; padding:16px;">登録されている担当者はいません。</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+          <a href="{% url 'deals:deal_users_manage' pk=deal.id %}{% if current_q %}?q={{ current_q|urlencode }}{% endif %}" class="app-btn app-btn--ghost app-btn--sm">キャンセル</a>
+          <button type="submit" class="app-btn app-btn--primary app-btn--sm">適用</button>
+        </div>
+      </form>
+    {% else %}
+      <div class="app-table-wrapper">
+        <table class="app-table">
+          <thead>
+            <tr>
+              <th>ユーザー</th>
+              <th>役割</th>
+              <th>権限</th>
+              <th>担当メモ</th>
+              <th style="width:50px; text-align:center;">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for du in deal_users %}
+              <tr>
+                <td>
+                  <strong>
+                    {% if du.user.get_full_name %}
+                      {{ du.user.get_full_name }}
+                    {% elif du.user.person and du.user.person.primary_contact and du.user.person.primary_contact.full_name %}
+                      {{ du.user.person.primary_contact.full_name }}
+                    {% else %}
+                      {{ du.user.username }}
+                    {% endif %}
+                  </strong>
+                  <span style="color:var(--app-muted); font-size:12px; margin-left:4px;">@{{ du.user.username }}</span>
+                </td>
+                <td><span class="app-status-badge">{{ du.get_role_display }}</span></td>
+                <td>
+                  {% if du.can_edit %}
+                    <span class="app-status-badge" style="background:#e0f2fe; color:#0369a1;">編集可</span>
+                  {% else %}
+                    <span class="app-status-badge app-status-badge--muted">閲覧のみ</span>
+                  {% endif %}
+                </td>
+                <td>{{ du.memo|default:"-" }}</td>
+                <td style="text-align:center;">
+                  <form method="post" action="{% url 'deals:deal_delete_user' pk=deal.id user_rel_id=du.id %}" style="margin:0; display:inline;">
+                    {% csrf_token %}
+                    <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                    <button type="submit" class="app-btn app-btn--ghost app-btn--sm" style="color:var(--app-color-danger, #ef4444); padding:4px 6px; display:inline-flex; align-items:center; justify-content:center;" title="削除" aria-label="削除" onclick="return confirm('この担当者を解除しますか？');">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <polyline points="3 6 5 6 21 6"></polyline>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                        <line x1="10" y1="11" x2="10" y2="17"></line>
+                        <line x1="14" y1="11" x2="14" y2="17"></line>
+                      </svg>
+                    </button>
+                  </form>
+                </td>
+              </tr>
+            {% empty %}
+              <tr>
+                <td colspan="5" class="app-muted" style="text-align:center; padding:16px;">登録されている担当者はいません。</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+  </section>
+
+  {# 2. 担当者検索・追加セクション（追加ボタンを左端に配置） #}
+  <section class="app-card">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+      <h2 style="font-size:16px; margin:0;">担当者（ユーザー）を検索・追加</h2>
+    </div>
+    <form method="get" style="display:flex; gap:8px; margin-bottom:16px;">
+      <input type="text"
+             name="q"
+             value="{{ current_q }}"
+             class="app-input"
+             placeholder="氏名・ユーザー名・メールで検索..."
+             style="max-width:400px;">
+      <button type="submit" class="app-btn app-btn--secondary">検索</button>
+      {% if current_q %}
+        <a href="{% url 'deals:deal_users_manage' pk=deal.id %}" class="app-btn app-btn--ghost">クリア</a>
+      {% endif %}
+    </form>
+
+    <div class="app-table-wrapper" style="max-height:450px; overflow-y:auto;">
+      <table class="app-table">
+        <thead>
+          <tr>
+            <th style="width:80px; text-align:center;">操作</th>
+            <th>氏名・ユーザー名</th>
+            <th>メール</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for u in candidate_users %}
+            <tr>
+              <td style="text-align:center;">
+                <form method="post" action="{% url 'deals:deal_add_user' pk=deal.id %}" style="margin:0; display:inline;">
+                  {% csrf_token %}
+                  <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                  <input type="hidden" name="user" value="{{ u.id }}">
+                  <input type="hidden" name="role" value="support">
+                  <input type="hidden" name="can_edit" value="on">
+                  <input type="hidden" name="memo" value="">
+                  <button type="submit" class="app-btn app-btn--primary app-btn--sm" style="white-space:nowrap;">＋ 追加</button>
+                </form>
+              </td>
+              <td>
+                <strong>
+                  {% if u.get_full_name %}
+                    {{ u.get_full_name }}
+                  {% elif u.person and u.person.primary_contact and u.person.primary_contact.full_name %}
+                    {{ u.person.primary_contact.full_name }}
+                  {% else %}
+                    {{ u.username }}
+                  {% endif %}
+                </strong>
+                <span style="color:var(--app-muted); font-size:12px; margin-left:4px;">@{{ u.username }}</span>
+              </td>
+              <td>{{ u.email|default:"-" }}</td>
+            </tr>
+          {% empty %}
+            <tr>
+              <td colspan="3" class="app-muted" style="text-align:center; padding:16px;">
+                {% if current_q %}該当するユーザーが見つかりませんでした。{% else %}追加可能な候補がいません。{% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
+{% endblock %}

@@ -210,7 +210,6 @@ class DealPerson(models.Model):
         related_name="deal_persons",
     )
     role = models.CharField(max_length=30, choices=PersonRole.choices)
-    is_primary = models.BooleanField(default=False, verbose_name="主担当")
     memo = models.CharField(max_length=255, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
 
