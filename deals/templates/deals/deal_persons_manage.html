@@ -4,7 +4,7 @@
 {% block title %}社外関係者管理 — {{ deal.name }} — FreeGroup2{% endblock %}
 
 {% block content %}
-<div style="max-width:1040px; margin:0 auto;">
+<div style="max-width: 1040px; margin-left: 0; margin-right: auto;">
   <div class="app-page-header">
     <div>
       <div style="font-size:13px; color:var(--app-muted); margin-bottom:4px;">
@@ -17,8 +17,11 @@
     </div>
     <div class="app-action-area">
       {% back_all_link back %}
-      {% back_link back %}
-      <a href="{{ deal_detail_url }}" class="app-btn app-btn--ghost app-btn--sm">← 戻る</a>
+      {% if back.back_exist %}
+        {% back_link back %}
+      {% else %}
+        <a href="{{ deal_detail_url }}" class="app-btn app-btn--secondary">戻る</a>
+      {% endif %}
     </div>
   </div>
 
@@ -29,16 +32,11 @@
         <h2 style="font-size:16px; margin:0;">登録済みの関係者</h2>
         <span class="app-status-badge">{{ deal_persons|length }}名</span>
       </div>
-      <div style="display:flex; align-items:center; gap:8px;">
-        {% if is_edit_mode %}
-          <a href="{% url 'deals:deal_persons_manage' pk=deal.id %}{% if current_q %}?q={{ current_q|urlencode }}{% endif %}" class="app-btn app-btn--ghost app-btn--sm">キャンセル</a>
-          <button type="submit" form="batch-update-persons-form" class="app-btn app-btn--primary app-btn--sm">適用</button>
-        {% else %}
-          {% if deal_persons %}
-            <a href="?{% if current_q %}q={{ current_q|urlencode }}&{% endif %}edit=1" class="app-btn app-btn--secondary app-btn--sm">一括編集</a>
-          {% endif %}
-        {% endif %}
-      </div>
+      {% if not is_edit_mode and deal_persons %}
+        <div style="display:flex; align-items:center; gap:8px;">
+          <a href="?{% if current_q %}q={{ current_q|urlencode }}&{% endif %}edit=1" class="app-btn app-btn--secondary app-btn--sm">一括編集</a>
+        </div>
+      {% endif %}
     </div>
 
     {% if is_edit_mode %}
@@ -205,7 +203,7 @@
                   <input type="hidden" name="person" value="{{ p.id }}">
                   <input type="hidden" name="role" value="contact_window">
                   <input type="hidden" name="memo" value="">
-                  <button type="submit" class="app-btn app-btn--primary app-btn--sm" style="white-space:nowrap;">＋ 追加</button>
+                  <button type="submit" class="app-btn app-btn--primary app-btn--sm" style="white-space:nowrap;">追加</button>
                 </form>
               </td>
               <td>

@@ -271,16 +271,5 @@ class DealUser(models.Model):
             ),
         ]
 
-    def clean(self):
-        super().clean()
-        if (
-            self.deal_id
-            and self.user_id
-            and self.deal.owner_id == self.user_id
-        ):
-            raise ValidationError(
-                "現在のownerと同じUserをDealUserに登録することはできません。"
-            )
-
     def __str__(self):
         return f"{self.deal.name} - {self.user} ({self.get_role_display()})"

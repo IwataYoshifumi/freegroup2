@@ -4,7 +4,7 @@
 {% block title %}社内担当者管理 — {{ deal.name }} — FreeGroup2{% endblock %}
 
 {% block content %}
-<div style="max-width:1040px; margin:0 auto;">
+<div style="max-width: 1040px; margin-left: 0; margin-right: auto;">
   <div class="app-page-header">
     <div>
       <div style="font-size:13px; color:var(--app-muted); margin-bottom:4px;">
@@ -14,8 +14,27 @@
     </div>
     <div class="app-action-area">
       {% back_all_link back %}
-      {% back_link back %}
-      <a href="{{ deal_detail_url }}" class="app-btn app-btn--ghost app-btn--sm">← 戻る</a>
+      {% if back.back_exist %}
+        {% back_link back %}
+      {% else %}
+        <a href="{{ deal_detail_url }}" class="app-btn app-btn--secondary">戻る</a>
+      {% endif %}
+    </div>
+  </div>
+
+  {# 案件オーナー（主担当者）表示案内 #}
+  <div style="background:var(--app-bg-subtle, #f8fafc); border:1px solid var(--app-border, #e2e8f0); border-radius:8px; padding:12px 16px; margin-bottom:20px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px;">
+    <div style="display:flex; align-items:center; gap:10px;">
+      <span class="app-status-badge" style="background:#dbeafe; color:#1e40af; font-weight:600; padding:4px 8px;">案件オーナー</span>
+      {% if deal.owner %}
+        <strong style="font-size:14px;">{{ deal.owner.display_name }}</strong>
+        <span style="color:var(--app-muted); font-size:12px;">@{{ deal.owner.username }}</span>
+        {% if deal.owner.email %}
+          <span style="color:var(--app-muted); font-size:12px;">({{ deal.owner.email }})</span>
+        {% endif %}
+      {% else %}
+        <span class="app-muted" style="font-size:13px;">未設定</span>
+      {% endif %}
     </div>
   </div>
 
@@ -23,19 +42,14 @@
   <section class="app-card" style="margin-bottom:24px;">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
       <div style="display:flex; align-items:center; gap:8px;">
-        <h2 style="font-size:16px; margin:0;">登録済みの担当者</h2>
+        <h2 style="font-size:16px; margin:0;">登録済みの担当者（チームメンバー）</h2>
         <span class="app-status-badge">{{ deal_users|length }}名</span>
       </div>
-      <div style="display:flex; align-items:center; gap:8px;">
-        {% if is_edit_mode %}
-          <a href="{% url 'deals:deal_users_manage' pk=deal.id %}{% if current_q %}?q={{ current_q|urlencode }}{% endif %}" class="app-btn app-btn--ghost app-btn--sm">キャンセル</a>
-          <button type="submit" form="batch-update-users-form" class="app-btn app-btn--primary app-btn--sm">適用</button>
-        {% else %}
-          {% if deal_users %}
-            <a href="?{% if current_q %}q={{ current_q|urlencode }}&{% endif %}edit=1" class="app-btn app-btn--secondary app-btn--sm">一括編集</a>
-          {% endif %}
-        {% endif %}
-      </div>
+      {% if not is_edit_mode and deal_users %}
+        <div style="display:flex; align-items:center; gap:8px;">
+          <a href="?{% if current_q %}q={{ current_q|urlencode }}&{% endif %}edit=1" class="app-btn app-btn--secondary app-btn--sm">一括編集</a>
+        </div>
+      {% endif %}
     </div>
 
     {% if is_edit_mode %}
@@ -59,13 +73,7 @@
                   <td>
                     <input type="hidden" name="user_{{ du.id }}_exists" value="1">
                     <strong>
-                      {% if du.user.get_full_name %}
-                        {{ du.user.get_full_name }}
-                      {% elif du.user.person and du.user.person.primary_contact and du.user.person.primary_contact.full_name %}
-                        {{ du.user.person.primary_contact.full_name }}
-                      {% else %}
-                        {{ du.user.username }}
-                      {% endif %}
+                      {{ du.user.display_name }}
                     </strong>
                     <span style="color:var(--app-muted); font-size:12px; margin-left:4px;">@{{ du.user.username }}</span>
                   </td>
@@ -119,13 +127,7 @@
               <tr>
                 <td>
                   <strong>
-                    {% if du.user.get_full_name %}
-                      {{ du.user.get_full_name }}
-                    {% elif du.user.person and du.user.person.primary_contact and du.user.person.primary_contact.full_name %}
-                      {{ du.user.person.primary_contact.full_name }}
-                    {% else %}
-                      {{ du.user.username }}
-                    {% endif %}
+                    {{ du.user.display_name }}
                   </strong>
                   <span style="color:var(--app-muted); font-size:12px; margin-left:4px;">@{{ du.user.username }}</span>
                 </td>
@@ -186,7 +188,7 @@
       <table class="app-table">
         <thead>
           <tr>
-            <th style="width:80px; text-align:center;">操作</th>
+            <th style="width:90px; text-align:center;">操作</th>
             <th>氏名・ユーザー名</th>
             <th>メール</th>
           </tr>
@@ -202,18 +204,12 @@
                   <input type="hidden" name="role" value="support">
                   <input type="hidden" name="can_edit" value="on">
                   <input type="hidden" name="memo" value="">
-                  <button type="submit" class="app-btn app-btn--primary app-btn--sm" style="white-space:nowrap;">＋ 追加</button>
+                  <button type="submit" class="app-btn app-btn--primary app-btn--sm" style="white-space:nowrap;">追加</button>
                 </form>
               </td>
               <td>
                 <strong>
-                  {% if u.get_full_name %}
-                    {{ u.get_full_name }}
-                  {% elif u.person and u.person.primary_contact and u.person.primary_contact.full_name %}
-                    {{ u.person.primary_contact.full_name }}
-                  {% else %}
-                    {{ u.username }}
-                  {% endif %}
+                  {{ u.display_name }}
                 </strong>
                 <span style="color:var(--app-muted); font-size:12px; margin-left:4px;">@{{ u.username }}</span>
               </td>

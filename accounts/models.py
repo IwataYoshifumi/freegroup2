@@ -61,6 +61,34 @@ class CustomUser(AbstractUser):
         ),
     )
 
+    @property
+    def display_name(self) -> str:
+        """ユーザの画面表示名。
+        1. 紐づく Person が存在する場合はその氏名（primary_contactのfull_nameまたは姓・名）
+        2. それ以外で get_full_name() が空でなければその氏名
+        3. それ以外は username
+        """
+        if self.person_id and self.person:
+            pc = getattr(self.person, "primary_contact", None)
+            if pc:
+                if pc.full_name:
+                    return pc.full_name
+                name = f"{pc.last_name} {pc.first_name}".strip()
+                if name:
+                    return name
+            if hasattr(self.person, "contact_set"):
+                c = self.person.contact_set.first()
+                if c:
+                    if c.full_name:
+                        return c.full_name
+                    name = f"{c.last_name} {c.first_name}".strip()
+                    if name:
+                        return name
+        full_name = self.get_full_name()
+        if full_name:
+            return full_name
+        return self.username
+
     class Meta:
         permissions = [
             ("link_user_to_person", "User と Person の紐付けを管理できる"),
@@ -197,6 +225,9 @@ class Department(models.Model):
             if parent.pk == self.pk:
                 raise ValidationError("循環参照は禁止です")
             parent = parent.parent
+
+    def __str__(self):
+        return self.name
 
 
 class LdapGroup(models.Model):

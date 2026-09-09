@@ -9,6 +9,7 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
+from accounts.models import Department
 from companies.models import Company
 from contacts.models import Contact
 from deals.admin import DealAdmin, DealPersonAdmin, DealUserAdmin
@@ -94,7 +95,8 @@ class DealModelValidationTests(TestCase):
         with self.assertRaises(IntegrityError):
             DealPerson.objects.create(deal=deal, person=self.person2, role=PersonRole.CONTACT_WINDOW)
 
-    def test_deal_user_cannot_be_owner(self):
+    def test_deal_user_can_be_owner(self):
+        """案件オーナー自身も DealUser として登録できることを検証（独自制限撤去）。"""
         deal = Deal.objects.create(
             name="Test Deal",
             primary_person=self.primary_person,
@@ -105,11 +107,7 @@ class DealModelValidationTests(TestCase):
             user=self.owner,
             role=UserRole.SUPPORT,
         )
-        with self.assertRaises(ValidationError) as ctx:
-            deal_user.full_clean()
-        self.assertTrue(
-            any("現在のownerと同じUser" in msg for msg in ctx.exception.messages)
-        )
+        deal_user.full_clean()  # should not raise
 
     def test_deal_user_other_user_succeeds(self):
         deal = Deal.objects.create(
@@ -765,8 +763,10 @@ class DealViewTests(TestCase):
 
         # UI要素の検証（戻るボタン、追加ボタン、ゴミ箱ボタン）
         html = search_person_res.content.decode("utf-8")
-        self.assertIn("← 戻る", html)
-        self.assertIn("＋ 追加", html)
+        self.assertNotIn("← 戻る", html)
+        self.assertIn(">戻る</a>", html)
+        self.assertNotIn("＋ 追加", html)
+        self.assertIn(">追加</button>", html)
 
         # 3. 追加POST（役割・編集権限・メモ設定、nextパラメータ付き）
         add_url = reverse("deals:deal_add_user", kwargs={"pk": self.deal.pk})
@@ -992,6 +992,371 @@ class DealViewTests(TestCase):
         self.assertEqual(update_res.status_code, 200)
         self.assertContains(update_res, 'inputmode="numeric"')
         self.assertContains(update_res, 'toLocaleString')
+
+    def test_custom_user_display_name_property(self):
+        """CustomUser.display_name プロパティの動作検証（Person紐付き、get_full_name、username）。"""
+        # 1. Person紐付き時 -> Personの表示名（姓・名）
+        person = Person.objects.create()
+        Contact.objects.create(person=person, last_name="山田", first_name="花子")
+        user_with_person = User.objects.create_user(
+            username="user_p", password="x", person=person
+        )
+        self.assertEqual(user_with_person.display_name, "山田 花子")
+
+        # 2. Person未紐付きだが first_name/last_name あり -> get_full_name()
+        user_with_name = User.objects.create_user(
+            username="user_fn", password="x", first_name="次郎", last_name="佐藤"
+        )
+        self.assertEqual(user_with_name.display_name, user_with_name.get_full_name())
+
+        # 3. どちらもなし -> username
+        user_plain = User.objects.create_user(username="user_plain", password="x")
+        self.assertEqual(user_plain.display_name, "user_plain")
+
+    def test_deal_detail_layout_and_styles(self):
+        """案件詳細画面のレイアウト・スタイル（max-width, 案件名通常色, カンマ表示, 管理情報見出し等）を検証。"""
+        # owner に Person を紐づけて表示名を検証できるようにする
+        owner_person = Person.objects.create()
+        Contact.objects.create(person=owner_person, last_name="鈴木", first_name="一郎")
+        self.owner.person = owner_person
+        self.owner.save(update_fields=["person"])
+
+        self.client.login(username="deal_owner", password="password")
+        response = self.client.get(reverse("deals:deal_detail", kwargs={"pk": self.deal.pk}))
+        self.assertEqual(response.status_code, 200)
+        html = response.content.decode("utf-8")
+
+        # 1. コンテナ最大幅の縮小・左寄せ
+        self.assertIn("max-width: 1040px;", html)
+        self.assertIn("margin-left: 0; margin-right: auto;", html)
+
+        # 2. 「基本情報」タイトルの撤去
+        self.assertNotIn("基本情報", html)
+
+        # 3. 案件名のスタイル（青字ではないこと）
+        self.assertNotIn("color:var(--app-color-primary, #1e40af);", html)
+        self.assertIn("color:var(--app-text, #0f172a);", html)
+        self.assertIn(self.deal.name, html)
+
+        # 4. 会社（左側メインカードに存在）
+        self.assertIn("会社:", html)
+        self.assertIn(self.company.organization, html)
+
+        # 5. 金額の3桁カンマ区切り表示（5000000 -> ¥5,000,000）
+        self.assertIn("¥5,000,000", html)
+
+        # 6. 「予想売上」が完全撤去されていること
+        self.assertNotIn("予想売上", html)
+
+        # 7. 管理情報カードの撤去、担当者の合流・Person表示名・メタ情報の存在確認（仕様書用語準拠）
+        self.assertNotIn("管理情報", html)
+        self.assertIn("担当者:", html)
+        self.assertNotIn("社内主担当者:", html)
+        self.assertIn("鈴木 一郎", html)
+        self.assertIn("作成者:", html)
+        self.assertIn("更新日時:", html)
+
+        # 8. 仕様書正本準拠の用語
+        self.assertIn("受注予定日:", html)
+        self.assertIn("種別:", html)
+        self.assertIn("案件発生源:", html)
+        self.assertIn("発生源キャンペーン:", html)
+        self.assertIn("概要メモ:", html)
+        self.assertIn("案件関係者（社外）", html)
+        self.assertIn("案件担当者（社内）", html)
+        self.assertIn("実施日時", html)
+        self.assertIn("実施者", html)
+        self.assertIn("内容メモ", html)
+
+        # 9. 項目の並び順（案件名 -> 会社 -> 担当者 -> 金額 -> 種別 -> 概要メモ -> 作成者）
+        idx_name = html.index(self.deal.name)
+        idx_company = html.index("会社:")
+        idx_owner = html.index("担当者:")
+        idx_amount = html.index("¥5,000,000")
+        idx_type = html.index("種別:")
+        idx_memo = html.index("概要メモ:")
+        idx_creator = html.index("作成者:")
+        self.assertTrue(idx_name < idx_company < idx_owner < idx_amount < idx_type < idx_memo < idx_creator)
+
+        # 10. 活動履歴が案件関係者・案件担当者の下に配置されていること
+        idx_persons = html.index("案件関係者（社外）")
+        idx_users = html.index("案件担当者（社内）")
+        idx_activities = html.index("活動履歴")
+        self.assertTrue(idx_persons < idx_activities)
+        self.assertTrue(idx_users < idx_activities)
+
+    def test_deal_detail_memo_styling_and_modal(self):
+        """案件詳細の概要メモ表示において、グレー背景枠が撤去され、モーダル構造が存在することを検証。"""
+        self.deal.memo = "これは案件の概要メモです。\n複数行のテスト文章。\n3行目。\n4行目。\n5行目。"
+        self.deal.save(update_fields=["memo"])
+
+        self.client.login(username="deal_owner", password="password")
+        res = self.client.get(reverse("deals:deal_detail", kwargs={"pk": self.deal.pk}))
+        self.assertEqual(res.status_code, 200)
+        html = res.content.decode("utf-8")
+
+        # 1. グレー背景枠の装飾が撤去されていること
+        self.assertNotIn("background:#f8fafc;", html)
+        self.assertNotIn("background: #f8fafc;", html)
+
+        # 2. 概要メモ要素と「全て表示」ボタンラッパーが存在すること
+        self.assertIn('id="deal-memo-text"', html)
+        self.assertIn('id="deal-memo-more-btn-wrapper"', html)
+        self.assertIn('id="deal-memo-more-btn"', html)
+
+        # 3. モーダルおよびバックドロップが存在し、全文が表示されること
+        self.assertIn('id="dealMemoModal"', html)
+        self.assertIn('id="dealMemoModalBackdrop"', html)
+        self.assertIn('data-action="close-memo-modal"', html)
+        self.assertIn("これは案件の概要メモです。", html)
+
+    def test_deal_detail_relations_tables_format(self):
+        """案件詳細の社外関係者・社内担当者が app-table 形式で描画されることを検証。"""
+        self.client.login(username="deal_owner", password="password")
+
+        # 1. 関係者・担当者が空の状態
+        DealUser.objects.filter(deal=self.deal).delete()
+        res_empty = self.client.get(reverse("deals:deal_detail", kwargs={"pk": self.deal.pk}))
+        self.assertEqual(res_empty.status_code, 200)
+        html_empty = res_empty.content.decode("utf-8")
+        self.assertIn("関係者は登録されていません。", html_empty)
+        self.assertIn("担当者は登録されていません。", html_empty)
+
+        # 2. 関係者・担当者を登録して取得
+        person = Person.objects.create()
+        contact = Contact.objects.create(person=person, last_name="佐藤", first_name="次郎", organization="テスト株式会社", department="営業推進部")
+        person.primary_contact = contact
+        person.save()
+        dp = DealPerson.objects.create(deal=self.deal, person=person, role=PersonRole.DECISION_MAKER)
+
+        dept = Department.objects.create(name="開発本部")
+        user_team = User.objects.create_user(username="team_user", password="password", department=dept)
+        du = DealUser.objects.create(deal=self.deal, user=user_team, role=UserRole.PRIMARY, can_edit=True)
+
+        res = self.client.get(reverse("deals:deal_detail", kwargs={"pk": self.deal.pk}))
+        self.assertEqual(res.status_code, 200)
+        html = res.content.decode("utf-8")
+
+        # テーブル構成の確認（社外：会社名・部署・名前・権限、社内：部署名・名前・役割・編集可否）
+        self.assertIn('<table class="app-table"', html)
+        self.assertIn("会社名</th>", html)
+        self.assertIn("部署</th>", html)
+        self.assertIn("名前</th>", html)
+        self.assertIn("権限</th>", html)
+        self.assertIn("部署名</th>", html)
+        self.assertIn("役割</th>", html)
+        self.assertIn("編集可否</th>", html)
+
+        # 案件関係者（社外）の確認
+        self.assertIn(reverse("persons:person_detail", kwargs={"pk": person.pk}), html)
+        self.assertIn("テスト株式会社", html)
+        self.assertIn("営業推進部", html)
+        self.assertIn("決裁者", html)
+
+        # 案件担当者（社内）の確認
+        self.assertIn("開発本部", html)
+        self.assertIn(user_team.display_name, html)
+        self.assertIn("主担当", html)
+        self.assertIn("編集可", html)
+
+    def test_deal_user_manage_search_and_add_owner(self):
+        """社内担当者管理画面で q=iwata や漢字氏名で検索し、案件オーナー自身も DealUser として追加できることを検証。"""
+        # iwata ユーザー作成、Person（岩田 好史）を紐付けて案件オーナーに設定
+        person = Person.objects.create()
+        contact = Contact.objects.create(person=person, last_name="岩田", first_name="好史")
+        person.primary_contact = contact
+        person.save(update_fields=["primary_contact"])
+        user_iwata = User.objects.create_user(
+            username="iwata", email="iwata@example.com", password="password", person=person
+        )
+        user_iwata.user_permissions.add(self.perm_change)
+        self.deal.owner = user_iwata
+        self.deal.save(update_fields=["owner"])
+
+        self.client.login(username="iwata", password="password")
+        url = reverse("deals:deal_users_manage", kwargs={"pk": self.deal.pk})
+
+        # 1. q=iwata で検索
+        res_username = self.client.get(f"{url}?q=iwata")
+        self.assertEqual(res_username.status_code, 200)
+        self.assertIn(user_iwata, res_username.context["candidate_users"])
+        html_username = res_username.content.decode("utf-8")
+        self.assertIn("岩田 好史", html_username)
+        self.assertIn("@iwata", html_username)
+        self.assertNotIn("＋ 追加", html_username)
+        self.assertIn(">追加</button>", html_username)
+
+        # 2. q=岩田 で検索（Personの氏名検索）
+        res_kanji = self.client.get(f"{url}?q=岩田")
+        self.assertEqual(res_kanji.status_code, 200)
+        self.assertIn(user_iwata, res_kanji.context["candidate_users"])
+        html_kanji = res_kanji.content.decode("utf-8")
+        self.assertIn("岩田 好史", html_kanji)
+        self.assertIn("@iwata", html_kanji)
+
+        # 3. 案件オーナーを DealUser に実際に追加（POST）
+        add_url = reverse("deals:deal_add_user", kwargs={"pk": self.deal.pk})
+        post_res = self.client.post(add_url, data={
+            "user": str(user_iwata.id),
+            "role": UserRole.SUPPORT,
+            "can_edit": "on",
+            "memo": "オーナー兼サポート",
+            "next": url,
+        })
+        self.assertRedirects(post_res, url)
+
+        # DealUser レコードが作成され、full_clean も通ることを検証
+        du = DealUser.objects.get(deal=self.deal, user=user_iwata)
+        self.assertEqual(du.role, UserRole.SUPPORT)
+        self.assertEqual(du.memo, "オーナー兼サポート")
+        du.full_clean()  # バリデーションエラーが起きないこと
+
+    def test_deal_users_and_persons_manage_batch_edit_buttons_and_actions(self):
+        """社内担当者および社外関係者管理画面の一括編集で、上部アクションボタンが撤去され下部のみ存在し正常に動作することを検証。"""
+        self.client.login(username="deal_owner", password="password")
+
+        # 準備: DealUser & DealPerson 作成
+        user_sub = User.objects.create_user(username="sub_user", password="password")
+        du = DealUser.objects.create(deal=self.deal, user=user_sub, role=UserRole.SUPPORT, memo="初期メモ")
+
+        person = Person.objects.create()
+        Contact.objects.create(person=person, last_name="山田", first_name="太郎")
+        dp = DealPerson.objects.create(deal=self.deal, person=person, role=PersonRole.CONTACT_WINDOW, memo="初期関係メモ")
+
+        # 1. 社内担当者管理画面
+        users_url = reverse("deals:deal_users_manage", kwargs={"pk": self.deal.pk})
+
+        # 1-1. 通常モード: 一括編集ボタンが表示される
+        res_normal_users = self.client.get(users_url)
+        self.assertEqual(res_normal_users.status_code, 200)
+        self.assertContains(res_normal_users, "一括編集")
+
+        # 1-2. 編集モード (?edit=1): 上部ボタンが撤去され、ボタンは最下部1箇所のみ
+        res_edit_users = self.client.get(f"{users_url}?edit=1")
+        self.assertEqual(res_edit_users.status_code, 200)
+        html_users = res_edit_users.content.decode("utf-8")
+        # 「適用」ボタンが1つだけ存在すること（上部撤去、下部のみ）
+        self.assertEqual(html_users.count(">適用</button>"), 1)
+        # 上部の「form="batch-update-users-form"」が存在しないこと
+        self.assertNotIn('form="batch-update-users-form"', html_users)
+
+        # 1-3. 一括更新 POST が正常に動作すること
+        post_users_res = self.client.post(users_url, data={
+            f"user_{du.id}_exists": "1",
+            f"user_{du.id}_role": UserRole.APPROVER,
+            f"user_{du.id}_can_edit": "1",
+            f"user_{du.id}_memo": "更新後担当メモ",
+        })
+        self.assertRedirects(post_users_res, users_url)
+        du.refresh_from_db()
+        self.assertEqual(du.role, UserRole.APPROVER)
+        self.assertTrue(du.can_edit)
+        self.assertEqual(du.memo, "更新後担当メモ")
+
+        # 2. 社外関係者管理画面
+        persons_url = reverse("deals:deal_persons_manage", kwargs={"pk": self.deal.pk})
+
+        # 2-1. 通常モード: 一括編集ボタンが表示される
+        res_normal_persons = self.client.get(persons_url)
+        self.assertEqual(res_normal_persons.status_code, 200)
+        self.assertContains(res_normal_persons, "一括編集")
+
+        # 2-2. 編集モード (?edit=1): 上部ボタンが撤去され、ボタンは最下部1箇所のみ
+        res_edit_persons = self.client.get(f"{persons_url}?edit=1")
+        self.assertEqual(res_edit_persons.status_code, 200)
+        html_persons = res_edit_persons.content.decode("utf-8")
+        # 「適用」ボタンが1つだけ存在すること（上部撤去、下部のみ）
+        self.assertEqual(html_persons.count(">適用</button>"), 1)
+        # 上部の「form="batch-update-persons-form"」が存在しないこと
+        self.assertNotIn('form="batch-update-persons-form"', html_persons)
+
+        # 2-3. 一括更新 POST が正常に動作すること
+        post_persons_res = self.client.post(persons_url, data={
+            f"person_{dp.id}_exists": "1",
+            f"person_{dp.id}_role": PersonRole.DECISION_MAKER,
+            f"person_{dp.id}_memo": "更新後関係メモ",
+        })
+        self.assertRedirects(post_persons_res, persons_url)
+        dp.refresh_from_db()
+        self.assertEqual(dp.role, PersonRole.DECISION_MAKER)
+        self.assertEqual(dp.memo, "更新後関係メモ")
+
+    def test_deal_manage_views_layout_and_back_button_normalization(self):
+        """社内担当者および社外関係者管理画面の左寄せ、戻るボタンの重複・矢印撤去、案件詳細の幅設定を検証。"""
+        self.client.login(username="deal_owner", password="password")
+
+        # 1. 社内担当者管理画面
+        users_url = reverse("deals:deal_users_manage", kwargs={"pk": self.deal.pk})
+        res_users = self.client.get(users_url)
+        self.assertEqual(res_users.status_code, 200)
+        html_users = res_users.content.decode("utf-8")
+        # 左寄せスタイル
+        self.assertIn("margin-left: 0; margin-right: auto;", html_users)
+        self.assertNotIn("margin:0 auto;", html_users)
+        self.assertNotIn("margin: 0 auto;", html_users)
+        # 手書きの矢印付き戻るボタンが撤去されていること
+        self.assertNotIn("← 戻る", html_users)
+        # 戻るボタンが1つだけ存在すること（フォールバック時）
+        self.assertEqual(html_users.count(">戻る</a>"), 1)
+
+        # 2. 社外関係者管理画面
+        persons_url = reverse("deals:deal_persons_manage", kwargs={"pk": self.deal.pk})
+        res_persons = self.client.get(persons_url)
+        self.assertEqual(res_persons.status_code, 200)
+        html_persons = res_persons.content.decode("utf-8")
+        # 左寄せスタイル
+        self.assertIn("margin-left: 0; margin-right: auto;", html_persons)
+        self.assertNotIn("margin:0 auto;", html_persons)
+        self.assertNotIn("margin: 0 auto;", html_persons)
+        # 手書きの矢印付き戻るボタンが撤去されていること
+        self.assertNotIn("← 戻る", html_persons)
+        # 戻るボタンが1つだけ存在すること（フォールバック時）
+        self.assertEqual(html_persons.count(">戻る</a>"), 1)
+
+        # 3. 案件詳細画面（コンテナ幅1040px・ラベル幅96px・テーブル列幅固定・ellipsis）
+        detail_url = reverse("deals:deal_detail", kwargs={"pk": self.deal.pk})
+        res_detail = self.client.get(detail_url)
+        self.assertEqual(res_detail.status_code, 200)
+        html_detail = res_detail.content.decode("utf-8")
+        self.assertIn("deal-detail-container", html_detail)
+        self.assertIn("max-width: 1040px; margin-left: 0; margin-right: auto; width: 100%;", html_detail)
+        self.assertIn("min-width:96px; width:96px;", html_detail)
+        self.assertIn('table-layout: fixed; width: 100%;', html_detail)
+        self.assertIn('style="width: 30%;"', html_detail)
+        self.assertIn('style="width: 25%;"', html_detail)
+        self.assertIn('style="width: 20%;"', html_detail)
+        self.assertIn('overflow: hidden; text-overflow: ellipsis;', html_detail)
+
+    def test_deal_detail_push_current_stack(self):
+        """DealDetailView が push_current を呼び出し、子画面リンクに back_stack が付与され、子画面から戻れることを検証。"""
+        self.client.login(username="deal_owner", password="password")
+
+        # 1. 案件詳細画面を GET
+        detail_url = reverse("deals:deal_detail", kwargs={"pk": self.deal.pk})
+        res_detail = self.client.get(detail_url)
+        self.assertEqual(res_detail.status_code, 200)
+
+        # BackNavigator インスタンスの検証
+        back = res_detail.context["back"]
+        self.assertTrue(back._pushed)
+        self.assertTrue(len(back.back_stack) > 0)
+        top_entry = back.back_stack[-1]
+        self.assertEqual(top_entry["title"], f"案件: {self.deal.name}")
+        self.assertEqual(top_entry["url"], detail_url)
+
+        # 2. 詳細画面内の担当者管理リンクに back_stack が含まれていること
+        html_detail = res_detail.content.decode("utf-8")
+        self.assertIn("back_stack=", html_detail)
+
+        # 3. 付与されたリンクで担当者管理画面へアクセスした場合、戻るボタンが案件詳細を指すこと
+        users_manage_url = reverse("deals:deal_users_manage", kwargs={"pk": self.deal.pk})
+        res_child = self.client.get(f"{users_manage_url}?back_stack={back._encode_stack()}")
+        self.assertEqual(res_child.status_code, 200)
+        html_child = res_child.content.decode("utf-8")
+        # 戻るボタンが存在し、案件詳細URLをhrefに持つこと
+        self.assertIn(f'href="{detail_url}"', html_child)
+        self.assertIn(">戻る</a>", html_child)
+
 
 
 

@@ -145,7 +145,9 @@ class DealDetailView(LoginRequiredMixin, DetailView):
         from attachments.forms import AttachmentUploadForm
 
         context["attachment_form"] = AttachmentUploadForm()
-        context["back"] = BackNavigator(self.request)
+        back = BackNavigator(self.request)
+        back.push_current(title=f"案件: {deal.name}", keys=["page"])
+        context["back"] = back
         context["active_menu"] = "deals:deal_list"
         return context
 
@@ -606,8 +608,6 @@ class DealUserManageView(LoginRequiredMixin, View):
         deal_users = deal.deal_users.select_related("user", "user__person__primary_contact").all()
 
         existing_user_ids = set(deal_users.values_list("user_id", flat=True))
-        if deal.owner_id:
-            existing_user_ids.add(deal.owner_id)
 
         User = get_user_model()
         user_qs = (
