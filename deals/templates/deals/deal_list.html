@@ -56,7 +56,7 @@
       <table class="app-table app-table--nowrap">
         <thead>
           <tr>
-            <th style="width:60px;">操作</th>
+            <th style="width:80px; min-width:80px; white-space:nowrap; text-align:center;">操作</th>
             <th>案件名</th>
             <th>会社名</th>
             <th>相手方主担当</th>
@@ -71,8 +71,8 @@
           {% for deal in deals %}
             {% url 'deals:deal_detail' pk=deal.id as detail_url %}
             <tr>
-              <td>
-                <a href="{% append_back_url detail_url back %}" class="app-btn app-btn--ghost app-btn--sm" title="詳細">詳細</a>
+              <td style="white-space:nowrap; text-align:center;">
+                <a href="{% append_back_url detail_url back %}" class="app-btn app-btn--ghost app-btn--sm" style="display:inline-block; white-space:nowrap;" title="詳細">詳細</a>
               </td>
               <td>
                 <a href="{% append_back_url detail_url back %}" style="font-weight:600; color:var(--app-color-primary);">{{ deal.name }}</a>

@@ -486,7 +486,7 @@ class DealViewTests(TestCase):
 
         post_data = {
             "name": "新規クラウド移行案件",
-            "primary_person": str(self.person.id),
+            "company": str(self.company.id),
             "stage": Stage.INITIAL_MEETING,
             "probability": 50,
             "deal_type": DealType.NEW,
@@ -497,8 +497,8 @@ class DealViewTests(TestCase):
         new_deal = Deal.objects.get(name="新規クラウド移行案件")
         self.assertEqual(new_deal.owner, self.owner)
         self.assertEqual(new_deal.created_by, self.owner)
-        # primary_person から company が自動補完されたか検証
         self.assertEqual(new_deal.company, self.company)
+        self.assertIsNone(new_deal.primary_person)
 
     def test_deal_update_view(self):
         self.client.login(username="deal_owner", password="password")
@@ -568,15 +568,14 @@ class DealViewTests(TestCase):
         p2 = Person.objects.create()
         p3 = Person.objects.create()
 
-        # primary_person を含めて送信しても除外され、p2, p3 のみが登録されること
+        # primary_person なしで p2, p3 が関連者として登録されること
         post_data = {
             "name": "関係者付き新規案件",
-            "primary_person": str(self.person.id),
             "stage": Stage.INITIAL_MEETING,
             "probability": 50,
             "deal_type": DealType.NEW,
             "amount": 2000000,
-            "related_person_ids": f"{p2.id},{p3.id},{self.person.id}",
+            "related_person_ids": f"{p2.id},{p3.id}",
         }
         response = self.client.post(url, data=post_data)
         self.assertEqual(response.status_code, 302)
@@ -588,7 +587,6 @@ class DealViewTests(TestCase):
         person_ids = set(deal_persons.values_list("person_id", flat=True))
         self.assertIn(p2.id, person_ids)
         self.assertIn(p3.id, person_ids)
-        self.assertNotIn(self.person.id, person_ids)
         for dp in deal_persons:
             self.assertEqual(dp.role, PersonRole.ATTENDEE)
 

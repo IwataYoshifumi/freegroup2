@@ -6,7 +6,7 @@
 {% block content %}
   <div class="app-page-header">
     <div>
-      <h1>{{ deal.name }}</h1>
+      <h1>案件詳細</h1>
       <div style="font-size:13px; color:var(--app-muted); margin-top:4px;">
         ステージ: <span class="app-status-badge">{{ deal.get_stage_display }}</span>
         {% if deal.is_archived %}
@@ -20,7 +20,7 @@
     </div>
   </div>
 
-  <div class="app-action-area" style="justify-content:flex-start; margin-bottom:20px; gap:8px;">
+  <div class="app-action-area" style="justify-content:flex-start; margin-bottom:16px; gap:8px;">
     {% if can_edit %}
       {% url 'deals:deal_update' pk=deal.id as edit_url %}
       <a href="{% append_back_url edit_url back %}" class="app-btn app-btn--success">編集</a>
@@ -31,94 +31,96 @@
       {% url 'deals:deal_reassign_owner' pk=deal.id as reassign_owner_url %}
       <a href="{% append_back_url reassign_owner_url back %}" class="app-btn app-btn--secondary">担当者変更</a>
     {% endif %}
-    {% if can_reassign_primary_person %}
-      {% url 'deals:deal_reassign_primary_person' pk=deal.id as reassign_person_url %}
-      <a href="{% append_back_url reassign_person_url back %}" class="app-btn app-btn--secondary">相手方主担当変更</a>
-    {% endif %}
     {% if can_archive %}
       {% url 'deals:deal_archive' pk=deal.id as archive_url %}
       <a href="{% append_back_url archive_url back %}" class="app-btn app-btn--warning">アーカイブ</a>
     {% endif %}
   </div>
 
-  <div style="display:grid; grid-template-columns:2fr 1fr; gap:20px; margin-bottom:24px;">
-    <section class="app-card">
-      <h2 style="font-size:16px; margin-bottom:16px;">基本情報</h2>
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
-        <div>
-          <div class="app-form__label">金額</div>
-          <div style="font-size:18px; font-weight:600;">{% if deal.amount is not None %}¥{{ deal.amount|floatformat:0 }}{% else %}-{% endif %}</div>
+  <div style="display:grid; grid-template-columns:2fr 1fr; gap:16px; margin-bottom:20px;">
+    <section class="app-card" style="padding:16px 20px;">
+      <h2 style="font-size:15px; font-weight:600; margin:0 0 12px 0; padding-bottom:6px; border-bottom:1px solid var(--app-border, #e5e7eb);">基本情報</h2>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px 16px;">
+        <div style="grid-column:1 / -1; padding-bottom:4px; border-bottom:1px dashed var(--app-border, #f1f5f9);">
+          <div class="app-form__label" style="font-size:11px; margin-bottom:1px; color:var(--app-muted, #64748b);">案件名</div>
+          <div style="font-size:15px; font-weight:700; color:var(--app-color-primary, #1e40af);">{{ deal.name }}</div>
         </div>
         <div>
-          <div class="app-form__label">確度</div>
-          <div style="font-size:18px; font-weight:600;">{% if deal.probability is not None %}{{ deal.probability }}%{% else %}-{% endif %}</div>
+          <div class="app-form__label" style="font-size:11px; margin-bottom:1px; color:var(--app-muted, #64748b);">金額</div>
+          <div style="font-size:16px; font-weight:600;">{% if deal.amount is not None %}¥{{ deal.amount|floatformat:0 }}{% else %}-{% endif %}</div>
         </div>
         <div>
-          <div class="app-form__label">予想売上</div>
-          <div style="font-size:16px;">{% if deal.expected_value is not None %}¥{{ deal.expected_value|floatformat:0 }}{% else %}-{% endif %}</div>
+          <div class="app-form__label" style="font-size:11px; margin-bottom:1px; color:var(--app-muted, #64748b);">確度</div>
+          <div style="font-size:16px; font-weight:600;">{% if deal.probability is not None %}{{ deal.probability }}%{% else %}-{% endif %}</div>
         </div>
         <div>
-          <div class="app-form__label">案件の性質</div>
-          <div>{{ deal.get_deal_type_display|default:"-" }}</div>
+          <div class="app-form__label" style="font-size:11px; margin-bottom:1px; color:var(--app-muted, #64748b);">予想売上</div>
+          <div style="font-size:14px; font-weight:600;">{% if deal.expected_value is not None %}¥{{ deal.expected_value|floatformat:0 }}{% else %}-{% endif %}</div>
         </div>
         <div>
-          <div class="app-form__label">完了予定日</div>
-          <div>{{ deal.expected_close_date|default:"-" }}</div>
+          <div class="app-form__label" style="font-size:11px; margin-bottom:1px; color:var(--app-muted, #64748b);">案件の性質</div>
+          <div style="font-size:13px; line-height:1.4;">{{ deal.get_deal_type_display|default:"-" }}</div>
         </div>
         <div>
-          <div class="app-form__label">成約確定日</div>
-          <div>{{ deal.closed_at|default:"-" }}</div>
+          <div class="app-form__label" style="font-size:11px; margin-bottom:1px; color:var(--app-muted, #64748b);">完了予定日</div>
+          <div style="font-size:13px; line-height:1.4;">{{ deal.expected_close_date|default:"-" }}</div>
         </div>
         <div>
-          <div class="app-form__label">案件発生源</div>
-          <div>{{ deal.get_lead_source_display|default:"-" }}</div>
+          <div class="app-form__label" style="font-size:11px; margin-bottom:1px; color:var(--app-muted, #64748b);">成約確定日</div>
+          <div style="font-size:13px; line-height:1.4;">{{ deal.closed_at|default:"-" }}</div>
         </div>
         <div>
-          <div class="app-form__label">発生源キャンペーン</div>
-          <div>{{ deal.source_campaign|default:"-" }}</div>
+          <div class="app-form__label" style="font-size:11px; margin-bottom:1px; color:var(--app-muted, #64748b);">案件発生源</div>
+          <div style="font-size:13px; line-height:1.4;">{{ deal.get_lead_source_display|default:"-" }}</div>
+        </div>
+        <div>
+          <div class="app-form__label" style="font-size:11px; margin-bottom:1px; color:var(--app-muted, #64748b);">発生源キャンペーン</div>
+          <div style="font-size:13px; line-height:1.4;">{{ deal.source_campaign|default:"-" }}</div>
         </div>
         {% if deal.lost_reason %}
           <div style="grid-column:1 / -1;">
-            <div class="app-form__label">失注理由</div>
-            <div style="color:var(--app-color-danger, #ef4444);">{{ deal.lost_reason }}</div>
+            <div class="app-form__label" style="font-size:11px; margin-bottom:1px; color:var(--app-muted, #64748b);">失注理由</div>
+            <div style="color:var(--app-color-danger, #ef4444); font-size:13px; line-height:1.4;">{{ deal.lost_reason }}</div>
           </div>
         {% endif %}
         <div style="grid-column:1 / -1;">
-          <div class="app-form__label">メモ</div>
-          <div>{{ deal.memo|linebreaksbr|default:"-" }}</div>
+          <div class="app-form__label" style="font-size:11px; margin-bottom:1px; color:var(--app-muted, #64748b);">メモ</div>
+          <div style="font-size:13px; line-height:1.4;">{{ deal.memo|linebreaksbr|default:"-" }}</div>
         </div>
       </div>
     </section>
 
-    <section class="app-card">
-      <h2 style="font-size:16px; margin-bottom:16px;">関係者・担当者</h2>
-      <div style="margin-bottom:14px;">
-        <div class="app-form__label">会社</div>
+    <section class="app-card" style="padding:16px 20px;">
+      <h2 style="font-size:15px; font-weight:600; margin:0 0 12px 0; padding-bottom:6px; border-bottom:1px solid var(--app-border, #e5e7eb);">関係者・担当者</h2>
+      <div style="display:flex; flex-direction:column; gap:8px;">
         <div>
-          {% if deal.company %}
-            <a href="{% url 'companies:company_detail' pk=deal.company.id %}">{{ deal.company.organization }}</a>
-          {% else %}-{% endif %}
+          <div class="app-form__label" style="font-size:11px; margin-bottom:1px; color:var(--app-muted, #64748b);">会社</div>
+          <div style="font-size:13px; line-height:1.4;">
+            {% if deal.company %}
+              <a href="{% url 'companies:company_detail' pk=deal.company.id %}">{{ deal.company.organization }}</a>
+            {% else %}-{% endif %}
+          </div>
         </div>
-      </div>
-      <div style="margin-bottom:14px;">
-        <div class="app-form__label">相手方主担当パーソン</div>
         <div>
-          {% if deal.primary_person %}
-            <a href="{% url 'persons:person_detail' pk=deal.primary_person.id %}">{{ deal.primary_person }}</a>
-          {% else %}-{% endif %}
+          <div class="app-form__label" style="font-size:11px; margin-bottom:1px; color:var(--app-muted, #64748b);">相手方主担当パーソン</div>
+          <div style="font-size:13px; line-height:1.4;">
+            {% if deal.primary_person %}
+              <a href="{% url 'persons:person_detail' pk=deal.primary_person.id %}">{{ deal.primary_person }}</a>
+            {% else %}-{% endif %}
+          </div>
         </div>
-      </div>
-      <div style="margin-bottom:14px;">
-        <div class="app-form__label">社内主担当者</div>
-        <div>{{ deal.owner|default:"-" }}</div>
-      </div>
-      <div style="margin-bottom:14px;">
-        <div class="app-form__label">起票者</div>
-        <div>{{ deal.created_by|default:"-" }}</div>
-      </div>
-      <div style="margin-bottom:14px;">
-        <div class="app-form__label">更新日時</div>
-        <div>{{ deal.updated_at|date:"Y-m-d H:i" }}</div>
+        <div>
+          <div class="app-form__label" style="font-size:11px; margin-bottom:1px; color:var(--app-muted, #64748b);">社内主担当者</div>
+          <div style="font-size:13px; line-height:1.4;">{{ deal.owner|default:"-" }}</div>
+        </div>
+        <div>
+          <div class="app-form__label" style="font-size:11px; margin-bottom:1px; color:var(--app-muted, #64748b);">起票者</div>
+          <div style="font-size:13px; line-height:1.4;">{{ deal.created_by|default:"-" }}</div>
+        </div>
+        <div>
+          <div class="app-form__label" style="font-size:11px; margin-bottom:1px; color:var(--app-muted, #64748b);">更新日時</div>
+          <div style="font-size:13px; line-height:1.4;">{{ deal.updated_at|date:"Y-m-d H:i" }}</div>
+        </div>
       </div>
     </section>
   </div>

@@ -77,6 +77,49 @@ class DealForm(forms.ModelForm):
         return cleaned_data
 
 
+class DealCreateForm(forms.ModelForm):
+    """案件新規起票専用フォーム（スリム化：10項目）。"""
+
+    class Meta:
+        model = Deal
+        fields = [
+            "name",
+            "company",
+            "owner",
+            "stage",
+            "amount",
+            "expected_close_date",
+            "probability",
+            "deal_type",
+            "lead_source",
+            "memo",
+        ]
+        labels = {
+            "name": "案件名",
+            "company": "会社名",
+            "owner": "社内担当者",
+            "stage": "ステージ",
+            "amount": "金額（円）",
+            "expected_close_date": "成約目標日",
+            "probability": "確度（%）",
+            "deal_type": "商談種別",
+            "lead_source": "流入経路",
+            "memo": "メモ",
+        }
+        widgets = {
+            "name": forms.TextInput(attrs={"class": "app-input", "placeholder": "案件名を入力"}),
+            "company": forms.Select(attrs={"class": "app-select app-input"}),
+            "owner": forms.Select(attrs={"class": "app-select app-input"}),
+            "stage": forms.Select(attrs={"class": "app-select app-input"}),
+            "amount": forms.NumberInput(attrs={"class": "app-input", "min": 0, "placeholder": "金額（円）"}),
+            "expected_close_date": forms.DateInput(attrs={"class": "app-input app-input--date", "type": "date"}),
+            "probability": forms.NumberInput(attrs={"class": "app-input", "min": 0, "max": 100, "placeholder": "0〜100"}),
+            "deal_type": forms.Select(attrs={"class": "app-select app-input"}),
+            "lead_source": forms.Select(attrs={"class": "app-select app-input"}),
+            "memo": forms.Textarea(attrs={"class": "app-textarea app-input", "rows": 4}),
+        }
+
+
 class DealUpdateForm(forms.ModelForm):
     """案件通常編集用フォーム（仕様書 v1.5 §2.6, §0.15）。
     ※ owner, primary_person, is_archived は除外。

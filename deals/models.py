@@ -74,6 +74,8 @@ class Deal(models.Model):
     primary_person = models.ForeignKey(
         "persons.Person",
         on_delete=models.PROTECT,
+        null=True,
+        blank=True,
         related_name="deals_as_primary",
     )
     company = models.ForeignKey(

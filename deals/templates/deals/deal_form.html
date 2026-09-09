@@ -35,7 +35,7 @@
           {% if form.name.errors %}<div class="app-form__error">{{ form.name.errors }}</div>{% endif %}
         </div>
 
-        {# 2. 相手方主担当（パーソン） & 会社名: 2列横並び (1:1) #}
+        {# 2. 相手方主担当（パーソン） & 会社名 #}
         {% if form.primary_person %}
           <div class="app-form__group">
             <label class="app-form__label" for="{{ form.primary_person.id_for_label }}">
@@ -51,7 +51,7 @@
             {{ form.company }}
             {% if form.company.errors %}<div class="app-form__error">{{ form.company.errors }}</div>{% endif %}
           </div>
-        {% else %}
+        {% elif not is_create %}
           <div class="app-form__group">
             <label class="app-form__label">相手方主担当（パーソン）</label>
             <div style="padding: 6px 0; font-weight: 500;">
@@ -65,27 +65,37 @@
             {{ form.company }}
             {% if form.company.errors %}<div class="app-form__error">{{ form.company.errors }}</div>{% endif %}
           </div>
+        {% else %}
+          <div class="app-form__group app-form__group--full">
+            <label class="app-form__label" for="{{ form.company.id_for_label }}">
+              {{ form.company.label }}{% if form.company.field.required %} <span style="color:var(--app-color-danger, #ef4444);">*</span>{% endif %}
+            </label>
+            {{ form.company }}
+            {% if form.company.errors %}<div class="app-form__error">{{ form.company.errors }}</div>{% endif %}
+          </div>
         {% endif %}
 
-        {# 2b. 相手方関係者（DealPerson）: 主担当直下に新設・全幅 #}
-        <div class="app-form__group app-form__group--full" id="related-persons-area" data-primary-person-id="{{ form.instance.primary_person_id|default:'' }}">
-          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-            <label class="app-form__label" style="margin-bottom: 0;">
-              関係者（同席・関連）
-            </label>
-            <button type="button" class="app-btn app-btn--secondary app-btn--sm" data-action="open-modal" data-target="relatedPersonModal">
-              ＋ 関係者を追加
-            </button>
+        {% if not is_create %}
+          {# 2b. 相手方関係者（DealPerson）: 編集時のみ表示 #}
+          <div class="app-form__group app-form__group--full" id="related-persons-area" data-primary-person-id="{{ form.instance.primary_person_id|default:'' }}">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+              <label class="app-form__label" style="margin-bottom: 0;">
+                関係者（同席・関連）
+              </label>
+              <button type="button" class="app-btn app-btn--secondary app-btn--sm" data-action="open-modal" data-target="relatedPersonModal">
+                ＋ 関係者を追加
+              </button>
+            </div>
+            <div id="related-persons-chips-container" style="display: flex; flex-wrap: wrap; gap: 8px; min-height: 36px; align-items: center; padding: 8px 12px; background: #f8fafc; border: 1px dashed var(--app-border, #cbd5e1); border-radius: 8px;">
+              <span class="app-muted" id="related-persons-empty" style="font-size: 13px;">（関係者は指定されていません）</span>
+              <div id="related-persons-chips" style="display: inline-flex; flex-wrap: wrap; gap: 6px;"></div>
+            </div>
+            <input type="hidden" name="related_person_ids" id="id_related_person_ids" value="">
+            <small class="app-muted" style="display: block; margin-top: 4px; font-size: 12px;">
+              ※ 商談の同席者や関連パーソン（DealPerson）を登録できます。主担当者は選択できません。
+            </small>
           </div>
-          <div id="related-persons-chips-container" style="display: flex; flex-wrap: wrap; gap: 8px; min-height: 36px; align-items: center; padding: 8px 12px; background: #f8fafc; border: 1px dashed var(--app-border, #cbd5e1); border-radius: 8px;">
-            <span class="app-muted" id="related-persons-empty" style="font-size: 13px;">（関係者は指定されていません）</span>
-            <div id="related-persons-chips" style="display: inline-flex; flex-wrap: wrap; gap: 6px;"></div>
-          </div>
-          <input type="hidden" name="related_person_ids" id="id_related_person_ids" value="">
-          <small class="app-muted" style="display: block; margin-top: 4px; font-size: 12px;">
-            ※ 商談の同席者や関連パーソン（DealPerson）を登録できます。主担当者は選択できません。
-          </small>
-        </div>
+        {% endif %}
 
         {# 3. 社内担当者 & ステージ: 2列横並び (1:1) #}
         {% if form.owner %}
@@ -150,21 +160,31 @@
           {% if form.expected_close_date.errors %}<div class="app-form__error">{{ form.expected_close_date.errors }}</div>{% endif %}
         </div>
 
-        {# 6. 流入経路 & 流入元キャンペーン: 2列横並び (1:1) #}
-        <div class="app-form__group">
-          <label class="app-form__label" for="{{ form.lead_source.id_for_label }}">
-            {{ form.lead_source.label }}{% if form.lead_source.field.required %} <span style="color:var(--app-color-danger, #ef4444);">*</span>{% endif %}
-          </label>
-          {{ form.lead_source }}
-          {% if form.lead_source.errors %}<div class="app-form__error">{{ form.lead_source.errors }}</div>{% endif %}
-        </div>
-        <div class="app-form__group">
-          <label class="app-form__label" for="{{ form.source_campaign.id_for_label }}">
-            {{ form.source_campaign.label }}{% if form.source_campaign.field.required %} <span style="color:var(--app-color-danger, #ef4444);">*</span>{% endif %}
-          </label>
-          {{ form.source_campaign }}
-          {% if form.source_campaign.errors %}<div class="app-form__error">{{ form.source_campaign.errors }}</div>{% endif %}
-        </div>
+        {# 6. 流入経路 & 流入元キャンペーン #}
+        {% if form.source_campaign %}
+          <div class="app-form__group">
+            <label class="app-form__label" for="{{ form.lead_source.id_for_label }}">
+              {{ form.lead_source.label }}{% if form.lead_source.field.required %} <span style="color:var(--app-color-danger, #ef4444);">*</span>{% endif %}
+            </label>
+            {{ form.lead_source }}
+            {% if form.lead_source.errors %}<div class="app-form__error">{{ form.lead_source.errors }}</div>{% endif %}
+          </div>
+          <div class="app-form__group">
+            <label class="app-form__label" for="{{ form.source_campaign.id_for_label }}">
+              {{ form.source_campaign.label }}{% if form.source_campaign.field.required %} <span style="color:var(--app-color-danger, #ef4444);">*</span>{% endif %}
+            </label>
+            {{ form.source_campaign }}
+            {% if form.source_campaign.errors %}<div class="app-form__error">{{ form.source_campaign.errors }}</div>{% endif %}
+          </div>
+        {% else %}
+          <div class="app-form__group app-form__group--full">
+            <label class="app-form__label" for="{{ form.lead_source.id_for_label }}">
+              {{ form.lead_source.label }}{% if form.lead_source.field.required %} <span style="color:var(--app-color-danger, #ef4444);">*</span>{% endif %}
+            </label>
+            {{ form.lead_source }}
+            {% if form.lead_source.errors %}<div class="app-form__error">{{ form.lead_source.errors }}</div>{% endif %}
+          </div>
+        {% endif %}
 
         {# 7. メモ: 1行・全幅 #}
         <div class="app-form__group app-form__group--full">

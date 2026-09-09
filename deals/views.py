@@ -16,6 +16,7 @@ from activities.models import Activity
 from back_navigator.back_navigator import BackNavigator
 from deals.forms import (
     DealCloseForm,
+    DealCreateForm,
     DealForm,
     DealPersonForm,
     DealReassignOwnerForm,
@@ -258,16 +259,13 @@ class DealCreateView(LoginRequiredMixin, PermissionRequiredMixin, _RelatedPerson
     """案件新規作成画面（仕様書 v1.5 §2.1）。"""
 
     model = Deal
-    form_class = DealForm
+    form_class = DealCreateForm
     template_name = "deals/deal_form.html"
     permission_required = "deals.add_deal"
 
     def get_initial(self):
         initial = super().get_initial()
         initial["owner"] = self.request.user
-        person_id = self.request.GET.get("person_id")
-        if person_id:
-            initial["primary_person"] = person_id
         company_id = self.request.GET.get("company_id")
         if company_id:
             initial["company"] = company_id
@@ -280,10 +278,6 @@ class DealCreateView(LoginRequiredMixin, PermissionRequiredMixin, _RelatedPerson
         deal.updated_by = self.request.user
         if not deal.owner_id:
             deal.owner = self.request.user
-        if not deal.company_id and deal.primary_person:
-            primary_contact = getattr(deal.primary_person, "primary_contact", None)
-            if primary_contact and primary_contact.company:
-                deal.company = primary_contact.company
         deal.save()
         self._sync_related_persons(deal)
         ActionLog.record(
