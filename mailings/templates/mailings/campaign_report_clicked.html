@@ -29,7 +29,7 @@
       <table class="app-table">
         <thead>
           <tr>
-            <th>操作</th>
+            <th style="white-space: nowrap;">操作</th>
             <th>会社名</th>
             <th>氏名</th>
             <th>メール</th>
@@ -41,10 +41,35 @@
         <tbody>
           {% for row in rows %}
             <tr>
-              <td>
-                {% if row.person.primary_contact %}
-                  <a class="app-btn app-btn--outline-secondary app-btn--sm" href="{% url 'contacts:contact_detail' pk=row.person.primary_contact.pk %}">詳細</a>
-                {% endif %}
+              <td style="white-space: nowrap;">
+                <div style="display:inline-flex; gap:6px; align-items:center; flex-wrap:nowrap;">
+                  {% if row.person.primary_contact %}
+                    {% url 'contacts:contact_detail' pk=row.person.primary_contact.pk as contact_detail_url %}
+                    <a class="app-btn app-btn--outline-secondary app-btn--sm" href="{% append_back_url contact_detail_url back %}">詳細</a>
+                  {% endif %}
+                  {% url 'activities:activity_create' as activity_create_url %}
+                  {% with camp_id=campaign.pk|stringformat:"s" person_id=row.person.pk|stringformat:"s" %}
+                  {% with act_url=activity_create_url|add:"?campaign="|add:camp_id|add:"&person="|add:person_id %}
+                    <a class="btn btn-primary app-btn app-btn--primary app-btn--sm" href="{% append_back_url act_url back %}">活動を記録</a>
+                  {% endwith %}
+                  {% endwith %}
+                  {% if row.person %}
+                    {% url 'deals:deal_create' as deal_create_url %}
+                    {% with camp_id=campaign.pk|stringformat:"s" person_id=row.person.pk|stringformat:"s" %}
+                      {% if row.person.primary_contact and row.person.primary_contact.company %}
+                        {% with comp_id=row.person.primary_contact.company.pk|stringformat:"s" %}
+                        {% with deal_url=deal_create_url|add:"?lead_source=campaign&source_campaign="|add:camp_id|add:"&person="|add:person_id|add:"&company="|add:comp_id %}
+                          <a class="btn btn-primary app-btn app-btn--primary app-btn--sm" href="{% append_back_url deal_url back %}">案件を作成</a>
+                        {% endwith %}
+                        {% endwith %}
+                      {% else %}
+                        {% with deal_url=deal_create_url|add:"?lead_source=campaign&source_campaign="|add:camp_id|add:"&person="|add:person_id %}
+                          <a class="btn btn-primary app-btn app-btn--primary app-btn--sm" href="{% append_back_url deal_url back %}">案件を作成</a>
+                        {% endwith %}
+                      {% endif %}
+                    {% endwith %}
+                  {% endif %}
+                </div>
               </td>
               <td>{{ row.person.primary_contact.organization|default:"—" }}</td>
               <td>{{ row.person.primary_contact.full_name|default:row.person.id }}</td>

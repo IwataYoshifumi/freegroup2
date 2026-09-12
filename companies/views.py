@@ -3,16 +3,18 @@ from collections import defaultdict
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin, PermissionRequiredMixin
 from django.core.exceptions import PermissionDenied
+from django.db import transaction
 from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views import View
-from django.views.generic import CreateView, DetailView, FormView, ListView, UpdateView
+from django.views.generic import DetailView, FormView, ListView, UpdateView
 
 from actionlogs.models import ActionLog
 from back_navigator.back_navigator import BackNavigator
 from companies.forms import CompanyForm, CompanyMergeConfirmForm
 from companies.models import Company, CompanyDuplicateCandidate
 from companies.services import execute_company_merge, mark_as_different_company
+from contacts.services.normalization import normalize_organization, normalize_phone_value
 
 
 class CompanyListView(LoginRequiredMixin, ListView):
@@ -81,35 +83,6 @@ class CompanyDetailView(LoginRequiredMixin, DetailView):
         )
         context["can_edit"] = self.request.user.has_perm("companies.change_company")
         context["can_archive"] = self.request.user.has_perm("companies.change_company")
-        context["back"] = BackNavigator(self.request)
-        context["active_menu"] = "companies:company_list"
-        return context
-
-
-class CompanyCreateView(LoginRequiredMixin, PermissionRequiredMixin, CreateView):
-    """会社新規作成画面（仕様書 v1.5 第6章）。"""
-
-    model = Company
-    form_class = CompanyForm
-    template_name = "companies/company_form.html"
-    permission_required = "companies.add_company"
-
-    def form_valid(self, form):
-        company = form.save(commit=False)
-        company.created_by = self.request.user
-        company.save()
-        ActionLog.record(
-            user=self.request.user,
-            action="company_created",
-            content_object=company,
-            data={"organization": company.organization, "company_id": str(company.id)},
-        )
-        messages.success(self.request, f"会社「{company.organization}」を作成しました。")
-        return redirect("companies:company_detail", pk=company.pk)
-
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        context["is_create"] = True
         context["back"] = BackNavigator(self.request)
         context["active_menu"] = "companies:company_list"
         return context
@@ -272,6 +245,93 @@ def _build_duplicate_groups():
             if cand.score > max_score:
                 max_score = cand.score
 
+        # 一致項目ラベル判定（全社共通項目）
+        match_labels = []
+        if len(comps) >= 2:
+            raw_orgs = [
+                c.organization.strip()
+                for c in comps
+                if c.organization and c.organization.strip()
+            ]
+            norm_orgs = [
+                normalize_organization(c.organization)
+                for c in comps
+                if c.organization and normalize_organization(c.organization)
+            ]
+            name_match = (
+                (len(raw_orgs) == len(comps) and len(set(raw_orgs)) == 1)
+                or (len(norm_orgs) == len(comps) and len(set(norm_orgs)) == 1)
+            )
+            if name_match:
+                match_labels.append("社名一致")
+
+            domains = [
+                c.domain.strip().lower()
+                for c in comps
+                if c.domain and c.domain.strip()
+            ]
+            if len(domains) == len(comps) and len(set(domains)) == 1:
+                match_labels.append("ドメイン一致")
+
+            raw_phones = [
+                c.phone.strip()
+                for c in comps
+                if c.phone and c.phone.strip()
+            ]
+            norm_phones = [
+                normalize_phone_value(c.phone)
+                for c in comps
+                if c.phone and normalize_phone_value(c.phone)
+            ]
+            phone_match = (
+                (len(raw_phones) == len(comps) and len(set(raw_phones)) == 1)
+                or (len(norm_phones) == len(comps) and len(set(norm_phones)) == 1)
+            )
+            if phone_match:
+                match_labels.append("電話一致")
+
+            addrs = [
+                c.address.replace(" ", "").replace("　", "").strip()
+                for c in comps
+                if c.address and c.address.strip()
+            ]
+            if len(addrs) == len(comps) and len(set(addrs)) == 1:
+                match_labels.append("住所一致")
+
+        # 先頭行（1行目）を基準とした各行の差分判定
+        base_comp = comps[0]
+        base_org = (base_comp.organization or "").strip()
+        base_domain = (base_comp.domain or "").strip().lower()
+        base_phone = (base_comp.phone or "").strip()
+        base_addr = (
+            base_comp.address.replace(" ", "").replace("　", "").strip()
+            if base_comp.address
+            else ""
+        )
+
+        for i, comp in enumerate(comps):
+            if i == 0:
+                comp.diff_org = False
+                comp.diff_domain = False
+                comp.diff_phone = False
+                comp.diff_address = False
+            else:
+                comp_org = (comp.organization or "").strip()
+                comp.diff_org = bool(comp_org) and (comp_org != base_org)
+
+                comp_domain = (comp.domain or "").strip().lower()
+                comp.diff_domain = bool(comp_domain) and (comp_domain != base_domain)
+
+                comp_phone = (comp.phone or "").strip()
+                comp.diff_phone = bool(comp_phone) and (comp_phone != base_phone)
+
+                comp_addr = (
+                    comp.address.replace(" ", "").replace("　", "").strip()
+                    if comp.address
+                    else ""
+                )
+                comp.diff_address = bool(comp_addr) and (comp_addr != base_addr)
+
         group_obj = {
             "id": f"grp_{idx}",
             "name": comps[0].organization,
@@ -280,6 +340,7 @@ def _build_duplicate_groups():
             "max_score": max_score,
             "company_count": len(comps),
             "companies": comps,
+            "match_labels": match_labels,
             "candidate_ids": [str(c.id) for c in cand_pairs],
             "candidate_ids_str": ",".join(str(c.id) for c in cand_pairs),
             "all_company_ids_str": ",".join(str(c.id) for c in comps),
@@ -374,70 +435,114 @@ class CompanyMergeView(LoginRequiredMixin, PermissionRequiredMixin, View):
                         surviving_company_id = val
                         break
 
-        # 2. 統合対象会社IDリストの取得
-        # 新UIからの送信（group_id が存在するか、または target_company_ids が明示的に送られてきた場合）
-        if "group_id" in request.POST or "target_company_ids" in request.POST:
-            raw_merge_ids = request.POST.getlist("target_company_ids")
-            if not raw_merge_ids:
-                raw_merge_ids_str = request.POST.get("target_company_ids", "")
-                raw_merge_ids = [i.strip() for i in raw_merge_ids_str.split(",") if i.strip()]
-            else:
-                expanded = []
-                for item in raw_merge_ids:
-                    expanded.extend([i.strip() for i in item.split(",") if i.strip()])
-                raw_merge_ids = expanded
-        else:
-            # 旧APIや直接POST互換（merge_company_ids のみ指定された場合）
-            raw_merge_ids = request.POST.getlist("merge_company_ids")
-            if not raw_merge_ids:
-                raw_merge_ids_str = request.POST.get("merge_company_ids", "")
-                raw_merge_ids = [i.strip() for i in raw_merge_ids_str.split(",") if i.strip()]
-            else:
-                expanded = []
-                for item in raw_merge_ids:
-                    expanded.extend([i.strip() for i in item.split(",") if i.strip()])
-                raw_merge_ids = expanded
-
+        # 2. マージ対象会社IDリストの取得（merge_company_ids または target_company_ids）
+        raw_merge_ids = request.POST.getlist("merge_company_ids")
         if not raw_merge_ids:
-            messages.error(request, "統合対象の会社が選択されていません。")
-            return redirect("companies:company_candidate_list")
+            raw_merge_ids = request.POST.getlist("target_company_ids")
+        if not raw_merge_ids:
+            raw_merge_str = request.POST.get("merge_company_ids") or request.POST.get("target_company_ids", "")
+            raw_merge_ids = [i.strip() for i in raw_merge_str.split(",") if i.strip()]
+        else:
+            expanded = []
+            for item in raw_merge_ids:
+                expanded.extend([i.strip() for i in item.split(",") if i.strip()])
+            raw_merge_ids = expanded
+
+        # 3. 別会社判定会社IDリストの取得
+        raw_diff_ids = request.POST.getlist("different_company_ids")
+        if not raw_diff_ids:
+            raw_diff_str = request.POST.get("different_company_ids", "")
+            raw_diff_ids = [i.strip() for i in raw_diff_str.split(",") if i.strip()]
+        else:
+            expanded = []
+            for item in raw_diff_ids:
+                expanded.extend([i.strip() for i in item.split(",") if i.strip()])
+            raw_diff_ids = expanded
+
+        # 4. 候補IDリストの取得
+        candidate_ids_raw = request.POST.getlist("candidate_ids") or request.POST.get("candidate_ids", "")
+        if isinstance(candidate_ids_raw, str):
+            candidate_ids = [c.strip() for c in candidate_ids_raw.split(",") if c.strip()]
+        else:
+            candidate_ids = []
+            for item in candidate_ids_raw:
+                candidate_ids.extend([c.strip() for c in item.split(",") if c.strip()])
 
         if not surviving_company_id:
             messages.error(request, "存続会社が選択されていません。")
             return redirect("companies:company_candidate_list")
 
-        # 存続会社IDを統合対象から除外
-        target_company_ids = [cid for cid in raw_merge_ids if str(cid) != str(surviving_company_id)]
+        # 存続会社IDをマージ対象・別会社から除外
+        target_merge_ids = [cid for cid in raw_merge_ids if str(cid) != str(surviving_company_id)]
+        target_diff_ids = [cid for cid in raw_diff_ids if str(cid) != str(surviving_company_id)]
 
-        if not target_company_ids:
+        if not target_merge_ids and not target_diff_ids:
             messages.error(request, "統合対象の会社が選択されていません。")
             return redirect("companies:company_candidate_list")
 
         surviving_company = get_object_or_404(Company, pk=surviving_company_id)
-        target_companies = list(Company.objects.filter(id__in=target_company_ids))
-
-        if not target_companies:
-            messages.error(request, "有効な統合対象会社が見つかりませんでした。")
-            return redirect("companies:company_candidate_list")
 
         try:
-            execute_company_merge(
-                surviving_company=surviving_company,
-                target_companies=target_companies,
-                user=request.user,
-            )
-            messages.success(
-                request,
-                f"会社「{surviving_company.organization}」への統合が完了しました（{len(target_companies)}社を統合）。",
-            )
-            next_url = request.POST.get("next")
-            if next_url:
-                return redirect(next_url)
-            if "candidates" in request.META.get("HTTP_REFERER", ""):
+            with transaction.atomic():
+                # A. 別会社判定処理（マージによる INVALIDATED への巻き込みを防ぐため先に実行）
+                diff_count = 0
+                if target_diff_ids:
+                    diff_companies = list(Company.objects.filter(id__in=target_diff_ids))
+                    diff_cids_set = {c.id for c in diff_companies}
+                    if diff_cids_set:
+                        pending_diff_qs = CompanyDuplicateCandidate.objects.filter(
+                            review_status=CompanyDuplicateCandidate.ReviewStatus.PENDING,
+                        ).filter(
+                            Q(company_a_id__in=diff_cids_set) | Q(company_b_id__in=diff_cids_set)
+                        )
+                        if candidate_ids:
+                            pending_diff_qs = pending_diff_qs.filter(id__in=candidate_ids)
+                        else:
+                            pending_diff_qs = pending_diff_qs.filter(
+                                Q(company_a_id=surviving_company.id) | Q(company_b_id=surviving_company.id)
+                            )
+
+                        for cand in pending_diff_qs:
+                            mark_as_different_company(candidate_id=cand.id, user=request.user)
+                        diff_count = len(diff_companies)
+
+                # B. マージ処理
+                merged_count = 0
+                if target_merge_ids:
+                    target_companies = list(Company.objects.filter(id__in=target_merge_ids))
+                    if target_companies:
+                        execute_company_merge(
+                            surviving_company=surviving_company,
+                            target_companies=target_companies,
+                            user=request.user,
+                        )
+                        merged_count = len(target_companies)
+
+                if merged_count > 0 and diff_count > 0:
+                    messages.success(
+                        request,
+                        f"{merged_count}社を統合し、{diff_count}社を別会社として記録しました。",
+                    )
+                elif merged_count > 0:
+                    messages.success(
+                        request,
+                        f"会社「{surviving_company.organization}」への統合が完了しました（{merged_count}社を統合）。",
+                    )
+                elif diff_count > 0:
+                    messages.success(
+                        request,
+                        f"{diff_count}社を別会社として記録しました。",
+                    )
+                else:
+                    messages.error(request, "有効な処理対象会社が見つかりませんでした。")
+                    return redirect("companies:company_candidate_list")
+
+                next_url = request.POST.get("next")
+                if next_url:
+                    return redirect(next_url)
                 return redirect("companies:company_candidate_list")
-            return redirect("companies:company_detail", pk=surviving_company.pk)
         except Exception as e:
-            messages.error(request, f"統合処理中にエラーが発生しました: {e}")
+            messages.error(request, f"処理中にエラーが発生しました: {e}")
             return redirect("companies:company_candidate_list")
 
 

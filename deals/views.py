@@ -163,10 +163,24 @@ class DealCreateView(LoginRequiredMixin, PermissionRequiredMixin, CreateView):
     def get_initial(self):
         initial = super().get_initial()
         initial["owner"] = self.request.user
-        company_id = self.request.GET.get("company_id")
+        company_id = self.request.GET.get("company_id") or self.request.GET.get("company")
         if company_id:
             initial["company"] = company_id
+        lead_source = self.request.GET.get("lead_source")
+        if lead_source:
+            initial["lead_source"] = lead_source
+        source_campaign = self.request.GET.get("source_campaign") or self.request.GET.get("campaign")
+        if source_campaign:
+            initial["source_campaign"] = source_campaign
+            if not lead_source:
+                initial["lead_source"] = Deal.LeadSource.CAMPAIGN
         return initial
+
+    def get_success_url(self):
+        back = BackNavigator(self.request)
+        if back.back_exist:
+            return back.back_url
+        return reverse("deals:deal_detail", kwargs={"pk": self.object.pk})
 
     @transaction.atomic
     def form_valid(self, form):
@@ -176,6 +190,25 @@ class DealCreateView(LoginRequiredMixin, PermissionRequiredMixin, CreateView):
         if not deal.owner_id:
             deal.owner = self.request.user
         deal.save()
+        self.object = deal
+
+        # 関連 Person (DealPerson) の自動紐付け
+        person_id = self.request.POST.get("person") or self.request.GET.get("person") or self.request.GET.get("person_id")
+        if person_id:
+            try:
+                person_obj = Person.objects.filter(pk=person_id).first()
+                if person_obj:
+                    defaults = {"role": PersonRole.CONTACT_WINDOW}
+                    if hasattr(DealPerson, "is_primary"):
+                        defaults["is_primary"] = True
+                    DealPerson.objects.get_or_create(
+                        deal=deal,
+                        person=person_obj,
+                        defaults=defaults,
+                    )
+            except Exception:
+                pass
+
         ActionLog.record(
             user=self.request.user,
             action="deal_created",
@@ -183,17 +216,23 @@ class DealCreateView(LoginRequiredMixin, PermissionRequiredMixin, CreateView):
             data={"name": deal.name, "deal_id": str(deal.id)},
         )
         messages.success(self.request, f"案件「{deal.name}」を作成しました。")
-        return redirect("deals:deal_detail", pk=deal.pk)
+        return redirect(self.get_success_url())
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context["is_create"] = True
         context["back"] = BackNavigator(self.request)
         context["active_menu"] = "deals:deal_list"
-        company_val = self.request.POST.get("company") or self.request.GET.get("company_id")
+        company_val = self.request.POST.get("company") or self.request.GET.get("company") or self.request.GET.get("company_id")
         if company_val:
             try:
                 context["selected_company"] = Company.objects.filter(pk=company_val).first()
+            except Exception:
+                pass
+        person_val = self.request.POST.get("person") or self.request.GET.get("person") or self.request.GET.get("person_id")
+        if person_val:
+            try:
+                context["selected_person"] = Person.objects.select_related("primary_contact").filter(pk=person_val).first()
             except Exception:
                 pass
         return context

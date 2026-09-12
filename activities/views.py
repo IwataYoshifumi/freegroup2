@@ -3,6 +3,7 @@ from django.contrib.auth.mixins import LoginRequiredMixin, PermissionRequiredMix
 from django.core.exceptions import PermissionDenied
 from django.db.models import Q
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils import timezone
 from django.views import View
 from django.views.generic import CreateView, DetailView, ListView, UpdateView
@@ -149,13 +150,19 @@ class ActivityCreateView(LoginRequiredMixin, PermissionRequiredMixin, CreateView
     def get_initial(self):
         initial = super().get_initial()
         initial["user"] = self.request.user
-        deal_id = self.request.GET.get("deal_id")
+        deal_id = self.request.GET.get("deal_id") or self.request.GET.get("deal")
         if deal_id:
             initial["deal"] = deal_id
-        campaign_id = self.request.GET.get("campaign_id")
+        campaign_id = self.request.GET.get("campaign") or self.request.GET.get("campaign_id")
         if campaign_id:
             initial["campaign"] = campaign_id
         return initial
+
+    def get_success_url(self):
+        back = BackNavigator(self.request)
+        if back.back_exist:
+            return back.back_url
+        return reverse("activities:activity_detail", kwargs={"pk": self.object.pk})
 
     def form_valid(self, form):
         activity = form.save(commit=False)
@@ -163,8 +170,13 @@ class ActivityCreateView(LoginRequiredMixin, PermissionRequiredMixin, CreateView
         if not activity.user_id:
             activity.user = self.request.user
         activity.save()
+        self.object = activity
 
-        person_id = self.request.POST.get("person_id") or self.request.GET.get("person_id")
+        person_id = (
+            self.request.POST.get("person_id")
+            or self.request.GET.get("person_id")
+            or self.request.GET.get("person")
+        )
         if person_id:
             try:
                 person = Person.objects.get(pk=person_id)
@@ -186,12 +198,14 @@ class ActivityCreateView(LoginRequiredMixin, PermissionRequiredMixin, CreateView
             },
         )
         messages.success(self.request, "活動を記録しました。")
-        return redirect("activities:activity_detail", pk=activity.pk)
+        return redirect(self.get_success_url())
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context["is_create"] = True
-        context["person_id"] = self.request.GET.get("person_id", "")
+        context["person_id"] = (
+            self.request.GET.get("person_id") or self.request.GET.get("person", "")
+        )
         context["back"] = BackNavigator(self.request)
         context["active_menu"] = "activities:activity_list"
         return context

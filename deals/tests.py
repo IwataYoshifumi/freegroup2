@@ -499,6 +499,98 @@ class DealViewTests(TestCase):
         self.assertEqual(new_deal.company, self.company)
         self.assertIsNone(new_deal.primary_person)
 
+    def test_deal_create_view_with_source_campaign_and_back_navigator(self):
+        from mailings.models import Campaign, EmailTemplate, MailingList
+        from back_navigator.back_navigator import BackNavigator
+
+        self.client.login(username="deal_owner", password="password")
+        template = EmailTemplate.objects.create(name="T", subject="S", body="B", created_by=self.owner)
+        ml = MailingList.objects.create(name="ML", created_by=self.owner)
+        campaign = Campaign.objects.create(name="テストCP", template=template, mailing_list=ml, created_by=self.owner)
+
+        nav = BackNavigator(self.client.get("/").wsgi_request)
+        back_stack = nav._calc_encode_stack([{"url": f"/mailings/campaigns/{campaign.pk}/report/", "title": "配信レポート"}])
+
+        url = f"{reverse('deals:deal_create')}?lead_source=campaign&source_campaign={campaign.pk}&back_stack={back_stack}"
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+
+        form = response.context["form"]
+        self.assertEqual(form.initial.get("lead_source"), "campaign")
+        self.assertEqual(str(form.initial.get("source_campaign")), str(campaign.pk))
+
+        content = response.content.decode("utf-8")
+        self.assertIn(f'href="/mailings/campaigns/{campaign.pk}/report/"', content)
+
+        post_data = {
+            "name": "キャンペーン経由案件",
+            "company": str(self.company.id),
+            "stage": Stage.INITIAL_MEETING,
+            "probability": 40,
+            "deal_type": DealType.NEW,
+            "lead_source": "campaign",
+            "source_campaign": str(campaign.pk),
+            "back_stack": back_stack,
+        }
+        post_resp = self.client.post(url, data=post_data)
+        self.assertEqual(post_resp.status_code, 302)
+        self.assertEqual(post_resp.url, f"/mailings/campaigns/{campaign.pk}/report/")
+
+        created_deal = Deal.objects.get(name="キャンペーン経由案件")
+        self.assertEqual(created_deal.source_campaign, campaign)
+        self.assertEqual(created_deal.lead_source, "campaign")
+
+    def test_deal_create_view_with_company_person_and_campaign_creates_deal_person(self):
+        """DealCreateView に company, person, source_campaign を渡して POST した際、
+        案件と DealPerson が同時に作成されて直前の画面へリダイレクトされること。
+        """
+        from mailings.models import Campaign, EmailTemplate, MailingList
+        from back_navigator.back_navigator import BackNavigator
+
+        self.client.login(username="deal_owner", password="password")
+        template = EmailTemplate.objects.create(name="T", subject="S", body="B", created_by=self.owner)
+        ml = MailingList.objects.create(name="ML", created_by=self.owner)
+        campaign = Campaign.objects.create(name="クリックCP", template=template, mailing_list=ml, created_by=self.owner)
+
+        clicked_list_url = f"/mailings/campaigns/{campaign.pk}/report/clicked/"
+        nav = BackNavigator(self.client.get("/").wsgi_request)
+        back_stack = nav._calc_encode_stack([{"url": clicked_list_url, "title": "クリック受信者一覧"}])
+
+        url = (
+            f"{reverse('deals:deal_create')}?"
+            f"lead_source=campaign&source_campaign={campaign.pk}&company={self.company.pk}&person={self.person.pk}&back_stack={back_stack}"
+        )
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["form"].initial.get("company"), str(self.company.pk))
+        self.assertEqual(response.context["form"].initial.get("source_campaign"), str(campaign.pk))
+        self.assertEqual(response.context["selected_person"], self.person)
+
+        post_data = {
+            "name": "クリック受信者からの案件",
+            "company": str(self.company.id),
+            "stage": Stage.INITIAL_MEETING,
+            "probability": 50,
+            "deal_type": DealType.NEW,
+            "lead_source": "campaign",
+            "source_campaign": str(campaign.pk),
+            "person": str(self.person.pk),
+            "back_stack": back_stack,
+        }
+        post_resp = self.client.post(url, data=post_data)
+        self.assertEqual(post_resp.status_code, 302)
+        self.assertEqual(post_resp.url, clicked_list_url)
+
+        created_deal = Deal.objects.get(name="クリック受信者からの案件")
+        self.assertEqual(created_deal.company, self.company)
+        self.assertEqual(created_deal.source_campaign, campaign)
+        self.assertEqual(created_deal.lead_source, "campaign")
+
+        # DealPerson が自動的に作成されていること
+        deal_person = DealPerson.objects.filter(deal=created_deal, person=self.person).first()
+        self.assertIsNotNone(deal_person)
+        self.assertEqual(deal_person.role, PersonRole.CONTACT_WINDOW)
+
     def test_deal_update_view(self):
         self.client.login(username="deal_owner", password="password")
         url = reverse("deals:deal_update", kwargs={"pk": self.deal.pk})

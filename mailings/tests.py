@@ -5301,6 +5301,9 @@ class TrackingRedirectViewConcurrencySafetyTests(TransactionTestCase):
 
         def _hit(client):
             try:
+                if connection.vendor == "sqlite":
+                    with connection.cursor() as cursor:
+                        cursor.execute("PRAGMA busy_timeout = 30000;")
                 client.get(f"/t/{self.tl.token}/", HTTP_USER_AGENT="Mozilla/5.0")
             finally:
                 # 各スレッドの DB 接続を閉じる（threading 共有を避ける）
@@ -9224,3 +9227,271 @@ class BouncedAndCompletionBugFixTests(_Phase3TestBase):
         self.assertEqual(campaign.total_count, 4)
         # まだ pending があるので status は SENDING のまま
         self.assertEqual(campaign.status, Campaign.Status.SENDING)
+
+
+class CampaignReportBackNavigatorTests(_Phase3TestBase):
+    """配信レポート（クリック一覧・バウンス一覧・配信停止一覧）からコンタクト詳細への
+    BackNavigator 導線正常化テスト。
+    """
+
+    def setUp(self):
+        super().setUp()
+        from django.contrib.auth.models import Permission
+
+        self.user.user_permissions.add(
+            Permission.objects.get(codename="view_campaign"),
+            Permission.objects.get(codename="view_contact"),
+        )
+        self.client.force_login(self.user)
+
+        self.campaign = self._make_campaign(status=Campaign.Status.DONE)
+        self.person = self._make_person("テスト太郎")
+        self._add_member(self.mailing_list, self.person)
+
+    def test_clicked_list_to_contact_detail_back_flow(self):
+        """クリック一覧で push_current され、コンタクト詳細リンクに back_stack が付与され、
+        コンタクト詳細画面で元のクリック一覧への「戻る」ボタンが表示されること。
+        """
+        from django.utils import timezone
+        from mailings.models import DeliveryHistory, TrackingLink
+
+        DeliveryHistory.objects.create(
+            campaign=self.campaign,
+            person=self.person,
+            to_email="alice@example.com",
+            status=DeliveryHistory.Status.SENT,
+        )
+        TrackingLink.objects.create(
+            campaign=self.campaign,
+            person=self.person,
+            original_url="https://example.com/item1",
+            token="testtoken1",
+            click_count=1,
+            total_access_count=1,
+            last_clicked_at=timezone.now(),
+        )
+
+        # 1. クリック一覧 GET
+        clicked_url = reverse("mailings:campaign_report_clicked", args=[self.campaign.pk])
+        resp = self.client.get(clicked_url)
+        self.assertEqual(resp.status_code, 200)
+
+        # View で push_current された back が context に存在すること
+        back = resp.context["back"]
+        self.assertTrue(back._pushed)
+        self.assertEqual(len(back.back_stack), 1)
+        self.assertIn(clicked_url, back.back_stack[0]["url"])
+
+        # HTML 内のコンタクト詳細リンクに back_stack クエリが含まれていること
+        content = resp.content.decode("utf-8")
+        contact_pk = self.person.primary_contact.pk
+        contact_detail_base = reverse("contacts:contact_detail", args=[contact_pk])
+        expected_href_part = f"{contact_detail_base}?back_stack="
+        self.assertIn(expected_href_part, content)
+
+        # 2. リンクの URL を取得してコンタクト詳細画面へ遷移
+        encoded_stack = back._calc_encode_stack()
+        detail_url_with_back = f"{contact_detail_base}?back_stack={encoded_stack}"
+        detail_resp = self.client.get(detail_url_with_back)
+        self.assertEqual(detail_resp.status_code, 200)
+
+        # コンタクト詳細の「戻る」ボタンがクリック一覧を指していること
+        detail_content = detail_resp.content.decode("utf-8")
+        self.assertIn(f'href="{clicked_url}"', detail_content)
+        self.assertIn("戻る", detail_content)
+
+    def test_clicked_list_with_url_filter_preserves_query(self):
+        """クリック一覧で ?url=... 絞り込み時に back_stack に url クエリが保持されること。"""
+        from django.utils import timezone
+        from mailings.models import DeliveryHistory, TrackingLink
+
+        DeliveryHistory.objects.create(
+            campaign=self.campaign,
+            person=self.person,
+            to_email="alice@example.com",
+            status=DeliveryHistory.Status.SENT,
+        )
+        TrackingLink.objects.create(
+            campaign=self.campaign,
+            person=self.person,
+            original_url="https://example.com/item1",
+            token="testtoken2",
+            click_count=1,
+            total_access_count=1,
+            last_clicked_at=timezone.now(),
+        )
+
+        target_url = "https://example.com/item1"
+        clicked_url = f"{reverse('mailings:campaign_report_clicked', args=[self.campaign.pk])}?url={target_url}"
+        resp = self.client.get(clicked_url)
+        self.assertEqual(resp.status_code, 200)
+
+        back = resp.context["back"]
+        self.assertTrue(back._pushed)
+        # url パラメータがスタックの URL に含まれること
+        self.assertIn("url=https%3A%2F%2Fexample.com%2Fitem1", back.back_stack[0]["url"])
+
+    def test_bounced_list_to_contact_detail_back_flow(self):
+        """バウンス一覧で push_current され、コンタクト詳細リンクに back_stack が付与され、
+        コンタクト詳細画面で元のバウンス一覧への「戻る」ボタンが表示されること。
+        """
+        from mailings.models import DeliveryHistory
+
+        DeliveryHistory.objects.create(
+            campaign=self.campaign,
+            person=self.person,
+            to_email="alice@example.com",
+            status=DeliveryHistory.Status.BOUNCED,
+        )
+
+        bounced_url = reverse("mailings:campaign_report_bounced", args=[self.campaign.pk])
+        resp = self.client.get(bounced_url)
+        self.assertEqual(resp.status_code, 200)
+
+        back = resp.context["back"]
+        self.assertTrue(back._pushed)
+        self.assertEqual(len(back.back_stack), 1)
+        self.assertIn(bounced_url, back.back_stack[0]["url"])
+
+        content = resp.content.decode("utf-8")
+        contact_pk = self.person.primary_contact.pk
+        contact_detail_base = reverse("contacts:contact_detail", args=[contact_pk])
+        self.assertIn(f"{contact_detail_base}?back_stack=", content)
+
+        # コンタクト詳細画面へアクセス
+        encoded_stack = back._calc_encode_stack()
+        detail_url_with_back = f"{contact_detail_base}?back_stack={encoded_stack}"
+        detail_resp = self.client.get(detail_url_with_back)
+        self.assertEqual(detail_resp.status_code, 200)
+        detail_content = detail_resp.content.decode("utf-8")
+        self.assertIn(f'href="{bounced_url}"', detail_content)
+        self.assertIn("戻る", detail_content)
+
+    def test_unsubscribed_list_to_contact_detail_back_flow(self):
+        """配信停止一覧で push_current され、コンタクト詳細リンクに back_stack が付与され、
+        コンタクト詳細画面で元の配信停止一覧への「戻る」ボタンが表示されること。
+        """
+        from mailings.models import DeliveryHistory, UnsubscribeLink
+        from django.utils import timezone
+
+        DeliveryHistory.objects.create(
+            campaign=self.campaign,
+            person=self.person,
+            to_email="alice@example.com",
+            status=DeliveryHistory.Status.SENT,
+        )
+        UnsubscribeLink.objects.create(
+            campaign=self.campaign,
+            person=self.person,
+            token="unsubtoken1",
+            target_email="alice@example.com",
+            unsubscribed_at=timezone.now(),
+        )
+
+        unsub_url = reverse("mailings:campaign_report_unsubscribed", args=[self.campaign.pk])
+        resp = self.client.get(unsub_url)
+        self.assertEqual(resp.status_code, 200)
+
+        back = resp.context["back"]
+        self.assertTrue(back._pushed)
+        self.assertEqual(len(back.back_stack), 1)
+        self.assertIn(unsub_url, back.back_stack[0]["url"])
+
+        content = resp.content.decode("utf-8")
+        contact_pk = self.person.primary_contact.pk
+        contact_detail_base = reverse("contacts:contact_detail", args=[contact_pk])
+        self.assertIn(f"{contact_detail_base}?back_stack=", content)
+
+        # コンタクト詳細画面へアクセス
+        encoded_stack = back._calc_encode_stack()
+        detail_url_with_back = f"{contact_detail_base}?back_stack={encoded_stack}"
+        detail_resp = self.client.get(detail_url_with_back)
+        self.assertEqual(detail_resp.status_code, 200)
+        detail_content = detail_resp.content.decode("utf-8")
+        self.assertIn(f'href="{unsub_url}"', detail_content)
+        self.assertIn("戻る", detail_content)
+
+    def test_campaign_report_does_not_have_deal_create_button(self):
+        """配信レポート画面には「案件を新規作成」ボタンが含まれていないこと。"""
+        report_url = reverse("mailings:campaign_report", args=[self.campaign.pk])
+        resp = self.client.get(report_url)
+        self.assertEqual(resp.status_code, 200)
+
+        content = resp.content.decode("utf-8")
+        self.assertNotIn("案件を新規作成", content)
+
+    def test_clicked_list_has_activity_create_button_with_back_stack(self):
+        """クリック受信者一覧画面に「活動を記録」ボタンが存在し、campaign, person,
+        および back_stack が付与されていること。
+        """
+        from django.utils import timezone
+        from mailings.models import DeliveryHistory, TrackingLink
+
+        DeliveryHistory.objects.create(
+            campaign=self.campaign,
+            person=self.person,
+            to_email="alice@example.com",
+            status=DeliveryHistory.Status.SENT,
+        )
+        TrackingLink.objects.create(
+            campaign=self.campaign,
+            person=self.person,
+            original_url="https://example.com/item1",
+            token="testtoken_act",
+            click_count=1,
+            total_access_count=1,
+            last_clicked_at=timezone.now(),
+        )
+
+        clicked_url = reverse("mailings:campaign_report_clicked", args=[self.campaign.pk])
+        resp = self.client.get(clicked_url)
+        self.assertEqual(resp.status_code, 200)
+
+        content = resp.content.decode("utf-8")
+        act_create_base = reverse("activities:activity_create")
+        self.assertIn("活動を記録", content)
+        self.assertIn("btn-primary", content)
+        self.assertIn(f"{act_create_base}?campaign={self.campaign.pk}&amp;person={self.person.pk}&amp;back_stack=", content)
+
+    def test_clicked_list_has_deal_create_button_with_back_stack(self):
+        """クリック受信者一覧画面に「案件を作成」ボタンが存在し、lead_source, source_campaign,
+        person, company, および back_stack が付与されていること。
+        """
+        from django.utils import timezone
+        from mailings.models import DeliveryHistory, TrackingLink
+        from companies.models import Company
+
+        company = Company.objects.create(organization="テスト株式会社")
+        self.person.primary_contact.company = company
+        self.person.primary_contact.save()
+
+        DeliveryHistory.objects.create(
+            campaign=self.campaign,
+            person=self.person,
+            to_email="alice@example.com",
+            status=DeliveryHistory.Status.SENT,
+        )
+        TrackingLink.objects.create(
+            campaign=self.campaign,
+            person=self.person,
+            original_url="https://example.com/item1",
+            token="testtoken_deal",
+            click_count=1,
+            total_access_count=1,
+            last_clicked_at=timezone.now(),
+        )
+
+        clicked_url = reverse("mailings:campaign_report_clicked", args=[self.campaign.pk])
+        resp = self.client.get(clicked_url)
+        self.assertEqual(resp.status_code, 200)
+
+        content = resp.content.decode("utf-8")
+        deal_create_base = reverse("deals:deal_create")
+        self.assertIn("案件を作成", content)
+        self.assertIn(
+            f"{deal_create_base}?lead_source=campaign&amp;source_campaign={self.campaign.pk}&amp;person={self.person.pk}&amp;company={company.pk}&amp;back_stack=",
+            content,
+        )
+
+
+

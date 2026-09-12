@@ -7,9 +7,6 @@
   <div class="app-page-header">
     <div>
       <h1>重複会社候補レビュー</h1>
-      <p class="app-muted" style="margin-top:4px; margin-bottom:0;">
-        システムが自動検出した類似・重複の可能性がある会社グループの一覧です。存続会社（サバイブ会社）を1社指定して一括統合、または別会社判定を行ってください。
-      </p>
     </div>
     <div class="app-action-area">
       {% back_all_link back %}
@@ -36,33 +33,41 @@
           <input type="hidden" name="candidate_ids" value="{{ group.candidate_ids_str }}">
           <input type="hidden" name="next" value="{% url 'companies:company_candidate_list' %}">
 
-          <!-- グループヘッダー: 会社名 / 判定ランク（バッジ） / 候補社数 -->
-          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:14px; padding-bottom:10px; border-bottom:1px solid var(--app-border);">
-            <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+          <!-- グループヘッダー: 3段構成（1段目: 社名・基本情報行、2段目: アクションボタン行、3段目: 一致項目バッジ群行） -->
+          <div style="margin-bottom:12px;">
+            <!-- 1段目: 会社名 / 判定ランク（信号機カラー） / 候補社数・スコア -->
+            <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:8px;">
               <h2 style="margin:0; font-size:17px; font-weight:700;">{{ group.name }}</h2>
-              {% if group.rank == "exact_match" %}
-                <span class="app-status-badge app-status-badge--error">{{ group.rank_display }}</span>
-              {% elif group.rank == "possible_high" %}
-                <span class="app-status-badge app-status-badge--warning">{{ group.rank_display }}</span>
+              {% if group.rank == "exact_match" or group.rank == "possible_high" %}
+                <span class="app-status-badge" style="background-color: #dcfce7; color: #15803d; border: 1px solid #86efac;">{{ group.rank_display }}</span>
+              {% elif group.rank == "possible_mid" %}
+                <span class="app-status-badge" style="background-color: #fef9c3; color: #a16207; border: 1px solid #fde047;">{{ group.rank_display }}</span>
               {% else %}
-                <span class="app-status-badge">{{ group.rank_display }}</span>
+                <span class="app-status-badge" style="background-color: #fee2e2; color: #b91c1c; border: 1px solid #fca5a5;">{{ group.rank_display }}</span>
               {% endif %}
+
               <span style="font-size:13px; color:var(--app-muted); font-weight:600;">
                 候補 {{ group.company_count }} 社（最大一致スコア: {{ group.max_score }}点）
               </span>
             </div>
-            <div style="display:flex; align-items:center; gap:8px;">
-              <button type="submit" class="app-btn app-btn--warning app-btn--sm" onclick="return confirm('選択した会社を存続会社として、チェックの入った会社を統合しますか？\n（チェックを外した会社は統合されず残ります）');">
-                チェックした会社を統合
-              </button>
-              <button type="submit" formaction="{% url 'companies:company_mark_different_batch' %}" formmethod="post" class="app-btn app-btn--secondary app-btn--sm" onclick="return confirm('このグループに含まれる候補ペアを別会社として記録しますか？');">
-                別会社として判定
+
+            <!-- 2段目: アクションボタン行（1本化、左寄せ） -->
+            <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
+              <button type="submit" class="app-btn app-btn--warning app-btn--sm" onclick="return confirm('選択した内容でマージおよび別会社判定を実行しますか？');">
+                マージ・別会社判定を実行
               </button>
             </div>
-          </div>
 
-          <div style="margin-bottom:10px; font-size:12px; color:var(--app-muted);">
-            ※「存続指定」で残す会社を1社選び、「統合対象」で合流させる会社にチェックを入れてください。チェックを外した会社は統合されずそのまま残ります。
+            <!-- 3段目: 一致項目バッジ群行（左寄せ）＋ 直下の区切り線 -->
+            {% if group.match_labels %}
+              <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; border-bottom:1px solid var(--app-border); padding-bottom:10px; margin-bottom:12px;">
+                {% for label in group.match_labels %}
+                  <span class="app-status-badge" style="background:#e0f2fe; color:#0369a1;">{{ label }}</span>
+                {% endfor %}
+              </div>
+            {% else %}
+              <div style="border-bottom:1px solid var(--app-border); margin-bottom:12px;"></div>
+            {% endif %}
           </div>
 
           <!-- 候補会社テーブル -->
@@ -71,7 +76,8 @@
               <thead>
                 <tr>
                   <th style="width:70px; text-align:center;">存続指定</th>
-                  <th style="width:70px; text-align:center;">統合対象</th>
+                  <th style="width:70px; text-align:center;">マージ対象</th>
+                  <th style="width:70px; text-align:center;">別会社</th>
                   <th>会社名</th>
                   <th>ドメイン</th>
                   <th>代表電話</th>
@@ -97,17 +103,29 @@
                     </td>
                     <td style="text-align:center;">
                       <input type="checkbox"
-                             name="target_company_ids"
-                             id="target_{{ group.id }}_{{ comp.id }}"
+                             name="merge_company_ids"
+                             id="merge_{{ group.id }}_{{ comp.id }}"
                              value="{{ comp.id }}"
-                             class="target-checkbox-{{ group.id }}"
+                             class="merge-checkbox-{{ group.id }}"
                              data-group="{{ group.id }}"
                              data-company="{{ comp.id }}"
                              {% if forloop.first %}disabled{% else %}checked{% endif %}
                              style="cursor:pointer; width:16px; height:16px; accent-color:var(--app-color-warning);"
-                             title="この会社を統合対象に含める">
+                             title="この会社をマージ対象に含める">
                     </td>
-                    <td>
+                    <td style="text-align:center;">
+                      <input type="checkbox"
+                             name="different_company_ids"
+                             id="diff_{{ group.id }}_{{ comp.id }}"
+                             value="{{ comp.id }}"
+                             class="diff-checkbox-{{ group.id }}"
+                             data-group="{{ group.id }}"
+                             data-company="{{ comp.id }}"
+                             {% if forloop.first %}disabled{% endif %}
+                             style="cursor:pointer; width:16px; height:16px; accent-color:var(--app-color-secondary);"
+                             title="この会社を別会社として記録する">
+                    </td>
+                    <td{% if comp.diff_org %} style="background-color: #fffbeb;"{% endif %}>
                       <label for="surviving_{{ group.id }}_{{ comp.id }}" style="cursor:pointer; font-weight:600; color:var(--app-text);">
                         {{ comp.organization }}
                       </label>
@@ -115,10 +133,14 @@
                         詳細 ↗
                       </a>
                     </td>
-                    <td>{{ comp.domain|default:"—" }}</td>
-                    <td>{{ comp.phone|default:"—" }}</td>
-                    <td style="max-width:240px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="{{ comp.address }}">
-                      {{ comp.address|default:"—" }}
+                    <td{% if comp.diff_domain %} style="background-color: #fffbeb;"{% endif %}>
+                      {% if comp.domain %}{{ comp.domain }}{% else %}<span class="app-muted">-</span>{% endif %}
+                    </td>
+                    <td{% if comp.diff_phone %} style="background-color: #fffbeb;"{% endif %}>
+                      {% if comp.phone %}{{ comp.phone }}{% else %}<span class="app-muted">-</span>{% endif %}
+                    </td>
+                    <td style="max-width:240px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;{% if comp.diff_address %} background-color: #fffbeb;{% endif %}" title="{{ comp.address }}">
+                      {% if comp.address %}{{ comp.address }}{% else %}<span class="app-muted">-</span>{% endif %}
                     </td>
                     <td style="text-align:center;">
                       <strong>{{ comp.contacts_count }}</strong> 件
@@ -152,22 +174,66 @@
 
   <script>
     document.addEventListener("DOMContentLoaded", function() {
+      // 1. 存続ラジオ切り替え時の排他制御
       document.querySelectorAll("input[type='radio'][data-group]").forEach(function(radio) {
         radio.addEventListener("change", function() {
           var groupId = this.dataset.group;
           var selectedCid = this.value;
-          document.querySelectorAll(".target-checkbox-" + groupId).forEach(function(cb) {
+
+          // マージ対象チェックボックスの制御
+          document.querySelectorAll(".merge-checkbox-" + groupId).forEach(function(cb) {
             if (cb.value === selectedCid) {
               cb.checked = false;
               cb.disabled = true;
             } else {
-              cb.disabled = false;
-              // ラジオ選択を切り替えた際、旧サバイブだった会社は自動でチェックをONにして利便性を高める
-              if (!cb.checked) {
-                cb.checked = true;
+              if (cb.disabled) {
+                cb.disabled = false;
+                var diffCb = document.getElementById("diff_" + groupId + "_" + cb.value);
+                if (!diffCb || !diffCb.checked) {
+                  cb.checked = true;
+                }
               }
             }
           });
+
+          // 別会社チェックボックスの制御
+          document.querySelectorAll(".diff-checkbox-" + groupId).forEach(function(cb) {
+            if (cb.value === selectedCid) {
+              cb.checked = false;
+              cb.disabled = true;
+            } else {
+              if (cb.disabled) {
+                cb.disabled = false;
+              }
+            }
+          });
+        });
+      });
+
+      // 2. マージ対象 vs 別会社（行内の排他）
+      document.querySelectorAll("input[name='merge_company_ids']").forEach(function(mergeCb) {
+        mergeCb.addEventListener("change", function() {
+          if (this.checked) {
+            var groupId = this.dataset.group;
+            var cid = this.dataset.company;
+            var diffCb = document.getElementById("diff_" + groupId + "_" + cid);
+            if (diffCb) {
+              diffCb.checked = false;
+            }
+          }
+        });
+      });
+
+      document.querySelectorAll("input[name='different_company_ids']").forEach(function(diffCb) {
+        diffCb.addEventListener("change", function() {
+          if (this.checked) {
+            var groupId = this.dataset.group;
+            var cid = this.dataset.company;
+            var mergeCb = document.getElementById("merge_" + groupId + "_" + cid);
+            if (mergeCb) {
+              mergeCb.checked = false;
+            }
+          }
         });
       });
     });

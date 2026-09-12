@@ -395,26 +395,18 @@ class CompanyViewTests(TestCase):
         self.assertContains(resp, "テスト株式会社")
         self.assertContains(resp, "03-1111-2222")
 
-    def test_company_create_and_update_view(self):
+    def test_company_update_view(self):
         self.client.login(username="comp_user", password="password")
-        # 作成
-        resp = self.client.post(
-            reverse("companies:company_create"),
-            {
-                "organization": "新規設立株式会社",
-                "domain": "newco.jp",
-                "phone": "06-9999-8888",
-                "address": "大阪府大阪市",
-                "website": "https://newco.jp",
-            },
+        target_co = Company.objects.create(
+            organization="新規設立株式会社",
+            domain="newco.jp",
+            phone="06-9999-8888",
+            address="大阪府大阪市",
+            website="https://newco.jp",
         )
-        self.assertEqual(resp.status_code, 302)
-        new_co = Company.objects.get(organization="新規設立株式会社")
-        self.assertEqual(new_co.domain, "newco.jp")
-
         # 編集
         resp = self.client.post(
-            reverse("companies:company_update", kwargs={"pk": new_co.pk}),
+            reverse("companies:company_update", kwargs={"pk": target_co.pk}),
             {
                 "organization": "新規設立株式会社改",
                 "domain": "newco-kai.jp",
@@ -424,8 +416,8 @@ class CompanyViewTests(TestCase):
             },
         )
         self.assertEqual(resp.status_code, 302)
-        new_co.refresh_from_db()
-        self.assertEqual(new_co.organization, "新規設立株式会社改")
+        target_co.refresh_from_db()
+        self.assertEqual(target_co.organization, "新規設立株式会社改")
 
     def test_company_archive_view(self):
         self.client.login(username="comp_user", password="password")
@@ -456,6 +448,104 @@ class CompanyViewTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "テスト株式会社")
         self.assertContains(resp, "テスト株式会社類似")
+
+    def test_company_candidate_list_ui_matches_and_diffs(self):
+        self.client.login(username="comp_user", password="password")
+        c1 = Company.objects.create(
+            organization="株式会社アルファ",
+            domain="alpha.co.jp",
+            phone="03-1111-2222",
+            address="東京都千代田区1-1-1",
+        )
+        c2 = Company.objects.create(
+            organization="（株）アルファ",
+            domain="alpha.co.jp",
+            phone="03-9999-8888",
+            address="東京都千代田区1-1-1",
+        )
+        CompanyDuplicateCandidate.objects.create(
+            company_a=c1,
+            company_b=c2,
+            score=95,
+            rank=CompanyDuplicateCandidate.Rank.EXACT_MATCH,
+        )
+        resp = self.client.get(reverse("companies:company_candidate_list"))
+        self.assertEqual(resp.status_code, 200)
+        # 一致項目ラベルバッジ
+        self.assertContains(resp, "社名一致")
+        self.assertContains(resp, "ドメイン一致")
+        self.assertContains(resp, "住所一致")
+        # 電話番号が異なるため差分ハイライトが適用されていること
+        self.assertContains(resp, 'style="background-color: #fffbeb;"')
+        # アクションボタンのクラス（黄色統一）およびボタン名
+        self.assertContains(resp, "app-btn--warning")
+        self.assertContains(resp, "マージ・別会社判定を実行")
+        self.assertContains(resp, 'name="merge_company_ids"')
+        self.assertContains(resp, 'name="different_company_ids"')
+        # 判定ランクバッジの信号機カラー（可能性高＝緑）
+        self.assertContains(resp, "background-color: #dcfce7;")
+
+        # 未設定セル（値が空）の検証: 差分ハイライトされず薄文字ハイフンが表示されること
+        c3 = Company.objects.create(organization="株式会社ガンマ", domain="gamma.co.jp")
+        c4 = Company.objects.create(organization="株式会社ガンマ", domain="")
+        CompanyDuplicateCandidate.objects.create(
+            company_a=c3,
+            company_b=c4,
+            score=70,
+            rank=CompanyDuplicateCandidate.Rank.POSSIBLE_MID,
+        )
+        resp2 = self.client.get(reverse("companies:company_candidate_list"))
+        self.assertEqual(resp2.status_code, 200)
+        self.assertContains(resp2, '<span class="app-muted">-</span>')
+        # 判定ランクバッジの信号機カラー（可能性中＝黄）
+        self.assertContains(resp2, "background-color: #fef9c3;")
+
+    def test_company_merge_view_simultaneous_merge_and_different(self):
+        """3社グループで1社存続、1社マージ、1社別会社判定を同時に実行できることの検証。"""
+        self.client.login(username="comp_user", password="password")
+        surviving = Company.objects.create(organization="存続親会社", domain="main.example.jp")
+        to_merge = Company.objects.create(organization="マージ対象会社", domain="merge.example.jp")
+        to_diff = Company.objects.create(organization="別会社対象会社", domain="diff.example.jp")
+
+        cand_merge = CompanyDuplicateCandidate.objects.create(
+            company_a=surviving,
+            company_b=to_merge,
+            score=90,
+            rank=CompanyDuplicateCandidate.Rank.POSSIBLE_HIGH,
+        )
+        cand_diff = CompanyDuplicateCandidate.objects.create(
+            company_a=surviving,
+            company_b=to_diff,
+            score=80,
+            rank=CompanyDuplicateCandidate.Rank.POSSIBLE_MID,
+        )
+
+        resp = self.client.post(
+            reverse("companies:company_merge"),
+            {
+                "surviving_company_id": str(surviving.id),
+                "merge_company_ids": [str(to_merge.id)],
+                "different_company_ids": [str(to_diff.id)],
+                "candidate_ids": f"{cand_merge.id},{cand_diff.id}",
+            },
+            follow=True,
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "1社を統合し、1社を別会社として記録しました。")
+
+        # マージ結果の検証
+        to_merge.refresh_from_db()
+        self.assertEqual(to_merge.status, Company.Status.MERGED)
+        self.assertEqual(to_merge.merged_into, surviving)
+        cand_merge.refresh_from_db()
+        self.assertEqual(cand_merge.review_status, CompanyDuplicateCandidate.ReviewStatus.MERGED)
+
+        # 別会社結果の検証
+        to_diff.refresh_from_db()
+        self.assertEqual(to_diff.status, Company.Status.ACTIVE)
+        cand_diff.refresh_from_db()
+        self.assertEqual(cand_diff.review_status, CompanyDuplicateCandidate.ReviewStatus.DIFFERENT_COMPANY)
+        self.assertEqual(cand_diff.reviewed_by.username, "comp_user")
 
     def test_company_merge_view_and_mark_different(self):
         self.client.login(username="comp_user", password="password")
@@ -523,11 +613,10 @@ class CompanyViewTests(TestCase):
         # HTML内に各社情報とラジオボタン、統合対象チェックボックス、統合ボタンが表示されていること
         self.assertContains(resp, "テスト株式会社")
         self.assertContains(resp, "テスト株式会社 分社B")
-        self.assertContains(resp, "テスト株式会社 分社C")
-        self.assertContains(resp, "チェックした会社を統合")
-        self.assertContains(resp, "別会社として判定")
+        self.assertContains(resp, "マージ・別会社判定を実行")
         self.assertContains(resp, f'name="surviving_company_{group["id"]}"')
-        self.assertContains(resp, 'name="target_company_ids"')
+        self.assertContains(resp, 'name="merge_company_ids"')
+        self.assertContains(resp, 'name="different_company_ids"')
 
     def test_group_batch_merge_and_mark_different(self):
         self.client.login(username="comp_user", password="password")
@@ -623,34 +712,18 @@ class CompanyViewTests(TestCase):
         self.assertEqual(s2.status, Company.Status.ACTIVE)
         self.assertEqual(s3.status, Company.Status.ACTIVE)
 
-        # 2. 仮に旧 hidden (merge_company_ids) が送られても、新UIからの送信時はフォールバックしないことを検証
-        resp_no_fallback = self.client.post(
-            reverse("companies:company_merge"),
-            {
-                "group_id": "grp_selective",
-                "surviving_company_id": str(s1.id),
-                "merge_company_ids": f"{s1.id},{s2.id},{s3.id}",
-                # チェック全解除のため target_company_ids は未送信
-            },
-            follow=True,
-        )
-        self.assertEqual(resp_no_fallback.status_code, 200)
-        messages_no_fallback = [m.message for m in resp_no_fallback.context["messages"]]
-        self.assertIn("統合対象の会社が選択されていません。", messages_no_fallback)
-        s2.refresh_from_db()
-        s3.refresh_from_db()
-        self.assertEqual(s2.status, Company.Status.ACTIVE)
-        self.assertEqual(s3.status, Company.Status.ACTIVE)
-
-        # 3. 明示的な空リスト送信時のエラーバリデーション
+        # 2. 空リスト送信時のエラーバリデーション
         resp_empty = self.client.post(
             reverse("companies:company_merge"),
             {
                 "surviving_company_id": str(s1.id),
-                "target_company_ids": [],
+                "merge_company_ids": [],
             },
+            follow=True,
         )
-        self.assertEqual(resp_empty.status_code, 302)
+        self.assertEqual(resp_empty.status_code, 200)
+        messages_empty = [m.message for m in resp_empty.context["messages"]]
+        self.assertIn("統合対象の会社が選択されていません。", messages_empty)
         s2.refresh_from_db()
         s3.refresh_from_db()
         self.assertEqual(s2.status, Company.Status.ACTIVE)
@@ -799,6 +872,46 @@ class LinkCompaniesCommandTests(TestCase):
         self.assertIsNotNone(c2.company)
         self.assertIn("エラー件数: 1 件", out.getvalue())
         self.assertIn("擬似障害エラー", err.getvalue())
+
+
+class CompanyListViewTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username="testuser", password="password")
+        self.client.login(username="testuser", password="password")
+
+    def test_company_list_displays_website_url(self):
+        from companies.models import Company
+
+        Company.objects.create(
+            organization="ウェブサイトあり会社",
+            website="https://example.com/corporate",
+        )
+        Company.objects.create(
+            organization="ウェブサイトなし会社",
+            website="",
+        )
+
+        resp = self.client.get(reverse("companies:company_list"))
+        self.assertEqual(resp.status_code, 200)
+        content = resp.content.decode("utf-8")
+        self.assertIn("https://example.com/corporate", content)
+        self.assertNotIn(">リンク</a>", content)
+        self.assertIn('target="_blank"', content)
+        self.assertIn('rel="noopener noreferrer"', content)
+        self.assertNotIn("会社新規作成", content)
+
+    def test_company_create_url_and_button_removed(self):
+        """会社新規作成のURLルートが削除され、画面上にもボタンが存在しないこと。"""
+        from django.urls import NoReverseMatch
+
+        with self.assertRaises(NoReverseMatch):
+            reverse("companies:company_create")
+
+        resp = self.client.get(reverse("companies:company_list"))
+        self.assertEqual(resp.status_code, 200)
+        content = resp.content.decode("utf-8")
+        self.assertNotIn("会社新規作成", content)
+
 
 
 

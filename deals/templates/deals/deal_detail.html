@@ -169,10 +169,10 @@
     </div>
   {% endif %}
 
-  <!-- 社外関係者 ＋ 社内担当者 2列グリッド（合計幅 100% = 1040px） -->
+  {# 社外関係者 ＋ 社内担当者 2列グリッド（合計幅 100% = 1040px） #}
   <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; width: 100%; box-sizing: border-box; margin-bottom: 24px;">
-    <!-- 左：案件関係者（社外） -->
-    <section class="app-card" style="margin: 0; width: 100%; box-sizing: border-box;">
+    {# 左：案件関係者（社外）カード #}
+    <section class="app-card" style="margin: 0; width: 100%; min-width: 0; box-sizing: border-box;">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
         <div style="display:flex; align-items:center; gap:8px;">
           <h2 style="font-size:16px; margin:0;">案件関係者（社外）</h2>
@@ -184,8 +184,8 @@
         {% endif %}
       </div>
 
-      <div class="app-table-wrapper">
-        <table class="app-table" style="table-layout: fixed; width: 100%;">
+      <div class="app-table-wrapper" style="min-width: 0;">
+        <table class="app-table" style="table-layout: fixed; width: 100%; min-width: 0;">
           <thead>
             <tr>
               <th style="width: 30%;">会社名</th>
@@ -220,8 +220,8 @@
       </div>
     </section>
 
-    <!-- 右：案件担当者（社内） -->
-    <section class="app-card" style="margin: 0; width: 100%; box-sizing: border-box;">
+    {# 右：案件担当者（社内）カード（※右端がメイン情報カードの右端と縦一直線に揃う） #}
+    <section class="app-card" style="margin: 0; width: 100%; min-width: 0; box-sizing: border-box;">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
         <div style="display:flex; align-items:center; gap:8px;">
           <h2 style="font-size:16px; margin:0;">案件担当者（社内）</h2>
@@ -233,8 +233,8 @@
         {% endif %}
       </div>
 
-      <div class="app-table-wrapper">
-        <table class="app-table" style="table-layout: fixed; width: 100%;">
+      <div class="app-table-wrapper" style="min-width: 0;">
+        <table class="app-table" style="table-layout: fixed; width: 100%; min-width: 0;">
           <thead>
             <tr>
               <th style="width: 30%;">部署名</th>

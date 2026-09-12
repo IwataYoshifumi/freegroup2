@@ -134,6 +134,7 @@ class DealCreateForm(DealAmountCleanMixin, forms.ModelForm):
             "probability",
             "deal_type",
             "lead_source",
+            "source_campaign",
             "memo",
         ]
         labels = {
@@ -146,6 +147,7 @@ class DealCreateForm(DealAmountCleanMixin, forms.ModelForm):
             "probability": "確度（%）",
             "deal_type": "商談種別",
             "lead_source": "流入経路",
+            "source_campaign": "流入元キャンペーン",
             "memo": "メモ",
         }
         widgets = {
@@ -157,8 +159,17 @@ class DealCreateForm(DealAmountCleanMixin, forms.ModelForm):
             "probability": forms.NumberInput(attrs={"class": "app-input", "min": 0, "max": 100, "placeholder": "0〜100"}),
             "deal_type": forms.Select(attrs={"class": "app-select app-input"}),
             "lead_source": forms.Select(attrs={"class": "app-select app-input"}),
+            "source_campaign": forms.Select(attrs={"class": "app-select app-input"}),
             "memo": forms.Textarea(attrs={"class": "app-textarea app-input", "rows": 4}),
         }
+
+    def clean(self):
+        cleaned_data = super().clean()
+        source_campaign = cleaned_data.get("source_campaign")
+        lead_source = cleaned_data.get("lead_source")
+        if source_campaign and not lead_source:
+            cleaned_data["lead_source"] = LeadSource.CAMPAIGN
+        return cleaned_data
 
 
 class DealUpdateForm(DealAmountCleanMixin, forms.ModelForm):

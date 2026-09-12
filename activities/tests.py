@@ -439,4 +439,48 @@ class ActivityViewTests(TestCase):
         self.assertContains(response, str(self.person))
         self.assertContains(response, f"person_id={self.person.id}&campaign_id={campaign.id}")
 
+    def test_activity_create_view_with_campaign_and_person_and_back_navigator(self):
+        from back_navigator.back_navigator import BackNavigator
+        from mailings.models import Campaign, EmailTemplate
+
+        self.client.login(username="act_owner", password="password")
+        template = EmailTemplate.objects.create(name="T", subject="S", body="B", created_by=self.user)
+        campaign = Campaign.objects.create(name="テストCP", template=template, created_by=self.user)
+
+        nav = BackNavigator(self.client.get("/").wsgi_request)
+        back_stack = nav._calc_encode_stack([{"url": f"/mailings/campaigns/{campaign.pk}/report/clicked/", "title": "クリック受信者"}])
+
+        url = f"{reverse('activities:activity_create')}?campaign={campaign.pk}&person={self.person.pk}&back_stack={back_stack}"
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+
+        # フォーム初期値およびコンテキストの検証
+        form = response.context["form"]
+        self.assertEqual(str(form.initial.get("campaign")), str(campaign.pk))
+        self.assertEqual(str(response.context.get("person_id")), str(self.person.pk))
+
+        # 戻るボタンの検証
+        content = response.content.decode("utf-8")
+        self.assertIn(f'href="/mailings/campaigns/{campaign.pk}/report/clicked/"', content)
+
+        # POST 実行時のリダイレクトおよびActivityPerson紐付け検証
+        post_data = {
+            "activity_type": ActivityType.PHONE,
+            "direction": Direction.OUTGOING,
+            "occurred_at": timezone.now().strftime("%Y-%m-%dT%H:%M"),
+            "user": str(self.user.id),
+            "campaign": str(campaign.pk),
+            "person_id": str(self.person.pk),
+            "memo": "クリック受信者へのフォロー架電",
+            "back_stack": back_stack,
+        }
+        post_resp = self.client.post(url, data=post_data)
+        self.assertEqual(post_resp.status_code, 302)
+        self.assertEqual(post_resp.url, f"/mailings/campaigns/{campaign.pk}/report/clicked/")
+
+        created_activity = Activity.objects.get(memo="クリック受信者へのフォロー架電")
+        self.assertEqual(created_activity.campaign, campaign)
+        self.assertTrue(ActivityPerson.objects.filter(activity=created_activity, person=self.person).exists())
+
+
 

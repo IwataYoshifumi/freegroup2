@@ -262,7 +262,7 @@ def _hydrate_person_rows(
     person_map = {
         p.pk: p
         for p in Person.objects.filter(pk__in=person_ids).select_related(
-            "primary_contact"
+            "primary_contact", "primary_contact__company"
         )
     }
     out: List[Dict[str, Any]] = []

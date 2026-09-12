@@ -35,7 +35,8 @@
             <tr>
               <td>
                 {% if row.person.primary_contact %}
-                  <a class="app-btn app-btn--outline-secondary app-btn--sm" href="{% url 'contacts:contact_detail' pk=row.person.primary_contact.pk %}">詳細</a>
+                  {% url 'contacts:contact_detail' pk=row.person.primary_contact.pk as contact_detail_url %}
+                  <a class="app-btn app-btn--outline-secondary app-btn--sm" href="{% append_back_url contact_detail_url back %}">詳細</a>
                 {% endif %}
               </td>
               <td>{{ row.person.primary_contact.organization|default:"—" }}</td>

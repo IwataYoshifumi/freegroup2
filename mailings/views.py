@@ -3377,6 +3377,8 @@ class CampaignReportView(
             _Campaign.objects.select_related("template", "mailing_list", "created_by"),
             pk=pk,
         )
+        back = BackNavigator(request)
+        back.push_current(title=f"配信レポート: {campaign.name}", keys=["page"])
         return render(
             request,
             "mailings/campaign_report.html",
@@ -3384,7 +3386,7 @@ class CampaignReportView(
                 "campaign": campaign,
                 "summary": get_campaign_summary(campaign),
                 "link_aggregates": get_link_aggregates(campaign),
-                "back": BackNavigator(request),
+                "back": back,
                 "active_app": "mailings",
             },
         )
@@ -3413,6 +3415,8 @@ class _CampaignReportFilteredListBaseView(
 
         campaign = get_object_or_404(_Campaign.objects.select_related("template"), pk=pk)
         rows = self.__class__.aggregator(campaign)
+        back = BackNavigator(request)
+        back.push_current(title=f"{self.page_title}: {campaign.name}", keys=["page"])
         return render(
             request,
             self.template_name,
@@ -3420,7 +3424,7 @@ class _CampaignReportFilteredListBaseView(
                 "campaign": campaign,
                 "rows": rows,
                 "page_title": self.page_title,
-                "back": BackNavigator(request),
+                "back": back,
                 "active_app": "mailings",
             },
         )
@@ -3452,6 +3456,8 @@ class CampaignReportClickedListView(_CampaignReportFilteredListBaseView):
         campaign = get_object_or_404(_Campaign.objects.select_related("template"), pk=pk)
         target_url = request.GET.get("url") or None
         rows = get_clicked_persons(campaign, url=target_url)
+        back = BackNavigator(request)
+        back.push_current(title=f"クリック受信者: {campaign.name}", keys=["page", "url"])
         return render(
             request,
             self.template_name,
@@ -3460,7 +3466,7 @@ class CampaignReportClickedListView(_CampaignReportFilteredListBaseView):
                 "rows": rows,
                 "page_title": self.page_title,
                 "target_url": target_url,
-                "back": BackNavigator(request),
+                "back": back,
                 "active_app": "mailings",
             },
         )

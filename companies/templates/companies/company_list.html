@@ -4,7 +4,6 @@
 {% block title %}会社一覧 — FreeGroup2{% endblock %}
 
 {% block content %}
-  {% url 'companies:company_create' as create_url %}
   <div class="app-page-header">
     <div>
       <h1>会社一覧</h1>
@@ -16,9 +15,6 @@
   </div>
 
   <div class="app-action-area" style="justify-content:flex-start; margin-bottom:16px; gap:8px;">
-    {% if perms.companies.add_company %}
-      <a href="{% append_back_url create_url back %}" class="app-btn app-btn--primary">会社新規作成</a>
-    {% endif %}
     {% if perms.companies.merge_company %}
       <a href="{% url 'companies:company_candidate_list' %}" class="app-btn app-btn--secondary">重複会社候補</a>
     {% endif %}
@@ -75,8 +71,12 @@
               <td>{{ company.address|truncatechars:30|default:"-" }}</td>
               <td>
                 {% if company.website %}
-                  <a href="{{ company.website }}" target="_blank" rel="noopener noreferrer">リンク</a>
-                {% else %}-{% endif %}
+                  <a href="{{ company.website }}" target="_blank" rel="noopener noreferrer" style="color: var(--color-primary, #0d6efd); text-decoration: underline; word-break: break-all;">
+                    {{ company.website }}
+                  </a>
+                {% else %}
+                  -
+                {% endif %}
               </td>
               <td>
                 <span class="app-status-badge">{{ company.get_status_display }}</span>
