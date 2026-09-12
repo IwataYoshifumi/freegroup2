@@ -24,7 +24,7 @@ class ActivityForm(forms.ModelForm):
             "activity_type": "活動種別",
             "direction": "受発信種別",
             "occurred_at": "活動日時",
-            "user": "対応担当者",
+            "user": "実施者",
             "place": "場所・会議URL",
             "memo": "活動内容メモ",
             "deal": "関連案件",
@@ -44,10 +44,12 @@ class ActivityForm(forms.ModelForm):
             "campaign": forms.Select(attrs={"class": "app-select app-input"}),
         }
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, current_user=None, **kwargs):
         super().__init__(*args, **kwargs)
         if not self.instance.pk and "occurred_at" not in self.initial:
             self.initial["occurred_at"] = timezone.localtime().strftime("%Y-%m-%dT%H:%M")
+        if not self.instance.pk and "user" not in self.initial and current_user:
+            self.initial["user"] = current_user
 
     def clean_occurred_at(self):
         occurred_at = self.cleaned_data.get("occurred_at")

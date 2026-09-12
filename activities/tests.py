@@ -353,6 +353,7 @@ class ActivityViewTests(TestCase):
         response = self.client.get(reverse("activities:activity_detail", kwargs={"pk": self.activity.pk}))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "初回訪問議事録")
+        self.assertContains(response, "実施者")
 
         # 同席者
         self.client.login(username="act_attendee", password="password")
@@ -363,6 +364,40 @@ class ActivityViewTests(TestCase):
         self.client.login(username="act_outsider", password="password")
         response = self.client.get(reverse("activities:activity_detail", kwargs={"pk": self.activity.pk}))
         self.assertEqual(response.status_code, 403)
+
+    def test_activity_create_view_initial_user_and_label(self):
+        """活動新規作成画面で実施者の初期値がログインユーザーとなり、ラベルが『実施者』であること。"""
+        self.client.login(username="act_owner", password="password")
+        url = reverse("activities:activity_create")
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+
+        # Form初期値およびラベルの検証
+        form = response.context["form"]
+        self.assertEqual(form.initial.get("user"), self.user)
+        self.assertEqual(form.fields["user"].label, "実施者")
+
+        # HTML表示の検証（ラベルおよびselectedオプション）
+        self.assertContains(response, "実施者")
+        self.assertContains(response, f'value="{self.user.id}" selected')
+
+    def test_activity_create_view_post_with_different_user(self):
+        """別のユーザーを選択してPOST送信した場合、選択したユーザーが実施者として保存されること。"""
+        self.client.login(username="act_owner", password="password")
+        url = reverse("activities:activity_create")
+        post_data = {
+            "activity_type": ActivityType.VISIT,
+            "direction": Direction.OUTGOING,
+            "occurred_at": timezone.localtime().strftime("%Y-%m-%dT%H:%M"),
+            "user": str(self.attendee.id),
+            "memo": "代理起票の訪問活動",
+        }
+        response = self.client.post(url, data=post_data)
+        self.assertEqual(response.status_code, 302)
+
+        created = Activity.objects.get(memo="代理起票の訪問活動")
+        self.assertEqual(created.user, self.attendee)
+        self.assertEqual(created.created_by, self.user)
 
     def test_activity_create_view_and_post(self):
         self.client.login(username="act_owner", password="password")

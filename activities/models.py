@@ -58,6 +58,7 @@ class Activity(models.Model):
         null=True,
         blank=True,
         related_name="activities_performed",
+        verbose_name="実施者",
     )
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,

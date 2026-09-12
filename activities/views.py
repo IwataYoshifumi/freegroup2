@@ -149,7 +149,8 @@ class ActivityCreateView(LoginRequiredMixin, PermissionRequiredMixin, CreateView
 
     def get_initial(self):
         initial = super().get_initial()
-        initial["user"] = self.request.user
+        if self.request.user.is_authenticated:
+            initial["user"] = self.request.user
         deal_id = self.request.GET.get("deal_id") or self.request.GET.get("deal")
         if deal_id:
             initial["deal"] = deal_id
@@ -157,6 +158,12 @@ class ActivityCreateView(LoginRequiredMixin, PermissionRequiredMixin, CreateView
         if campaign_id:
             initial["campaign"] = campaign_id
         return initial
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        if self.request.user.is_authenticated:
+            kwargs["current_user"] = self.request.user
+        return kwargs
 
     def get_success_url(self):
         back = BackNavigator(self.request)
