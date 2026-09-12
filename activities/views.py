@@ -1,6 +1,8 @@
 from django.contrib import messages
+from django.contrib.auth import get_user_model
 from django.contrib.auth.mixins import LoginRequiredMixin, PermissionRequiredMixin
 from django.core.exceptions import PermissionDenied
+from django.db import transaction
 from django.db.models import Q
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -23,7 +25,7 @@ from activities.permissions import (
 )
 from activities.services import archive_activity, get_unfollowed_campaign_persons
 from back_navigator.back_navigator import BackNavigator
-from deals.models import PersonRole
+from deals.models import PersonRole, UserRole
 from mailings.models import Campaign
 from persons.models import Person
 
@@ -119,11 +121,18 @@ class ActivityDetailView(LoginRequiredMixin, DetailView):
             raise PermissionDenied
         return obj
 
+    def get(self, request, *args, **kwargs):
+        self.object = self.get_object()
+        back = BackNavigator(request)
+        back.push_current(title=f"活動: {self.object}", keys=["page"])
+        context = self.get_context_data(object=self.object, back=back)
+        return self.render_to_response(context)
+
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         activity = self.object
         context["activity_persons"] = activity.activity_persons.select_related(
-            "person__primary_contact"
+            "person__primary_contact__company"
         ).all()
         context["activity_users"] = activity.activity_users.select_related("user").all()
         context["attachments"] = activity.attachments.select_related("uploaded_by").all()
@@ -134,7 +143,10 @@ class ActivityDetailView(LoginRequiredMixin, DetailView):
         from attachments.forms import AttachmentUploadForm
 
         context["attachment_form"] = AttachmentUploadForm()
-        context["back"] = BackNavigator(self.request)
+        if "back" not in context:
+            back = BackNavigator(self.request)
+            back.push_current(title=f"活動: {activity}", keys=["page"])
+            context["back"] = back
         context["active_menu"] = "activities:activity_list"
         return context
 
@@ -149,8 +161,6 @@ class ActivityCreateView(LoginRequiredMixin, PermissionRequiredMixin, CreateView
 
     def get_initial(self):
         initial = super().get_initial()
-        if self.request.user.is_authenticated:
-            initial["user"] = self.request.user
         deal_id = self.request.GET.get("deal_id") or self.request.GET.get("deal")
         if deal_id:
             initial["deal"] = deal_id
@@ -159,12 +169,6 @@ class ActivityCreateView(LoginRequiredMixin, PermissionRequiredMixin, CreateView
             initial["campaign"] = campaign_id
         return initial
 
-    def get_form_kwargs(self):
-        kwargs = super().get_form_kwargs()
-        if self.request.user.is_authenticated:
-            kwargs["current_user"] = self.request.user
-        return kwargs
-
     def get_success_url(self):
         back = BackNavigator(self.request)
         if back.back_exist:
@@ -172,11 +176,9 @@ class ActivityCreateView(LoginRequiredMixin, PermissionRequiredMixin, CreateView
         return reverse("activities:activity_detail", kwargs={"pk": self.object.pk})
 
     def form_valid(self, form):
-        activity = form.save(commit=False)
-        activity.created_by = self.request.user
-        if not activity.user_id:
-            activity.user = self.request.user
-        activity.save()
+        form.instance.user = self.request.user
+        form.instance.created_by = self.request.user
+        activity = form.save()
         self.object = activity
 
         person_id = (
@@ -318,12 +320,13 @@ class ActivityAddPersonView(LoginRequiredMixin, View):
             try:
                 rel.full_clean()
                 rel.save()
-                messages.success(request, f"参加者「{rel.person}」を追加しました。")
+                messages.success(request, f"関係者「{rel.person}」を追加しました。")
             except Exception as e:
-                messages.error(request, f"参加者の追加に失敗しました: {e}")
+                messages.error(request, f"関係者の追加に失敗しました: {e}")
         else:
             messages.error(request, "入力内容をご確認ください。")
-        return redirect("activities:activity_detail", pk=activity.pk)
+        next_url = request.POST.get("next") or reverse("activities:activity_detail", kwargs={"pk": activity.pk})
+        return redirect(next_url)
 
 
 class ActivityDeletePersonView(LoginRequiredMixin, View):
@@ -335,8 +338,9 @@ class ActivityDeletePersonView(LoginRequiredMixin, View):
             raise PermissionDenied
         rel = get_object_or_404(ActivityPerson, pk=person_rel_id, activity=activity)
         rel.delete()
-        messages.success(request, "参加者を解除しました。")
-        return redirect("activities:activity_detail", pk=activity.pk)
+        messages.success(request, "関係者を解除しました。")
+        next_url = request.POST.get("next") or reverse("activities:activity_detail", kwargs={"pk": activity.pk})
+        return redirect(next_url)
 
 
 class ActivityAddUserView(LoginRequiredMixin, View):
@@ -350,15 +354,19 @@ class ActivityAddUserView(LoginRequiredMixin, View):
         if form.is_valid():
             rel = form.save(commit=False)
             rel.activity = activity
-            try:
-                rel.full_clean()
-                rel.save()
-                messages.success(request, f"同席者「{rel.user}」を追加しました。")
-            except Exception as e:
-                messages.error(request, f"同席者の追加に失敗しました: {e}")
+            if activity.user_id and rel.user_id == activity.user_id:
+                messages.error(request, "実施者本人を同席者に追加することはできません。")
+            else:
+                try:
+                    rel.full_clean()
+                    rel.save()
+                    messages.success(request, f"同席者「{rel.user}」を追加しました。")
+                except Exception as e:
+                    messages.error(request, f"同席者の追加に失敗しました: {e}")
         else:
             messages.error(request, "入力内容をご確認ください。")
-        return redirect("activities:activity_detail", pk=activity.pk)
+        next_url = request.POST.get("next") or reverse("activities:activity_detail", kwargs={"pk": activity.pk})
+        return redirect(next_url)
 
 
 class ActivityDeleteUserView(LoginRequiredMixin, View):
@@ -371,4 +379,220 @@ class ActivityDeleteUserView(LoginRequiredMixin, View):
         rel = get_object_or_404(ActivityUser, pk=user_rel_id, activity=activity)
         rel.delete()
         messages.success(request, "同席者を解除しました。")
-        return redirect("activities:activity_detail", pk=activity.pk)
+        next_url = request.POST.get("next") or reverse("activities:activity_detail", kwargs={"pk": activity.pk})
+        return redirect(next_url)
+
+
+class ActivityPersonManageView(LoginRequiredMixin, View):
+    """活動社外関係者管理画面。"""
+
+    def get(self, request, pk):
+        activity = get_object_or_404(
+            Activity.objects.select_related("deal__company", "user"),
+            pk=pk,
+        )
+        if not can_edit_activity(request.user, activity):
+            raise PermissionDenied
+
+        activity_persons = activity.activity_persons.select_related(
+            "person__primary_contact__company",
+        ).all()
+
+        existing_person_ids = set(activity_persons.values_list("person_id", flat=True))
+
+        q = request.GET.get("q", "").strip()
+        person_qs = (
+            Person.objects.exclude(status=Person.Status.MERGED)
+            .exclude(id__in=existing_person_ids)
+            .select_related("primary_contact__company")
+        )
+
+        if q:
+            person_qs = person_qs.filter(
+                Q(primary_contact__first_name__icontains=q)
+                | Q(primary_contact__last_name__icontains=q)
+                | Q(primary_contact__company__organization__icontains=q)
+                | Q(primary_contact__organization__icontains=q)
+                | Q(primary_contact__title__icontains=q)
+                | Q(primary_contact__email__icontains=q)
+            ).distinct()[:50]
+        elif activity.deal_id:
+            deal_person_ids = list(
+                activity.deal.deal_persons.exclude(person_id__in=existing_person_ids).values_list("person_id", flat=True)
+            )
+            if (
+                activity.deal.primary_person_id
+                and activity.deal.primary_person_id not in existing_person_ids
+                and activity.deal.primary_person_id not in deal_person_ids
+            ):
+                deal_person_ids.insert(0, activity.deal.primary_person_id)
+
+            deal_persons_list = list(
+                person_qs.filter(id__in=deal_person_ids).order_by("-created_at")[:30]
+            )
+            deal_person_id_set = {p.id for p in deal_persons_list}
+            remaining_limit = 50 - len(deal_persons_list)
+            other_persons = list(
+                person_qs.exclude(id__in=deal_person_id_set).order_by("-created_at")[:remaining_limit]
+            )
+            person_qs = deal_persons_list + other_persons
+        else:
+            person_qs = list(person_qs.order_by("-created_at")[:50])
+
+        back = BackNavigator(request)
+        activity_detail_url = reverse("activities:activity_detail", kwargs={"pk": activity.pk})
+        back.push_current(title=f"関係者管理: {activity}", keys=["q"])
+
+        is_edit_mode = request.GET.get("edit") == "1"
+
+        return render(
+            request,
+            "activities/activity_persons_manage.html",
+            {
+                "activity": activity,
+                "activity_persons": activity_persons,
+                "candidate_persons": person_qs,
+                "current_q": q,
+                "is_edit_mode": is_edit_mode,
+                "person_roles": PersonRole.choices,
+                "back": back,
+                "activity_detail_url": activity_detail_url,
+                "active_menu": "activities:activity_list",
+            },
+        )
+
+    def post(self, request, pk):
+        """活動社外関係者の一括更新。"""
+        activity = get_object_or_404(Activity, pk=pk)
+        if not can_edit_activity(request.user, activity):
+            raise PermissionDenied
+
+        activity_persons = activity.activity_persons.all()
+        updated_count = 0
+        with transaction.atomic():
+            for ap in activity_persons:
+                exists_key = f"person_{ap.id}_exists"
+                if exists_key not in request.POST:
+                    continue
+                role_key = f"person_{ap.id}_role"
+                memo_key = f"person_{ap.id}_memo"
+
+                if role_key in request.POST:
+                    new_role = request.POST.get(role_key)
+                    if new_role in dict(PersonRole.choices):
+                        ap.role = new_role
+
+                if memo_key in request.POST:
+                    ap.memo = request.POST.get(memo_key, "").strip()
+
+                ap.full_clean()
+                ap.save()
+                updated_count += 1
+
+        messages.success(request, f"社外関係者情報を一括更新しました（{updated_count}件）。")
+        redirect_url = reverse("activities:activity_persons_manage", kwargs={"pk": activity.pk})
+        q = request.POST.get("q", "").strip()
+        if q:
+            redirect_url += f"?q={q}"
+        return redirect(redirect_url)
+
+
+class ActivityUserManageView(LoginRequiredMixin, View):
+    """活動社内同席者管理画面。"""
+
+    def get(self, request, pk):
+        activity = get_object_or_404(
+            Activity.objects.select_related("user"),
+            pk=pk,
+        )
+        if not can_edit_activity(request.user, activity):
+            raise PermissionDenied
+
+        activity_users = activity.activity_users.select_related(
+            "user", "user__person__primary_contact"
+        ).all()
+        existing_user_ids = set(activity_users.values_list("user_id", flat=True))
+        if activity.user_id:
+            existing_user_ids.add(activity.user_id)
+
+        User = get_user_model()
+        user_qs = (
+            User.objects.filter(is_active=True)
+            .exclude(id__in=existing_user_ids)
+            .select_related("person__primary_contact")
+            .order_by("username")
+        )
+
+        q = request.GET.get("q", "").strip()
+        if q:
+            user_qs = user_qs.filter(
+                Q(username__icontains=q)
+                | Q(first_name__icontains=q)
+                | Q(last_name__icontains=q)
+                | Q(email__icontains=q)
+                | Q(person__primary_contact__full_name__icontains=q)
+                | Q(person__primary_contact__last_name__icontains=q)
+                | Q(person__primary_contact__first_name__icontains=q)
+                | Q(person__contact__full_name__icontains=q)
+                | Q(person__contact__last_name__icontains=q)
+                | Q(person__contact__first_name__icontains=q)
+            ).distinct()[:50]
+        else:
+            user_qs = list(user_qs[:50])
+
+        back = BackNavigator(request)
+        activity_detail_url = reverse("activities:activity_detail", kwargs={"pk": activity.pk})
+        back.push_current(title=f"同席者管理: {activity}", keys=["q"])
+
+        is_edit_mode = request.GET.get("edit") == "1"
+
+        return render(
+            request,
+            "activities/activity_users_manage.html",
+            {
+                "activity": activity,
+                "activity_users": activity_users,
+                "candidate_users": user_qs,
+                "current_q": q,
+                "is_edit_mode": is_edit_mode,
+                "user_roles": UserRole.choices,
+                "back": back,
+                "activity_detail_url": activity_detail_url,
+                "active_menu": "activities:activity_list",
+            },
+        )
+
+    def post(self, request, pk):
+        """活動社内同席者の一括更新。"""
+        activity = get_object_or_404(Activity, pk=pk)
+        if not can_edit_activity(request.user, activity):
+            raise PermissionDenied
+
+        activity_users = activity.activity_users.all()
+        updated_count = 0
+        with transaction.atomic():
+            for au in activity_users:
+                exists_key = f"user_{au.id}_exists"
+                if exists_key not in request.POST:
+                    continue
+                role_key = f"user_{au.id}_role"
+                memo_key = f"user_{au.id}_memo"
+
+                if role_key in request.POST:
+                    new_role = request.POST.get(role_key)
+                    if new_role in dict(UserRole.choices):
+                        au.role = new_role
+
+                if memo_key in request.POST:
+                    au.memo = request.POST.get(memo_key, "").strip()
+
+                au.full_clean()
+                au.save()
+                updated_count += 1
+
+        messages.success(request, f"社内同席者情報を一括更新しました（{updated_count}件）。")
+        redirect_url = reverse("activities:activity_users_manage", kwargs={"pk": activity.pk})
+        q = request.POST.get("q", "").strip()
+        if q:
+            redirect_url += f"?q={q}"
+        return redirect(redirect_url)

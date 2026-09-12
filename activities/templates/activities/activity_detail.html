@@ -4,37 +4,49 @@
 {% block title %}活動詳細 — FreeGroup2{% endblock %}
 
 {% block content %}
-  <div class="app-page-header">
-    <div>
-      <h1>活動詳細</h1>
-      <div style="font-size:13px; color:var(--app-muted); margin-top:4px;">
-        種別: <span class="app-status-badge">{{ activity.get_activity_type_display }}</span>
+<div class="activity-detail-container" style="max-width: 1040px; margin-left: 0; margin-right: auto; width: 100%;">
+  {% url 'activities:activity_update' pk=activity.id as edit_url %}
+  {% url 'activities:activity_archive' pk=activity.id as archive_url %}
+  <div style="margin-bottom: 20px;">
+    <div class="app-page-header" style="display: flex; justify-content: space-between; align-items: center;">
+      <!-- 左側: タイトル・バッジ・アクションアイコン -->
+      <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+        <h1 style="margin: 0; font-size: 20px; font-weight: 700; color: var(--app-text, #0f172a);">活動詳細</h1>
+        <span class="app-status-badge">{{ activity.get_activity_type_display }}</span>
         {% if activity.direction %}
-          <span class="app-status-badge" style="margin-left:4px;">{{ activity.get_direction_display }}</span>
+          <span class="app-status-badge">{{ activity.get_direction_display }}</span>
         {% endif %}
         {% if activity.is_archived %}
-          <span class="app-status-badge app-status-badge--warning" style="margin-left:4px;">アーカイブ済み</span>
+          <span class="app-status-badge app-status-badge--warning">アーカイブ済み</span>
+        {% endif %}
+
+        <!-- アクションアイコン群（HIG準拠: app-icon-btn） -->
+        <div style="display: flex; align-items: center; gap: 6px; margin-left: 4px;">
+          {% if can_edit %}
+            <a href="{% append_back_url edit_url back %}" class="app-icon-btn" title="編集" aria-label="編集">
+              <i class="bi bi-pencil-fill"></i>
+            </a>
+          {% endif %}
+          {% if can_archive %}
+            <a href="{% append_back_url archive_url back %}" class="app-icon-btn" title="アーカイブ" aria-label="アーカイブ">
+              <i class="bi bi-archive-fill"></i>
+            </a>
+          {% endif %}
+        </div>
+      </div>
+
+      <!-- 右側: 戻るボタン（BackNavigator） -->
+      <div>
+        {% if back.has_back %}
+          {% back_link back %}
+        {% else %}
+          <a href="{% url 'activities:activity_list' %}" class="app-btn app-btn--secondary app-btn--sm">戻る</a>
         {% endif %}
       </div>
     </div>
-    <div class="app-action-area">
-      {% back_all_link back %}
-      {% back_link back %}
-    </div>
   </div>
 
-  <div class="app-action-area" style="justify-content:flex-start; margin-bottom:20px; gap:8px;">
-    {% if can_edit %}
-      {% url 'activities:activity_update' pk=activity.id as edit_url %}
-      <a href="{% append_back_url edit_url back %}" class="app-btn app-btn--success">編集</a>
-    {% endif %}
-    {% if can_archive %}
-      {% url 'activities:activity_archive' pk=activity.id as archive_url %}
-      <a href="{% append_back_url archive_url back %}" class="app-btn app-btn--warning">アーカイブ</a>
-    {% endif %}
-  </div>
-
-  <div style="display:grid; grid-template-columns:2fr 1fr; gap:20px; margin-bottom:24px;">
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 24px; width: 100%; box-sizing: border-box;">
     <section class="app-card">
       <h2 style="font-size:16px; margin-bottom:16px;">活動内容</h2>
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
@@ -82,74 +94,113 @@
     </section>
   </div>
 
-  {# 社外参加者 & 社内同席者 #}
-  <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px; margin-bottom:24px;">
-    <section class="app-card">
-      <h2 style="font-size:16px; margin-bottom:16px;">社外参加者（パーソン）</h2>
-      <ul style="list-style:none; padding:0; margin:0 0 16px 0;">
-        {% for ap in activity_persons %}
-          <li style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid var(--app-border, #eee);">
-            <div>
-              <strong>{{ ap.person }}</strong>
-              <span class="app-status-badge" style="margin-left:6px;">{{ ap.get_role_display }}</span>
-              {% if ap.memo %}<span class="app-muted" style="font-size:12px; margin-left:6px;">{{ ap.memo }}</span>{% endif %}
-            </div>
-            {% if can_edit %}
-              <form method="post" action="{% url 'activities:activity_delete_person' pk=activity.id person_rel_id=ap.id %}" style="margin:0;">
-                {% csrf_token %}
-                <button type="submit" class="app-btn app-btn--ghost app-btn--sm" style="color:var(--app-color-danger, #ef4444);">削除</button>
-              </form>
-            {% endif %}
-          </li>
-        {% empty %}
-          <li class="app-muted" style="padding:8px 0;">参加者は登録されていません。</li>
-        {% endfor %}
-      </ul>
-      {% if can_edit %}
-        <form method="post" action="{% url 'activities:activity_add_person' pk=activity.id %}" style="display:flex; flex-direction:column; gap:8px;">
-          {% csrf_token %}
-          <div style="display:flex; gap:8px;">
-            <div style="flex:2;">{{ activity_person_form.person }}</div>
-            <div style="flex:1;">{{ activity_person_form.role }}</div>
-          </div>
-          <div>{{ activity_person_form.memo }}</div>
-          <button type="submit" class="app-btn app-btn--secondary app-btn--sm" style="align-self:flex-start;">参加者を追加</button>
-        </form>
-      {% endif %}
+  {# 社外関係者 ＋ 社内同席者 2列グリッド #}
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; width: 100%; box-sizing: border-box; margin-bottom: 24px;">
+    {# 左：相手方関係者（社外）カード #}
+    <section class="app-card" style="margin: 0; width: 100%; min-width: 0; box-sizing: border-box;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <h2 style="font-size:16px; margin:0;">相手方関係者（社外）</h2>
+          <span class="app-status-badge">{{ activity_persons.count }}名</span>
+        </div>
+        {% if can_edit %}
+          {% url 'activities:activity_persons_manage' pk=activity.id as persons_manage_url %}
+          <a href="{% append_back_url persons_manage_url back %}" class="app-btn app-btn--secondary app-btn--sm">関係者を管理・追加</a>
+        {% endif %}
+      </div>
+
+      <div class="app-table-wrapper" style="min-width: 0;">
+        <table class="app-table" style="table-layout: fixed; width: 100%; min-width: 0;">
+          <thead>
+            <tr>
+              <th style="width: 25%;">会社名</th>
+              <th style="width: 20%;">部署</th>
+              <th style="width: 25%;">名前</th>
+              <th style="width: 15%;">役割</th>
+              <th style="width: 15%;">メモ</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for ap in activity_persons %}
+              <tr>
+                <td style="word-break: break-word; overflow: hidden; text-overflow: ellipsis;">
+                  {% if ap.person.primary_contact and ap.person.primary_contact.company %}
+                    {{ ap.person.primary_contact.company.organization }}
+                  {% elif ap.person.primary_contact and ap.person.primary_contact.organization %}
+                    {{ ap.person.primary_contact.organization }}
+                  {% else %}-{% endif %}
+                </td>
+                <td style="word-break: break-word; overflow: hidden; text-overflow: ellipsis;">
+                  {{ ap.person.primary_contact.department|default:"-" }}
+                </td>
+                <td style="word-break: break-word; overflow: hidden; text-overflow: ellipsis;">
+                  <a href="{% url 'persons:person_detail' pk=ap.person.id %}" style="font-weight:600;">{{ ap.person }}</a>
+                </td>
+                <td style="word-break: break-word; overflow: hidden; text-overflow: ellipsis;">
+                  <span class="app-status-badge">{{ ap.get_role_display }}</span>
+                </td>
+                <td style="word-break: break-word; overflow: hidden; text-overflow: ellipsis;">
+                  {{ ap.memo|default:"-" }}
+                </td>
+              </tr>
+            {% empty %}
+              <tr>
+                <td colspan="5" class="app-muted" style="text-align:center; padding:12px;">関係者は登録されていません。</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
     </section>
 
-    <section class="app-card">
-      <h2 style="font-size:16px; margin-bottom:16px;">社内同席者（ユーザー）</h2>
-      <ul style="list-style:none; padding:0; margin:0 0 16px 0;">
-        {% for au in activity_users %}
-          <li style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid var(--app-border, #eee);">
-            <div>
-              <strong>{{ au.user }}</strong>
-              <span class="app-status-badge" style="margin-left:6px;">{{ au.get_role_display }}</span>
-              {% if au.memo %}<span class="app-muted" style="font-size:12px; margin-left:6px;">{{ au.memo }}</span>{% endif %}
-            </div>
-            {% if can_edit %}
-              <form method="post" action="{% url 'activities:activity_delete_user' pk=activity.id user_rel_id=au.id %}" style="margin:0;">
-                {% csrf_token %}
-                <button type="submit" class="app-btn app-btn--ghost app-btn--sm" style="color:var(--app-color-danger, #ef4444);">削除</button>
-              </form>
-            {% endif %}
-          </li>
-        {% empty %}
-          <li class="app-muted" style="padding:8px 0;">同席者は登録されていません。</li>
-        {% endfor %}
-      </ul>
-      {% if can_edit %}
-        <form method="post" action="{% url 'activities:activity_add_user' pk=activity.id %}" style="display:flex; flex-direction:column; gap:8px;">
-          {% csrf_token %}
-          <div style="display:flex; gap:8px;">
-            <div style="flex:2;">{{ activity_user_form.user }}</div>
-            <div style="flex:1;">{{ activity_user_form.role }}</div>
-          </div>
-          <div>{{ activity_user_form.memo }}</div>
-          <button type="submit" class="app-btn app-btn--secondary app-btn--sm" style="align-self:flex-start;">同席者を追加</button>
-        </form>
-      {% endif %}
+    {# 右：社内同席者カード #}
+    <section class="app-card" style="margin: 0; width: 100%; min-width: 0; box-sizing: border-box;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <h2 style="font-size:16px; margin:0;">社内同席者</h2>
+          <span class="app-status-badge">{{ activity_users.count }}名</span>
+        </div>
+        {% if can_edit %}
+          {% url 'activities:activity_users_manage' pk=activity.id as users_manage_url %}
+          <a href="{% append_back_url users_manage_url back %}" class="app-btn app-btn--secondary app-btn--sm">同席者を管理・追加</a>
+        {% endif %}
+      </div>
+
+      <div class="app-table-wrapper" style="min-width: 0;">
+        <table class="app-table" style="table-layout: fixed; width: 100%; min-width: 0;">
+          <thead>
+            <tr>
+              <th style="width: 30%;">部署名</th>
+              <th style="width: 35%;">名前</th>
+              <th style="width: 20%;">役割</th>
+              <th style="width: 15%;">メモ</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for au in activity_users %}
+              <tr>
+                <td style="word-break: break-word; overflow: hidden; text-overflow: ellipsis;">
+                  {{ au.user.department|default:"-" }}
+                </td>
+                <td style="word-break: break-word; overflow: hidden; text-overflow: ellipsis;">
+                  <strong>{{ au.user.display_name }}</strong>
+                  <span style="color:var(--app-muted); font-size:12px;">@{{ au.user.username }}</span>
+                </td>
+                <td style="word-break: break-word; overflow: hidden; text-overflow: ellipsis;">
+                  <span class="app-status-badge">{{ au.get_role_display }}</span>
+                </td>
+                <td style="word-break: break-word; overflow: hidden; text-overflow: ellipsis;">
+                  {{ au.memo|default:"-" }}
+                </td>
+              </tr>
+            {% empty %}
+              <tr>
+                <td colspan="4" class="app-muted" style="text-align:center; padding:12px;">同席者は登録されていません。</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
     </section>
   </div>
 
@@ -222,4 +273,5 @@
       </form>
     {% endif %}
   </section>
+</div>
 {% endblock %}

@@ -1,0 +1,243 @@
+{% extends "deals/app_base.html" %}
+{% load back_tags %}
+
+{% block title %}社外関係者管理 — {{ activity }} — FreeGroup2{% endblock %}
+
+{% block content %}
+<div style="max-width: 1040px; margin-left: 0; margin-right: auto;">
+  <div class="app-page-header">
+    <div>
+      <div style="font-size:13px; color:var(--app-muted); margin-bottom:4px;">
+        活動: <strong>{{ activity }}</strong>
+        {% if activity.deal %}
+          / 案件: <a href="{% url 'deals:deal_detail' pk=activity.deal.id %}">{{ activity.deal.name }}</a>
+        {% endif %}
+        {% if activity.campaign %}
+          / キャンペーン: <span>{{ activity.campaign }}</span>
+        {% endif %}
+      </div>
+      <h1>社外関係者（パーソン）管理</h1>
+    </div>
+    <div class="app-action-area">
+      {% back_all_link back %}
+      {% if back.back_exist %}
+        {% back_link back %}
+      {% else %}
+        <a href="{{ activity_detail_url }}" class="app-btn app-btn--secondary">戻る</a>
+      {% endif %}
+    </div>
+  </div>
+
+  {# 1. 登録済み関係者セクション（一括編集対応） #}
+  <section class="app-card" style="margin-bottom:24px;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <h2 style="font-size:16px; margin:0;">登録済みの関係者</h2>
+        <span class="app-status-badge">{{ activity_persons|length }}名</span>
+      </div>
+      {% if not is_edit_mode and activity_persons %}
+        <div style="display:flex; align-items:center; gap:8px;">
+          <a href="?{% if current_q %}q={{ current_q|urlencode }}&{% endif %}edit=1" class="app-btn app-btn--secondary app-btn--sm">一括編集</a>
+        </div>
+      {% endif %}
+    </div>
+
+    {% if is_edit_mode %}
+      <form method="post" action="{% url 'activities:activity_persons_manage' pk=activity.id %}" id="batch-update-persons-form">
+        {% csrf_token %}
+        <input type="hidden" name="q" value="{{ current_q }}">
+        <div class="app-table-wrapper">
+          <table class="app-table">
+            <thead>
+              <tr>
+                <th style="min-width:140px;">氏名</th>
+                <th style="min-width:140px;">会社名</th>
+                <th style="min-width:100px;">役職</th>
+                <th style="min-width:160px;">役割</th>
+                <th style="min-width:200px;">関係メモ</th>
+                <th style="width:50px; text-align:center;"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for ap in activity_persons %}
+                <tr>
+                  <td>
+                    <input type="hidden" name="person_{{ ap.id }}_exists" value="1">
+                    <strong>
+                      {% if ap.person.primary_contact and ap.person.primary_contact.full_name %}
+                        {{ ap.person.primary_contact.full_name }}
+                      {% else %}
+                        {{ ap.person }}
+                      {% endif %}
+                    </strong>
+                  </td>
+                  <td>
+                    {% if ap.person.primary_contact and ap.person.primary_contact.company %}
+                      {{ ap.person.primary_contact.company.organization }}
+                    {% elif ap.person.primary_contact and ap.person.primary_contact.organization %}
+                      {{ ap.person.primary_contact.organization }}
+                    {% else %}-{% endif %}
+                  </td>
+                  <td>{{ ap.person.primary_contact.title|default:"-" }}</td>
+                  <td>
+                    <select name="person_{{ ap.id }}_role" class="app-select app-input" style="padding:4px 8px; font-size:13px;">
+                      {% for val, label in person_roles %}
+                        <option value="{{ val }}" {% if ap.role == val %}selected{% endif %}>{{ label }}</option>
+                      {% endfor %}
+                    </select>
+                  </td>
+                  <td>
+                    <input type="text" name="person_{{ ap.id }}_memo" value="{{ ap.memo }}" class="app-input" style="padding:4px 8px; font-size:13px;" placeholder="関係メモ">
+                  </td>
+                  <td style="text-align:center;">
+                    <span class="app-muted" style="font-size:12px;">-</span>
+                  </td>
+                </tr>
+              {% empty %}
+                <tr>
+                  <td colspan="6" class="app-muted" style="text-align:center; padding:16px;">登録されている関係者はいません。</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+          <a href="{% url 'activities:activity_persons_manage' pk=activity.id %}{% if current_q %}?q={{ current_q|urlencode }}{% endif %}" class="app-btn app-btn--ghost app-btn--sm">キャンセル</a>
+          <button type="submit" class="app-btn app-btn--primary app-btn--sm">適用</button>
+        </div>
+      </form>
+    {% else %}
+      <div class="app-table-wrapper">
+        <table class="app-table">
+          <thead>
+            <tr>
+              <th>氏名</th>
+              <th>会社名</th>
+              <th>役職</th>
+              <th>役割</th>
+              <th>関係メモ</th>
+              <th style="width:50px; text-align:center;">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for ap in activity_persons %}
+              <tr>
+                <td>
+                  <strong>
+                    {% if ap.person.primary_contact and ap.person.primary_contact.full_name %}
+                      <a href="{% url 'persons:person_detail' pk=ap.person.id %}">{{ ap.person.primary_contact.full_name }}</a>
+                    {% else %}
+                      <a href="{% url 'persons:person_detail' pk=ap.person.id %}">{{ ap.person }}</a>
+                    {% endif %}
+                  </strong>
+                </td>
+                <td>
+                  {% if ap.person.primary_contact and ap.person.primary_contact.company %}
+                    {{ ap.person.primary_contact.company.organization }}
+                  {% elif ap.person.primary_contact and ap.person.primary_contact.organization %}
+                    {{ ap.person.primary_contact.organization }}
+                  {% else %}-{% endif %}
+                </td>
+                <td>{{ ap.person.primary_contact.title|default:"-" }}</td>
+                <td><span class="app-status-badge">{{ ap.get_role_display }}</span></td>
+                <td>{{ ap.memo|default:"-" }}</td>
+                <td style="text-align:center;">
+                  <form method="post" action="{% url 'activities:activity_delete_person' pk=activity.id person_rel_id=ap.id %}" style="margin:0; display:inline;">
+                    {% csrf_token %}
+                    <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                    <button type="submit" class="app-btn app-btn--ghost app-btn--sm" style="color:var(--app-color-danger, #ef4444); padding:4px 6px; display:inline-flex; align-items:center; justify-content:center;" title="削除" aria-label="削除" onclick="return confirm('この関係者を解除しますか？');">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <polyline points="3 6 5 6 21 6"></polyline>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                        <line x1="10" y1="11" x2="10" y2="17"></line>
+                        <line x1="14" y1="11" x2="14" y2="17"></line>
+                      </svg>
+                    </button>
+                  </form>
+                </td>
+              </tr>
+            {% empty %}
+              <tr>
+                <td colspan="6" class="app-muted" style="text-align:center; padding:16px;">登録されている関係者はいません。</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+  </section>
+
+  {# 2. 関係者検索・追加セクション（追加ボタンを左端に配置） #}
+  <section class="app-card">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+      <h2 style="font-size:16px; margin:0;">関係者（パーソン）を検索・追加</h2>
+    </div>
+    <form method="get" style="display:flex; gap:8px; margin-bottom:16px;">
+      <input type="text"
+             name="q"
+             value="{{ current_q }}"
+             class="app-input"
+             placeholder="氏名・会社名・役職・メールで検索..."
+             style="max-width:400px;">
+      <button type="submit" class="app-btn app-btn--secondary">検索</button>
+      {% if current_q %}
+        <a href="{% url 'activities:activity_persons_manage' pk=activity.id %}" class="app-btn app-btn--ghost">クリア</a>
+      {% endif %}
+    </form>
+
+    <div class="app-table-wrapper" style="max-height:450px; overflow-y:auto;">
+      <table class="app-table">
+        <thead>
+          <tr>
+            <th style="width:80px; text-align:center;">操作</th>
+            <th>氏名</th>
+            <th>会社名</th>
+            <th>役職</th>
+            <th>メール</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for p in candidate_persons %}
+            <tr>
+              <td style="text-align:center;">
+                <form method="post" action="{% url 'activities:activity_add_person' pk=activity.id %}" style="margin:0; display:inline;">
+                  {% csrf_token %}
+                  <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                  <input type="hidden" name="person" value="{{ p.id }}">
+                  <input type="hidden" name="role" value="attendee">
+                  <input type="hidden" name="memo" value="">
+                  <button type="submit" class="app-btn app-btn--primary app-btn--sm" style="white-space:nowrap;">＋ 追加</button>
+                </form>
+              </td>
+              <td>
+                <strong>
+                  {% if p.primary_contact and p.primary_contact.full_name %}
+                    {{ p.primary_contact.full_name }}
+                  {% else %}
+                    {{ p }}
+                  {% endif %}
+                </strong>
+              </td>
+              <td>
+                {% if p.primary_contact and p.primary_contact.company %}
+                  {{ p.primary_contact.company.organization }}
+                {% elif p.primary_contact and p.primary_contact.organization %}
+                  {{ p.primary_contact.organization }}
+                {% else %}-{% endif %}
+              </td>
+              <td>{{ p.primary_contact.title|default:"-" }}</td>
+              <td>{{ p.primary_contact.email|default:"-" }}</td>
+            </tr>
+          {% empty %}
+            <tr>
+              <td colspan="5" class="app-muted" style="text-align:center; padding:16px;">
+                {% if current_q %}該当するパーソンが見つかりませんでした。{% else %}追加可能な候補がいません。{% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
+{% endblock %}

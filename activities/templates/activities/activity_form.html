@@ -38,11 +38,18 @@
           {% if form.occurred_at.errors %}<div class="app-form__error">{{ form.occurred_at.errors }}</div>{% endif %}
         </div>
         <div class="app-form__group">
-          <label class="app-form__label" for="{{ form.user.id_for_label }}">
-            {{ form.user.label }}{% if form.user.field.required %} <span style="color:var(--app-color-danger, #ef4444);">*</span>{% endif %}
-          </label>
-          {{ form.user }}
-          {% if form.user.errors %}<div class="app-form__error">{{ form.user.errors }}</div>{% endif %}
+          <label class="app-form__label">実施者</label>
+          <div style="display:flex; align-items:center; height:38px;">
+            {% if is_create %}
+              <span class="app-status-badge" style="font-size:13px; font-weight:600; padding:6px 12px; background:var(--app-bg-subtle, #f1f5f9); color:var(--app-text, #334155); border:1px solid var(--app-border, #e2e8f0);">
+                {{ request.user.display_name|default:request.user.username }}
+              </span>
+            {% else %}
+              <span class="app-status-badge" style="font-size:13px; font-weight:600; padding:6px 12px; background:var(--app-bg-subtle, #f1f5f9); color:var(--app-text, #334155); border:1px solid var(--app-border, #e2e8f0);">
+                {{ form.instance.user.display_name|default:form.instance.user.username|default:"-" }}
+              </span>
+            {% endif %}
+          </div>
         </div>
 
         {# 活動種別 & 受発信種別 #}

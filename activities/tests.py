@@ -365,39 +365,184 @@ class ActivityViewTests(TestCase):
         response = self.client.get(reverse("activities:activity_detail", kwargs={"pk": self.activity.pk}))
         self.assertEqual(response.status_code, 403)
 
-    def test_activity_create_view_initial_user_and_label(self):
-        """活動新規作成画面で実施者の初期値がログインユーザーとなり、ラベルが『実施者』であること。"""
+    def test_activity_detail_view_back_navigator_and_icon_buttons(self):
+        """GET /activities/<pk>/ アクセス時に BackNavigator に自身が push され、
+        編集・アーカイブがテキストボタンではなく app-icon-btn アイコンボタンとして表示されること。"""
+        self.client.login(username="act_owner", password="password")
+        detail_url = reverse("activities:activity_detail", kwargs={"pk": self.activity.pk})
+        response = self.client.get(detail_url)
+        self.assertEqual(response.status_code, 200)
+
+        # BackNavigator のスタックに活動詳細の URL が push されていること
+        back = response.context["back"]
+        self.assertTrue(len(back.back_stack) >= 1)
+        self.assertEqual(back.back_stack[-1]["url"], detail_url)
+
+        # テキストボタン「編集」「アーカイブ」が存在しないこと
+        content = response.content.decode("utf-8")
+        self.assertNotIn('class="app-btn app-btn--success">編集<', content)
+        self.assertNotIn('class="app-btn app-btn--warning">アーカイブ<', content)
+
+        # アイコンボタン（app-icon-btn, bi-pencil-fill, bi-archive-fill）が存在すること
+        self.assertIn('class="app-icon-btn" title="編集" aria-label="編集"', content)
+        self.assertIn('bi bi-pencil-fill', content)
+        self.assertIn('class="app-icon-btn" title="アーカイブ" aria-label="アーカイブ"', content)
+        self.assertIn('bi bi-archive-fill', content)
+
+        # アイコンリンクに back_stack が付与されていること
+        edit_url = reverse("activities:activity_update", kwargs={"pk": self.activity.pk})
+        self.assertIn(f'{edit_url}?back_stack=', content)
+        archive_url = reverse("activities:activity_archive", kwargs={"pk": self.activity.pk})
+        self.assertIn(f'{archive_url}?back_stack=', content)
+
+        # コンテナ幅（1040px）およびグリッド（1fr 1fr）のレイアウト検証
+        self.assertIn('class="activity-detail-container"', content)
+        self.assertIn('max-width: 1040px;', content)
+        self.assertIn('grid-template-columns: 1fr 1fr;', content)
+
+    def test_activity_create_view_auto_user_and_badge(self):
+        """活動新規作成画面で実施者が固定バッジ表示され、POST時にuserとcreated_byが自動保存されること。"""
         self.client.login(username="act_owner", password="password")
         url = reverse("activities:activity_create")
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
 
-        # Form初期値およびラベルの検証
-        form = response.context["form"]
-        self.assertEqual(form.initial.get("user"), self.user)
-        self.assertEqual(form.fields["user"].label, "実施者")
-
-        # HTML表示の検証（ラベルおよびselectedオプション）
+        # HTML表示の検証（ラベルおよび固定バッジ表示、userプルダウンが存在しないこと）
         self.assertContains(response, "実施者")
-        self.assertContains(response, f'value="{self.user.id}" selected')
+        self.assertContains(response, self.user.display_name)
+        self.assertNotContains(response, '<select name="user"')
 
-    def test_activity_create_view_post_with_different_user(self):
-        """別のユーザーを選択してPOST送信した場合、選択したユーザーが実施者として保存されること。"""
-        self.client.login(username="act_owner", password="password")
-        url = reverse("activities:activity_create")
+        # POST時に user / created_by がログインユーザーで自動設定されること（代理指定があってもログインユーザーで固定）
         post_data = {
             "activity_type": ActivityType.VISIT,
             "direction": Direction.OUTGOING,
             "occurred_at": timezone.localtime().strftime("%Y-%m-%dT%H:%M"),
             "user": str(self.attendee.id),
-            "memo": "代理起票の訪問活動",
+            "memo": "自動固定の訪問活動",
         }
-        response = self.client.post(url, data=post_data)
-        self.assertEqual(response.status_code, 302)
+        post_resp = self.client.post(url, data=post_data)
+        self.assertEqual(post_resp.status_code, 302)
 
-        created = Activity.objects.get(memo="代理起票の訪問活動")
-        self.assertEqual(created.user, self.attendee)
+        created = Activity.objects.get(memo="自動固定の訪問活動")
+        self.assertEqual(created.user, self.user)
         self.assertEqual(created.created_by, self.user)
+
+    def test_activity_persons_manage_crud_and_permissions(self):
+        """activity_persons_manage でパーソンの検索、追加（デフォルト attendee）、更新、解除、および権限チェック。"""
+        p_new = Person.objects.create()
+        contact = Contact.objects.create(person=p_new, last_name="鈴木", first_name="一郎", full_name="鈴木 一郎")
+        p_new.primary_contact = contact
+        p_new.save(update_fields=["primary_contact"])
+
+        # 権限なしユーザーは 403
+        self.client.login(username="act_outsider", password="password")
+        manage_url = reverse("activities:activity_persons_manage", kwargs={"pk": self.activity.pk})
+        self.assertEqual(self.client.get(manage_url).status_code, 403)
+        self.assertEqual(self.client.post(manage_url, data={}).status_code, 403)
+
+        # 権限ありユーザーでアクセス
+        self.client.login(username="act_owner", password="password")
+        resp = self.client.get(manage_url)
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "社外関係者（パーソン）管理")
+        self.assertContains(resp, "登録済みの関係者")
+
+        # 検索機能
+        resp_q = self.client.get(manage_url + "?q=鈴木")
+        self.assertEqual(resp_q.status_code, 200)
+        self.assertContains(resp_q, "鈴木 一郎")
+
+        # 追加（デフォルト attendee）
+        add_url = reverse("activities:activity_add_person", kwargs={"pk": self.activity.pk})
+        add_resp = self.client.post(add_url, data={
+            "person": str(p_new.id),
+            "role": "attendee",
+            "memo": "",
+            "next": manage_url,
+        })
+        self.assertEqual(add_resp.status_code, 302)
+        rel = ActivityPerson.objects.get(activity=self.activity, person=p_new)
+        self.assertEqual(rel.role, PersonRole.ATTENDEE)
+
+        # 一括更新（役割・メモ変更）
+        update_resp = self.client.post(manage_url, data={
+            f"person_{rel.id}_exists": "1",
+            f"person_{rel.id}_role": PersonRole.DECISION_MAKER,
+            f"person_{rel.id}_memo": "決裁者として参加",
+        })
+        self.assertEqual(update_resp.status_code, 302)
+        rel.refresh_from_db()
+        self.assertEqual(rel.role, PersonRole.DECISION_MAKER)
+        self.assertEqual(rel.memo, "決裁者として参加")
+
+        # 解除（削除）
+        del_url = reverse("activities:activity_delete_person", kwargs={"pk": self.activity.pk, "person_rel_id": rel.id})
+        del_resp = self.client.post(del_url, data={"next": manage_url})
+        self.assertEqual(del_resp.status_code, 302)
+        self.assertFalse(ActivityPerson.objects.filter(id=rel.id).exists())
+
+    def test_activity_users_manage_crud_and_permissions(self):
+        """activity_users_manage で社内ユーザーの検索、追加（デフォルト support）、更新、解除、および権限チェック。"""
+        colleague = User.objects.create_user(username="act_colleague", password="password")
+
+        # 権限なしユーザーは 403
+        self.client.login(username="act_outsider", password="password")
+        manage_url = reverse("activities:activity_users_manage", kwargs={"pk": self.activity.pk})
+        self.assertEqual(self.client.get(manage_url).status_code, 403)
+        self.assertEqual(self.client.post(manage_url, data={}).status_code, 403)
+
+        # 権限ありユーザーでアクセス
+        self.client.login(username="act_owner", password="password")
+        resp = self.client.get(manage_url)
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "社内同席者（ユーザー）管理")
+        self.assertContains(resp, "登録済みの同席者")
+
+        # 実施者本人（act_owner）は候補から除外されていること
+        candidate_ids = [u.id for u in resp.context["candidate_users"]]
+        self.assertNotIn(self.user.id, candidate_ids)
+        self.assertIn(colleague.id, candidate_ids)
+
+        # 追加（デフォルト support）
+        add_url = reverse("activities:activity_add_user", kwargs={"pk": self.activity.pk})
+        add_resp = self.client.post(add_url, data={
+            "user": str(colleague.id),
+            "role": "support",
+            "memo": "",
+            "next": manage_url,
+        })
+        self.assertEqual(add_resp.status_code, 302)
+        rel = ActivityUser.objects.get(activity=self.activity, user=colleague)
+        self.assertEqual(rel.role, UserRole.SUPPORT)
+
+        # 一括更新（役割・メモ変更）
+        update_resp = self.client.post(manage_url, data={
+            f"user_{rel.id}_exists": "1",
+            f"user_{rel.id}_role": UserRole.APPROVER,
+            f"user_{rel.id}_memo": "承認者として同席",
+        })
+        self.assertEqual(update_resp.status_code, 302)
+        rel.refresh_from_db()
+        self.assertEqual(rel.role, UserRole.APPROVER)
+        self.assertEqual(rel.memo, "承認者として同席")
+
+        # 解除（削除）
+        del_url = reverse("activities:activity_delete_user", kwargs={"pk": self.activity.pk, "user_rel_id": rel.id})
+        del_resp = self.client.post(del_url, data={"next": manage_url})
+        self.assertEqual(del_resp.status_code, 302)
+        self.assertFalse(ActivityUser.objects.filter(id=rel.id).exists())
+
+    def test_activity_users_manage_cannot_add_executor(self):
+        """activity_users_manage で実施者自身を同席者に追加しようとした場合、拒絶されること。"""
+        self.client.login(username="act_owner", password="password")
+        add_url = reverse("activities:activity_add_user", kwargs={"pk": self.activity.pk})
+        resp = self.client.post(add_url, data={
+            "user": str(self.user.id),
+            "role": "support",
+            "memo": "自分を追加",
+        })
+        self.assertEqual(resp.status_code, 302)
+        self.assertFalse(ActivityUser.objects.filter(activity=self.activity, user=self.user).exists())
 
     def test_activity_create_view_and_post(self):
         self.client.login(username="act_owner", password="password")

@@ -9,7 +9,9 @@ from activities.views import (
     ActivityDeleteUserView,
     ActivityDetailView,
     ActivityListView,
+    ActivityPersonManageView,
     ActivityUpdateView,
+    ActivityUserManageView,
     CampaignUnfollowedListView,
 )
 
@@ -26,11 +28,21 @@ urlpatterns = [
         CampaignUnfollowedListView.as_view(),
         name="campaign_unfollowed_list",
     ),
+    path(
+        "<uuid:pk>/persons/manage/",
+        ActivityPersonManageView.as_view(),
+        name="activity_persons_manage",
+    ),
     path("<uuid:pk>/persons/add/", ActivityAddPersonView.as_view(), name="activity_add_person"),
     path(
         "<uuid:pk>/persons/<uuid:person_rel_id>/delete/",
         ActivityDeletePersonView.as_view(),
         name="activity_delete_person",
+    ),
+    path(
+        "<uuid:pk>/users/manage/",
+        ActivityUserManageView.as_view(),
+        name="activity_users_manage",
     ),
     path("<uuid:pk>/users/add/", ActivityAddUserView.as_view(), name="activity_add_user"),
     path(

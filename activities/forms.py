@@ -14,7 +14,6 @@ class ActivityForm(forms.ModelForm):
             "activity_type",
             "direction",
             "occurred_at",
-            "user",
             "place",
             "memo",
             "deal",
@@ -24,7 +23,6 @@ class ActivityForm(forms.ModelForm):
             "activity_type": "活動種別",
             "direction": "受発信種別",
             "occurred_at": "活動日時",
-            "user": "実施者",
             "place": "場所・会議URL",
             "memo": "活動内容メモ",
             "deal": "関連案件",
@@ -37,19 +35,16 @@ class ActivityForm(forms.ModelForm):
                 attrs={"class": "app-input app-input--date", "type": "datetime-local"},
                 format="%Y-%m-%dT%H:%M",
             ),
-            "user": forms.Select(attrs={"class": "app-select app-input"}),
             "place": forms.TextInput(attrs={"class": "app-input", "placeholder": "訪問先・会議URL等"}),
             "memo": forms.Textarea(attrs={"class": "app-textarea app-input", "rows": 4, "placeholder": "活動内容・議事録等"}),
             "deal": forms.Select(attrs={"class": "app-select app-input"}),
             "campaign": forms.Select(attrs={"class": "app-select app-input"}),
         }
 
-    def __init__(self, *args, current_user=None, **kwargs):
+    def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         if not self.instance.pk and "occurred_at" not in self.initial:
             self.initial["occurred_at"] = timezone.localtime().strftime("%Y-%m-%dT%H:%M")
-        if not self.instance.pk and "user" not in self.initial and current_user:
-            self.initial["user"] = current_user
 
     def clean_occurred_at(self):
         occurred_at = self.cleaned_data.get("occurred_at")
