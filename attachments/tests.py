@@ -384,6 +384,57 @@ class AttachmentViewTests(TestCase):
         self.assertEqual(resp_bad.status_code, 302)
         self.assertFalse(Attachment.objects.filter(deal=self.deal, original_filename="virus.exe").exists())
 
+    def test_attachment_multiple_upload_view(self):
+        """複数ファイルの一括アップロードと共通メモ適用を検証。"""
+        self.client.login(username="att_owner", password="password")
+        url = reverse("attachments:attachment_upload")
+
+        f1 = SimpleUploadedFile("file1.pdf", b"content 1", content_type="application/pdf")
+        f2 = SimpleUploadedFile("file2.png", b"content 2", content_type="image/png")
+        f3 = SimpleUploadedFile("file3.txt", b"content 3", content_type="text/plain")
+
+        resp = self.client.post(
+            url,
+            {
+                "deal_id": str(self.deal.id),
+                "files": [f1, f2, f3],
+                "memo": "一括共通メモ",
+            },
+        )
+        self.assertEqual(resp.status_code, 302)
+
+        atts = Attachment.objects.filter(deal=self.deal, memo="一括共通メモ").order_by("original_filename")
+        self.assertEqual(atts.count(), 3)
+        filenames = [att.original_filename for att in atts]
+        self.assertEqual(filenames, ["file1.pdf", "file2.png", "file3.txt"])
+        for att in atts:
+            self.assertEqual(att.uploaded_by, self.owner)
+            self.assertEqual(att.memo, "一括共通メモ")
+
+    def test_attachment_multiple_upload_size_limit_error(self):
+        """15MB超過ファイルが混ざっていた場合、エラーとなり1件も保存されないことを検証。"""
+        self.client.login(username="att_owner", password="password")
+        url = reverse("attachments:attachment_upload")
+
+        good_file = SimpleUploadedFile("ok.pdf", b"ok content", content_type="application/pdf")
+        # 16MBのダミーファイル
+        large_content = b"x" * (16 * 1024 * 1024)
+        large_file = SimpleUploadedFile("too_large.pdf", large_content, content_type="application/pdf")
+
+        resp = self.client.post(
+            url,
+            {
+                "deal_id": str(self.deal.id),
+                "files": [good_file, large_file],
+                "memo": "失敗テストメモ",
+            },
+        )
+        self.assertEqual(resp.status_code, 302)
+        # 1件も保存されていないこと
+        self.assertFalse(Attachment.objects.filter(original_filename="ok.pdf").exists())
+        self.assertFalse(Attachment.objects.filter(original_filename="too_large.pdf").exists())
+
+
     def test_attachment_delete_view_permissions(self):
         # 同席者は削除権限なし（403）
         self.client.login(username="att_attendee", password="password")
@@ -404,5 +455,23 @@ class AttachmentViewTests(TestCase):
         self.assertEqual(resp.status_code, 302)
         self.attachment.refresh_from_db()
         self.assertEqual(self.attachment.memo, "更新されたメモ")
+
+    def test_attachment_memo_update_ajax(self):
+        """AJAXリクエストによるメモ更新でJSONレスポンスが返ることを検証。"""
+        self.client.login(username="att_owner", password="password")
+        url = reverse("attachments:attachment_update_memo", kwargs={"pk": self.attachment.pk})
+        resp = self.client.post(
+            url,
+            {"memo": "AJAXで更新されたメモ"},
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp["Content-Type"], "application/json")
+        data = resp.json()
+        self.assertEqual(data.get("status"), "success")
+        self.assertEqual(data.get("memo"), "AJAXで更新されたメモ")
+
+        self.attachment.refresh_from_db()
+        self.assertEqual(self.attachment.memo, "AJAXで更新されたメモ")
 
 

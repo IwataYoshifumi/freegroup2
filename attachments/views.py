@@ -1,9 +1,11 @@
+from pathlib import Path
 from urllib.parse import quote
 
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin, PermissionRequiredMixin
 from django.core.exceptions import PermissionDenied
-from django.http import FileResponse, Http404
+from django.db import transaction
+from django.http import FileResponse, Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views import View
@@ -11,7 +13,12 @@ from django.views import View
 from actionlogs.models import ActionLog
 from activities.models import Activity
 from activities.permissions import can_edit_activity
-from attachments.forms import AttachmentMemoUpdateForm, AttachmentUploadForm
+from attachments.forms import (
+    BLOCKED_EXTENSIONS,
+    MAX_ATTACHMENT_SIZE,
+    AttachmentMemoUpdateForm,
+    AttachmentUploadForm,
+)
 from attachments.models import Attachment
 from attachments.permissions import (
     can_delete_attachment,
@@ -91,34 +98,64 @@ class AttachmentUploadView(LoginRequiredMixin, PermissionRequiredMixin, View):
             messages.error(request, "添付先の案件または活動が指定されていません。")
             return redirect(redirect_url)
 
-        form = AttachmentUploadForm(request.POST, request.FILES)
-        if form.is_valid():
-            attachment = form.save(commit=False)
-            if deal:
-                attachment.deal = deal
-            if activity:
-                attachment.activity = activity
-            attachment.uploaded_by = request.user
-            attachment.original_filename = form.cleaned_data["file"].name
-            attachment.save()
+        files = request.FILES.getlist("files") or request.FILES.getlist("file")
+        if not files:
+            messages.error(request, "ファイルが選択されていません。")
+            return redirect(redirect_url)
 
-            target_type = "deal" if deal else "activity"
-            target_id = str(deal.id) if deal else str(activity.id)
-            ActionLog.record(
-                user=request.user,
-                action="attachment_uploaded",
-                content_object=attachment,
-                data={
-                    "original_filename": attachment.original_filename,
-                    "target_type": target_type,
-                    "target_id": target_id,
-                },
-            )
-            messages.success(request, f"ファイル「{attachment.original_filename}」を添付しました。")
+        memo = request.POST.get("memo", "").strip()
+
+        # 各ファイルの検証
+        errors = []
+        for f in files:
+            if f.size > MAX_ATTACHMENT_SIZE:
+                errors.append(f"「{f.name}」: ファイルサイズは15MB以下にしてください。")
+            ext = Path(f.name).suffix.lower()
+            if ext in BLOCKED_EXTENSIONS:
+                errors.append(f"「{f.name}」: このファイル形式はセキュリティ上の理由によりアップロードできません。")
+
+        if errors:
+            for error in errors:
+                messages.error(request, error)
+            return redirect(redirect_url)
+
+        created_attachments = []
+        try:
+            with transaction.atomic():
+                for f in files:
+                    attachment = Attachment(
+                        file=f,
+                        memo=memo,
+                        uploaded_by=request.user,
+                        original_filename=f.name,
+                    )
+                    if deal:
+                        attachment.deal = deal
+                    if activity:
+                        attachment.activity = activity
+                    attachment.save()
+                    created_attachments.append(attachment)
+
+                    target_type = "deal" if deal else "activity"
+                    target_id = str(deal.id) if deal else str(activity.id)
+                    ActionLog.record(
+                        user=request.user,
+                        action="attachment_uploaded",
+                        content_object=attachment,
+                        data={
+                            "original_filename": attachment.original_filename,
+                            "target_type": target_type,
+                            "target_id": target_id,
+                        },
+                    )
+        except Exception as e:
+            messages.error(request, f"ファイルのアップロード中にエラーが発生しました: {e}")
+            return redirect(redirect_url)
+
+        if len(created_attachments) == 1:
+            messages.success(request, "ファイルをアップロードしました。")
         else:
-            for error_list in form.errors.values():
-                for error in error_list:
-                    messages.error(request, error)
+            messages.success(request, f"{len(created_attachments)}件のファイルをアップロードしました。")
 
         return redirect(redirect_url)
 
@@ -158,7 +195,6 @@ class AttachmentDeleteView(LoginRequiredMixin, PermissionRequiredMixin, View):
         messages.success(request, f"ファイル「{filename}」を削除しました。")
         return redirect(redirect_url)
 
-
 class AttachmentMemoUpdateView(LoginRequiredMixin, PermissionRequiredMixin, View):
     """添付ファイルメモ更新View（仕様書 v1.5 §4.4.4）。"""
 
@@ -169,11 +205,21 @@ class AttachmentMemoUpdateView(LoginRequiredMixin, PermissionRequiredMixin, View
         if not can_edit_attachment(request.user, attachment):
             raise PermissionDenied
 
+        is_ajax = (
+            request.headers.get("x-requested-with") == "XMLHttpRequest"
+            or request.headers.get("Accept") == "application/json"
+            or request.content_type == "application/json"
+        )
+
         form = AttachmentMemoUpdateForm(request.POST, instance=attachment)
         if form.is_valid():
             form.save()
+            if is_ajax:
+                return JsonResponse({"status": "success", "memo": attachment.memo})
             messages.success(request, "添付メモを更新しました。")
         else:
+            if is_ajax:
+                return JsonResponse({"status": "error", "errors": form.errors.get_json_data()}, status=400)
             messages.error(request, "メモの更新に失敗しました。")
 
         if attachment.deal_id:
@@ -181,3 +227,4 @@ class AttachmentMemoUpdateView(LoginRequiredMixin, PermissionRequiredMixin, View
         elif attachment.activity_id:
             return redirect("activities:activity_detail", pk=attachment.activity_id)
         return redirect("home")
+

@@ -675,6 +675,59 @@ class DealViewTests(TestCase):
         reassign_url = reverse("deals:deal_reassign_owner", kwargs={"pk": self.deal.pk})
         self.assertIn(reassign_url, html)
 
+    def test_deal_detail_persons_users_icon_buttons_and_attachment_memo_ui(self):
+        """案件詳細の関係者・担当者カードの編集アイコン化、および添付メモの非常時フォーム・編集トリガーを検証。"""
+        from django.core.files.base import ContentFile
+        from attachments.models import Attachment
+
+        # 添付ファイル追加権限を付与
+        perm_add_att = Permission.objects.get(codename="add_attachment")
+        self.owner.user_permissions.add(perm_add_att)
+
+        att = Attachment.objects.create(
+            deal=self.deal,
+            file=ContentFile(b"test file content", name="test_file.pdf"),
+            original_filename="test_file.pdf",
+            memo="既存のメモ内容",
+            uploaded_by=self.owner,
+        )
+
+        self.client.login(username="deal_owner", password="password")
+        url = reverse("deals:deal_detail", kwargs={"pk": self.deal.pk})
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode("utf-8")
+
+        # 1. 「関係者を管理・追加」「担当者を管理・追加」テキストボタンが存在しないこと
+        self.assertNotIn(">関係者を管理・追加</a>", html)
+        self.assertNotIn(">担当者を管理・追加</a>", html)
+
+        # 2. 社外関係者カードおよび社内担当者カードに app-icon-btn の編集アイコン（bi-pencil-fill）が存在すること
+        self.assertRegex(
+            html,
+            r'<a\s+href="[^"]*persons/manage[^"]*"\s+class="app-icon-btn"\s+title="案件関係者を管理・追加"\s+aria-label="案件関係者を管理・追加"[^>]*>\s*<i class="bi bi-pencil-fill"></i>\s*</a>',
+        )
+        self.assertRegex(
+            html,
+            r'<a\s+href="[^"]*users/manage[^"]*"\s+class="app-icon-btn"\s+title="案件担当者を管理・追加"\s+aria-label="案件担当者を管理・追加"[^>]*>\s*<i class="bi bi-pencil-fill"></i>\s*</a>',
+        )
+
+        # 3. 添付ファイル一覧のメモが常時フォームではなくテキスト表示＋編集トリガー（memo-edit-btn）になっていること
+        self.assertIn('class="attachment-memo-cell"', html)
+        self.assertIn('class="memo-view-mode"', html)
+        self.assertIn("既存のメモ内容", html)
+        self.assertIn('class="app-icon-btn memo-edit-btn"', html)
+
+        # 4. D&D アップロードゾーンが存在し、multiple属性が付与されていること
+        self.assertIn('id="attachment-dropzone"', html)
+        self.assertIn('id="attachment-file-input"', html)
+        self.assertIn('multiple', html)
+        self.assertRegex(html, r'<input[^>]*id="attachment-file-input"[^>]*multiple[^>]*>')
+        self.assertIn('name="files"', html)
+        self.assertIn("ファイルをここにドラッグ＆ドロップ、またはクリックして選択", html)
+
+
+
     def test_deal_reassign_owner_search_and_selection_ui(self):
         """案件担当者変更画面の検索UI、未検索時案内、候補テーブル、選択プレビュー、緑確定ボタン、POST確定処理を検証。"""
         self.client.login(username="deal_owner", password="password")

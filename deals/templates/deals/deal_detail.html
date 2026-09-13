@@ -217,7 +217,9 @@
         </div>
         {% if can_edit %}
           {% url 'deals:deal_persons_manage' pk=deal.id as persons_manage_url %}
-          <a href="{% append_back_url persons_manage_url back %}" class="app-btn app-btn--secondary app-btn--sm">関係者を管理・追加</a>
+          <a href="{% append_back_url persons_manage_url back %}" class="app-icon-btn" title="案件関係者を管理・追加" aria-label="案件関係者を管理・追加" style="color:var(--app-text, #0f172a); text-decoration:none;">
+            <i class="bi bi-pencil-fill"></i>
+          </a>
         {% endif %}
       </div>
 
@@ -274,7 +276,9 @@
         </div>
         {% if can_edit %}
           {% url 'deals:deal_users_manage' pk=deal.id as users_manage_url %}
-          <a href="{% append_back_url users_manage_url back %}" class="app-btn app-btn--secondary app-btn--sm">担当者を管理・追加</a>
+          <a href="{% append_back_url users_manage_url back %}" class="app-icon-btn" title="案件担当者を管理・追加" aria-label="案件担当者を管理・追加" style="color:var(--app-text, #0f172a); text-decoration:none;">
+            <i class="bi bi-pencil-fill"></i>
+          </a>
         {% endif %}
       </div>
 
@@ -395,16 +399,21 @@
                   {{ att.original_filename }}
                 </a>
               </td>
-              <td>
+              <td class="attachment-memo-cell" data-attachment-id="{{ att.id }}" data-update-url="{% url 'attachments:attachment_update_memo' pk=att.id %}">
+                <div class="memo-view-mode" style="display:flex; align-items:center; gap:6px;">
+                  <span class="memo-text" style="word-break:break-word;">{{ att.memo|default:"-" }}</span>
+                  {% if can_edit %}
+                    <button type="button" class="app-icon-btn memo-edit-btn" title="メモを編集" aria-label="メモを編集" style="border:none; background:none; cursor:pointer; padding:2px; color:var(--app-muted, #64748b); font-size:12px; display:inline-flex; align-items:center;">
+                      <i class="bi bi-pencil-fill"></i>
+                    </button>
+                  {% endif %}
+                </div>
                 {% if can_edit %}
-                  <form method="post" action="{% url 'attachments:attachment_update_memo' pk=att.id %}" style="display:flex; gap:4px; margin:0;">
-                    {% csrf_token %}
-                    {% hidden_back_field back %}
-                    <input type="text" name="memo" value="{{ att.memo }}" class="app-input" style="padding:2px 6px; font-size:12px; height:28px;">
-                    <button type="submit" class="app-btn app-btn--ghost app-btn--sm">保存</button>
-                  </form>
-                {% else %}
-                  {{ att.memo|default:"-" }}
+                  <div class="memo-edit-mode" style="display:none; align-items:center; gap:4px;">
+                    <input type="text" class="app-input app-input--compact memo-input" value="{{ att.memo|default:'' }}" placeholder="メモを入力..." style="padding:2px 6px; font-size:12px; height:28px; width:180px; max-width:100%;">
+                    <button type="button" class="app-btn app-btn--success app-btn--xs memo-save-btn" style="padding:2px 8px; font-size:11px; height:28px; line-height:24px;">保存</button>
+                    <button type="button" class="app-btn app-btn--ghost app-btn--xs memo-cancel-btn" style="padding:2px 6px; font-size:11px; height:28px; line-height:24px;">取消</button>
+                  </div>
                 {% endif %}
               </td>
               <td>{{ att.uploaded_by|default:"-" }}</td>
@@ -429,20 +438,52 @@
     </div>
 
     {% if can_edit and perms.attachments.add_attachment %}
-      <form method="post" action="{% url 'attachments:attachment_upload' %}" enctype="multipart/form-data" style="display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end;">
+      <form method="post" action="{% url 'attachments:attachment_upload' %}" enctype="multipart/form-data" id="attachment-upload-form" style="margin-top:16px;">
         {% csrf_token %}
         {% hidden_back_field back %}
         <input type="hidden" name="deal_id" value="{{ deal.id }}">
-        <div class="app-form__group" style="margin-bottom:0;">
-          <label class="app-form__label">ファイル追加（15MB以下）</label>
-          {{ attachment_form.file }}
+
+        {# D&D ドロップゾーン #}
+        <div id="attachment-dropzone" class="attachment-dropzone" style="border: 2px dashed var(--app-border, #cbd5e1); border-radius: 8px; padding: 20px; text-align: center; background: var(--app-bg-subtle, #f8fafc); cursor: pointer; transition: all 0.2s ease;">
+          <input type="file" name="files" id="attachment-file-input" style="display:none;" multiple required>
+          <div id="dropzone-prompt">
+            <i class="bi bi-cloud-arrow-up" style="font-size:26px; color:var(--app-muted, #64748b); display:block; margin-bottom:6px;"></i>
+            <div style="font-size:13px; font-weight:600; color:var(--app-text, #0f172a); margin-bottom:4px;">
+              ファイルをここにドラッグ＆ドロップ、またはクリックして選択（15MB以下・複数可）
+            </div>
+            <div style="font-size:12px; color:var(--app-muted, #94a3b8);">
+              複数ファイルを同時に選択して一括アップロードできます
+            </div>
+          </div>
+          <div id="dropzone-file-info" style="display:none;">
+            <div style="display:inline-flex; flex-direction:column; align-items:center; gap:8px; max-width:100%; padding:10px 16px; background:var(--app-card-bg, #ffffff); border:1px solid var(--app-border, #cbd5e1); border-radius:6px; box-shadow:0 1px 2px rgba(0,0,0,0.05);">
+              <div style="display:inline-flex; align-items:center; gap:8px; width:100%; justify-content:center;">
+                <i class="bi bi-file-earmark-check" style="color:var(--app-color-primary, #2563eb); font-size:18px;"></i>
+                <span id="dropzone-summary-text" style="font-size:13px; color:var(--app-text, #0f172a);"></span>
+                <button type="button" id="dropzone-clear-btn" class="app-icon-btn" title="クリア" aria-label="ファイルをクリア" style="border:none; background:none; cursor:pointer; padding:2px; font-size:16px; color:var(--app-muted, #94a3b8); margin-left:4px; line-height:1;">
+                  <i class="bi bi-x"></i>
+                </button>
+              </div>
+              <div id="dropzone-file-list" style="display:flex; flex-wrap:wrap; gap:6px; justify-content:center; max-height:120px; overflow-y:auto; width:100%;"></div>
+            </div>
+          </div>
         </div>
-        <div class="app-form__group" style="margin-bottom:0; flex:1;">
-          <label class="app-form__label">メモ</label>
-          {{ attachment_form.memo }}
+
+        {# メモ入力およびアップロードボタン #}
+        <div id="upload-controls" style="display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end; margin-top:12px;">
+          <div class="app-form__group" style="margin-bottom:0; flex:1; min-width:200px;">
+            <label class="app-form__label" for="attachment-memo-input" style="font-size:12px;">メモ（任意）</label>
+            <input type="text" name="memo" id="attachment-memo-input" class="app-input" placeholder="メモ・備考（任意）" style="height:36px;">
+          </div>
+          <button type="submit" id="attachment-upload-btn" class="app-btn app-btn--primary" style="height:36px;">アップロード</button>
         </div>
-        <button type="submit" class="app-btn app-btn--primary">アップロード</button>
       </form>
+      <style>
+        .attachment-dropzone.dragover {
+          border-color: var(--app-color-primary, #2563eb) !important;
+          background-color: #eff6ff !important;
+        }
+      </style>
     {% endif %}
   </section>
 </div>
@@ -486,6 +527,224 @@
         closeModal();
       }
     });
+  })();
+
+  // 添付ファイル メモAJAXインライン編集
+  (function() {
+    function getCsrfToken() {
+      var cookieValue = null;
+      if (document.cookie && document.cookie !== '') {
+        var cookies = document.cookie.split(';');
+        for (var i = 0; i < cookies.length; i++) {
+          var cookie = cookies[i].trim();
+          if (cookie.substring(0, 10) === 'csrftoken=') {
+            cookieValue = decodeURIComponent(cookie.substring(10));
+            break;
+          }
+        }
+      }
+      if (!cookieValue) {
+        var input = document.querySelector('input[name="csrfmiddlewaretoken"]');
+        if (input) cookieValue = input.value;
+      }
+      return cookieValue;
+    }
+
+    document.querySelectorAll('.attachment-memo-cell').forEach(function(cell) {
+      var viewMode = cell.querySelector('.memo-view-mode');
+      var editMode = cell.querySelector('.memo-edit-mode');
+      var memoText = cell.querySelector('.memo-text');
+      var editBtn = cell.querySelector('.memo-edit-btn');
+      var input = cell.querySelector('.memo-input');
+      var saveBtn = cell.querySelector('.memo-save-btn');
+      var cancelBtn = cell.querySelector('.memo-cancel-btn');
+      var updateUrl = cell.getAttribute('data-update-url');
+
+      if (!editBtn || !editMode || !saveBtn || !cancelBtn) return;
+
+      function openEdit() {
+        viewMode.style.display = 'none';
+        editMode.style.display = 'flex';
+        input.focus();
+        input.select();
+      }
+
+      function closeEdit() {
+        input.style.borderColor = '';
+        var currentText = memoText.textContent.trim();
+        input.value = currentText === '-' ? '' : currentText;
+        editMode.style.display = 'none';
+        viewMode.style.display = 'flex';
+      }
+
+      function saveMemo() {
+        var newMemo = input.value.trim();
+        saveBtn.disabled = true;
+        input.style.borderColor = '';
+
+        fetch(updateUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'X-CSRFToken': getCsrfToken(),
+            'X-Requested-With': 'XMLHttpRequest'
+          },
+          body: new URLSearchParams({ memo: newMemo })
+        })
+        .then(function(res) {
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          return res.json();
+        })
+        .then(function(data) {
+          if (data && data.status === 'success') {
+            var updated = data.memo !== undefined ? data.memo : newMemo;
+            memoText.textContent = updated || '-';
+            input.value = updated || '';
+            editMode.style.display = 'none';
+            viewMode.style.display = 'flex';
+            memoText.style.transition = 'color 0.3s ease';
+            memoText.style.color = 'var(--app-color-success, #16a34a)';
+            setTimeout(function() { memoText.style.color = ''; }, 1200);
+          } else {
+            throw new Error('Save failed');
+          }
+        })
+        .catch(function() {
+          input.style.borderColor = 'var(--app-color-danger, #ef4444)';
+          alert('メモの更新に失敗しました。');
+        })
+        .finally(function() {
+          saveBtn.disabled = false;
+        });
+      }
+
+      editBtn.addEventListener('click', openEdit);
+      cancelBtn.addEventListener('click', closeEdit);
+      saveBtn.addEventListener('click', saveMemo);
+      input.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          saveMemo();
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          closeEdit();
+        }
+      });
+    });
+  })();
+
+  // 添付ファイル追加 D&D ゾーン制御（複数ファイル対応）
+  (function() {
+    var dropzone = document.getElementById('attachment-dropzone');
+    var fileInput = document.getElementById('attachment-file-input');
+    var promptEl = document.getElementById('dropzone-prompt');
+    var infoEl = document.getElementById('dropzone-file-info');
+    var summaryTextEl = document.getElementById('dropzone-summary-text');
+    var fileListEl = document.getElementById('dropzone-file-list');
+    var clearBtn = document.getElementById('dropzone-clear-btn');
+
+    if (!dropzone || !fileInput) return;
+
+    function formatBytes(bytes) {
+      if (bytes === 0) return '0 B';
+      var k = 1024;
+      var sizes = ['B', 'KB', 'MB', 'GB'];
+      var i = Math.floor(Math.log(bytes) / Math.log(k));
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+    }
+
+    function escapeHtml(str) {
+      var div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    }
+
+    function showFiles(files) {
+      if (!files || files.length === 0) {
+        resetFiles();
+        return;
+      }
+      var count = files.length;
+      var totalSize = 0;
+      if (fileListEl) fileListEl.innerHTML = '';
+
+      for (var i = 0; i < count; i++) {
+        totalSize += files[i].size;
+      }
+
+      if (count === 1) {
+        if (summaryTextEl) {
+          summaryTextEl.innerHTML = '<span style="font-weight:600; word-break:break-all;">' + escapeHtml(files[0].name) + '</span> <span style="font-size:12px; color:var(--app-muted, #64748b);">(' + formatBytes(files[0].size) + ')</span>';
+        }
+        if (fileListEl) fileListEl.style.display = 'none';
+      } else {
+        if (summaryTextEl) {
+          summaryTextEl.innerHTML = '<strong style="font-weight:700;">' + count + '件のファイルを選択中（合計 ' + formatBytes(totalSize) + '）</strong>';
+        }
+        if (fileListEl) {
+          fileListEl.style.display = 'flex';
+          for (var j = 0; j < count; j++) {
+            var tag = document.createElement('span');
+            tag.style.cssText = 'display:inline-flex; align-items:center; font-size:11px; padding:2px 8px; background:var(--app-bg-subtle, #f1f5f9); border:1px solid var(--app-border, #e2e8f0); border-radius:4px; color:var(--app-text, #334155); max-width:240px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;';
+            tag.textContent = files[j].name + ' (' + formatBytes(files[j].size) + ')';
+            tag.title = files[j].name;
+            fileListEl.appendChild(tag);
+          }
+        }
+      }
+
+      promptEl.style.display = 'none';
+      infoEl.style.display = 'block';
+    }
+
+    function resetFiles() {
+      fileInput.value = '';
+      promptEl.style.display = 'block';
+      infoEl.style.display = 'none';
+      if (fileListEl) fileListEl.innerHTML = '';
+      if (summaryTextEl) summaryTextEl.innerHTML = '';
+    }
+
+    dropzone.addEventListener('click', function(e) {
+      if (e.target.closest('#dropzone-clear-btn')) return;
+      fileInput.click();
+    });
+
+    dropzone.addEventListener('dragover', function(e) {
+      e.preventDefault();
+      dropzone.classList.add('dragover');
+    });
+
+    ['dragleave', 'dragend'].forEach(function(evt) {
+      dropzone.addEventListener(evt, function(e) {
+        e.preventDefault();
+        dropzone.classList.remove('dragover');
+      });
+    });
+
+    dropzone.addEventListener('drop', function(e) {
+      e.preventDefault();
+      dropzone.classList.remove('dragover');
+      if (e.dataTransfer && e.dataTransfer.files.length > 0) {
+        fileInput.files = e.dataTransfer.files;
+        showFiles(e.dataTransfer.files);
+      }
+    });
+
+    fileInput.addEventListener('change', function() {
+      if (fileInput.files && fileInput.files.length > 0) {
+        showFiles(fileInput.files);
+      } else {
+        resetFiles();
+      }
+    });
+
+    if (clearBtn) {
+      clearBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        resetFiles();
+      });
+    }
   })();
 </script>
 {% endblock %}
