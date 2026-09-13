@@ -1,4 +1,4 @@
-{% extends "cards/app_base.html" %}
+{% extends "companies/app_base.html" %}
 {% load back_tags %}
 
 {% block title %}{{ company.organization }} — 会社詳細 — FreeGroup2{% endblock %}
@@ -10,7 +10,8 @@
       <div style="font-size:13px; color:var(--app-muted); margin-top:4px;">
         状態: <span class="app-status-badge">{{ company.get_status_display }}</span>
         {% if company.merged_into %}
-          （統合先: <a href="{% url 'companies:company_detail' pk=company.merged_into.id %}">{{ company.merged_into.organization }}</a>）
+          {% url 'companies:company_detail' pk=company.merged_into.id as merged_url %}
+          （統合先: <a href="{% append_back_url merged_url back %}">{{ company.merged_into.organization }}</a>）
         {% endif %}
       </div>
     </div>
@@ -89,9 +90,10 @@
         </thead>
         <tbody>
           {% for deal in deals %}
+            {% url 'deals:deal_detail' pk=deal.id as deal_detail_url %}
             <tr>
               <td>
-                <a href="{% url 'deals:deal_detail' pk=deal.id %}" style="font-weight:600;">{{ deal.name }}</a>
+                <a href="{% append_back_url deal_detail_url back %}" style="font-weight:600;">{{ deal.name }}</a>
               </td>
               <td><span class="app-status-badge">{{ deal.get_stage_display }}</span></td>
               <td>{% if deal.amount is not None %}¥{{ deal.amount|floatformat:0 }}{% else %}-{% endif %}</td>
@@ -99,7 +101,7 @@
               <td>{{ deal.owner|default:"-" }}</td>
               <td>{{ deal.updated_at|date:"Y-m-d H:i" }}</td>
               <td>
-                <a href="{% url 'deals:deal_detail' pk=deal.id %}" class="app-btn app-btn--ghost app-btn--sm">詳細</a>
+                <a href="{% append_back_url deal_detail_url back %}" class="app-btn app-btn--ghost app-btn--sm">詳細</a>
               </td>
             </tr>
           {% empty %}
@@ -140,6 +142,7 @@
         </thead>
         <tbody>
           {% for activity in activities %}
+            {% url 'activities:activity_detail' pk=activity.id as act_detail_url %}
             <tr>
               <td>{{ activity.occurred_at|date:"Y-m-d H:i" }}</td>
               <td><span class="app-status-badge">{{ activity.get_activity_type_display }}</span></td>
@@ -147,12 +150,13 @@
               <td>{{ activity.user|default:"-" }}</td>
               <td>
                 {% if activity.deal %}
-                  <a href="{% url 'deals:deal_detail' pk=activity.deal.id %}">{{ activity.deal.name }}</a>
+                  {% url 'deals:deal_detail' pk=activity.deal.id as act_deal_url %}
+                  <a href="{% append_back_url act_deal_url back %}">{{ activity.deal.name }}</a>
                 {% else %}-{% endif %}
               </td>
               <td>{{ activity.memo|truncatechars:40|default:"-" }}</td>
               <td>
-                <a href="{% url 'activities:activity_detail' pk=activity.id %}" class="app-btn app-btn--ghost app-btn--sm">詳細</a>
+                <a href="{% append_back_url act_detail_url back %}" class="app-btn app-btn--ghost app-btn--sm">詳細</a>
               </td>
             </tr>
           {% empty %}
@@ -182,16 +186,17 @@
         </thead>
         <tbody>
           {% for contact in contacts %}
+            {% url 'contacts:contact_detail' pk=contact.id as contact_detail_url %}
             <tr>
               <td>
-                <a href="{% url 'contacts:contact_detail' pk=contact.id %}" style="font-weight:600;">{{ contact.full_name }}</a>
+                <a href="{% append_back_url contact_detail_url back %}" style="font-weight:600;">{{ contact.full_name }}</a>
               </td>
               <td>{{ contact.title|default:"-" }}</td>
               <td>{{ contact.department|default:"-" }}</td>
               <td>{{ contact.email|default:"-" }}</td>
               <td>{{ contact.phone|default:"-" }}</td>
               <td>
-                <a href="{% url 'contacts:contact_detail' pk=contact.id %}" class="app-btn app-btn--ghost app-btn--sm">詳細</a>
+                <a href="{% append_back_url contact_detail_url back %}" class="app-btn app-btn--ghost app-btn--sm">詳細</a>
               </td>
             </tr>
           {% empty %}

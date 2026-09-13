@@ -9,9 +9,11 @@ from activities.views import (
     ActivityDeleteUserView,
     ActivityDetailView,
     ActivityListView,
+    ActivityMembersView,
     ActivityPersonManageView,
     ActivityUpdateView,
     ActivityUserManageView,
+    ActivityAttachmentManageView,
     CampaignUnfollowedListView,
 )
 
@@ -22,6 +24,7 @@ urlpatterns = [
     path("create/", ActivityCreateView.as_view(), name="activity_create"),
     path("<uuid:pk>/", ActivityDetailView.as_view(), name="activity_detail"),
     path("<uuid:pk>/edit/", ActivityUpdateView.as_view(), name="activity_update"),
+    path("<uuid:pk>/members/", ActivityMembersView.as_view(), name="activity_members"),
     path("<uuid:pk>/archive/", ActivityArchiveView.as_view(), name="activity_archive"),
     path(
         "campaigns/<uuid:campaign_id>/unfollowed/",
@@ -49,5 +52,10 @@ urlpatterns = [
         "<uuid:pk>/users/<uuid:user_rel_id>/delete/",
         ActivityDeleteUserView.as_view(),
         name="activity_delete_user",
+    ),
+    path(
+        "<uuid:pk>/attachments/manage/",
+        ActivityAttachmentManageView.as_view(),
+        name="activity_attachments_manage",
     ),
 ]

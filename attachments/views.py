@@ -98,6 +98,10 @@ class AttachmentUploadView(LoginRequiredMixin, PermissionRequiredMixin, View):
             messages.error(request, "添付先の案件または活動が指定されていません。")
             return redirect(redirect_url)
 
+        next_url = request.POST.get("next") or request.GET.get("next")
+        if next_url:
+            redirect_url = next_url
+
         files = request.FILES.getlist("files") or request.FILES.getlist("file")
         if not files:
             messages.error(request, "ファイルが選択されていません。")
@@ -172,6 +176,9 @@ class AttachmentDeleteView(LoginRequiredMixin, PermissionRequiredMixin, View):
         return super().dispatch(request, *args, **kwargs)
 
     def get_redirect_url(self):
+        next_url = self.request.POST.get("next") or self.request.GET.get("next")
+        if next_url:
+            return next_url
         if self.attachment.deal_id:
             return reverse("deals:deal_detail", kwargs={"pk": self.attachment.deal_id})
         elif self.attachment.activity_id:

@@ -1,43 +1,56 @@
-{% extends "activities/app_base.html" %}
+{% extends "deals/app_base.html" %}
 {% load back_tags %}
 
-{% block title %}{% if is_wizard %}活動参加者設定 (2/4) 相手方関係者 — {{ activity }} — FreeGroup2{% else %}社外関係者管理 — {{ activity }} — FreeGroup2{% endif %}{% endblock %}
+{% block title %}関係者設定 — {{ deal.name }} — FreeGroup2{% endblock %}
 
 {% block content %}
 <div style="max-width: 1040px; margin-left: 0; margin-right: auto;">
   <div class="app-page-header">
     <div>
       <div style="font-size:13px; color:var(--app-muted); margin-bottom:4px;">
-        活動: <strong>{{ activity }}</strong>
-        {% if activity.deal %}
-          / 案件: <a href="{% url 'deals:deal_detail' pk=activity.deal.id %}">{{ activity.deal.name }}</a>
-        {% endif %}
-        {% if activity.campaign %}
-          / キャンペーン: <span>{{ activity.campaign }}</span>
+        案件: <strong>{{ deal.name }}</strong>
+        {% if deal.company %}
+          / 会社: <a href="{% url 'companies:company_detail' pk=deal.company.id %}">{{ deal.company.organization }}</a>
         {% endif %}
       </div>
-      <h1>{% if is_wizard %}活動参加者設定 (2/4) 相手方関係者{% else %}社外関係者（パーソン）管理{% endif %}</h1>
+      <h1>関係者設定</h1>
     </div>
     <div class="app-action-area">
-      {% back_all_link back %}
-      {% if back.back_exist %}
-        {% back_link back %}
+      {% if is_wizard %}
+        {% url 'deals:deal_detail' pk=deal.id as finish_url %}
+        <a href="{% append_back_url finish_url back %}" class="app-btn app-btn--ghost">今回はスキップして完了</a>
+        <a href="{% append_back_url finish_url back %}" class="app-btn app-btn--primary">設定を完了して案件詳細へ</a>
       {% else %}
-        <a href="{{ activity_detail_url }}" class="app-btn app-btn--secondary">戻る</a>
+        {% back_all_link back %}
+        {% if back.back_exist %}
+          {% back_link back %}
+        {% else %}
+          <a href="{{ deal_detail_url }}" class="app-btn app-btn--secondary">戻る</a>
+        {% endif %}
       {% endif %}
     </div>
   </div>
 
   {# ステップインジケーター（ウィザード時） #}
   {% if is_wizard %}
-    <div class="wizard-steps" style="display:flex; align-items:center; gap:12px; background:var(--app-bg-subtle, #f8fafc); border:1px solid var(--app-border, #e2e8f0); border-radius:8px; padding:12px 16px; margin-bottom:20px; flex-wrap:wrap;">
-      <span style="color:var(--app-muted, #64748b); font-weight:500; font-size:13px;">1. 基本情報</span>
-      <i class="bi bi-chevron-right" style="color:#cbd5e1; font-size:12px;"></i>
-      <span style="background:#f59e0b; color:#0f172a; font-weight:600; border-radius:6px; padding:4px 10px; font-size:13px;">2. 相手方関係者</span>
-      <i class="bi bi-chevron-right" style="color:#cbd5e1; font-size:12px;"></i>
-      <span style="color:var(--app-subtle, #94a3b8); font-weight:500; font-size:13px;">3. 社内同席者</span>
-      <i class="bi bi-chevron-right" style="color:#cbd5e1; font-size:12px;"></i>
-      <span style="color:var(--app-subtle, #94a3b8); font-weight:500; font-size:13px;">4. 添付ファイル</span>
+    <div class="wizard-steps" style="display:flex; align-items:center; gap:12px; background:var(--app-bg-subtle, #f8fafc); border:1px solid var(--app-border, #e2e8f0); border-radius:8px; padding:12px 16px; margin-bottom:20px;">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span class="app-badge app-badge--neutral" style="font-weight:600; padding:4px 10px; font-size:12px; border-radius:9999px;">
+          Step 1
+        </span>
+        <span style="font-size:13px; font-weight:500; color:var(--app-muted, #64748b);">
+          基本情報入力 (完了)
+        </span>
+      </div>
+      <i class="bi bi-chevron-right" style="color:var(--app-muted, #94a3b8); font-size:12px;"></i>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span class="app-badge app-badge--primary" style="font-weight:600; padding:4px 10px; font-size:12px; border-radius:9999px;">
+          Step 2
+        </span>
+        <span style="font-size:13px; font-weight:700; color:var(--app-text, #0f172a);">
+          関係者設定 (現在)
+        </span>
+      </div>
     </div>
   {% endif %}
 
@@ -46,9 +59,9 @@
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
       <div style="display:flex; align-items:center; gap:8px;">
         <h2 style="font-size:16px; margin:0;">登録済みの関係者</h2>
-        <span class="app-status-badge">{{ activity_persons|length }}名</span>
+        <span class="app-status-badge">{{ deal_persons|length }}名</span>
       </div>
-      {% if not is_edit_mode and activity_persons %}
+      {% if not is_edit_mode and deal_persons %}
         <div style="display:flex; align-items:center; gap:8px;">
           <a href="?{% if is_wizard %}wizard=1&{% endif %}{% if current_q %}q={{ current_q|urlencode }}&{% endif %}edit=1" class="app-btn app-btn--secondary app-btn--sm">一括編集</a>
         </div>
@@ -56,11 +69,11 @@
     </div>
 
     {% if is_edit_mode %}
-      <form method="post" action="{% url 'activities:activity_persons_manage' pk=activity.id %}{% if is_wizard %}?wizard=1{% endif %}" id="batch-update-persons-form">
+      <form method="post" action="{% url 'deals:deal_members' pk=deal.id %}" id="batch-update-persons-form">
         {% csrf_token %}
         {% if is_wizard %}<input type="hidden" name="wizard" value="1">{% endif %}
-        {% hidden_back_field back %}
         <input type="hidden" name="q" value="{{ current_q }}">
+        {% hidden_back_field back %}
         <div class="app-table-wrapper">
           <table class="app-table">
             <thead>
@@ -74,35 +87,35 @@
               </tr>
             </thead>
             <tbody>
-              {% for ap in activity_persons %}
+              {% for dp in deal_persons %}
                 <tr>
                   <td>
-                    <input type="hidden" name="person_{{ ap.id }}_exists" value="1">
+                    <input type="hidden" name="person_{{ dp.id }}_exists" value="1">
                     <strong>
-                      {% if ap.person.primary_contact and ap.person.primary_contact.full_name %}
-                        {{ ap.person.primary_contact.full_name }}
+                      {% if dp.person.primary_contact and dp.person.primary_contact.full_name %}
+                        {{ dp.person.primary_contact.full_name }}
                       {% else %}
-                        {{ ap.person }}
+                        {{ dp.person }}
                       {% endif %}
                     </strong>
                   </td>
                   <td>
-                    {% if ap.person.primary_contact and ap.person.primary_contact.company %}
-                      {{ ap.person.primary_contact.company.organization }}
-                    {% elif ap.person.primary_contact and ap.person.primary_contact.organization %}
-                      {{ ap.person.primary_contact.organization }}
+                    {% if dp.person.primary_contact and dp.person.primary_contact.company %}
+                      {{ dp.person.primary_contact.company.organization }}
+                    {% elif dp.person.primary_contact and dp.person.primary_contact.organization %}
+                      {{ dp.person.primary_contact.organization }}
                     {% else %}-{% endif %}
                   </td>
-                  <td>{{ ap.person.primary_contact.title|default:"-" }}</td>
+                  <td>{{ dp.person.primary_contact.title|default:"-" }}</td>
                   <td>
-                    <select name="person_{{ ap.id }}_role" class="app-select app-input" style="padding:4px 8px; font-size:13px;">
+                    <select name="person_{{ dp.id }}_role" class="app-select app-input" style="padding:4px 8px; font-size:13px;">
                       {% for val, label in person_roles %}
-                        <option value="{{ val }}" {% if ap.role == val %}selected{% endif %}>{{ label }}</option>
+                        <option value="{{ val }}" {% if dp.role == val %}selected{% endif %}>{{ label }}</option>
                       {% endfor %}
                     </select>
                   </td>
                   <td>
-                    <input type="text" name="person_{{ ap.id }}_memo" value="{{ ap.memo }}" class="app-input" style="padding:4px 8px; font-size:13px;" placeholder="関係メモ">
+                    <input type="text" name="person_{{ dp.id }}_memo" value="{{ dp.memo }}" class="app-input" style="padding:4px 8px; font-size:13px;" placeholder="関係メモ">
                   </td>
                   <td style="text-align:center;">
                     <span class="app-muted" style="font-size:12px;">-</span>
@@ -116,8 +129,8 @@
             </tbody>
           </table>
         </div>
-        <div style="margin-top:16px; display:flex; justify-content:flex-end; gap:8px;">
-          <a href="?{% if is_wizard %}wizard=1&{% endif %}{% if current_q %}q={{ current_q|urlencode }}{% endif %}" class="app-btn app-btn--ghost app-btn--sm">キャンセル</a>
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+          <a href="{% url 'deals:deal_members' pk=deal.id %}?{% if is_wizard %}wizard=1{% endif %}{% if current_q %}&q={{ current_q|urlencode }}{% endif %}" class="app-btn app-btn--ghost app-btn--sm">キャンセル</a>
           <button type="submit" class="app-btn app-btn--primary app-btn--sm">適用</button>
         </div>
       </form>
@@ -135,29 +148,29 @@
             </tr>
           </thead>
           <tbody>
-            {% for ap in activity_persons %}
+            {% for dp in deal_persons %}
               <tr>
                 <td>
                   <strong>
-                    {% if ap.person.primary_contact and ap.person.primary_contact.full_name %}
-                      <a href="{% url 'persons:person_detail' pk=ap.person.id %}">{{ ap.person.primary_contact.full_name }}</a>
+                    {% if dp.person.primary_contact and dp.person.primary_contact.full_name %}
+                      {{ dp.person.primary_contact.full_name }}
                     {% else %}
-                      <a href="{% url 'persons:person_detail' pk=ap.person.id %}">{{ ap.person }}</a>
+                      {{ dp.person }}
                     {% endif %}
                   </strong>
                 </td>
                 <td>
-                  {% if ap.person.primary_contact and ap.person.primary_contact.company %}
-                    {{ ap.person.primary_contact.company.organization }}
-                  {% elif ap.person.primary_contact and ap.person.primary_contact.organization %}
-                    {{ ap.person.primary_contact.organization }}
+                  {% if dp.person.primary_contact and dp.person.primary_contact.company %}
+                    {{ dp.person.primary_contact.company.organization }}
+                  {% elif dp.person.primary_contact and dp.person.primary_contact.organization %}
+                    {{ dp.person.primary_contact.organization }}
                   {% else %}-{% endif %}
                 </td>
-                <td>{{ ap.person.primary_contact.title|default:"-" }}</td>
-                <td><span class="app-status-badge">{{ ap.get_role_display }}</span></td>
-                <td>{{ ap.memo|default:"-" }}</td>
+                <td>{{ dp.person.primary_contact.title|default:"-" }}</td>
+                <td><span class="app-status-badge">{{ dp.get_role_display }}</span></td>
+                <td>{{ dp.memo|default:"-" }}</td>
                 <td style="text-align:center;">
-                  <form method="post" action="{% url 'activities:activity_delete_person' pk=activity.id person_rel_id=ap.id %}" style="margin:0; display:inline;">
+                  <form method="post" action="{% url 'deals:deal_delete_person' pk=deal.id person_rel_id=dp.id %}" style="margin:0; display:inline;">
                     {% csrf_token %}
                     <input type="hidden" name="next" value="{{ request.get_full_path }}">
                     <button type="submit" class="app-icon-btn" style="border:none; background:none; padding:4px; cursor:pointer; color:var(--app-text, #0f172a);" title="削除" aria-label="削除" onclick="return confirm('この関係者を解除しますか？');">
@@ -177,14 +190,13 @@
     {% endif %}
   </section>
 
-  {# 2. 関係者検索・追加セクション（追加ボタンを左端に配置） #}
+  {# 2. 関係者検索・追加セクション #}
   <section class="app-card">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
       <h2 style="font-size:16px; margin:0;">関係者（パーソン）を検索・追加</h2>
     </div>
     <form method="get" style="display:flex; gap:8px; margin-bottom:16px;">
       {% if is_wizard %}<input type="hidden" name="wizard" value="1">{% endif %}
-      {% hidden_back_field back %}
       <input type="text"
              name="q"
              value="{{ current_q }}"
@@ -193,7 +205,7 @@
              style="max-width:400px;">
       <button type="submit" class="app-btn app-btn--secondary">検索</button>
       {% if current_q %}
-        <a href="{% url 'activities:activity_persons_manage' pk=activity.id %}{% if is_wizard %}?wizard=1{% endif %}" class="app-btn app-btn--ghost">クリア</a>
+        <a href="{% url 'deals:deal_members' pk=deal.id %}{% if is_wizard %}?wizard=1{% endif %}" class="app-btn app-btn--ghost">クリア</a>
       {% endif %}
     </form>
 
@@ -218,13 +230,12 @@
               {% for p in candidate_persons %}
                 <tr>
                   <td style="text-align:center;">
-                    <form method="post" action="{% url 'activities:activity_add_person' pk=activity.id %}" style="margin:0; display:inline;">
+                    <form method="post" action="{% url 'deals:deal_add_person' pk=deal.id %}" style="display:inline; margin:0;">
                       {% csrf_token %}
-                      <input type="hidden" name="next" value="{{ request.get_full_path }}">
                       <input type="hidden" name="person" value="{{ p.id }}">
                       <input type="hidden" name="role" value="attendee">
-                      <input type="hidden" name="memo" value="">
-                      <button type="submit" class="app-btn app-btn--primary app-btn--sm" style="white-space:nowrap;">追加</button>
+                      <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                      <button type="submit" class="app-btn app-btn--primary app-btn--xs">追加</button>
                     </form>
                   </td>
                   <td>
@@ -252,17 +263,26 @@
         </div>
       {% else %}
         <div class="app-muted" style="text-align:center; padding:32px 16px;">
-          該当する人物は見つかりませんでした。
+          該当するパーソンが見つかりませんでした
         </div>
       {% endif %}
     {% endif %}
   </section>
 
-  {% if is_wizard %}
-    <div class="app-action-area" style="margin-top:24px; display:flex; justify-content:flex-end;">
-      {% url 'activities:activity_users_manage' pk=activity.id as next_step_url %}
-      <a href="{% append_back_url next_step_url|add:'?wizard=1' back %}" class="app-btn app-btn--primary" style="min-width:120px; text-align:center;">次へ</a>
-    </div>
-  {% endif %}
+  {# 画面下部アクションエリア #}
+  <div class="app-action-area" style="display:flex; justify-content:flex-end; gap:8px; margin-top:24px; padding-top:16px; border-top:1px solid var(--app-border, #e2e8f0);">
+    {% if is_wizard %}
+      {% url 'deals:deal_detail' pk=deal.id as finish_url %}
+      <a href="{% append_back_url finish_url back %}" class="app-btn app-btn--ghost">今回はスキップして完了</a>
+      <a href="{% append_back_url finish_url back %}" class="app-btn app-btn--primary">設定を完了して案件詳細へ</a>
+    {% else %}
+      {% back_all_link back %}
+      {% if back.back_exist %}
+        {% back_link back %}
+      {% else %}
+        <a href="{{ deal_detail_url }}" class="app-btn app-btn--secondary">戻る</a>
+      {% endif %}
+    {% endif %}
+  </div>
 </div>
 {% endblock %}

@@ -1,0 +1,5 @@
+{# 活動管理サイドバー部品（include 専用）。app_base.html から呼ばれる。 #}
+<nav class="app-sidebar" aria-label="活動管理メニュー">
+  <div class="app-sidebar__section-title">活動管理</div>
+  <a href="{% url 'activities:activity_list' %}" {% if active_menu == 'activities:activity_list' %}class="is-active"{% endif %}>活動一覧</a>
+</nav>

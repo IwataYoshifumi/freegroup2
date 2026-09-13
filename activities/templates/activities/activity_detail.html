@@ -1,4 +1,4 @@
-{% extends "deals/app_base.html" %}
+{% extends "activities/app_base.html" %}
 {% load back_tags %}
 
 {% block title %}活動詳細 — FreeGroup2{% endblock %}
@@ -175,19 +175,19 @@
             {% for ap in activity_persons %}
               <tr>
                 <td style="word-break: break-word; overflow: hidden; text-overflow: ellipsis;">
-                  {% if ap.person.primary_contact and ap.person.primary_contact.company %}
-                    {% url 'companies:company_detail' pk=ap.person.primary_contact.company.id as ap_company_url %}
-                    <a href="{% append_back_url ap_company_url back %}">{{ ap.person.primary_contact.company.organization }}</a>
-                  {% elif ap.person.primary_contact and ap.person.primary_contact.organization %}
-                    {{ ap.person.primary_contact.organization }}
+                  {% if ap.person.effective_company %}
+                    {% url 'companies:company_detail' pk=ap.person.effective_company.id as ap_company_url %}
+                    <a href="{% append_back_url ap_company_url back %}">{{ ap.person.effective_company.organization }}</a>
+                  {% elif ap.person.effective_company_name %}
+                    {{ ap.person.effective_company_name }}
                   {% else %}-{% endif %}
                 </td>
                 <td style="word-break: break-word; overflow: hidden; text-overflow: ellipsis;">
-                  {{ ap.person.primary_contact.department|default:"-" }}
+                  {{ ap.person.effective_department|default:"-" }}
                 </td>
                 <td style="word-break: break-word; overflow: hidden; text-overflow: ellipsis;">
-                  {% url 'persons:person_detail' pk=ap.person.id as ap_person_url %}
-                  <a href="{% append_back_url ap_person_url back %}" style="font-weight:600;">{{ ap.person }}</a>
+                  {% url 'persons:person_detail' pk=ap.person.effective_person.id as ap_person_url %}
+                  <a href="{% append_back_url ap_person_url back %}" style="font-weight:600;">{{ ap.person.display_name }}</a>
                 </td>
                 <td style="word-break: break-word; overflow: hidden; text-overflow: ellipsis;">
                   <span class="app-status-badge">{{ ap.get_role_display }}</span>

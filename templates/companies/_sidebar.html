@@ -1,0 +1,13 @@
+{# 会社管理サイドバー部品（include 専用）。app_base.html から呼ばれる。 #}
+<nav class="app-sidebar" aria-label="会社管理メニュー">
+  <div class="app-sidebar__section-title">会社管理</div>
+  <a href="{% url 'companies:company_list' %}" {% if active_menu == 'companies:company_list' %}class="is-active"{% endif %}>会社一覧</a>
+  {% if perms.companies.merge_company %}
+    <a href="{% url 'companies:company_candidate_list' %}" {% if active_menu == 'companies:company_candidate_list' or active_menu == 'companies:candidate_list' %}class="is-active"{% endif %}>
+      重複会社候補
+      {% if company_duplicate_count > 0 %}
+        <span style="color:#e11d48; margin-left:4px; font-size:10px;">●</span>
+      {% endif %}
+    </a>
+  {% endif %}
+</nav>

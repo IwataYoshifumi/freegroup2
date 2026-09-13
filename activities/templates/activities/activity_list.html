@@ -1,13 +1,14 @@
-{% extends "deals/app_base.html" %}
+{% extends "activities/app_base.html" %}
 {% load back_tags %}
 
 {% block title %}活動一覧 — FreeGroup2{% endblock %}
 
 {% block content %}
+<div class="activity-list-container" style="max-width: 1200px; margin-left: 0; margin-right: auto; width: 100%;">
   {% url 'activities:activity_create' as create_url %}
-  <div class="app-page-header">
+  <div class="app-page-header" style="margin-bottom: 16px;">
     <div>
-      <h1>活動一覧</h1>
+      <h1 style="margin:0;">活動一覧</h1>
     </div>
     <div class="app-action-area">
       {% back_all_link back %}
@@ -15,7 +16,7 @@
     </div>
   </div>
 
-  <div class="app-action-area" style="justify-content:flex-start; margin-bottom:16px; gap:8px;">
+  <div class="app-action-area" style="justify-content:flex-start; margin-bottom:16px; gap:8px; align-items:center;">
     {% if perms.activities.add_activity %}
       <a href="{% append_back_url create_url back %}" class="app-btn app-btn--primary">活動新規作成</a>
     {% endif %}
@@ -24,44 +25,98 @@
   </div>
 
   <section class="app-card" style="margin-bottom:16px;">
-    <form method="get" class="app-filter-form" style="display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end;">
-      <div class="app-form__group" style="margin-bottom:0;">
-        <label class="app-form__label" for="filter-q">キーワード検索</label>
-        <input type="text" id="filter-q" name="q" value="{{ current_q }}" class="app-input" placeholder="内容・場所・案件名・パーソン名">
+    <form method="get" class="app-filter-form" style="display:flex; flex-direction:column; gap:16px;">
+      {# ブロック1：実施期間 #}
+      <div class="app-form__group js-date-range" style="margin-bottom:0;">
+        <label class="app-form__label" style="margin-bottom:6px; font-weight:600;">実施期間</label>
+        <div style="display:flex; flex-direction:column; gap:8px;">
+          <div style="display:flex; gap:8px; align-items:center;">
+            <input type="date" name="occurred_after" value="{{ occurred_after }}" class="app-input js-date-from" style="width:160px;" aria-label="開始日">
+            <span class="app-muted">〜</span>
+            <input type="date" name="occurred_before" value="{{ occurred_before }}" class="app-input js-date-to" style="width:160px;" aria-label="終了日">
+          </div>
+          <div style="display:flex; flex-wrap:wrap; gap:6px; align-items:center;">
+            <button type="button" class="app-btn app-btn--ghost app-btn--xs js-date-quick" data-range="today">今日</button>
+            <button type="button" class="app-btn app-btn--ghost app-btn--xs js-date-quick" data-range="week">今週</button>
+            <button type="button" class="app-btn app-btn--ghost app-btn--xs js-date-quick" data-range="lastweek">先週</button>
+            <button type="button" class="app-btn app-btn--ghost app-btn--xs js-date-quick" data-range="month">今月</button>
+            <button type="button" class="app-btn app-btn--ghost app-btn--xs js-date-quick" data-range="lastmonth">先月</button>
+            <span style="width:1px; height:16px; background:var(--app-border, #e2e8f0); margin:0 2px;"></span>
+            <button type="button" class="app-btn app-btn--ghost app-btn--xs js-date-clear">クリア</button>
+          </div>
+        </div>
       </div>
-      <div class="app-form__group" style="margin-bottom:0;">
-        <label class="app-form__label" for="filter-date">実施日</label>
-        <input type="date" id="filter-date" name="date" value="{{ current_date }}" class="app-input app-input--date">
+
+      {# ブロック2：キーワード検索 #}
+      <div class="app-form__group" style="margin-bottom:0; width:100%;">
+        <label class="app-form__label" for="filter-q" style="font-weight:600;">キーワード検索</label>
+        <input type="text" id="filter-q" name="q" value="{{ current_q }}" class="app-input" style="width:100%; box-sizing:border-box;" placeholder="内容・場所・案件名・会社名・担当者名...">
       </div>
-      <div class="app-form__group" style="margin-bottom:0;">
-        <label class="app-form__label" for="filter-type">活動種別</label>
-        <select id="filter-type" name="activity_type" class="app-select app-input">
-          <option value="">（すべて）</option>
-          {% for code, label in activity_types %}
-            <option value="{{ code }}" {% if current_activity_type == code %}selected{% endif %}>{{ label }}</option>
-          {% endfor %}
-        </select>
+
+      {# ブロック3：絞り込み条件（横並び） #}
+      <div style="display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end;">
+        <div class="app-form__group" style="margin-bottom:0; flex:1; min-width:160px;">
+          <label class="app-form__label" for="filter-user" style="font-weight:600;">実施者</label>
+          <select id="filter-user" name="user_id" class="app-select app-input">
+            <option value="">（すべて）</option>
+            {% for u in users %}
+              <option value="{{ u.id }}" {% if current_user_id == u.id|stringformat:"s" %}selected{% endif %}>
+                {{ u.display_name|default:u.username }}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="app-form__group" style="margin-bottom:0; flex:1; min-width:140px;">
+          <label class="app-form__label" for="filter-type" style="font-weight:600;">活動種別</label>
+          <select id="filter-type" name="activity_type" class="app-select app-input">
+            <option value="">（すべて）</option>
+            {% for code, label in activity_types %}
+              <option value="{{ code }}" {% if current_activity_type == code %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="app-form__group" style="margin-bottom:0; flex:1; min-width:130px;">
+          <label class="app-form__label" for="filter-direction" style="font-weight:600;">方向</label>
+          <select id="filter-direction" name="direction" class="app-select app-input">
+            <option value="">（すべて）</option>
+            {% for code, label in directions %}
+              <option value="{{ code }}" {% if current_direction == code %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="app-form__group" style="margin-bottom:0; flex:1; min-width:140px;">
+          <label class="app-form__label" for="filter-status" style="font-weight:600;">状態</label>
+          <select id="filter-status" name="status" class="app-select app-input">
+            <option value="active" {% if current_status == "active" %}selected{% endif %}>有効な活動</option>
+            <option value="archived" {% if current_status == "archived" %}selected{% endif %}>アーカイブ済み</option>
+            <option value="all" {% if current_status == "all" %}selected{% endif %}>全件</option>
+          </select>
+        </div>
       </div>
-      <div class="app-form__group" style="margin-bottom:0;">
-        <label class="app-form__label" for="filter-direction">方向</label>
-        <select id="filter-direction" name="direction" class="app-select app-input">
-          <option value="">（すべて）</option>
-          {% for code, label in directions %}
-            <option value="{{ code }}" {% if current_direction == code %}selected{% endif %}>{{ label }}</option>
-          {% endfor %}
-        </select>
+
+      {# ブロック4：ソート ＆ 表示件数（横並び） #}
+      <div style="display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end;">
+        <div class="app-form__group" style="margin-bottom:0; width:180px;">
+          <label class="app-form__label" for="filter-sort" style="font-weight:600;">並び順</label>
+          <select id="filter-sort" name="sort" class="app-select app-input">
+            <option value="date_desc" {% if current_sort == "date_desc" %}selected{% endif %}>実施日時（新しい順）</option>
+            <option value="date_asc" {% if current_sort == "date_asc" %}selected{% endif %}>実施日時（古い順）</option>
+          </select>
+        </div>
+        <div class="app-form__group" style="margin-bottom:0; width:120px;">
+          <label class="app-form__label" for="filter-per-page" style="font-weight:600;">表示件数</label>
+          <select id="filter-per-page" name="per_page" class="app-select app-input">
+            <option value="20" {% if current_per_page == "20" %}selected{% endif %}>20件</option>
+            <option value="50" {% if current_per_page == "50" %}selected{% endif %}>50件</option>
+            <option value="100" {% if current_per_page == "100" %}selected{% endif %}>100件</option>
+          </select>
+        </div>
       </div>
-      <div class="app-form__group" style="margin-bottom:0;">
-        <label class="app-form__label" for="filter-status">状態</label>
-        <select id="filter-status" name="status" class="app-select app-input">
-          <option value="active" {% if current_status == "active" %}selected{% endif %}>有効な活動</option>
-          <option value="archived" {% if current_status == "archived" %}selected{% endif %}>アーカイブ済み</option>
-          <option value="all" {% if current_status == "all" %}selected{% endif %}>全件</option>
-        </select>
-      </div>
-      <div style="display:flex; gap:8px;">
-        <button type="submit" class="app-btn app-btn--primary app-btn--sm">絞り込み</button>
-        <a href="{% url 'activities:activity_list' %}" class="app-btn app-btn--secondary app-btn--sm">リセット</a>
+
+      {# ブロック5：アクション（最下部・右寄せ） #}
+      <div style="display:flex; gap:8px; justify-content:flex-end; padding-top:4px;">
+        <button type="submit" class="app-btn app-btn--primary">検索</button>
+        <a href="{% url 'activities:activity_list' %}" class="app-btn app-btn--ghost">リセット</a>
       </div>
     </form>
   </section>
@@ -71,27 +126,27 @@
       <table class="app-table app-table--nowrap">
         <thead>
           <tr>
-            <th style="width:60px;">操作</th>
-            <th>実施日時</th>
-            <th>種別</th>
-            <th>方向</th>
-            <th>実施者</th>
+            <th style="width:72px; min-width:72px; white-space:nowrap; text-align:center;">操作</th>
+            <th style="white-space:nowrap;">実施日時</th>
+            <th style="white-space:nowrap;">種別</th>
+            <th style="white-space:nowrap;">方向</th>
+            <th style="white-space:nowrap;">実施者</th>
             <th>相手方参加者</th>
             <th>関連案件</th>
             <th>場所・URL</th>
-            <th>内容メモ</th>
+            <th style="width:240px; max-width:240px;">内容メモ</th>
           </tr>
         </thead>
         <tbody>
           {% for activity in activities %}
             {% url 'activities:activity_detail' pk=activity.id as detail_url %}
             <tr>
-              <td>
-                <a href="{% append_back_url detail_url back %}" class="app-btn app-btn--ghost app-btn--sm">詳細</a>
+              <td style="white-space:nowrap; text-align:center;">
+                <a href="{% append_back_url detail_url back %}" class="app-btn app-btn--ghost app-btn--sm" style="display:inline-block; white-space:nowrap;" title="詳細">詳細</a>
               </td>
-              <td>{{ activity.occurred_at|date:"Y-m-d H:i" }}</td>
-              <td><span class="app-status-badge">{{ activity.get_activity_type_display }}</span></td>
-              <td>{{ activity.get_direction_display|default:"-" }}</td>
+              <td style="white-space:nowrap;">{{ activity.occurred_at|date:"Y-m-d H:i" }}</td>
+              <td><span class="app-badge app-badge--neutral">{{ activity.get_activity_type_display }}</span></td>
+              <td>{% if activity.direction %}<span class="app-badge app-badge--info">{{ activity.get_direction_display }}</span>{% else %}-{% endif %}</td>
               <td>{{ activity.user|default:"-" }}</td>
               <td>
                 {% for ap in activity.activity_persons.all %}
@@ -100,11 +155,12 @@
               </td>
               <td>
                 {% if activity.deal %}
-                  <a href="{% url 'deals:deal_detail' pk=activity.deal.id %}">{{ activity.deal.name }}</a>
+                  {% url 'deals:deal_detail' pk=activity.deal.id as deal_url %}
+                  <a href="{% append_back_url deal_url back %}" style="font-weight:600; color:var(--app-text, #0f172a); text-decoration:none;">{{ activity.deal.name }}</a>
                 {% else %}-{% endif %}
               </td>
               <td>{{ activity.place|default:"-" }}</td>
-              <td>{{ activity.memo|truncatechars:35|default:"-" }}</td>
+              <td style="max-width:240px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="{{ activity.memo|default:'' }}">{{ activity.memo|default:"-" }}</td>
             </tr>
           {% empty %}
             <tr>
@@ -118,13 +174,80 @@
     {% if is_paginated %}
       <div class="app-pagination" style="display:flex; justify-content:center; gap:8px; margin-top:16px;">
         {% if page_obj.has_previous %}
-          <a href="?page={{ page_obj.previous_page_number }}{% if current_q %}&q={{ current_q }}{% endif %}{% if current_date %}&date={{ current_date }}{% endif %}{% if current_activity_type %}&activity_type={{ current_activity_type }}{% endif %}{% if current_direction %}&direction={{ current_direction }}{% endif %}{% if current_status %}&status={{ current_status }}{% endif %}" class="app-btn app-btn--secondary app-btn--sm">前へ</a>
+          <a href="?page={{ page_obj.previous_page_number }}{% if current_q %}&q={{ current_q }}{% endif %}{% if occurred_after %}&occurred_after={{ occurred_after }}{% endif %}{% if occurred_before %}&occurred_before={{ occurred_before }}{% endif %}{% if current_date %}&date={{ current_date }}{% endif %}{% if current_user_id %}&user_id={{ current_user_id }}{% endif %}{% if current_activity_type %}&activity_type={{ current_activity_type }}{% endif %}{% if current_direction %}&direction={{ current_direction }}{% endif %}{% if current_status %}&status={{ current_status }}{% endif %}{% if current_sort %}&sort={{ current_sort }}{% endif %}{% if current_per_page %}&per_page={{ current_per_page }}{% endif %}{% if current_mode %}&mode={{ current_mode }}{% endif %}" class="app-btn app-btn--secondary app-btn--sm">前へ</a>
         {% endif %}
         <span style="align-self:center; font-size:14px;">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span>
         {% if page_obj.has_next %}
-          <a href="?page={{ page_obj.next_page_number }}{% if current_q %}&q={{ current_q }}{% endif %}{% if current_date %}&date={{ current_date }}{% endif %}{% if current_activity_type %}&activity_type={{ current_activity_type }}{% endif %}{% if current_direction %}&direction={{ current_direction }}{% endif %}{% if current_status %}&status={{ current_status }}{% endif %}" class="app-btn app-btn--secondary app-btn--sm">次へ</a>
+          <a href="?page={{ page_obj.next_page_number }}{% if current_q %}&q={{ current_q }}{% endif %}{% if occurred_after %}&occurred_after={{ occurred_after }}{% endif %}{% if occurred_before %}&occurred_before={{ occurred_before }}{% endif %}{% if current_date %}&date={{ current_date }}{% endif %}{% if current_user_id %}&user_id={{ current_user_id }}{% endif %}{% if current_activity_type %}&activity_type={{ current_activity_type }}{% endif %}{% if current_direction %}&direction={{ current_direction }}{% endif %}{% if current_status %}&status={{ current_status }}{% endif %}{% if current_sort %}&sort={{ current_sort }}{% endif %}{% if current_per_page %}&per_page={{ current_per_page }}{% endif %}{% if current_mode %}&mode={{ current_mode }}{% endif %}" class="app-btn app-btn--secondary app-btn--sm">次へ</a>
         {% endif %}
       </div>
     {% endif %}
   </section>
+</div>
+
+<script>
+  (function () {
+    function init() {
+      var wrap = document.querySelector('.js-date-range');
+      if (!wrap) return;
+      var fromEl = wrap.querySelector('.js-date-from');
+      var toEl = wrap.querySelector('.js-date-to');
+      if (!fromEl || !toEl) return;
+
+      function fmt(d) {
+        return d.getFullYear() + '-' +
+          String(d.getMonth() + 1).padStart(2, '0') + '-' +
+          String(d.getDate()).padStart(2, '0');
+      }
+      function setRange(from, to) {
+        fromEl.value = fmt(from);
+        toEl.value = fmt(to);
+      }
+
+      Array.prototype.slice.call(wrap.querySelectorAll('.js-date-quick')).forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var now = new Date();
+          var y = now.getFullYear(), m = now.getMonth(), d = now.getDate();
+          switch (btn.getAttribute('data-range')) {
+            case 'today':
+              setRange(new Date(y, m, d), new Date(y, m, d));
+              break;
+            case 'week': {
+              var offset = (now.getDay() + 6) % 7;   // 月曜起点（Mon=0 … Sun=6）
+              var mon = new Date(y, m, d - offset);
+              setRange(mon, new Date(mon.getFullYear(), mon.getMonth(), mon.getDate() + 6));
+              break;
+            }
+            case 'lastweek': {
+              var offsetL = (now.getDay() + 6) % 7;
+              var lastMon = new Date(y, m, d - offsetL - 7);
+              setRange(lastMon, new Date(lastMon.getFullYear(), lastMon.getMonth(), lastMon.getDate() + 6));
+              break;
+            }
+            case 'month':
+              setRange(new Date(y, m, 1), new Date(y, m + 1, 0));
+              break;
+            case 'lastmonth':
+              setRange(new Date(y, m - 1, 1), new Date(y, m, 0));
+              break;
+          }
+        });
+      });
+
+      var clearBtn = wrap.querySelector('.js-date-clear');
+      if (clearBtn) {
+        clearBtn.addEventListener('click', function () {
+          fromEl.value = '';
+          toEl.value = '';
+        });
+      }
+    }
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', init);
+    } else {
+      init();
+    }
+  })();
+</script>
 {% endblock %}

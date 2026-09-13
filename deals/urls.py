@@ -11,11 +11,13 @@ from deals.views import (
     DealDeleteUserView,
     DealDetailView,
     DealListView,
+    DealMembersView,
     DealPersonManageView,
     DealReassignOwnerView,
     DealReassignPrimaryPersonView,
     DealUpdateView,
     DealUserManageView,
+    DealAttachmentManageView,
 )
 
 app_name = "deals"
@@ -34,6 +36,7 @@ urlpatterns = [
         name="deal_reassign_primary_person",
     ),
     path("<uuid:pk>/archive/", DealArchiveView.as_view(), name="deal_archive"),
+    path("<uuid:pk>/members/", DealMembersView.as_view(), name="deal_members"),
     path("<uuid:pk>/persons/manage/", DealPersonManageView.as_view(), name="deal_persons_manage"),
     path("<uuid:pk>/persons/add/", DealAddPersonView.as_view(), name="deal_add_person"),
     path(
@@ -48,4 +51,5 @@ urlpatterns = [
         DealDeleteUserView.as_view(),
         name="deal_delete_user",
     ),
+    path("<uuid:pk>/attachments/manage/", DealAttachmentManageView.as_view(), name="deal_attachments_manage"),
 ]

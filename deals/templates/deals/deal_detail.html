@@ -177,8 +177,8 @@
       {# カード内下部: メタ情報 #}
       <div style="display:flex; justify-content:flex-end; align-items:center; flex-wrap:wrap; gap:16px; margin-top:4px; padding-top:8px; border-top:1px solid var(--app-border, #f1f5f9); font-size:11px; color:var(--app-muted, #94a3b8);">
         {% if deal.primary_person %}
-          {% url 'persons:person_detail' pk=deal.primary_person.id as primary_person_url %}
-          <div>相手方主担当: <a href="{% append_back_url primary_person_url back %}" style="color:var(--app-muted, #64748b);">{{ deal.primary_person }}</a></div>
+          {% url 'persons:person_detail' pk=deal.primary_person.effective_person.id as primary_person_url %}
+          <div>相手方主担当: <a href="{% append_back_url primary_person_url back %}" style="color:var(--app-muted, #64748b);">{{ deal.primary_person.display_name }}</a></div>
         {% endif %}
         <div>作成者: {{ deal.created_by.display_name|default:"-" }}</div>
         <div>更新日時: {{ deal.updated_at|date:"Y-m-d H:i" }}</div>
@@ -237,21 +237,21 @@
             {% for dp in deal_persons %}
               <tr>
                 <td style="word-break: break-word; overflow: hidden; text-overflow: ellipsis;">
-                  {% if dp.person.primary_contact and dp.person.primary_contact.company %}
-                    {% url 'companies:company_detail' pk=dp.person.primary_contact.company.id as dp_company_url %}
-                    <a href="{% append_back_url dp_company_url back %}">{{ dp.person.primary_contact.company.organization }}</a>
-                  {% elif dp.person.primary_contact and dp.person.primary_contact.organization %}
-                    {{ dp.person.primary_contact.organization }}
+                  {% if dp.person.effective_company %}
+                    {% url 'companies:company_detail' pk=dp.person.effective_company.id as dp_company_url %}
+                    <a href="{% append_back_url dp_company_url back %}">{{ dp.person.effective_company.organization }}</a>
+                  {% elif dp.person.effective_company_name %}
+                    {{ dp.person.effective_company_name }}
                   {% else %}
                     -
                   {% endif %}
                 </td>
                 <td style="word-break: break-word; overflow: hidden; text-overflow: ellipsis;">
-                  {{ dp.person.primary_contact.department|default:"-" }}
+                  {{ dp.person.effective_department|default:"-" }}
                 </td>
                 <td style="word-break: break-word; overflow: hidden; text-overflow: ellipsis;">
-                  {% url 'persons:person_detail' pk=dp.person.id as dp_person_url %}
-                  <a href="{% append_back_url dp_person_url back %}" style="font-weight:600;">{{ dp.person }}</a>
+                  {% url 'persons:person_detail' pk=dp.person.effective_person.id as dp_person_url %}
+                  <a href="{% append_back_url dp_person_url back %}" style="font-weight:600;">{{ dp.person.display_name }}</a>
                 </td>
                 <td style="word-break: break-word; overflow: hidden; text-overflow: ellipsis;">
                   <span class="app-status-badge">{{ dp.get_role_display }}</span>

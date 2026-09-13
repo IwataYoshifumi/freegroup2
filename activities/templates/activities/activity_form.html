@@ -1,4 +1,4 @@
-{% extends "deals/app_base.html" %}
+{% extends "activities/app_base.html" %}
 {% load back_tags %}
 
 {% block title %}{% if is_create or request.GET.wizard == "1" or not form.instance.pk %}活動記録作成 (1/4) 基本情報 — FreeGroup2{% else %}活動編集 — FreeGroup2{% endif %}{% endblock %}

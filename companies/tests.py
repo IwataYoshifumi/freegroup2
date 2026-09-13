@@ -940,6 +940,50 @@ class CompanyDetailActionButtonsTests(TestCase):
         pattern_act = rf'href="({re.escape(act_create_base)}\?company={self.company.pk}&amp;back_stack=[^"]+|{re.escape(act_create_base)}\?company={self.company.pk}&back_stack=[^"]+)"\s+class="app-btn app-btn--primary app-btn--sm">\s*活動記録\s*</a>'
         self.assertRegex(html, pattern_act)
 
+    def test_company_detail_table_links_have_back_stack(self):
+        """会社詳細テーブル内の案件・活動・コンタクトの各詳細リンクに back_stack が付与されていること。"""
+        from deals.models import Deal
+        from activities.models import Activity, ActivityType
+        from contacts.models import Contact
+        from persons.models import Person
+
+        person = Person.objects.create()
+        contact = Contact.objects.create(
+            person=person,
+            company=self.company,
+            last_name="佐藤",
+            first_name="花子",
+        )
+        deal = Deal.objects.create(
+            name="テスト関連案件",
+            company=self.company,
+            owner=self.user,
+        )
+        activity = Activity.objects.create(
+            deal=deal,
+            activity_type=ActivityType.VISIT,
+            occurred_at=self.company.created_at,
+            user=self.user,
+            memo="テスト活動メモ",
+        )
+
+        url = reverse("companies:company_detail", kwargs={"pk": self.company.pk})
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode("utf-8")
+
+        # 案件詳細リンク（案件名 & 詳細ボタン）に back_stack が含まれる
+        deal_detail_url = reverse("deals:deal_detail", kwargs={"pk": deal.pk})
+        self.assertIn(f'href="{deal_detail_url}?back_stack=', html)
+
+        # 活動詳細リンク（詳細ボタン）に back_stack が含まれる
+        act_detail_url = reverse("activities:activity_detail", kwargs={"pk": activity.pk})
+        self.assertIn(f'href="{act_detail_url}?back_stack=', html)
+
+        # コンタクト詳細リンク（氏名 & 詳細ボタン）に back_stack が含まれる
+        contact_detail_url = reverse("contacts:contact_detail", kwargs={"pk": contact.pk})
+        self.assertIn(f'href="{contact_detail_url}?back_stack=', html)
+
 
 
 

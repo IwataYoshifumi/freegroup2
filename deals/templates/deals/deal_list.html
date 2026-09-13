@@ -4,6 +4,7 @@
 {% block title %}案件一覧 — FreeGroup2{% endblock %}
 
 {% block content %}
+<div class="deal-list-container" style="max-width: 1200px; margin-left: 0; margin-right: auto; width: 100%;">
   {% url 'deals:deal_create' as create_url %}
   <div class="app-page-header">
     <div>
@@ -61,8 +62,8 @@
             <th>会社名</th>
             <th>相手方主担当</th>
             <th>ステージ</th>
-            <th>確度</th>
-            <th>金額</th>
+            <th style="text-align: right;">確度</th>
+            <th style="text-align: right; font-variant-numeric: tabular-nums;">金額</th>
             <th>社内担当</th>
             <th>最終接触日</th>
           </tr>
@@ -75,7 +76,7 @@
                 <a href="{% append_back_url detail_url back %}" class="app-btn app-btn--ghost app-btn--sm" style="display:inline-block; white-space:nowrap;" title="詳細">詳細</a>
               </td>
               <td>
-                <a href="{% append_back_url detail_url back %}" style="font-weight:600; color:var(--app-color-primary);">{{ deal.name }}</a>
+                <a href="{% append_back_url detail_url back %}" style="font-weight: 600; color: var(--app-text, #0f172a); text-decoration: none;">{{ deal.name }}</a>
               </td>
               <td>
                 {% if deal.company %}
@@ -88,13 +89,13 @@
                 {% else %}-{% endif %}
               </td>
               <td>
-                <span class="app-status-badge">{{ deal.get_stage_display }}</span>
+                <span class="app-badge app-badge--neutral">{{ deal.get_stage_display }}</span>
               </td>
-              <td>
+              <td style="text-align: right;">
                 {% if deal.probability is not None %}{{ deal.probability }}%{% else %}-{% endif %}
               </td>
-              <td>
-                {% if deal.amount is not None %}¥{{ deal.amount|floatformat:0 }}{% else %}-{% endif %}
+              <td style="text-align: right; font-variant-numeric: tabular-nums;">
+                {% if deal.amount is not None %}¥{{ deal.amount|floatformat:"0g" }}{% else %}-{% endif %}
               </td>
               <td>{{ deal.owner|default:"-" }}</td>
               <td>
@@ -124,4 +125,5 @@
       </div>
     {% endif %}
   </section>
+</div>
 {% endblock %}

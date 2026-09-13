@@ -67,15 +67,137 @@ class Person(models.Model):
             ("link_user", "User-Person 紐付けを設定できる"),
         ]
 
+    @property
+    def display_name(self):
+        """表示用氏名。primary_contact、配下Contact、マージ先Personから安全に解決する。"""
+        contact = self.effective_contact
+        if contact:
+            if contact.full_name:
+                return contact.full_name
+            name_parts = [p for p in [contact.last_name, contact.first_name] if p]
+            if name_parts:
+                return " ".join(name_parts)
+            if contact.display_name:
+                return contact.display_name
+        if self.status == self.Status.MERGED and self.merged_into_id:
+            try:
+                surviving = self.get_surviving_person()
+                if surviving and surviving.id != self.id:
+                    return surviving.display_name
+            except Exception:
+                pass
+        return "名称未設定の人物"
+
+    @property
+    def effective_person(self):
+        """マージ済みの場合は統合先（surviving root）を返し、それ以外は自身を返す。"""
+        if self.status == self.Status.MERGED and self.merged_into_id:
+            try:
+                return self.get_surviving_person()
+            except Exception:
+                pass
+        return self
+
+    @property
+    def effective_contact(self):
+        """有効なContact（primary_contact または最新Contact）。マージ済みの場合は統合先から取得。"""
+        eff = self.effective_person
+        if eff.primary_contact:
+            return eff.primary_contact
+        return eff.contact_set.order_by("-created_at").first()
+
+    @property
+    def effective_company(self):
+        """所属会社（Companyインスタンス）。マージ先も探索。"""
+        contact = self.effective_contact
+        return contact.company if contact else None
+
+    @property
+    def effective_company_name(self):
+        """会社名文字列。マージ先も探索。"""
+        contact = self.effective_contact
+        if not contact:
+            return ""
+        if contact.company:
+            return contact.company.organization
+        return contact.organization or ""
+
+    @property
+    def effective_department(self):
+        """部署名文字列。マージ先も探索。"""
+        contact = self.effective_contact
+        return contact.department if contact else ""
+
     def __str__(self):
-        contact = self.contact_set.order_by("-created_at").first()
-        if contact and contact.full_name:
-            return contact.full_name
-        return f"Person {self.id}"
+        return self.display_name
 
     # ------------------------------------------------------------------
     # インスタンスメソッド（仕様書 §10.4.1）
     # ------------------------------------------------------------------
+
+    def transfer_relations_to(self, surviving_person):
+        """自身（merged_person）に紐づく Deal / Activity 関連を surviving_person に付け替える。
+
+        1. Deal.primary_person:
+           案件の主担当パーソンが self の場合は surviving_person に更新。
+        2. DealPerson:
+           self に紐づく DealPerson を surviving_person へ移行。
+           移行先の案件に既に surviving_person の DealPerson が存在する場合は重複を削除。
+        3. ActivityPerson:
+           self に紐づく ActivityPerson を surviving_person へ移行。
+           移行先のアクティビティに既に surviving_person の ActivityPerson が存在する場合は、
+           重複を防止するため一方を削除（必要に応じて role をマージ）。
+        """
+        from deals.models import Deal, DealPerson, PersonRole
+        from activities.models import ActivityPerson
+
+        # 1. Deal.primary_person の付け替え
+        deals_as_primary = Deal.objects.filter(primary_person=self)
+        for deal in deals_as_primary:
+            deal.primary_person = surviving_person
+            deal.save(update_fields=["primary_person", "updated_at"])
+            # primary_person と同じ Person の DealPerson が存在する場合は削除（制約違反回避）
+            DealPerson.objects.filter(deal=deal, person=surviving_person).delete()
+
+        # 2. DealPerson の付け替え・重複削除
+        for dp in list(self.deal_persons.select_related("deal").all()):
+            deal = dp.deal
+            if deal.primary_person_id == surviving_person.id:
+                dp.delete()
+                continue
+            if DealPerson.objects.filter(deal=deal, person=surviving_person).exists():
+                dp.delete()
+            else:
+                dp.person = surviving_person
+                dp.save(update_fields=["person"])
+
+        # 3. ActivityPerson の付け替え・重複削除・roleマージ
+        role_priority = {
+            PersonRole.DECISION_MAKER: 50,
+            PersonRole.CONTACT_WINDOW: 40,
+            PersonRole.TECHNICAL: 30,
+            PersonRole.ATTENDEE: 20,
+            PersonRole.OTHER: 10,
+        }
+        for ap in list(self.activity_persons.select_related("activity").all()):
+            act = ap.activity
+            target_ap = ActivityPerson.objects.filter(activity=act, person=surviving_person).first()
+            if target_ap is not None:
+                source_score = role_priority.get(ap.role, 0)
+                target_score = role_priority.get(target_ap.role, 0)
+                updates = []
+                if source_score > target_score:
+                    target_ap.role = ap.role
+                    updates.append("role")
+                if not target_ap.memo and ap.memo:
+                    target_ap.memo = ap.memo
+                    updates.append("memo")
+                if updates:
+                    target_ap.save(update_fields=updates)
+                ap.delete()
+            else:
+                ap.person = surviving_person
+                ap.save(update_fields=["person"])
 
     def mark_as_merged(self, surviving_person):
         """自身の状態遷移：merged 化（仕様書 §10.4.1）。
@@ -86,6 +208,7 @@ class Person(models.Model):
 
         Contact 側のフィールド（status / person FK）には一切触らない（仕様書 §10.2）。
         Contact の付け替えは transfer_contacts_to() の責務。
+        Deal / Activity 関連の付け替えは transfer_relations_to() で実行。
         """
         with transaction.atomic():
             self.status = self.Status.MERGED
@@ -94,6 +217,7 @@ class Person(models.Model):
             self.save(
                 update_fields=["status", "merged_into", "primary_contact", "updated_at"]
             )
+            self.transfer_relations_to(surviving_person)
 
     def mark_as_archived(self):
         """自身の状態遷移：archived 化（仕様書 §10.4.1）。
