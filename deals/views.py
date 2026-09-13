@@ -132,7 +132,7 @@ class DealDetailView(LoginRequiredMixin, DetailView):
             .order_by("-occurred_at")
         )
         context["deal_persons"] = deal.deal_persons.select_related(
-            "person__primary_contact"
+            "person__primary_contact__company"
         ).all()
         context["deal_users"] = deal.deal_users.select_related("user").all()
         context["attachments"] = deal.attachments.select_related("uploaded_by").all()
@@ -164,6 +164,16 @@ class DealCreateView(LoginRequiredMixin, PermissionRequiredMixin, CreateView):
         initial = super().get_initial()
         initial["owner"] = self.request.user
         company_id = self.request.GET.get("company_id") or self.request.GET.get("company")
+        person_id = self.request.GET.get("person") or self.request.GET.get("person_id")
+        if person_id:
+            try:
+                person = Person.objects.select_related("primary_contact__company").filter(pk=person_id).first()
+                if person:
+                    initial["primary_person"] = person.pk
+                    if not company_id and person.primary_contact and person.primary_contact.company_id:
+                        company_id = str(person.primary_contact.company_id)
+            except Exception:
+                pass
         if company_id:
             initial["company"] = company_id
         lead_source = self.request.GET.get("lead_source")
@@ -189,23 +199,35 @@ class DealCreateView(LoginRequiredMixin, PermissionRequiredMixin, CreateView):
         deal.updated_by = self.request.user
         if not deal.owner_id:
             deal.owner = self.request.user
+
+        person_id = self.request.POST.get("person") or self.request.GET.get("person") or self.request.GET.get("person_id")
+        person_obj = None
+        if person_id:
+            try:
+                person_obj = Person.objects.select_related("primary_contact__company").filter(pk=person_id).first()
+            except Exception:
+                pass
+
+        if person_obj:
+            if not deal.primary_person_id:
+                deal.primary_person = person_obj
+            if not deal.company_id and person_obj.primary_contact and person_obj.primary_contact.company_id:
+                deal.company = person_obj.primary_contact.company
+
         deal.save()
         self.object = deal
 
         # 関連 Person (DealPerson) の自動紐付け
-        person_id = self.request.POST.get("person") or self.request.GET.get("person") or self.request.GET.get("person_id")
-        if person_id:
+        if person_obj:
             try:
-                person_obj = Person.objects.filter(pk=person_id).first()
-                if person_obj:
-                    defaults = {"role": PersonRole.CONTACT_WINDOW}
-                    if hasattr(DealPerson, "is_primary"):
-                        defaults["is_primary"] = True
-                    DealPerson.objects.get_or_create(
-                        deal=deal,
-                        person=person_obj,
-                        defaults=defaults,
-                    )
+                defaults = {"role": PersonRole.CONTACT_WINDOW}
+                if hasattr(DealPerson, "is_primary"):
+                    defaults["is_primary"] = True
+                DealPerson.objects.get_or_create(
+                    deal=deal,
+                    person=person_obj,
+                    defaults=defaults,
+                )
             except Exception:
                 pass
 
@@ -224,15 +246,19 @@ class DealCreateView(LoginRequiredMixin, PermissionRequiredMixin, CreateView):
         context["back"] = BackNavigator(self.request)
         context["active_menu"] = "deals:deal_list"
         company_val = self.request.POST.get("company") or self.request.GET.get("company") or self.request.GET.get("company_id")
-        if company_val:
-            try:
-                context["selected_company"] = Company.objects.filter(pk=company_val).first()
-            except Exception:
-                pass
         person_val = self.request.POST.get("person") or self.request.GET.get("person") or self.request.GET.get("person_id")
         if person_val:
             try:
-                context["selected_person"] = Person.objects.select_related("primary_contact").filter(pk=person_val).first()
+                selected_person = Person.objects.select_related("primary_contact__company").filter(pk=person_val).first()
+                if selected_person:
+                    context["selected_person"] = selected_person
+                    if not company_val and selected_person.primary_contact and selected_person.primary_contact.company:
+                        company_val = str(selected_person.primary_contact.company_id)
+            except Exception:
+                pass
+        if company_val:
+            try:
+                context["selected_company"] = Company.objects.filter(pk=company_val).first()
             except Exception:
                 pass
         return context
@@ -381,6 +407,34 @@ class DealReassignOwnerView(LoginRequiredMixin, FormView):
         context["deal"] = self.deal
         context["back"] = BackNavigator(self.request)
         context["active_menu"] = "deals:deal_list"
+
+        q = self.request.GET.get("q", "").strip()
+        if q:
+            User = get_user_model()
+            user_qs = (
+                User.objects.filter(is_active=True)
+                .select_related("person__primary_contact")
+                .order_by("username")
+            )
+            user_qs = list(
+                user_qs.filter(
+                    Q(username__icontains=q)
+                    | Q(first_name__icontains=q)
+                    | Q(last_name__icontains=q)
+                    | Q(email__icontains=q)
+                    | Q(person__primary_contact__full_name__icontains=q)
+                    | Q(person__primary_contact__last_name__icontains=q)
+                    | Q(person__primary_contact__first_name__icontains=q)
+                    | Q(person__contact__full_name__icontains=q)
+                    | Q(person__contact__last_name__icontains=q)
+                    | Q(person__contact__first_name__icontains=q)
+                ).distinct()[:50]
+            )
+        else:
+            user_qs = []
+
+        context["candidate_users"] = user_qs
+        context["current_q"] = q
         return context
 
 

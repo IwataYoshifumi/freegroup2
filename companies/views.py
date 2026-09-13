@@ -83,7 +83,9 @@ class CompanyDetailView(LoginRequiredMixin, DetailView):
         )
         context["can_edit"] = self.request.user.has_perm("companies.change_company")
         context["can_archive"] = self.request.user.has_perm("companies.change_company")
-        context["back"] = BackNavigator(self.request)
+        back = BackNavigator(self.request)
+        back.push_current("会社詳細", ["page"])
+        context["back"] = back
         context["active_menu"] = "companies:company_list"
         return context
 

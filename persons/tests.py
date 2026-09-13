@@ -1743,6 +1743,187 @@ class PersonListSortTests(TestCase):
         self.assertIn('value="updated_at"', body)
 
 
+class PersonDetailActionButtonsTests(TestCase):
+    """パーソン詳細画面の「新規案件」「活動記録」ボタンの表示・HIG是正および関連案件・活動履歴セクションを検証。"""
+
+    def setUp(self):
+        from activities.models import Activity, ActivityPerson, ActivityType
+        from deals.models import Deal, DealPerson, PersonRole
+        from django.utils import timezone
+
+        self.user = get_user_model().objects.create_user(
+            username="person_btn_tester", password="password"
+        )
+        _grant_view_person(self.user)
+        self.client.login(username="person_btn_tester", password="password")
+
+        self.person = Person.objects.create(status=Person.Status.ACTIVE)
+        self.contact = Contact.objects.create(
+            person=self.person,
+            last_name="佐藤",
+            first_name="花子",
+            status=Contact.Status.ACTIVE,
+        )
+        self.person.primary_contact = self.contact
+        self.person.save(update_fields=["primary_contact"])
+
+        # 関連案件
+        self.deal1 = Deal.objects.create(
+            name="花子主担当案件",
+            primary_person=self.person,
+            owner=self.user,
+        )
+        self.deal2 = Deal.objects.create(
+            name="花子関係者案件",
+            owner=self.user,
+        )
+        DealPerson.objects.create(
+            deal=self.deal2,
+            person=self.person,
+            role=PersonRole.DECISION_MAKER,
+        )
+
+        # 関連活動
+        self.activity = Activity.objects.create(
+            deal=self.deal1,
+            activity_type=ActivityType.VISIT,
+            occurred_at=timezone.now(),
+            user=self.user,
+            memo="花子様訪問商談",
+        )
+        ActivityPerson.objects.create(
+            activity=self.activity,
+            person=self.person,
+            role=PersonRole.ATTENDEE,
+        )
+
+    def test_person_detail_sections_and_action_buttons(self):
+        """person_detail の HTML 内で上部ボタンが撤去され、関連案件・活動履歴セクションに見出しと app-btn--primary ボタンおよびレコードが表示されること。"""
+        import re
+
+        url = reverse("persons:person_detail", kwargs={"pk": self.person.pk})
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode("utf-8")
+
+        # 1. コンテキストに deals および activities が含まれていること
+        self.assertIn("deals", resp.context)
+        self.assertIn("activities", resp.context)
+        deals_list = list(resp.context["deals"])
+        self.assertIn(self.deal1, deals_list)
+        self.assertIn(self.deal2, deals_list)
+        activities_list = list(resp.context["activities"])
+        self.assertIn(self.activity, activities_list)
+
+        # 2. テーブル内に各案件・活動名が表示されていること
+        self.assertIn("花子主担当案件", html)
+        self.assertIn("花子関係者案件", html)
+        self.assertIn("花子様訪問商談", html)
+
+        # 3. 画面上部のアクション帯に新規案件・活動記録ボタンが存在しないこと
+        top_action_area_match = re.search(
+            r'<div style="max-width:1100px; display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:var\(--app-space-sm\);">(.*?)</div>\s*<div style="display:grid;',
+            html,
+            re.DOTALL,
+        )
+        if top_action_area_match:
+            top_action_html = top_action_area_match.group(1)
+            self.assertNotIn("新規案件", top_action_html)
+            self.assertNotIn("活動記録", top_action_html)
+
+        # 4. 「関連案件」「活動履歴」セクション見出しが存在すること
+        self.assertIn("関連案件（2件）", html)
+        self.assertIn("活動履歴（1件）", html)
+
+        # 5. 各セクション見出し横に app-btn--primary の新規案件・活動記録ボタン（「＋」なし）が存在すること
+        deal_create_base = reverse("deals:deal_create")
+        pattern_deal = rf'href="({re.escape(deal_create_base)}\?person={self.person.pk}&amp;back_stack=[^"]+|{re.escape(deal_create_base)}\?person={self.person.pk}&back_stack=[^"]+)"\s+class="app-btn app-btn--primary app-btn--sm">\s*新規案件\s*</a>'
+        self.assertRegex(html, pattern_deal)
+
+        act_create_base = reverse("activities:activity_create")
+        pattern_act = rf'href="({re.escape(act_create_base)}\?person={self.person.pk}&amp;back_stack=[^"]+|{re.escape(act_create_base)}\?person={self.person.pk}&back_stack=[^"]+)"\s+class="app-btn app-btn--primary app-btn--sm">\s*活動記録\s*</a>'
+        self.assertRegex(html, pattern_act)
+
+    def test_person_detail_merge_button_and_edit_icon_layout(self):
+        """マージ候補ボタンがタイトル下部に黄色ボタンで配置され、編集アイコンが氏名直横に配置されること。"""
+        import re
+        from duplicates.models import DuplicateCandidate
+
+        # マージ候補を作成
+        other_person = Person.objects.create(status=Person.Status.ACTIVE)
+        DuplicateCandidate.objects.create(
+            person_a=self.person,
+            person_b=other_person,
+            score=90,
+            rank="A",
+        )
+
+        url = reverse("persons:person_detail", kwargs={"pk": self.person.pk})
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode("utf-8")
+
+        # 1. タイトル下部に黄色ボタン（app-btn--warning app-btn--sm）でマージ候補ボタンが存在すること
+        self.assertRegex(html, r'<a\s+href="[^"]*duplicates[^"]*"\s+class="app-btn app-btn--warning app-btn--sm"[^>]*>\s*マージ候補 1 件\s*</a>')
+
+        # マージ候補ボタンと戻るボタングループが同一フレックス行（justify-content:space-between; align-items:center;）に配置されていること
+        self.assertIn("display:flex; justify-content:space-between; align-items:center;", html)
+
+        # back_stack がある場合に戻るボタンが表示され、同一行内に配置されること
+        from back_navigator.back_navigator import BackNavigator
+        back_nav = BackNavigator(resp.wsgi_request)
+        encoded_stack = back_nav._calc_encode_stack([{"title": "一覧", "url": "/persons/"}])
+        resp_with_back = self.client.get(f"{url}?back_stack={encoded_stack}")
+        html_with_back = resp_with_back.content.decode("utf-8")
+        self.assertIn(">戻る</a>", html_with_back)
+
+        # 2. 氏名表示セル（.app-detail-value）内の検証
+        name_cell_match = re.search(r'<div class="app-detail-label">氏名</div>\s*<div class="app-detail-value"[^>]*>(.*?)</div>\s*</div>', html, re.DOTALL)
+        self.assertIsNotNone(name_cell_match)
+        name_cell_html = name_cell_match.group(1)
+
+        # 氏名セル内にはマージ候補ボタンが存在しないこと
+        self.assertNotIn("マージ候補", name_cell_html)
+
+        # 氏名セル内にインフォアイコン（app-help-icon または bi-info-circle）が存在しないこと（完全撤去）
+        self.assertNotIn("app-help-icon", name_cell_html)
+        self.assertNotIn("bi-info-circle", name_cell_html)
+
+        # 氏名セルの右端エリア（margin-left:auto）には鉛筆アイコンがなく、アーカイブアイコンのみ存在すること
+        right_end_match = re.search(r'<span style="margin-left:auto;[^"]*">(.*?)</span>', name_cell_html, re.DOTALL)
+        self.assertIsNotNone(right_end_match)
+        right_end_html = right_end_match.group(1)
+        self.assertNotIn("bi-pencil-fill", right_end_html)
+        self.assertIn("bi-archive-fill", right_end_html)
+
+        # 氏名セル全体としては鉛筆アイコンが存在すること
+        self.assertIn("bi-pencil-fill", name_cell_html)
+
+    def test_person_detail_sections_empty(self):
+        """紐づく案件・活動がない場合、0件表示と空メッセージが表示されること。"""
+        empty_person = Person.objects.create(status=Person.Status.ACTIVE)
+        contact = Contact.objects.create(
+            person=empty_person,
+            last_name="山田",
+            first_name="太郎",
+            status=Contact.Status.ACTIVE,
+        )
+        empty_person.primary_contact = contact
+        empty_person.save(update_fields=["primary_contact"])
+
+        url = reverse("persons:person_detail", kwargs={"pk": empty_person.pk})
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode("utf-8")
+
+        self.assertIn("関連案件（0件）", html)
+        self.assertIn("紐づく案件はありません。", html)
+        self.assertIn("活動履歴（0件）", html)
+        self.assertIn("紐づく活動履歴はありません。", html)
+
+
+
+
 
 
 

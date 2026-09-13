@@ -280,7 +280,7 @@ class DealReassignOwnerForm(forms.Form):
 
     new_owner = forms.ModelChoiceField(
         queryset=User.objects.filter(is_active=True),
-        widget=forms.Select(attrs={"class": "app-select app-input"}),
+        widget=forms.HiddenInput(),
         label="新担当者（社内）",
     )
 

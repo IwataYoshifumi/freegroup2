@@ -25,6 +25,7 @@ from activities.permissions import (
 )
 from activities.services import archive_activity, get_unfollowed_campaign_persons
 from back_navigator.back_navigator import BackNavigator
+from companies.models import Company
 from deals.models import PersonRole, UserRole
 from mailings.models import Campaign
 from persons.models import Person
@@ -159,6 +160,31 @@ class ActivityCreateView(LoginRequiredMixin, PermissionRequiredMixin, CreateView
     template_name = "activities/activity_form.html"
     permission_required = "activities.add_activity"
 
+    def _get_target_company(self):
+        company_id = (
+            self.request.POST.get("company_id")
+            or self.request.GET.get("company_id")
+            or self.request.GET.get("company")
+        )
+        if company_id:
+            try:
+                return Company.objects.filter(pk=company_id).first()
+            except Exception:
+                pass
+        person_id = (
+            self.request.POST.get("person_id")
+            or self.request.GET.get("person_id")
+            or self.request.GET.get("person")
+        )
+        if person_id:
+            try:
+                person = Person.objects.select_related("primary_contact__company").filter(pk=person_id).first()
+                if person and person.primary_contact and person.primary_contact.company:
+                    return person.primary_contact.company
+            except Exception:
+                pass
+        return None
+
     def get_initial(self):
         initial = super().get_initial()
         deal_id = self.request.GET.get("deal_id") or self.request.GET.get("deal")
@@ -168,6 +194,13 @@ class ActivityCreateView(LoginRequiredMixin, PermissionRequiredMixin, CreateView
         if campaign_id:
             initial["campaign"] = campaign_id
         return initial
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        company = self._get_target_company()
+        if company:
+            kwargs["company"] = company
+        return kwargs
 
     def get_success_url(self):
         back = BackNavigator(self.request)
@@ -212,9 +245,23 @@ class ActivityCreateView(LoginRequiredMixin, PermissionRequiredMixin, CreateView
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context["is_create"] = True
-        context["person_id"] = (
-            self.request.GET.get("person_id") or self.request.GET.get("person", "")
+        person_id = (
+            self.request.POST.get("person_id")
+            or self.request.GET.get("person_id")
+            or self.request.GET.get("person", "")
         )
+        context["person_id"] = person_id
+        if person_id:
+            try:
+                context["selected_person"] = Person.objects.select_related("primary_contact__company").filter(pk=person_id).first()
+            except Exception:
+                pass
+
+        company = self._get_target_company()
+        if company:
+            context["selected_company"] = company
+            context["company_id"] = str(company.id)
+
         context["back"] = BackNavigator(self.request)
         context["active_menu"] = "activities:activity_list"
         return context

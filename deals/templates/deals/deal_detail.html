@@ -7,7 +7,7 @@
 <div class="deal-detail-container" style="max-width: 1040px; margin-left: 0; margin-right: auto; width: 100%;">
   <!-- 画面上部ヘッダー（タイトル・操作ボタン・戻る） -->
   <div style="margin-bottom: 16px;">
-    <div class="app-page-header">
+    <div class="app-page-header" style="margin-bottom: 8px;">
       <div>
         <h1>案件詳細</h1>
         <div style="font-size:13px; color:var(--app-muted); margin-top:4px;">
@@ -17,27 +17,19 @@
           {% endif %}
         </div>
       </div>
-      <div class="app-action-area">
+    </div>
+
+    <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap;">
+      <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+        {% if can_edit %}
+          {% url 'deals:deal_close' pk=deal.id as close_url %}
+          <a href="{% append_back_url close_url back %}" class="app-btn app-btn--primary">クローズ（受注/失注）</a>
+        {% endif %}
+      </div>
+      <div style="display: flex; align-items: center; gap: 8px; margin-left: auto;">
         {% back_all_link back %}
         {% back_link back %}
       </div>
-    </div>
-
-    <div class="app-action-area" style="justify-content:flex-start; margin-bottom:16px; gap:8px;">
-      {% if can_edit %}
-        {% url 'deals:deal_update' pk=deal.id as edit_url %}
-        <a href="{% append_back_url edit_url back %}" class="app-btn app-btn--success">編集</a>
-        {% url 'deals:deal_close' pk=deal.id as close_url %}
-        <a href="{% append_back_url close_url back %}" class="app-btn app-btn--primary">クローズ（受注/失注）</a>
-      {% endif %}
-      {% if can_reassign_owner %}
-        {% url 'deals:deal_reassign_owner' pk=deal.id as reassign_owner_url %}
-        <a href="{% append_back_url reassign_owner_url back %}" class="app-btn app-btn--secondary">担当者変更</a>
-      {% endif %}
-      {% if can_archive %}
-        {% url 'deals:deal_archive' pk=deal.id as archive_url %}
-        <a href="{% append_back_url archive_url back %}" class="app-btn app-btn--warning">アーカイブ</a>
-      {% endif %}
     </div>
   </div>
 
@@ -45,10 +37,27 @@
   <section class="app-card" style="padding:16px 20px; width: 100%; box-sizing: border-box; margin-bottom: 24px;">
     <div style="display:flex; flex-direction:column; gap:12px;">
 
-      {# 1. 案件名（全幅） #}
-      <div style="display:flex; align-items:baseline; gap:8px; padding-bottom:10px; border-bottom:1px solid var(--app-border, #e5e7eb);">
-        <span style="display:inline-block; min-width:96px; width:96px; font-size:12px; color:var(--app-muted, #64748b); white-space:nowrap;">案件名:</span>
-        <span style="flex:1; word-break:break-word; font-size:16px; font-weight:700; color:var(--app-text, #0f172a);">{{ deal.name }}</span>
+      {# 1. 案件名行（全幅・flex） #}
+      <div style="display:flex; justify-content:space-between; align-items:center; padding-bottom:10px; border-bottom:1px solid var(--app-border, #e5e7eb);">
+        <div style="display:flex; align-items:center; gap:8px; flex:1;">
+          <span style="display:inline-block; min-width:96px; width:96px; font-size:12px; color:var(--app-muted, #64748b); white-space:nowrap;">案件名:</span>
+          <span style="font-size:16px; font-weight:700; color:var(--app-text, #0f172a); word-break:break-word;">{{ deal.name }}</span>
+          {% if can_edit %}
+            {% url 'deals:deal_update' pk=deal.id as edit_url %}
+            <a href="{% append_back_url edit_url back %}" class="app-icon-btn" title="案件を編集" aria-label="案件を編集" style="color:var(--app-text, #0f172a); text-decoration:none; margin-left:4px;">
+              <i class="bi bi-pencil-fill"></i>
+            </a>
+          {% endif %}
+        </div>
+
+        {% if can_archive %}
+          {% url 'deals:deal_archive' pk=deal.id as archive_url %}
+          <div style="margin-left:auto;">
+            <a href="{% append_back_url archive_url back %}" class="app-icon-btn" title="アーカイブ" aria-label="アーカイブ" style="color:var(--app-text, #0f172a); text-decoration:none;">
+              <i class="bi bi-archive-fill"></i>
+            </a>
+          </div>
+        {% endif %}
       </div>
 
       {# 2. 会社（全幅） #}
@@ -56,7 +65,8 @@
         <span style="display:inline-block; min-width:96px; width:96px; font-size:12px; color:var(--app-muted, #64748b); white-space:nowrap;">会社:</span>
         <span style="flex:1; word-break:break-word; font-size:14px; font-weight:600;">
           {% if deal.company %}
-            <a href="{% url 'companies:company_detail' pk=deal.company.id %}">{{ deal.company.organization }}</a>
+            {% url 'companies:company_detail' pk=deal.company.id as company_url %}
+            <a href="{% append_back_url company_url back %}">{{ deal.company.organization }}</a>
           {% else %}
             <span class="app-muted">-</span>
           {% endif %}
@@ -65,9 +75,28 @@
 
       {# 3. 担当者 / ステージ / 確度（3列横並び） #}
       <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:16px; padding-bottom:8px; border-bottom:1px dashed var(--app-border, #f1f5f9);">
-        <div style="display:flex; align-items:baseline; gap:8px;">
+        <div style="display:flex; align-items:center; gap:8px;">
           <span style="display:inline-block; min-width:96px; width:96px; font-size:12px; color:var(--app-muted, #64748b); white-space:nowrap;">担当者:</span>
-          <span style="flex:1; word-break:break-word; font-size:13px; font-weight:500; color:var(--app-text, #0f172a);">{{ deal.owner.display_name|default:"-" }}</span>
+          <div style="display:inline-flex; align-items:center; gap:4px; flex-wrap:wrap;">
+            <span style="word-break:break-word; font-size:13px; font-weight:500; color:var(--app-text, #0f172a);">
+              {{ deal.owner.display_name|default:"-" }}
+            </span>
+            {% if can_reassign_owner %}
+              {% url 'deals:deal_reassign_owner' pk=deal.id as reassign_owner_url %}
+              <details class="owner-reassign-details" style="display:inline-flex; align-items:center; margin-left:2px;">
+                <summary style="cursor:pointer; list-style:none; outline:none; background:none; border:none; padding:0 2px; color:var(--app-muted, #64748b); display:inline-flex; align-items:center;" title="担当者を変更">
+                  <span class="toggle-arrow" style="display:inline-block; font-size:10px; transition:transform 0.2s ease;">▼</span>
+                </summary>
+                <a href="{% append_back_url reassign_owner_url back %}" class="app-btn app-btn--success app-btn--sm" style="margin-left:6px; padding:2px 8px; font-size:11px; line-height:1.4; text-decoration:none; white-space:nowrap;">
+                  担当者を変更
+                </a>
+              </details>
+              <style>
+                .owner-reassign-details summary::-webkit-details-marker { display: none; }
+                .owner-reassign-details[open] .toggle-arrow { transform: rotate(180deg); }
+              </style>
+            {% endif %}
+          </div>
         </div>
         <div style="display:flex; align-items:baseline; gap:8px;">
           <span style="display:inline-block; min-width:96px; width:96px; font-size:12px; color:var(--app-muted, #64748b); white-space:nowrap;">ステージ:</span>
@@ -111,7 +140,14 @@
         </div>
         <div style="display:flex; align-items:baseline; gap:8px;">
           <span style="display:inline-block; min-width:96px; width:96px; font-size:12px; color:var(--app-muted, #64748b); white-space:nowrap;">発生源キャンペーン:</span>
-          <span style="flex:1; word-break:break-word; font-size:13px; color:var(--app-text, #0f172a);">{{ deal.source_campaign|default:"-" }}</span>
+          <span style="flex:1; word-break:break-word; font-size:13px; color:var(--app-text, #0f172a);">
+            {% if deal.source_campaign %}
+              {% url 'mailings:campaign_detail' pk=deal.source_campaign.id as campaign_url %}
+              <a href="{% append_back_url campaign_url back %}">{{ deal.source_campaign.name }}</a>
+            {% else %}
+              -
+            {% endif %}
+          </span>
         </div>
       </div>
 
@@ -141,7 +177,8 @@
       {# カード内下部: メタ情報 #}
       <div style="display:flex; justify-content:flex-end; align-items:center; flex-wrap:wrap; gap:16px; margin-top:4px; padding-top:8px; border-top:1px solid var(--app-border, #f1f5f9); font-size:11px; color:var(--app-muted, #94a3b8);">
         {% if deal.primary_person %}
-          <div>相手方主担当: <a href="{% url 'persons:person_detail' pk=deal.primary_person.id %}" style="color:var(--app-muted, #64748b);">{{ deal.primary_person }}</a></div>
+          {% url 'persons:person_detail' pk=deal.primary_person.id as primary_person_url %}
+          <div>相手方主担当: <a href="{% append_back_url primary_person_url back %}" style="color:var(--app-muted, #64748b);">{{ deal.primary_person }}</a></div>
         {% endif %}
         <div>作成者: {{ deal.created_by.display_name|default:"-" }}</div>
         <div>更新日時: {{ deal.updated_at|date:"Y-m-d H:i" }}</div>
@@ -198,13 +235,21 @@
             {% for dp in deal_persons %}
               <tr>
                 <td style="word-break: break-word; overflow: hidden; text-overflow: ellipsis;">
-                  {{ dp.person.primary_contact.organization|default:"-" }}
+                  {% if dp.person.primary_contact and dp.person.primary_contact.company %}
+                    {% url 'companies:company_detail' pk=dp.person.primary_contact.company.id as dp_company_url %}
+                    <a href="{% append_back_url dp_company_url back %}">{{ dp.person.primary_contact.company.organization }}</a>
+                  {% elif dp.person.primary_contact and dp.person.primary_contact.organization %}
+                    {{ dp.person.primary_contact.organization }}
+                  {% else %}
+                    -
+                  {% endif %}
                 </td>
                 <td style="word-break: break-word; overflow: hidden; text-overflow: ellipsis;">
                   {{ dp.person.primary_contact.department|default:"-" }}
                 </td>
                 <td style="word-break: break-word; overflow: hidden; text-overflow: ellipsis;">
-                  <a href="{% url 'persons:person_detail' pk=dp.person.id %}" style="font-weight:600;">{{ dp.person }}</a>
+                  {% url 'persons:person_detail' pk=dp.person.id as dp_person_url %}
+                  <a href="{% append_back_url dp_person_url back %}" style="font-weight:600;">{{ dp.person }}</a>
                 </td>
                 <td style="word-break: break-word; overflow: hidden; text-overflow: ellipsis;">
                   <span class="app-status-badge">{{ dp.get_role_display }}</span>
@@ -279,8 +324,12 @@
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
       <h2 style="font-size:16px; margin:0;">活動履歴</h2>
       {% if perms.activities.add_activity %}
-        {% url 'activities:activity_create' as create_act_url %}
-        <a href="{% append_back_url create_act_url back %}?deal_id={{ deal.id }}" class="app-btn app-btn--primary app-btn--sm">活動を記録</a>
+        {% url 'activities:activity_create' as create_act_base_url %}
+        {% with deal_id=deal.id|stringformat:"s" %}
+        {% with act_url=create_act_base_url|add:"?deal_id="|add:deal_id %}
+        <a href="{% append_back_url act_url back %}" class="app-btn app-btn--primary app-btn--sm">活動を記録</a>
+        {% endwith %}
+        {% endwith %}
       {% endif %}
     </div>
     <div class="app-table-wrapper">
@@ -310,7 +359,8 @@
               </td>
               <td>{{ activity.memo|truncatechars:40|default:"-" }}</td>
               <td>
-                <a href="{% url 'activities:activity_detail' pk=activity.id %}" class="app-btn app-btn--ghost app-btn--sm">詳細</a>
+                {% url 'activities:activity_detail' pk=activity.id as act_detail_url %}
+                <a href="{% append_back_url act_detail_url back %}" class="app-btn app-btn--ghost app-btn--sm">詳細</a>
               </td>
             </tr>
           {% empty %}
@@ -349,6 +399,7 @@
                 {% if can_edit %}
                   <form method="post" action="{% url 'attachments:attachment_update_memo' pk=att.id %}" style="display:flex; gap:4px; margin:0;">
                     {% csrf_token %}
+                    {% hidden_back_field back %}
                     <input type="text" name="memo" value="{{ att.memo }}" class="app-input" style="padding:2px 6px; font-size:12px; height:28px;">
                     <button type="submit" class="app-btn app-btn--ghost app-btn--sm">保存</button>
                   </form>
@@ -362,6 +413,7 @@
                 {% if perms.attachments.delete_attachment %}
                   <form method="post" action="{% url 'attachments:attachment_delete' pk=att.id %}" style="margin:0;">
                     {% csrf_token %}
+                    {% hidden_back_field back %}
                     <button type="submit" class="app-btn app-btn--ghost app-btn--sm" style="color:var(--app-color-danger, #ef4444);" onclick="return confirm('この添付ファイルを削除しますか？');">削除</button>
                   </form>
                 {% endif %}
@@ -379,6 +431,7 @@
     {% if can_edit and perms.attachments.add_attachment %}
       <form method="post" action="{% url 'attachments:attachment_upload' %}" enctype="multipart/form-data" style="display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end;">
         {% csrf_token %}
+        {% hidden_back_field back %}
         <input type="hidden" name="deal_id" value="{{ deal.id }}">
         <div class="app-form__group" style="margin-bottom:0;">
           <label class="app-form__label">ファイル追加（15MB以下）</label>

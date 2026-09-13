@@ -4,9 +4,13 @@
 {% block title %}案件担当者変更 — {{ deal.name }} — FreeGroup2{% endblock %}
 
 {% block content %}
-  <div class="app-page-header" style="max-width: 840px; margin-left: 0; margin-right: auto; margin-bottom: 16px;">
+<div style="max-width: 960px; margin-left: 0; margin-right: auto;">
+  <div class="app-page-header" style="margin-bottom: 16px;">
     <div>
-      <h1>案件担当者変更：{{ deal.name }}</h1>
+      <div style="font-size:13px; color:var(--app-muted); margin-bottom:4px;">
+        案件: <strong>{{ deal.name }}</strong>
+      </div>
+      <h1>案件担当者変更</h1>
     </div>
     <div class="app-action-area">
       {% back_all_link back %}
@@ -14,26 +18,181 @@
     </div>
   </div>
 
-  <section class="app-card" style="max-width: 840px; margin-left: 0; margin-right: auto;">
-    <p class="app-muted" style="margin-bottom:16px;">
-      現在の社内担当者: <strong>{{ deal.owner|default:"未設定" }}</strong>
-    </p>
+  <section class="app-card" style="margin-bottom: 24px;">
+    {# 1. 【第1段】現在の社内担当者表示 #}
+    <div style="background:var(--app-bg-subtle, #f8fafc); border:1px solid var(--app-border, #e2e8f0); border-radius:8px; padding:12px 16px; margin-bottom:24px; display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+      <span class="app-status-badge" style="background:#e0e7ff; color:#3730a3; font-weight:600; padding:4px 8px;">現在の担当者</span>
+      {% if deal.owner %}
+        <strong style="font-size:14px; color:var(--app-text, #0f172a);">{{ deal.owner.display_name }}</strong>
+        <span style="color:var(--app-muted, #64748b); font-size:12px;">@{{ deal.owner.username }}</span>
+        {% if deal.owner.email %}
+          <span style="color:var(--app-muted, #64748b); font-size:12px;">({{ deal.owner.email }})</span>
+        {% endif %}
+      {% else %}
+        <span class="app-muted" style="font-size:13px;">未設定</span>
+      {% endif %}
+    </div>
 
-    <form method="post" class="app-form-grid-edit">
-      {% csrf_token %}
-      {% hidden_back_field back %}
+    {# 2. 【第2段】ユーザー検索エリア #}
+    <div style="margin-bottom: 20px;">
+      <h2 style="font-size:15px; font-weight:600; margin-top:0; margin-bottom:12px;">社内ユーザーから検索</h2>
+      <form method="get" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;" id="server-search-form">
+        <input type="text"
+               id="owner-search-input"
+               name="q"
+               value="{{ current_q }}"
+               class="app-input"
+               placeholder="氏名・ユーザー名・メールで検索..."
+               style="max-width:400px;"
+               autocomplete="off">
+        <button type="submit" class="app-btn app-btn--secondary">検索</button>
+        {% if current_q %}
+          <a href="{% url 'deals:deal_reassign_owner' pk=deal.id %}" class="app-btn app-btn--ghost">クリア</a>
+        {% endif %}
+      </form>
+    </div>
 
-      <div class="app-form__group">
-        <label class="app-form__label" for="{{ form.new_owner.id_for_label }}">新しい社内担当者</label>
+    {# 3. 【第3段】候補一覧テーブル（検索実行時のみ表示） #}
+    <div style="margin-bottom: 24px;">
+      {% if not current_q %}
+        {# 未検索時（検索窓が空の場合） #}
+        <div class="app-muted" style="padding: 24px; text-align: center; background: var(--app-bg-subtle, #f8fafc); border: 1px dashed var(--app-border, #e2e8f0); border-radius: 6px; font-size: 14px;">
+          氏名・ユーザー名・メールアドレスを入力して検索してください。
+        </div>
+      {% else %}
+        {# 検索実行時（クエリ送信時） #}
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <span class="app-muted" style="font-size:12px;" id="candidates-count-label">検索結果: {{ candidate_users|length }} 名</span>
+        </div>
+        <div class="app-table-wrapper" style="max-height:420px; overflow-y:auto; border:1px solid var(--app-border, #e2e8f0); border-radius:6px;">
+          <table class="app-table" id="candidates-table" style="margin:0;">
+            <thead>
+              <tr>
+                <th style="width:80px; text-align:center;">選択</th>
+                <th>氏名・ユーザー名</th>
+                <th>メール</th>
+                <th style="width:100px; text-align:center;">状態</th>
+              </tr>
+            </thead>
+            <tbody id="candidates-tbody">
+              {% for u in candidate_users %}
+                <tr class="candidate-row"
+                    id="user-row-{{ u.id }}"
+                    data-user-id="{{ u.id }}"
+                    data-user-name="{{ u.display_name }}"
+                    data-user-sub="@{{ u.username }}{% if u.email %} ({{ u.email }}){% endif %}">
+                  <td style="text-align:center;">
+                    <button type="button"
+                            class="app-btn app-btn--secondary app-btn--sm select-user-btn"
+                            onclick="selectOwner('{{ u.id }}', '{{ u.display_name|escapejs }}', '@{{ u.username|escapejs }}{% if u.email %} ({{ u.email|escapejs }}){% endif %}')"
+                            style="white-space:nowrap; padding:4px 10px; font-size:12px;">
+                      選択
+                    </button>
+                  </td>
+                  <td>
+                    <strong>{{ u.display_name }}</strong>
+                    <span style="color:var(--app-muted, #64748b); font-size:12px; margin-left:4px;">@{{ u.username }}</span>
+                  </td>
+                  <td>{{ u.email|default:"-" }}</td>
+                  <td style="text-align:center;">
+                    {% if deal.owner_id == u.id %}
+                      <span class="app-status-badge" style="font-size:11px; background:#f1f5f9; color:#475569;">現担当者</span>
+                    {% else %}
+                      <span class="app-muted" style="font-size:11px;">-</span>
+                    {% endif %}
+                  </td>
+                </tr>
+              {% empty %}
+                <tr>
+                  <td colspan="4" class="app-muted" style="text-align:center; padding:24px;">
+                    該当するユーザーが見つかりませんでした。
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% endif %}
+    </div>
+
+    {# 4. 【第4段（最下部）】選択結果プレビュー ＆ 確定変更ボタン #}
+    <div id="selected-owner-card" style="background:var(--app-surface, #ffffff); border:2px dashed var(--app-border, #cbd5e1); border-radius:8px; padding:16px 20px; transition:border-color 0.2s, background-color 0.2s;">
+      <div style="font-size:12px; font-weight:700; color:var(--app-muted, #64748b); text-transform:uppercase; margin-bottom:10px; letter-spacing:0.5px;">
+        選択中の新担当者
+      </div>
+      <form method="post" id="reassign-owner-form">
+        {% csrf_token %}
+        {% hidden_back_field back %}
         {{ form.new_owner }}
-        {% if form.new_owner.errors %}<div class="app-form__error">{{ form.new_owner.errors }}</div>{% endif %}
-      </div>
 
-      <div class="app-action-area" style="margin-top:24px;">
-        {% back_all_link back %}
-        {% back_link back %}
-        <button type="submit" class="app-btn app-btn--primary">担当者を変更する</button>
-      </div>
-    </form>
+        {% if form.new_owner.errors %}
+          <div class="app-form__error" style="color:var(--app-color-danger, #ef4444); margin-bottom:10px; font-size:13px;">
+            {{ form.new_owner.errors }}
+          </div>
+        {% endif %}
+
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px;">
+          <div id="selected-owner-display" style="display:flex; align-items:center; gap:10px;">
+            <span class="app-status-badge" id="selected-badge" style="background:#dbeafe; color:#1e40af; font-weight:600; padding:4px 8px; display:none;">新担当者</span>
+            <span id="selected-user-name" style="font-size:15px; font-weight:700; color:var(--app-text, #0f172a);">
+              候補一覧からユーザーの「選択」ボタンを押してください
+            </span>
+            <span id="selected-user-sub" style="font-size:13px; color:var(--app-muted, #64748b);"></span>
+          </div>
+          <div>
+            <button type="submit" id="submit-reassign-btn" class="app-btn app-btn--success" disabled style="min-width:140px;">
+              担当者を変更する
+            </button>
+          </div>
+        </div>
+      </form>
+    </div>
   </section>
+</div>
+
+<script>
+  function selectOwner(userId, userName, userSub) {
+    const hiddenInput = document.getElementById('id_new_owner');
+    if (hiddenInput) {
+      hiddenInput.value = userId;
+    }
+
+    const nameElem = document.getElementById('selected-user-name');
+    const subElem = document.getElementById('selected-user-sub');
+    const badgeElem = document.getElementById('selected-badge');
+    const submitBtn = document.getElementById('submit-reassign-btn');
+    const cardElem = document.getElementById('selected-owner-card');
+
+    if (nameElem) nameElem.textContent = '新担当者: ' + userName;
+    if (subElem) subElem.textContent = userSub;
+    if (badgeElem) badgeElem.style.display = 'inline-block';
+    if (submitBtn) submitBtn.disabled = false;
+    if (cardElem) {
+      cardElem.style.borderColor = 'var(--app-color-success, #16a34a)';
+      cardElem.style.backgroundColor = 'var(--app-bg-subtle, #f0fdf4)';
+    }
+
+    // テーブル行のハイライト更新
+    const rows = document.querySelectorAll('.candidate-row');
+    rows.forEach(function(row) {
+      if (row.getAttribute('data-user-id') === userId) {
+        row.style.backgroundColor = 'var(--app-bg-subtle, #f0fdf4)';
+        const btn = row.querySelector('.select-user-btn');
+        if (btn) {
+          btn.classList.remove('app-btn--secondary');
+          btn.classList.add('app-btn--success');
+          btn.textContent = '選択中';
+        }
+      } else {
+        row.style.backgroundColor = '';
+        const btn = row.querySelector('.select-user-btn');
+        if (btn) {
+          btn.classList.remove('app-btn--success');
+          btn.classList.add('app-btn--secondary');
+          btn.textContent = '選択';
+        }
+      }
+    });
+  }
+</script>
 {% endblock %}

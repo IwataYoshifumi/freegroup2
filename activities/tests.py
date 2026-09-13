@@ -10,6 +10,7 @@ from django.utils import timezone
 
 from activities.admin import ActivityAdmin, ActivityPersonAdmin, ActivityUserAdmin
 from activities.models import Activity, ActivityPerson, ActivityType, ActivityUser, Direction
+from companies.models import Company
 from contacts.models import Contact
 from deals.models import Deal, PersonRole, UserRole
 from mailings.models import Campaign, ClickLog, EmailTemplate, TrackingLink
@@ -662,5 +663,83 @@ class ActivityViewTests(TestCase):
         self.assertEqual(created_activity.campaign, campaign)
         self.assertTrue(ActivityPerson.objects.filter(activity=created_activity, person=self.person).exists())
 
+class ActivityCreateInitialParamTests(TestCase):
+    """ActivityCreateView の ?company= および ?person= パラメータ連携テスト"""
 
+    def setUp(self):
+        self.user = User.objects.create_user(username="test_act_user", password="password")
+        add_perm = Permission.objects.get(codename="add_activity")
+        change_perm = Permission.objects.get(codename="change_activity")
+        self.user.user_permissions.add(add_perm, change_perm)
+        self.client.login(username="test_act_user", password="password")
 
+        self.company1 = Company.objects.create(organization="株式会社テスト商事")
+        self.company2 = Company.objects.create(organization="別会社")
+
+        self.person1 = Person.objects.create()
+        self.contact1 = Contact.objects.create(
+            person=self.person1,
+            company=self.company1,
+            last_name="山田",
+            first_name="花子",
+        )
+        self.person1.primary_contact = self.contact1
+        self.person1.save(update_fields=["primary_contact"])
+
+        self.deal1 = Deal.objects.create(
+            name="商事向け案件",
+            company=self.company1,
+            primary_person=self.person1,
+            owner=self.user,
+        )
+        self.deal2 = Deal.objects.create(
+            name="別会社向け案件",
+            company=self.company2,
+            owner=self.user,
+        )
+
+    def test_get_activity_create_with_company_param_filters_deals(self):
+        url = f"{reverse('activities:activity_create')}?company={self.company1.id}"
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+
+        self.assertEqual(response.context["selected_company"], self.company1)
+        self.assertEqual(response.context["company_id"], str(self.company1.id))
+
+        deal_queryset = response.context["form"].fields["deal"].queryset
+        self.assertIn(self.deal1, deal_queryset)
+        self.assertNotIn(self.deal2, deal_queryset)
+
+        content = response.content.decode("utf-8")
+        self.assertIn(self.company1.organization, content)
+
+    def test_get_activity_create_with_person_param_filters_deals_and_sets_context(self):
+        url = f"{reverse('activities:activity_create')}?person={self.person1.id}"
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+
+        self.assertEqual(response.context["selected_person"], self.person1)
+        self.assertEqual(response.context["person_id"], str(self.person1.id))
+        self.assertEqual(response.context["selected_company"], self.company1)
+
+        # 所属会社の案件に絞り込まれていること
+        deal_queryset = response.context["form"].fields["deal"].queryset
+        self.assertIn(self.deal1, deal_queryset)
+        self.assertNotIn(self.deal2, deal_queryset)
+
+    def test_post_activity_create_with_person_param_creates_activity_person(self):
+        url = f"{reverse('activities:activity_create')}?person={self.person1.id}"
+        post_data = {
+            "activity_type": ActivityType.PHONE,
+            "direction": Direction.OUTGOING,
+            "occurred_at": timezone.localtime().strftime("%Y-%m-%dT%H:%M"),
+            "deal": str(self.deal1.id),
+            "memo": "パーソン起点での電話活動",
+            "person_id": str(self.person1.id),
+        }
+        response = self.client.post(url, data=post_data)
+        self.assertEqual(response.status_code, 302)
+
+        activity = Activity.objects.get(memo="パーソン起点での電話活動")
+        self.assertEqual(activity.deal, self.deal1)
+        self.assertTrue(ActivityPerson.objects.filter(activity=activity, person=self.person1).exists())

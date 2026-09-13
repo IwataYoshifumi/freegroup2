@@ -62,13 +62,21 @@
           <div class="app-form__label">関連案件</div>
           <div>
             {% if activity.deal %}
-              <a href="{% url 'deals:deal_detail' pk=activity.deal.id %}">{{ activity.deal.name }}</a>
+              {% url 'deals:deal_detail' pk=activity.deal.id as deal_url %}
+              <a href="{% append_back_url deal_url back %}">{{ activity.deal.name }}</a>
             {% else %}-{% endif %}
           </div>
         </div>
         <div>
           <div class="app-form__label">関連キャンペーン</div>
-          <div>{{ activity.campaign|default:"-" }}</div>
+          <div>
+            {% if activity.campaign %}
+              {% url 'mailings:campaign_detail' pk=activity.campaign.id as campaign_url %}
+              <a href="{% append_back_url campaign_url back %}">{{ activity.campaign.name }}</a>
+            {% else %}
+              -
+            {% endif %}
+          </div>
         </div>
         <div style="grid-column:1 / -1;">
           <div class="app-form__label">内容メモ・議事録</div>
@@ -125,7 +133,8 @@
               <tr>
                 <td style="word-break: break-word; overflow: hidden; text-overflow: ellipsis;">
                   {% if ap.person.primary_contact and ap.person.primary_contact.company %}
-                    {{ ap.person.primary_contact.company.organization }}
+                    {% url 'companies:company_detail' pk=ap.person.primary_contact.company.id as ap_company_url %}
+                    <a href="{% append_back_url ap_company_url back %}">{{ ap.person.primary_contact.company.organization }}</a>
                   {% elif ap.person.primary_contact and ap.person.primary_contact.organization %}
                     {{ ap.person.primary_contact.organization }}
                   {% else %}-{% endif %}
@@ -134,7 +143,8 @@
                   {{ ap.person.primary_contact.department|default:"-" }}
                 </td>
                 <td style="word-break: break-word; overflow: hidden; text-overflow: ellipsis;">
-                  <a href="{% url 'persons:person_detail' pk=ap.person.id %}" style="font-weight:600;">{{ ap.person }}</a>
+                  {% url 'persons:person_detail' pk=ap.person.id as ap_person_url %}
+                  <a href="{% append_back_url ap_person_url back %}" style="font-weight:600;">{{ ap.person }}</a>
                 </td>
                 <td style="word-break: break-word; overflow: hidden; text-overflow: ellipsis;">
                   <span class="app-status-badge">{{ ap.get_role_display }}</span>
@@ -230,6 +240,7 @@
                 {% if can_edit %}
                   <form method="post" action="{% url 'attachments:attachment_update_memo' pk=att.id %}" style="display:flex; gap:4px; margin:0;">
                     {% csrf_token %}
+                    {% hidden_back_field back %}
                     <input type="text" name="memo" value="{{ att.memo }}" class="app-input" style="padding:2px 6px; font-size:12px; height:28px;">
                     <button type="submit" class="app-btn app-btn--ghost app-btn--sm">保存</button>
                   </form>
@@ -243,6 +254,7 @@
                 {% if perms.attachments.delete_attachment %}
                   <form method="post" action="{% url 'attachments:attachment_delete' pk=att.id %}" style="margin:0;">
                     {% csrf_token %}
+                    {% hidden_back_field back %}
                     <button type="submit" class="app-btn app-btn--ghost app-btn--sm" style="color:var(--app-color-danger, #ef4444);" onclick="return confirm('この添付ファイルを削除しますか？');">削除</button>
                   </form>
                 {% endif %}
@@ -260,6 +272,7 @@
     {% if can_edit and perms.attachments.add_attachment %}
       <form method="post" action="{% url 'attachments:attachment_upload' %}" enctype="multipart/form-data" style="display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end;">
         {% csrf_token %}
+        {% hidden_back_field back %}
         <input type="hidden" name="activity_id" value="{{ activity.id }}">
         <div class="app-form__group" style="margin-bottom:0;">
           <label class="app-form__label">ファイル追加（15MB以下）</label>

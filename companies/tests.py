@@ -913,5 +913,34 @@ class CompanyListViewTests(TestCase):
         self.assertNotIn("会社新規作成", content)
 
 
+class CompanyDetailActionButtonsTests(TestCase):
+    """会社詳細画面の「新規案件」「活動記録」ボタンの表示・パラメータ連携を検証。"""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="comp_user", password="password")
+        self.client.login(username="comp_user", password="password")
+        self.company = Company.objects.create(organization="テスト連携株式会社")
+
+    def test_company_detail_action_buttons_present_with_back_stack(self):
+        """company_detail の HTML 内に ?company= および ?back_stack= を含む新規案件・活動記録ボタンが存在すること。"""
+        import re
+
+        url = reverse("companies:company_detail", kwargs={"pk": self.company.pk})
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode("utf-8")
+
+        # 1. 新規案件ボタンの存在および app-btn--primary クラス検証（「＋」なし）
+        deal_create_base = reverse("deals:deal_create")
+        pattern_deal = rf'href="({re.escape(deal_create_base)}\?company={self.company.pk}&amp;back_stack=[^"]+|{re.escape(deal_create_base)}\?company={self.company.pk}&back_stack=[^"]+)"\s+class="app-btn app-btn--primary app-btn--sm">\s*新規案件\s*</a>'
+        self.assertRegex(html, pattern_deal)
+
+        # 2. 活動記録ボタンの存在および app-btn--primary クラス検証（「＋」なし）
+        act_create_base = reverse("activities:activity_create")
+        pattern_act = rf'href="({re.escape(act_create_base)}\?company={self.company.pk}&amp;back_stack=[^"]+|{re.escape(act_create_base)}\?company={self.company.pk}&back_stack=[^"]+)"\s+class="app-btn app-btn--primary app-btn--sm">\s*活動記録\s*</a>'
+        self.assertRegex(html, pattern_act)
+
+
+
 
 

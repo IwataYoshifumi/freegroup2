@@ -353,6 +353,10 @@ class PersonDetailView(LoginRequiredMixin, PermissionRequiredMixin, DetailView):
             .order_by("-mailing_list__members_frozen_at", "mailing_list__name")
         )
 
+        deals, activities = self._get_person_deals_and_activities(person)
+        context["deals"] = deals
+        context["activities"] = activities
+
         context.update(
             {
                 "back": back,
@@ -363,9 +367,39 @@ class PersonDetailView(LoginRequiredMixin, PermissionRequiredMixin, DetailView):
         )
         return render(request, "persons/person_detail_active.html", context)
 
+    @staticmethod
+    def _get_person_deals_and_activities(person):
+        from activities.models import Activity
+        from deals.models import Deal
+        from django.db.models import Q
+
+        deals = (
+            Deal.objects.filter(
+                Q(primary_person=person) | Q(deal_persons__person=person),
+                is_archived=False,
+            )
+            .select_related("owner", "primary_person", "company")
+            .distinct()
+            .order_by("-updated_at")
+        )
+        activities = (
+            Activity.objects.filter(
+                activity_persons__person=person,
+                is_archived=False,
+            )
+            .select_related("deal", "user")
+            .distinct()
+            .order_by("-occurred_at")
+        )
+        return deals, activities
+
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         person = self.object
+
+        deals, activities = self._get_person_deals_and_activities(person)
+        context["deals"] = deals
+        context["activities"] = activities
 
         context["active_contacts_remaining"] = person.get_active_contacts()
         context["inactive_contacts"] = person.get_inactive_contacts()

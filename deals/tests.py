@@ -642,6 +642,80 @@ class DealViewTests(TestCase):
         # DealUser から自動除外されていること
         self.assertFalse(DealUser.objects.filter(deal=self.deal, user=self.editor).exists())
 
+    def test_deal_detail_action_buttons_and_owner_toggle(self):
+        """案件詳細のボタン高さ合わせ、編集・アーカイブのアイコン化、担当者トグル導線を検証。"""
+        self.client.login(username="deal_owner", password="password")
+        url = reverse("deals:deal_detail", kwargs={"pk": self.deal.pk})
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode("utf-8")
+
+        # 1. アクションボタン帯と戻るボタンが同一水平行（justify-content: space-between; align-items: center;）
+        self.assertIn("display: flex; justify-content: space-between; align-items: center;", html)
+
+        # 2. 編集ボタン・アーカイブボタンが基本情報カード内に配置されアイコン化（app-icon-btn, HIG準拠）
+        self.assertRegex(
+            html,
+            r'<a\s+href="[^"]*edit[^"]*"\s+class="app-icon-btn"\s+title="案件を編集"\s+aria-label="案件を編集"[^>]*>\s*<i class="bi bi-pencil-fill"></i>\s*</a>',
+        )
+        self.assertRegex(
+            html,
+            r'<a\s+href="[^"]*archive[^"]*"\s+class="app-icon-btn"\s+title="アーカイブ"\s+aria-label="アーカイブ"[^>]*>\s*<i class="bi bi-archive-fill"></i>\s*</a>',
+        )
+
+        # 3. 上部アクション帯からテキストの「担当者変更」ボタンが撤去されていること
+        self.assertNotIn('>担当者変更</a>', html)
+
+        # 4. 基本情報カード内の担当者欄にボーダーレストグル（▼矢印）と横並び緑ボタン「担当者を変更」が存在すること
+        self.assertIn("owner-reassign-details", html)
+        self.assertIn("toggle-arrow", html)
+        self.assertIn("▼", html)
+        self.assertIn('class="app-btn app-btn--success app-btn--sm"', html)
+        self.assertIn("担当者を変更", html)
+        reassign_url = reverse("deals:deal_reassign_owner", kwargs={"pk": self.deal.pk})
+        self.assertIn(reassign_url, html)
+
+    def test_deal_reassign_owner_search_and_selection_ui(self):
+        """案件担当者変更画面の検索UI、未検索時案内、候補テーブル、選択プレビュー、緑確定ボタン、POST確定処理を検証。"""
+        self.client.login(username="deal_owner", password="password")
+        url = reverse("deals:deal_reassign_owner", kwargs={"pk": self.deal.pk})
+
+        # 1. 未検索時の画面表示の検証
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode("utf-8")
+
+        # 未検索時は候補一覧リストを空として渡し、候補テーブルは非表示で案内文が表示されること
+        self.assertEqual(resp.context["candidate_users"], [])
+        self.assertNotIn("candidates-table", html)
+        self.assertIn("氏名・ユーザー名・メールアドレスを入力して検索してください。", html)
+
+        # 素の <select> ドロップダウンが廃止され、hidden input になっていること
+        self.assertNotIn("<select", html)
+        self.assertIn('type="hidden" name="new_owner"', html)
+
+        # 確定ボタンが緑色（app-btn--success HIG 3.6準拠）で文言が「担当者を変更する」であること
+        self.assertIn('class="app-btn app-btn--success"', html)
+        self.assertIn("担当者を変更する", html)
+        self.assertIn("submit-reassign-btn", html)
+
+        # 2. 検索機能の検証（GET ?q=...）
+        search_resp = self.client.get(f"{url}?q={self.editor.username}")
+        self.assertEqual(search_resp.status_code, 200)
+        search_html = search_resp.content.decode("utf-8")
+
+        # 検索時は該当ユーザーが含まれ、候補一覧テーブルおよび「選択」ボタンが表示されること
+        self.assertIn(self.editor, search_resp.context["candidate_users"])
+        self.assertIn("candidates-table", search_html)
+        self.assertIn("select-user-btn", search_html)
+
+        # 3. POST で確定して担当者を変更
+        post_resp = self.client.post(url, data={"new_owner": str(self.editor.id)})
+        self.assertEqual(post_resp.status_code, 302)
+        self.deal.refresh_from_db()
+        self.assertEqual(self.deal.owner, self.editor)
+
+
     def test_deal_archive_view(self):
         self.client.login(username="deal_owner", password="password")
         url = reverse("deals:deal_archive", kwargs={"pk": self.deal.pk})
@@ -1449,8 +1523,223 @@ class DealViewTests(TestCase):
         self.assertIn(f'href="{detail_url}"', html_child)
         self.assertIn(">戻る</a>", html_child)
 
+    def test_deal_detail_company_link_preserves_back_stack(self):
+        """案件詳細画面の会社リンクに back_stack が付与され、会社詳細の戻るボタンが案件詳細を指すことを検証。"""
+        import re
 
+        from activities.models import Activity, ActivityType
+        from mailings.models import Campaign, EmailTemplate, MailingList
 
+        self.client.login(username="deal_owner", password="password")
 
+        # 関連データ作成（発生源キャンペーン、活動、社外関係者）
+        ml = MailingList.objects.create(name="テストリスト", created_by=self.owner)
+        template = EmailTemplate.objects.create(
+            name="テンプレート", subject="件名", body="本文", created_by=self.owner
+        )
+        campaign = Campaign.objects.create(
+            name="春のプロモ", template=template, mailing_list=ml, created_by=self.owner
+        )
+        self.deal.source_campaign = campaign
+        self.deal.lead_source = Deal.LeadSource.CAMPAIGN
+        self.deal.save(update_fields=["source_campaign", "lead_source"])
+
+        person2 = Person.objects.create()
+        company2 = Company.objects.create(organization="関係先株式会社")
+        contact2 = Contact.objects.create(person=person2, company=company2, last_name="佐藤", first_name="健")
+        person2.primary_contact = contact2
+        person2.save(update_fields=["primary_contact"])
+        DealPerson.objects.create(deal=self.deal, person=person2, role=PersonRole.DECISION_MAKER)
+
+        activity = Activity.objects.create(
+            deal=self.deal,
+            activity_type=ActivityType.PHONE,
+            occurred_at=timezone.now(),
+            user=self.owner,
+            memo="電話ヒアリング",
+        )
+
+        # 1. 案件詳細画面を GET
+        detail_url = reverse("deals:deal_detail", kwargs={"pk": self.deal.pk})
+        res_detail = self.client.get(detail_url)
+        self.assertEqual(res_detail.status_code, 200)
+        html_detail = res_detail.content.decode("utf-8")
+
+        # 2. 会社詳細リンクに ?back_stack= が含まれていること
+        base_company_url = reverse("companies:company_detail", kwargs={"pk": self.company.pk})
+        pattern = rf'href="({re.escape(base_company_url)}\?back_stack=[^"]+)"'
+        match = re.search(pattern, html_detail)
+        self.assertIsNotNone(match, f"会社リンク（{base_company_url}）に ?back_stack= が含まれていません。")
+        company_link_with_back = match.group(1)
+
+        # 3. 発生源キャンペーンリンクに ?back_stack= が含まれていること
+        base_campaign_url = reverse("mailings:campaign_detail", kwargs={"pk": campaign.pk})
+        self.assertIn(f'href="{base_campaign_url}?back_stack=', html_detail)
+
+        # 4. 主担当パーソンリンクに ?back_stack= が含まれていること
+        base_person_url = reverse("persons:person_detail", kwargs={"pk": self.person.pk})
+        self.assertIn(f'href="{base_person_url}?back_stack=', html_detail)
+
+        # 5. 社外関係者テーブルの会社・パーソンリンクに ?back_stack= が含まれていること
+        base_comp2_url = reverse("companies:company_detail", kwargs={"pk": company2.pk})
+        base_p2_url = reverse("persons:person_detail", kwargs={"pk": person2.pk})
+        self.assertIn(f'href="{base_comp2_url}?back_stack=', html_detail)
+        self.assertIn(f'href="{base_p2_url}?back_stack=', html_detail)
+
+        # 6. 活動履歴の詳細リンクに ?back_stack= が含まれていること
+        base_act_url = reverse("activities:activity_detail", kwargs={"pk": activity.pk})
+        self.assertIn(f'href="{base_act_url}?back_stack=', html_detail)
+
+        # 7. 案件詳細から生成されたリンクで会社詳細（company_detail）にアクセス
+        res_company = self.client.get(company_link_with_back)
+        self.assertEqual(res_company.status_code, 200)
+
+        # 8. 会社詳細のコンテキスト/画面の戻る導線が当該案件詳細を指していること
+        back = res_company.context["back"]
+        self.assertTrue(back.back_exist)
+        self.assertEqual(back.back_url, detail_url)
+
+        html_company = res_company.content.decode("utf-8")
+        self.assertIn(f'href="{detail_url}"', html_company)
+        self.assertIn(">戻る</a>", html_company)
+
+    def test_activity_detail_links_preserve_back_stack(self):
+        """活動詳細画面の関連案件・キャンペーン・関係者リンクに back_stack が付与され、遷移先から戻れることを検証。"""
+        import re
+
+        from activities.models import Activity, ActivityPerson, ActivityType
+        from mailings.models import Campaign, EmailTemplate, MailingList
+
+        self.client.login(username="deal_owner", password="password")
+
+        ml = MailingList.objects.create(name="テストリスト2", created_by=self.owner)
+        template = EmailTemplate.objects.create(
+            name="テンプレート2", subject="件名2", body="本文2", created_by=self.owner
+        )
+        campaign = Campaign.objects.create(
+            name="夏キャンペーン", template=template, mailing_list=ml, created_by=self.owner
+        )
+
+        activity = Activity.objects.create(
+            deal=self.deal,
+            activity_type=ActivityType.VISIT,
+            occurred_at=timezone.now(),
+            user=self.owner,
+            memo="訪問商談",
+        )
+
+        activity_camp = Activity.objects.create(
+            campaign=campaign,
+            activity_type=ActivityType.EMAIL,
+            occurred_at=timezone.now(),
+            user=self.owner,
+            memo="メール送信",
+        )
+
+        person3 = Person.objects.create()
+        comp3 = Company.objects.create(organization="関係社3")
+        c3 = Contact.objects.create(person=person3, company=comp3, last_name="高橋", first_name="修")
+        person3.primary_contact = c3
+        person3.save(update_fields=["primary_contact"])
+        ActivityPerson.objects.create(activity=activity, person=person3)
+
+        # 1. 案件紐付きの活動詳細画面を GET
+        act_detail_url = reverse("activities:activity_detail", kwargs={"pk": activity.pk})
+        res_act = self.client.get(act_detail_url)
+        self.assertEqual(res_act.status_code, 200)
+        html_act = res_act.content.decode("utf-8")
+
+        # 2. 関連案件リンクに ?back_stack= が含まれていること
+        deal_url = reverse("deals:deal_detail", kwargs={"pk": self.deal.pk})
+        pattern = rf'href="({re.escape(deal_url)}\?back_stack=[^"]+)"'
+        match = re.search(pattern, html_act)
+        self.assertIsNotNone(match, f"関連案件リンク（{deal_url}）に ?back_stack= が含まれていません。")
+        deal_link_with_back = match.group(1)
+
+        # 3. 相手方関係者の会社・パーソンリンクに ?back_stack= が含まれていること
+        base_comp3_url = reverse("companies:company_detail", kwargs={"pk": comp3.pk})
+        base_p3_url = reverse("persons:person_detail", kwargs={"pk": person3.pk})
+        self.assertIn(f'href="{base_comp3_url}?back_stack=', html_act)
+        self.assertIn(f'href="{base_p3_url}?back_stack=', html_act)
+
+        # 4. キャンペーン紐付きの活動詳細画面で関連キャンペーンリンクに ?back_stack= が含まれていること
+        res_camp_act = self.client.get(reverse("activities:activity_detail", kwargs={"pk": activity_camp.pk}))
+        self.assertEqual(res_camp_act.status_code, 200)
+        html_camp_act = res_camp_act.content.decode("utf-8")
+        base_camp_url = reverse("mailings:campaign_detail", kwargs={"pk": campaign.pk})
+        self.assertIn(f'href="{base_camp_url}?back_stack=', html_camp_act)
+
+        # 5. 関連案件リンクで案件詳細に遷移した場合、戻るボタンが当該活動詳細を指していること
+        res_deal = self.client.get(deal_link_with_back)
+        self.assertEqual(res_deal.status_code, 200)
+        back = res_deal.context["back"]
+        self.assertTrue(back.back_exist)
+        self.assertEqual(back.back_url, act_detail_url)
+
+        html_deal = res_deal.content.decode("utf-8")
+        self.assertIn(f'href="{act_detail_url}"', html_deal)
+        self.assertIn(">戻る</a>", html_deal)
+class DealCreateInitialParamTests(TestCase):
+    """DealCreateView の ?company= および ?person= パラメータ連携テスト"""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="test_deal_user", password="password")
+        perm_add = Permission.objects.get(codename="add_deal")
+        perm_change = Permission.objects.get(codename="change_deal")
+        self.user.user_permissions.add(perm_add, perm_change)
+        self.client.login(username="test_deal_user", password="password")
+
+        self.company = Company.objects.create(organization="株式会社テスト商事")
+        self.person = Person.objects.create()
+        self.contact = Contact.objects.create(
+            person=self.person,
+            company=self.company,
+            last_name="山田",
+            first_name="花子",
+        )
+        self.person.primary_contact = self.contact
+        self.person.save(update_fields=["primary_contact"])
+
+    def test_get_deal_create_with_company_param(self):
+        url = f"{reverse('deals:deal_create')}?company={self.company.id}"
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+
+        form = response.context["form"]
+        self.assertEqual(str(form.initial.get("company")), str(self.company.id))
+        self.assertEqual(response.context["selected_company"], self.company)
+
+        content = response.content.decode("utf-8")
+        self.assertIn(self.company.organization, content)
+
+    def test_get_deal_create_with_person_param(self):
+        url = f"{reverse('deals:deal_create')}?person={self.person.id}"
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+
+        form = response.context["form"]
+        # パーソンの所属会社が company に初期セットされる
+        self.assertEqual(str(form.initial.get("company")), str(self.company.id))
+        self.assertEqual(response.context["selected_person"], self.person)
+        self.assertEqual(response.context["selected_company"], self.company)
+        self.assertEqual(form.initial.get("primary_person"), self.person.id)
+
+    def test_post_deal_create_with_person_param_creates_deal_and_deal_person(self):
+        url = f"{reverse('deals:deal_create')}?person={self.person.id}"
+        post_data = {
+            "name": "パーソン起点案件",
+            "company": str(self.company.id),
+            "stage": Stage.INITIAL_MEETING,
+            "probability": 50,
+            "deal_type": DealType.NEW,
+            "amount": 1000000,
+        }
+        response = self.client.post(url, data=post_data)
+        self.assertEqual(response.status_code, 302)
+
+        deal = Deal.objects.get(name="パーソン起点案件")
+        self.assertEqual(deal.company, self.company)
+        self.assertEqual(deal.primary_person, self.person)
+        self.assertTrue(DealPerson.objects.filter(deal=deal, person=self.person).exists())
 
 

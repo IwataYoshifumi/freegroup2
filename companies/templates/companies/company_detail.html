@@ -63,7 +63,17 @@
 
   {# 関連案件 #}
   <section class="app-card" style="margin-bottom:24px;">
-    <h2 style="font-size:16px; margin-bottom:16px;">関連案件（{{ deals.count }}件）</h2>
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+      <h2 style="font-size:16px; margin:0;">関連案件（{{ deals.count }}件）</h2>
+      {% url 'deals:deal_create' as deal_create_base_url %}
+      {% with comp_id=company.id|stringformat:"s" %}
+      {% with deal_create_url=deal_create_base_url|add:"?company="|add:comp_id %}
+        <a href="{% append_back_url deal_create_url back %}" class="app-btn app-btn--primary app-btn--sm">
+          新規案件
+        </a>
+      {% endwith %}
+      {% endwith %}
+    </div>
     <div class="app-table-wrapper">
       <table class="app-table">
         <thead>
@@ -104,7 +114,17 @@
 
   {# 活動履歴 #}
   <section class="app-card" style="margin-bottom:24px;">
-    <h2 style="font-size:16px; margin-bottom:16px;">活動履歴（{{ activities.count }}件）</h2>
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+      <h2 style="font-size:16px; margin:0;">活動履歴（{{ activities.count }}件）</h2>
+      {% url 'activities:activity_create' as act_create_base_url %}
+      {% with comp_id=company.id|stringformat:"s" %}
+      {% with act_create_url=act_create_base_url|add:"?company="|add:comp_id %}
+        <a href="{% append_back_url act_create_url back %}" class="app-btn app-btn--primary app-btn--sm">
+          活動記録
+        </a>
+      {% endwith %}
+      {% endwith %}
+    </div>
     <div class="app-table-wrapper">
       <table class="app-table">
         <thead>

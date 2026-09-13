@@ -21,6 +21,20 @@
       {% if person_id %}
         <input type="hidden" name="person_id" value="{{ person_id }}">
       {% endif %}
+      {% if company_id %}
+        <input type="hidden" name="company_id" value="{{ company_id }}">
+      {% endif %}
+
+      {% if selected_company or selected_person %}
+        <div class="app-alert app-alert--info" style="margin-bottom:16px; display:flex; gap:16px; flex-wrap:wrap; font-size:13px;">
+          {% if selected_company %}
+            <div><strong>対象会社:</strong> {{ selected_company.organization }}</div>
+          {% endif %}
+          {% if selected_person %}
+            <div><strong>対象パーソン:</strong> {{ selected_person }}</div>
+          {% endif %}
+        </div>
+      {% endif %}
 
       {% if form.non_field_errors %}
         <div class="app-alert app-alert--danger" style="margin-bottom:16px;">

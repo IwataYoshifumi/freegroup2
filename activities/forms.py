@@ -41,10 +41,15 @@ class ActivityForm(forms.ModelForm):
             "campaign": forms.Select(attrs={"class": "app-select app-input"}),
         }
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, company=None, **kwargs):
         super().__init__(*args, **kwargs)
         if not self.instance.pk and "occurred_at" not in self.initial:
             self.initial["occurred_at"] = timezone.localtime().strftime("%Y-%m-%dT%H:%M")
+        if company:
+            qs = self.fields["deal"].queryset.filter(company=company, is_archived=False)
+            if self.instance.pk and self.instance.deal_id:
+                qs = (qs | self.fields["deal"].queryset.filter(pk=self.instance.deal_id)).distinct()
+            self.fields["deal"].queryset = qs
 
     def clean_occurred_at(self):
         occurred_at = self.cleaned_data.get("occurred_at")

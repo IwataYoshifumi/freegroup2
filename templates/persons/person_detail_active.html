@@ -12,6 +12,36 @@
     </div>
   </div>
 
+  {# タイトル直下：左側マージ候補（＋本人紐付け）、右側戻るボタン（同一水平ライン・高さ合わせ） #}
+  <div style="max-width:1100px; display:flex; justify-content:space-between; align-items:center; margin-bottom:var(--app-space-sm); flex-wrap:wrap; gap:8px;">
+    <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+      {% if pending_duplicates %}
+        {% with first_dup=pending_duplicates.first %}
+          {% if first_dup.group_id %}
+            {% url 'duplicates:duplicate_group_detail' group_id=first_dup.group_id as dup_url %}
+          {% else %}
+            {% url 'duplicates:duplicate_group_list' as dup_url %}
+          {% endif %}
+          <a href="{% append_back_url dup_url back %}"
+             class="app-btn app-btn--warning app-btn--sm"
+             style="text-decoration:none;">
+            マージ候補 {{ pending_duplicates|length }} 件
+          </a>
+        {% endwith %}
+      {% endif %}
+      {% if can_self_link %}
+        {% url 'accounts:link_user_person_confirm' person_id=contact.person.id as self_link_url %}
+        <a href="{% append_back_url self_link_url back %}" class="app-btn app-btn--warning">このパーソンをログインアカウントに紐付ける</a>
+      {% endif %}
+    </div>
+
+    {# 右側：戻るボタン #}
+    <div style="display:flex; align-items:center; gap:8px; margin-left:auto;">
+      {% back_all_link back %}
+      {% back_link back %}
+    </div>
+  </div>
+
   {% if debug %}
     <div style="max-width:1100px; margin-bottom:var(--app-space-sm); font-size:12px;">
       Contact UID: <code class="app-debug-uid">{{ contact.id }}</code>
@@ -22,30 +52,11 @@
   {% endif %}
 
   {# ============================================================ #}
-  {# タイトル直下アクション帯（HIG 7.3）。カード枠なしでじか置き。        #}
-  {# 本人紐付け（self-link）：email 一致 ∧ active ∧ 未紐付けのときだけ黄（可逆な注意操作・HIG 3.6）。 #}
-  {# 右端＝マージ（控えめ）／アーカイブ化／戻る。                       #}
-  {# ============================================================ #}
-  <div style="max-width:1100px; display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:var(--app-space-sm);">
-    {% if can_self_link %}
-      {% url 'accounts:link_user_person_confirm' person_id=contact.person.id as self_link_url %}
-      <a href="{% append_back_url self_link_url back %}"
-         class="app-btn app-btn--warning">このパーソンをログインアカウントに紐付ける</a>
-    {% endif %}
-
-    {# 右寄せ：戻る #}
-    <div style="margin-left:auto; display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
-      {% back_all_link back %}
-      {% back_link back %}
-    </div>
-  </div>
-
-  {# ============================================================ #}
   {# 情報（左 1fr）＋名刺画像（右 固定帯）の 2 カラム。画像なしは 1 カラム。 #}
   {# ============================================================ #}
   <div style="display:grid; grid-template-columns:1fr{% if business_card and business_card.card_image %} minmax(320px,420px){% endif %}; gap:var(--app-space-md); max-width:1100px; margin-top:var(--app-space-md); align-items:start;">
     <section class="app-card" style="margin:0;">
-      {# 氏名行：左端「氏名」＋右に値・主コンタクトバッジ・ⓘ（姓/名/敬称付き）・鉛筆・アーカイブ #}
+      {# 氏名行：左端「氏名」＋右に値・主コンタクトバッジ・鉛筆・ⓘ（姓/名/敬称付き）・アーカイブ #}
       <div class="app-cd-section">
         <div class="app-cd-section__name">氏名</div>
         <div class="app-detail-list app-contact-detail-fields">
@@ -55,35 +66,17 @@
               <strong>{{ contact.full_name|default:"(氏名なし)" }}</strong>
               {% status_badge contact %}
               {% if contact.person.status != "active" %}{% status_badge contact.person %}{% endif %}
-              {% if pending_duplicates %}
-                {% with first_dup=pending_duplicates.first %}
-                  {% if first_dup.group_id %}
-                    {% url 'duplicates:duplicate_group_detail' group_id=first_dup.group_id as dup_url %}
-                  {% else %}
-                    {% url 'duplicates:duplicate_group_list' as dup_url %}
-                  {% endif %}
-                  <a href="{% append_back_url dup_url back %}"
-                     class="app-btn app-btn--outline-secondary app-btn--sm"
-                     style="text-decoration:none;">
-                    マージ候補 {{ pending_duplicates|length }} 件
-                  </a>
-                {% endwith %}
-              {% endif %}
-              {% if contact.last_name or contact.first_name or contact.phonetic_name or contact.salutation_name %}
-                {% with name_tip="姓："|add:contact.last_name|add:" ／ 名："|add:contact.first_name|add:" ／ 読みカナ："|add:contact.phonetic_name|add:" ／ 敬称付き氏名（メール宛名）："|add:contact.salutation_name %}
-                  <span class="app-help-icon" data-tooltip="{{ name_tip }}" aria-label="氏名の内訳" role="img">i</span>
-                {% endwith %}
+              {% if is_editable %}
+                {% if is_primary %}{% url 'contacts:contact_update_primary' contact.id as edit_url %}{% elif is_active %}{% url 'contacts:contact_update_active' contact.id as edit_url %}{% endif %}
+                {% if edit_url %}
+                  <a href="{% append_back_url edit_url back %}"
+                     class="app-btn--icon"
+                     title="主コンタクトを修正" aria-label="主コンタクトを修正"
+                     style="color:inherit; border:none; background:none; text-decoration:none; line-height:1; font-size:1.2rem;"><i class="bi bi-pencil-fill"></i></a>
+                {% endif %}
               {% endif %}
               <span style="margin-left:auto; display:inline-flex; align-items:center; gap:8px;">
-                {% if is_editable %}
-                  {% if is_primary %}{% url 'contacts:contact_update_primary' contact.id as edit_url %}{% elif is_active %}{% url 'contacts:contact_update_active' contact.id as edit_url %}{% endif %}
-                  {% if edit_url %}
-                    <a href="{% append_back_url edit_url back %}"
-                       class="app-btn--icon"
-                       title="主コンタクトを修正" aria-label="主コンタクトを修正"
-                       style="color:inherit; border:none; background:none; text-decoration:none; line-height:1; font-size:1.2rem;"><i class="bi bi-pencil-fill"></i></a>
-                  {% endif %}
-                {% else %}
+                {% if not is_editable %}
                   <span class="app-muted">表示のみモード（編集不可）</span>
                 {% endif %}
                 {% if contact.person and contact.person.status == "active" %}
@@ -340,6 +333,118 @@
       </table>
     </div>
     {% endif %}
+  </section>
+
+  {# ============================================================ #}
+  {# 関連案件セクション                                            #}
+  {# ============================================================ #}
+  <section class="app-card" style="max-width:1100px; margin-top:var(--app-space-md);">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+      <h2 style="font-size:16px; margin:0;">関連案件（{% if deals.count %}{{ deals.count }}{% else %}{{ deals|length }}{% endif %}件）</h2>
+      {% url 'deals:deal_create' as create_deal_url %}
+      {% with person_id=person.id|stringformat:"s" %}
+      {% with deal_create_url=create_deal_url|add:"?person="|add:person_id %}
+        <a href="{% append_back_url deal_create_url back %}" class="app-btn app-btn--primary app-btn--sm">
+          新規案件
+        </a>
+      {% endwith %}
+      {% endwith %}
+    </div>
+    <div class="app-table-wrapper">
+      <table class="app-table">
+        <thead>
+          <tr>
+            <th>案件名</th>
+            <th>ステージ</th>
+            <th>金額</th>
+            <th>主担当</th>
+            <th>担当者</th>
+            <th>更新日時</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for deal in deals %}
+            <tr>
+              <td>
+                {% url 'deals:deal_detail' pk=deal.id as deal_detail_url %}
+                <a href="{% append_back_url deal_detail_url back %}" style="font-weight:600;">{{ deal.name }}</a>
+              </td>
+              <td><span class="app-status-badge">{{ deal.get_stage_display }}</span></td>
+              <td>{% if deal.amount is not None %}¥{{ deal.amount|floatformat:0 }}{% else %}-{% endif %}</td>
+              <td>{{ deal.primary_person|default:"-" }}</td>
+              <td>{{ deal.owner|default:"-" }}</td>
+              <td>{{ deal.updated_at|date:"Y-m-d H:i" }}</td>
+              <td>
+                {% url 'deals:deal_detail' pk=deal.id as deal_detail_url %}
+                <a href="{% append_back_url deal_detail_url back %}" class="app-btn app-btn--ghost app-btn--sm">詳細</a>
+              </td>
+            </tr>
+          {% empty %}
+            <tr>
+              <td colspan="7" class="app-muted" style="text-align:center; padding:16px;">紐づく案件はありません。</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  {# ============================================================ #}
+  {# 活動履歴セクション                                            #}
+  {# ============================================================ #}
+  <section class="app-card" style="max-width:1100px; margin-top:var(--app-space-md);">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+      <h2 style="font-size:16px; margin:0;">活動履歴（{% if activities.count %}{{ activities.count }}{% else %}{{ activities|length }}{% endif %}件）</h2>
+      {% url 'activities:activity_create' as create_activity_url %}
+      {% with person_id=person.id|stringformat:"s" %}
+      {% with act_create_url=create_activity_url|add:"?person="|add:person_id %}
+        <a href="{% append_back_url act_create_url back %}" class="app-btn app-btn--primary app-btn--sm">
+          活動記録
+        </a>
+      {% endwith %}
+      {% endwith %}
+    </div>
+    <div class="app-table-wrapper">
+      <table class="app-table">
+        <thead>
+          <tr>
+            <th>日時</th>
+            <th>種別</th>
+            <th>方向</th>
+            <th>実施者</th>
+            <th>関連案件</th>
+            <th>メモ</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for activity in activities %}
+            <tr>
+              <td>{{ activity.occurred_at|date:"Y-m-d H:i" }}</td>
+              <td><span class="app-status-badge">{{ activity.get_activity_type_display }}</span></td>
+              <td>{{ activity.get_direction_display|default:"-" }}</td>
+              <td>{{ activity.user|default:"-" }}</td>
+              <td>
+                {% if activity.deal %}
+                  {% url 'deals:deal_detail' pk=activity.deal.id as act_deal_url %}
+                  <a href="{% append_back_url act_deal_url back %}">{{ activity.deal.name }}</a>
+                {% else %}-{% endif %}
+              </td>
+              <td>{{ activity.memo|truncatechars:40|default:"-" }}</td>
+              <td>
+                {% url 'activities:activity_detail' pk=activity.id as act_detail_url %}
+                <a href="{% append_back_url act_detail_url back %}" class="app-btn app-btn--ghost app-btn--sm">詳細</a>
+              </td>
+            </tr>
+          {% empty %}
+            <tr>
+              <td colspan="7" class="app-muted" style="text-align:center; padding:16px;">紐づく活動履歴はありません。</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
   </section>
 
   {# ---- タグ付与・解除 UI（v1.6 Phase 1b-β、§5.2.3、active画面は編集可能）---- #}
