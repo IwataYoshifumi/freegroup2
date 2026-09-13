@@ -382,6 +382,8 @@ class CompanyViewTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "テスト株式会社")
         self.assertContains(resp, "有効")  # get_status_display
+        self.assertContains(resp, "company-list-container")
+        self.assertContains(resp, "max-width: 1040px")
 
         # 検索
         resp_search = self.client.get(reverse("companies:company_list"), {"q": "存在しない会社"})
@@ -394,6 +396,8 @@ class CompanyViewTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "テスト株式会社")
         self.assertContains(resp, "03-1111-2222")
+        self.assertContains(resp, "company-detail-container")
+        self.assertContains(resp, "max-width: 1040px")
 
     def test_company_update_view(self):
         self.client.login(username="comp_user", password="password")

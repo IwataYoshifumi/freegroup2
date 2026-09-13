@@ -397,10 +397,6 @@ class PersonDetailView(LoginRequiredMixin, PermissionRequiredMixin, DetailView):
         context = super().get_context_data(**kwargs)
         person = self.object
 
-        deals, activities = self._get_person_deals_and_activities(person)
-        context["deals"] = deals
-        context["activities"] = activities
-
         context["active_contacts_remaining"] = person.get_active_contacts()
         context["inactive_contacts"] = person.get_inactive_contacts()
         context["merge_logs"] = PersonMergeLog.get_for_person(person)
