@@ -131,9 +131,11 @@ class DealDetailView(LoginRequiredMixin, DetailView):
             .prefetch_related("activity_persons__person__primary_contact")
             .order_by("-occurred_at")
         )
-        context["deal_persons"] = deal.deal_persons.select_related(
-            "person__primary_contact__company"
-        ).all()
+        context["deal_persons"] = (
+            deal.deal_persons.filter(person__status=Person.Status.ACTIVE)
+            .select_related("person__primary_contact__company")
+            .all()
+        )
         context["deal_users"] = deal.deal_users.select_related("user").all()
         context["attachments"] = deal.attachments.select_related("uploaded_by").all()
         context["can_edit"] = can_edit_deal(self.request.user, deal)
@@ -187,10 +189,12 @@ class DealCreateView(LoginRequiredMixin, PermissionRequiredMixin, CreateView):
         return initial
 
     def get_success_url(self):
-        back = BackNavigator(self.request)
-        if back.back_exist:
-            return back.back_url
-        return reverse("deals:deal_detail", kwargs={"pk": self.object.pk})
+        url = reverse("deals:deal_persons_manage", kwargs={"pk": self.object.pk}) + "?wizard=1"
+        raw_back = self.request.GET.get(BackNavigator.PARAM_NAME) or self.request.POST.get(BackNavigator.PARAM_NAME)
+        if raw_back:
+            from urllib.parse import quote
+            url += f"&{BackNavigator.PARAM_NAME}={quote(raw_back)}"
+        return url
 
     @transaction.atomic
     def form_valid(self, form):
@@ -290,6 +294,13 @@ class DealUpdateView(LoginRequiredMixin, PermissionRequiredMixin, UpdateView):
             data={"name": deal.name, "deal_id": str(deal.id)},
         )
         messages.success(self.request, f"案件「{deal.name}」を更新しました。")
+        if self.request.GET.get("wizard") == "1" or self.request.POST.get("wizard") == "1":
+            url = reverse("deals:deal_persons_manage", kwargs={"pk": deal.pk}) + "?wizard=1"
+            raw_back = self.request.POST.get(BackNavigator.PARAM_NAME) or self.request.GET.get(BackNavigator.PARAM_NAME)
+            if raw_back:
+                from urllib.parse import quote
+                url += f"&{BackNavigator.PARAM_NAME}={quote(raw_back)}"
+            return redirect(url)
         return redirect("deals:deal_detail", pk=deal.pk)
 
     def get_context_data(self, **kwargs):
@@ -622,7 +633,11 @@ class DealPersonManageView(LoginRequiredMixin, View):
 
         back = BackNavigator(request)
         deal_detail_url = reverse("deals:deal_detail", kwargs={"pk": deal.pk})
-        back.push_current(title=f"関係者管理: {deal.name}", keys=["q"])
+        is_wizard = request.GET.get("wizard") == "1"
+        if not is_wizard:
+            back.push_current(title=f"関係者管理: {deal.name}", keys=["q"])
+        else:
+            back.push_current(title=f"社外関係者: {deal.name}", keys=["wizard", "q"])
 
         is_edit_mode = request.GET.get("edit") == "1"
 
@@ -637,6 +652,7 @@ class DealPersonManageView(LoginRequiredMixin, View):
                 "q": q,
                 "is_searched": is_searched,
                 "is_edit_mode": is_edit_mode,
+                "is_wizard": is_wizard,
                 "person_roles": PersonRole.choices,
                 "back": back,
                 "deal_detail_url": deal_detail_url,
@@ -674,9 +690,18 @@ class DealPersonManageView(LoginRequiredMixin, View):
 
         messages.success(request, f"社外関係者情報を一括更新しました（{updated_count}件）。")
         redirect_url = reverse("deals:deal_persons_manage", kwargs={"pk": deal.pk})
+        params = []
+        if request.POST.get("wizard") == "1" or request.GET.get("wizard") == "1":
+            params.append("wizard=1")
         q = request.POST.get("q", "").strip()
         if q:
-            redirect_url += f"?q={q}"
+            params.append(f"q={q}")
+        raw_back = request.POST.get(BackNavigator.PARAM_NAME) or request.GET.get(BackNavigator.PARAM_NAME)
+        if raw_back:
+            from urllib.parse import quote
+            params.append(f"{BackNavigator.PARAM_NAME}={quote(raw_back)}")
+        if params:
+            redirect_url += "?" + "&".join(params)
         return redirect(redirect_url)
 
 
@@ -724,7 +749,11 @@ class DealUserManageView(LoginRequiredMixin, View):
 
         back = BackNavigator(request)
         deal_detail_url = reverse("deals:deal_detail", kwargs={"pk": deal.pk})
-        back.push_current(title=f"担当者管理: {deal.name}", keys=["q"])
+        is_wizard = request.GET.get("wizard") == "1"
+        if not is_wizard:
+            back.push_current(title=f"担当者管理: {deal.name}", keys=["q"])
+        else:
+            back.push_current(title=f"社内担当者: {deal.name}", keys=["wizard", "q"])
 
         is_edit_mode = request.GET.get("edit") == "1"
 
@@ -739,6 +768,7 @@ class DealUserManageView(LoginRequiredMixin, View):
                 "q": q,
                 "is_searched": is_searched,
                 "is_edit_mode": is_edit_mode,
+                "is_wizard": is_wizard,
                 "user_roles": UserRole.choices,
                 "back": back,
                 "deal_detail_url": deal_detail_url,
@@ -779,7 +809,240 @@ class DealUserManageView(LoginRequiredMixin, View):
 
         messages.success(request, f"社内担当者情報を一括更新しました（{updated_count}件）。")
         redirect_url = reverse("deals:deal_users_manage", kwargs={"pk": deal.pk})
+        params = []
+        if request.POST.get("wizard") == "1" or request.GET.get("wizard") == "1":
+            params.append("wizard=1")
         q = request.POST.get("q", "").strip()
         if q:
-            redirect_url += f"?q={q}"
+            params.append(f"q={q}")
+        raw_back = request.POST.get(BackNavigator.PARAM_NAME) or request.GET.get(BackNavigator.PARAM_NAME)
+        if raw_back:
+            from urllib.parse import quote
+            params.append(f"{BackNavigator.PARAM_NAME}={quote(raw_back)}")
+        if params:
+            redirect_url += "?" + "&".join(params)
         return redirect(redirect_url)
+
+
+class DealMembersView(LoginRequiredMixin, View):
+    """案件関係者設定画面（ウィザード対応）。"""
+
+    def get(self, request, pk):
+        deal = get_object_or_404(
+            Deal.objects.select_related("company", "owner"),
+            pk=pk,
+        )
+        if not can_edit_deal(request.user, deal):
+            raise PermissionDenied
+
+        deal_persons = deal.deal_persons.select_related(
+            "person__primary_contact__company",
+        ).all()
+
+        existing_person_ids = set(deal_persons.values_list("person_id", flat=True))
+        if deal.primary_person_id:
+            existing_person_ids.add(deal.primary_person_id)
+
+        q = request.GET.get("q", "").strip()
+        is_searched = bool(q)
+        if is_searched:
+            person_qs = (
+                Person.objects.exclude(status=Person.Status.MERGED)
+                .exclude(id__in=existing_person_ids)
+                .select_related("primary_contact__company")
+                .filter(
+                    Q(primary_contact__first_name__icontains=q)
+                    | Q(primary_contact__last_name__icontains=q)
+                    | Q(primary_contact__company__organization__icontains=q)
+                    | Q(primary_contact__organization__icontains=q)
+                    | Q(primary_contact__title__icontains=q)
+                    | Q(primary_contact__email__icontains=q)
+                )
+                .distinct()[:50]
+            )
+        else:
+            person_qs = Person.objects.none()
+
+        back = BackNavigator(request)
+        deal_detail_url = reverse("deals:deal_detail", kwargs={"pk": deal.pk})
+        is_wizard = request.GET.get("wizard") == "1"
+        if not is_wizard:
+            back.push_current(title=f"関係者管理: {deal.name}", keys=["q"])
+
+        is_edit_mode = request.GET.get("edit") == "1"
+
+        return render(
+            request,
+            "deals/deal_members.html",
+            {
+                "deal": deal,
+                "deal_persons": deal_persons,
+                "candidate_persons": person_qs,
+                "current_q": q,
+                "q": q,
+                "is_searched": is_searched,
+                "is_edit_mode": is_edit_mode,
+                "is_wizard": is_wizard,
+                "person_roles": PersonRole.choices,
+                "back": back,
+                "deal_detail_url": deal_detail_url,
+                "active_menu": "deals:deal_list",
+            },
+        )
+
+    def post(self, request, pk):
+        """社外関係者の一括更新（バッチアップデート）。"""
+        deal = get_object_or_404(Deal, pk=pk)
+        if not can_edit_deal(request.user, deal):
+            raise PermissionDenied
+
+        deal_persons = deal.deal_persons.all()
+        updated_count = 0
+        with transaction.atomic():
+            for dp in deal_persons:
+                exists_key = f"person_{dp.id}_exists"
+                if exists_key not in request.POST:
+                    continue
+                role_key = f"person_{dp.id}_role"
+                memo_key = f"person_{dp.id}_memo"
+
+                if role_key in request.POST:
+                    new_role = request.POST.get(role_key)
+                    if new_role in dict(PersonRole.choices):
+                        dp.role = new_role
+
+                if memo_key in request.POST:
+                    dp.memo = request.POST.get(memo_key, "").strip()
+
+                dp.full_clean()
+                dp.save()
+                updated_count += 1
+
+        messages.success(request, f"社外関係者情報を一括更新しました（{updated_count}件）。")
+        redirect_url = reverse("deals:deal_members", kwargs={"pk": deal.pk})
+        params = []
+        if request.POST.get("wizard") == "1" or request.GET.get("wizard") == "1":
+            params.append("wizard=1")
+        q = request.POST.get("q", "").strip()
+        if q:
+            params.append(f"q={q}")
+        raw_back = request.POST.get(BackNavigator.PARAM_NAME) or request.GET.get(BackNavigator.PARAM_NAME)
+        if raw_back:
+            from urllib.parse import quote
+            params.append(f"{BackNavigator.PARAM_NAME}={quote(raw_back)}")
+        if params:
+            redirect_url += "?" + "&".join(params)
+        return redirect(redirect_url)
+
+
+class DealAttachmentManageView(LoginRequiredMixin, View):
+    """案件添付ファイル管理画面（ウィザード Step 4 対応）。"""
+
+    def get(self, request, pk):
+        deal = get_object_or_404(
+            Deal.objects.select_related("company", "owner"),
+            pk=pk,
+        )
+        if not can_edit_deal(request.user, deal):
+            raise PermissionDenied
+
+        attachments = deal.attachments.select_related("uploaded_by").all()
+        can_edit = can_edit_deal(request.user, deal)
+
+        back = BackNavigator(request)
+        deal_detail_url = reverse("deals:deal_detail", kwargs={"pk": deal.pk})
+        is_wizard = request.GET.get("wizard") == "1"
+        if not is_wizard:
+            back.push_current(title=f"添付ファイル: {deal.name}", keys=["wizard"])
+        else:
+            back.push_current(title=f"添付ファイル: {deal.name}", keys=["wizard"])
+
+        return render(
+            request,
+            "deals/deal_attachments_manage.html",
+            {
+                "deal": deal,
+                "attachments": attachments,
+                "can_edit": can_edit,
+                "is_wizard": is_wizard,
+                "back": back,
+                "deal_detail_url": deal_detail_url,
+                "active_menu": "deals:deal_list",
+            },
+        )
+
+    def post(self, request, pk):
+        """案件添付ファイルのアップロード（ウィザード Step 4 対応）。"""
+        deal = get_object_or_404(Deal, pk=pk)
+        if not can_edit_deal(request.user, deal):
+            raise PermissionDenied
+
+        files = request.FILES.getlist("files") or request.FILES.getlist("file")
+        next_url = request.POST.get("next") or request.GET.get("next")
+        default_redirect = reverse("deals:deal_detail", kwargs={"pk": deal.pk})
+        redirect_url = next_url or default_redirect
+
+        # ファイルが選択されていない場合はそのまま完了・リダイレクト
+        if not files:
+            return redirect(redirect_url)
+
+        if not request.user.has_perm("attachments.add_attachment"):
+            raise PermissionDenied
+
+        memo = request.POST.get("memo", "").strip()
+        from attachments.views import MAX_ATTACHMENT_SIZE, BLOCKED_EXTENSIONS
+        from attachments.models import Attachment
+        from actionlogs.models import ActionLog
+        from pathlib import Path
+
+        errors = []
+        for f in files:
+            if f.size > MAX_ATTACHMENT_SIZE:
+                errors.append(f"「{f.name}」: ファイルサイズは15MB以下にしてください。")
+            ext = Path(f.name).suffix.lower()
+            if ext in BLOCKED_EXTENSIONS:
+                errors.append(f"「{f.name}」: このファイル形式はセキュリティ上の理由によりアップロードできません。")
+
+        if errors:
+            for error in errors:
+                messages.error(request, error)
+            step4_url = reverse("deals:deal_attachments_manage", kwargs={"pk": deal.pk}) + "?wizard=1"
+            return redirect(step4_url)
+
+        created_attachments = []
+        try:
+            with transaction.atomic():
+                for f in files:
+                    attachment = Attachment(
+                        file=f,
+                        memo=memo,
+                        uploaded_by=request.user,
+                        original_filename=f.name,
+                        deal=deal,
+                    )
+                    attachment.save()
+                    created_attachments.append(attachment)
+
+                    ActionLog.record(
+                        user=request.user,
+                        action="attachment_uploaded",
+                        content_object=attachment,
+                        data={
+                            "original_filename": attachment.original_filename,
+                            "target_type": "deal",
+                            "target_id": str(deal.id),
+                        },
+                    )
+        except Exception as e:
+            messages.error(request, f"ファイルのアップロード中にエラーが発生しました: {e}")
+            step4_url = reverse("deals:deal_attachments_manage", kwargs={"pk": deal.pk}) + "?wizard=1"
+            return redirect(step4_url)
+
+        if len(created_attachments) == 1:
+            messages.success(request, "ファイルをアップロードしました。")
+        else:
+            messages.success(request, f"{len(created_attachments)}件のファイルをアップロードしました。")
+
+        return redirect(redirect_url)
+
+

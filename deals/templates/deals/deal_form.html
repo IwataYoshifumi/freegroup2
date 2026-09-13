@@ -1,12 +1,12 @@
 {% extends "deals/app_base.html" %}
 {% load back_tags %}
 
-{% block title %}{% if is_create %}案件新規作成{% else %}案件編集：{{ form.instance.name }}{% endif %} — FreeGroup2{% endblock %}
+{% block title %}{% if is_create or request.GET.wizard == "1" or not form.instance.pk %}案件新規作成 (1/4) 基本情報 — FreeGroup2{% else %}案件編集：{{ form.instance.name }} — FreeGroup2{% endif %}{% endblock %}
 
 {% block content %}
   <div class="app-page-header" style="max-width: 840px; margin-left: 0; margin-right: auto; margin-bottom: 16px;">
     <div>
-      <h1>{% if is_create %}案件新規作成{% else %}案件編集：{{ form.instance.name }}{% endif %}</h1>
+      <h1>{% if is_create or request.GET.wizard == "1" or not form.instance.pk %}案件新規作成 (1/4) 基本情報{% else %}案件編集：{{ form.instance.name }}{% endif %}</h1>
     </div>
     <div class="app-action-area">
       {% back_all_link back %}
@@ -14,10 +14,23 @@
     </div>
   </div>
 
+  {% if is_create or request.GET.wizard == "1" or not form.instance.pk %}
+    <div class="wizard-steps" style="display:flex; align-items:center; gap:12px; background:var(--app-bg-subtle, #f8fafc); border:1px solid var(--app-border, #e2e8f0); border-radius:8px; padding:12px 16px; margin-bottom:20px; max-width:840px; margin-left:0; margin-right:auto; flex-wrap:wrap;">
+      <span style="background:#f59e0b; color:#0f172a; font-weight:600; border-radius:6px; padding:4px 10px; font-size:13px;">1. 基本情報</span>
+      <i class="bi bi-chevron-right" style="color:#cbd5e1; font-size:12px;"></i>
+      <span style="color:var(--app-subtle, #94a3b8); font-weight:500; font-size:13px;">2. 社外関係者</span>
+      <i class="bi bi-chevron-right" style="color:#cbd5e1; font-size:12px;"></i>
+      <span style="color:var(--app-subtle, #94a3b8); font-weight:500; font-size:13px;">3. 社内担当者</span>
+      <i class="bi bi-chevron-right" style="color:#cbd5e1; font-size:12px;"></i>
+      <span style="color:var(--app-subtle, #94a3b8); font-weight:500; font-size:13px;">4. 添付ファイル</span>
+    </div>
+  {% endif %}
+
   <section class="app-card" style="max-width: 840px; margin-left: 0; margin-right: auto;">
     <form method="post" novalidate>
       {% csrf_token %}
       {% hidden_back_field back %}
+      {% if request.GET.wizard == "1" %}<input type="hidden" name="wizard" value="1">{% endif %}
       {% if selected_person %}
         <input type="hidden" name="person" value="{{ selected_person.pk }}">
       {% endif %}
@@ -140,7 +153,14 @@
           <label class="app-form__label" for="{{ form.expected_close_date.id_for_label }}">
             {{ form.expected_close_date.label }}{% if form.expected_close_date.field.required %} <span style="color:var(--app-color-danger, #ef4444);">*</span>{% endif %}
           </label>
-          {{ form.expected_close_date }}
+          <div style="display: flex; gap: 8px; align-items: center;">
+            {{ form.expected_close_date }}
+            <button type="button" class="app-btn app-btn--secondary app-btn--sm" id="btn-expected-close-date-ok" onclick="var el = document.getElementById('{{ form.expected_close_date.id_for_label }}'); if(el) el.blur();">OK</button>
+          </div>
+          <div style="display: flex; gap: 6px; margin-top: 6px;">
+            <button type="button" class="app-btn app-btn--secondary app-btn--sm" id="btn-expected-close-date-today" style="font-size: 12px; padding: 2px 10px;">今日</button>
+            <button type="button" class="app-btn app-btn--secondary app-btn--sm" id="btn-expected-close-date-yesterday" style="font-size: 12px; padding: 2px 10px;">昨日</button>
+          </div>
           {% if form.expected_close_date.errors %}<div class="app-form__error">{{ form.expected_close_date.errors }}</div>{% endif %}
         </div>
 
@@ -157,8 +177,8 @@
       <div class="app-action-area" style="margin-top:24px;">
         {% back_all_link back %}
         {% back_link back %}
-        <button type="submit" class="app-btn {% if is_create %}app-btn--primary{% else %}app-btn--success{% endif %}">
-          {% if is_create %}作成する{% else %}保存する{% endif %}
+        <button type="submit" class="app-btn {% if is_create or request.GET.wizard == "1" or not form.instance.pk %}app-btn--primary{% else %}app-btn--success{% endif %}">
+          {% if is_create or request.GET.wizard == "1" or not form.instance.pk %}次へ{% else %}保存する{% endif %}
         </button>
       </div>
     </form>
@@ -404,6 +424,38 @@
             }
           });
         }
+      }
+
+      // 成約目標日（今日・昨日・OK）補助処理
+      var dateInput = document.getElementById('{{ form.expected_close_date.id_for_label }}');
+      var todayBtn = document.getElementById('btn-expected-close-date-today');
+      var yestBtn = document.getElementById('btn-expected-close-date-yesterday');
+      function setExpectedDate(dateObj) {
+        if (!dateInput) return;
+        var y = dateObj.getFullYear();
+        var m = String(dateObj.getMonth() + 1).padStart(2, '0');
+        var d = String(dateObj.getDate()).padStart(2, '0');
+        if (dateInput.type === 'date') {
+          dateInput.value = y + '-' + m + '-' + d;
+        } else {
+          var hh = String(dateObj.getHours()).padStart(2, '0');
+          var mm = String(dateObj.getMinutes()).padStart(2, '0');
+          dateInput.value = y + '-' + m + '-' + d + 'T' + hh + ':' + mm;
+        }
+        dateInput.dispatchEvent(new Event('input', { bubbles: true }));
+        dateInput.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      if (todayBtn) {
+        todayBtn.addEventListener('click', function() {
+          setExpectedDate(new Date());
+        });
+      }
+      if (yestBtn) {
+        yestBtn.addEventListener('click', function() {
+          var d = new Date();
+          d.setDate(d.getDate() - 1);
+          setExpectedDate(d);
+        });
       }
     })();
   </script>

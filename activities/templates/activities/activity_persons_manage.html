@@ -1,7 +1,7 @@
 {% extends "deals/app_base.html" %}
 {% load back_tags %}
 
-{% block title %}社外関係者管理 — {{ activity }} — FreeGroup2{% endblock %}
+{% block title %}{% if is_wizard %}活動参加者設定 (2/4) 相手方関係者 — {{ activity }} — FreeGroup2{% else %}社外関係者管理 — {{ activity }} — FreeGroup2{% endif %}{% endblock %}
 
 {% block content %}
 <div style="max-width: 1040px; margin-left: 0; margin-right: auto;">
@@ -16,7 +16,7 @@
           / キャンペーン: <span>{{ activity.campaign }}</span>
         {% endif %}
       </div>
-      <h1>社外関係者（パーソン）管理</h1>
+      <h1>{% if is_wizard %}活動参加者設定 (2/4) 相手方関係者{% else %}社外関係者（パーソン）管理{% endif %}</h1>
     </div>
     <div class="app-action-area">
       {% back_all_link back %}
@@ -28,6 +28,19 @@
     </div>
   </div>
 
+  {# ステップインジケーター（ウィザード時） #}
+  {% if is_wizard %}
+    <div class="wizard-steps" style="display:flex; align-items:center; gap:12px; background:var(--app-bg-subtle, #f8fafc); border:1px solid var(--app-border, #e2e8f0); border-radius:8px; padding:12px 16px; margin-bottom:20px; flex-wrap:wrap;">
+      <span style="color:var(--app-muted, #64748b); font-weight:500; font-size:13px;">1. 基本情報</span>
+      <i class="bi bi-chevron-right" style="color:#cbd5e1; font-size:12px;"></i>
+      <span style="background:#f59e0b; color:#0f172a; font-weight:600; border-radius:6px; padding:4px 10px; font-size:13px;">2. 相手方関係者</span>
+      <i class="bi bi-chevron-right" style="color:#cbd5e1; font-size:12px;"></i>
+      <span style="color:var(--app-subtle, #94a3b8); font-weight:500; font-size:13px;">3. 社内同席者</span>
+      <i class="bi bi-chevron-right" style="color:#cbd5e1; font-size:12px;"></i>
+      <span style="color:var(--app-subtle, #94a3b8); font-weight:500; font-size:13px;">4. 添付ファイル</span>
+    </div>
+  {% endif %}
+
   {# 1. 登録済み関係者セクション（一括編集対応） #}
   <section class="app-card" style="margin-bottom:24px;">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
@@ -37,14 +50,16 @@
       </div>
       {% if not is_edit_mode and activity_persons %}
         <div style="display:flex; align-items:center; gap:8px;">
-          <a href="?{% if current_q %}q={{ current_q|urlencode }}&{% endif %}edit=1" class="app-btn app-btn--secondary app-btn--sm">一括編集</a>
+          <a href="?{% if is_wizard %}wizard=1&{% endif %}{% if current_q %}q={{ current_q|urlencode }}&{% endif %}edit=1" class="app-btn app-btn--secondary app-btn--sm">一括編集</a>
         </div>
       {% endif %}
     </div>
 
     {% if is_edit_mode %}
-      <form method="post" action="{% url 'activities:activity_persons_manage' pk=activity.id %}" id="batch-update-persons-form">
+      <form method="post" action="{% url 'activities:activity_persons_manage' pk=activity.id %}{% if is_wizard %}?wizard=1{% endif %}" id="batch-update-persons-form">
         {% csrf_token %}
+        {% if is_wizard %}<input type="hidden" name="wizard" value="1">{% endif %}
+        {% hidden_back_field back %}
         <input type="hidden" name="q" value="{{ current_q }}">
         <div class="app-table-wrapper">
           <table class="app-table">
@@ -101,8 +116,8 @@
             </tbody>
           </table>
         </div>
-        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
-          <a href="{% url 'activities:activity_persons_manage' pk=activity.id %}{% if current_q %}?q={{ current_q|urlencode }}{% endif %}" class="app-btn app-btn--ghost app-btn--sm">キャンセル</a>
+        <div style="margin-top:16px; display:flex; justify-content:flex-end; gap:8px;">
+          <a href="?{% if is_wizard %}wizard=1&{% endif %}{% if current_q %}q={{ current_q|urlencode }}{% endif %}" class="app-btn app-btn--ghost app-btn--sm">キャンセル</a>
           <button type="submit" class="app-btn app-btn--primary app-btn--sm">適用</button>
         </div>
       </form>
@@ -168,6 +183,8 @@
       <h2 style="font-size:16px; margin:0;">関係者（パーソン）を検索・追加</h2>
     </div>
     <form method="get" style="display:flex; gap:8px; margin-bottom:16px;">
+      {% if is_wizard %}<input type="hidden" name="wizard" value="1">{% endif %}
+      {% hidden_back_field back %}
       <input type="text"
              name="q"
              value="{{ current_q }}"
@@ -176,7 +193,7 @@
              style="max-width:400px;">
       <button type="submit" class="app-btn app-btn--secondary">検索</button>
       {% if current_q %}
-        <a href="{% url 'activities:activity_persons_manage' pk=activity.id %}" class="app-btn app-btn--ghost">クリア</a>
+        <a href="{% url 'activities:activity_persons_manage' pk=activity.id %}{% if is_wizard %}?wizard=1{% endif %}" class="app-btn app-btn--ghost">クリア</a>
       {% endif %}
     </form>
 
@@ -240,5 +257,12 @@
       {% endif %}
     {% endif %}
   </section>
+
+  {% if is_wizard %}
+    <div class="app-action-area" style="margin-top:24px; display:flex; justify-content:flex-end;">
+      {% url 'activities:activity_users_manage' pk=activity.id as next_step_url %}
+      <a href="{% append_back_url next_step_url back %}{% if back.back_exist %}&{% else %}?{% endif %}wizard=1" class="app-btn app-btn--primary" style="min-width:120px; text-align:center;">次へ</a>
+    </div>
+  {% endif %}
 </div>
 {% endblock %}

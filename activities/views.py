@@ -39,6 +39,12 @@ class ActivityListView(LoginRequiredMixin, ListView):
     context_object_name = "activities"
     paginate_by = 20
 
+    def get_paginate_by(self, queryset):
+        per_page = self.request.GET.get("per_page")
+        if per_page in ("20", "50", "100"):
+            return int(per_page)
+        return self.paginate_by
+
     def get_queryset(self):
         qs = visible_activities_for(self.request.user)
 
@@ -49,15 +55,42 @@ class ActivityListView(LoginRequiredMixin, ListView):
             qs = qs.filter(is_archived=True)
 
         mode = self.request.GET.get("mode")
-        date_str = self.request.GET.get("date")
+        date_str = self.request.GET.get("date") or self.request.GET.get("occurred_at")
+        occurred_after = self.request.GET.get("occurred_after")
+        occurred_before = self.request.GET.get("occurred_before")
 
-        if mode == "daily" or (not self.request.GET and not date_str):
-            # デフォルトで日報（本日分）を表示
-            today = timezone.localdate()
-            qs = qs.filter(occurred_at__date=today)
+        if occurred_after or occurred_before:
+            if occurred_after:
+                try:
+                    qs = qs.filter(occurred_at__date__gte=occurred_after)
+                except Exception:
+                    pass
+            if occurred_before:
+                try:
+                    qs = qs.filter(occurred_at__date__lte=occurred_before)
+                except Exception:
+                    pass
         elif date_str:
             try:
                 qs = qs.filter(occurred_at__date=date_str)
+            except Exception:
+                pass
+        elif mode == "daily" or (not self.request.GET and not mode):
+            # デフォルトで日報（本日分）を表示
+            today = timezone.localdate()
+            qs = qs.filter(occurred_at__date=today)
+
+        # 実施者（ユーザー）絞り込み
+        if "user_id" in self.request.GET:
+            current_user_id = self.request.GET.get("user_id", "").strip()
+        elif not self.request.GET or not self.request.GET.get("mode"):
+            current_user_id = str(self.request.user.id)
+        else:
+            current_user_id = ""
+
+        if current_user_id:
+            try:
+                qs = qs.filter(user_id=current_user_id)
             except Exception:
                 pass
 
@@ -76,20 +109,49 @@ class ActivityListView(LoginRequiredMixin, ListView):
                 Q(memo__icontains=q)
                 | Q(place__icontains=q)
                 | Q(deal__name__icontains=q)
+                | Q(deal__company__organization__icontains=q)
                 | Q(activity_persons__person__primary_contact__last_name__icontains=q)
                 | Q(activity_persons__person__primary_contact__first_name__icontains=q)
+                | Q(activity_persons__person__primary_contact__company__organization__icontains=q)
+                | Q(activity_persons__person__primary_contact__organization__icontains=q)
+                | Q(user__username__icontains=q)
+                | Q(user__last_name__icontains=q)
+                | Q(user__first_name__icontains=q)
+                | Q(activity_users__user__username__icontains=q)
+                | Q(activity_users__user__last_name__icontains=q)
+                | Q(activity_users__user__first_name__icontains=q)
             ).distinct()
+
+        sort = self.request.GET.get("sort", "date_desc")
+        if sort == "date_asc":
+            order_fields = ["occurred_at", "id"]
+        else:
+            order_fields = ["-occurred_at", "-id"]
 
         return qs.select_related("deal", "campaign", "user").prefetch_related(
             "activity_persons__person__primary_contact"
-        ).order_by("-occurred_at")
+        ).order_by(*order_fields)
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         back = BackNavigator(self.request)
         back.push_current(
             title="活動一覧",
-            keys=["mode", "date", "activity_type", "direction", "q", "status", "page"],
+            keys=[
+                "mode",
+                "date",
+                "occurred_at",
+                "occurred_after",
+                "occurred_before",
+                "activity_type",
+                "direction",
+                "q",
+                "status",
+                "user_id",
+                "sort",
+                "per_page",
+                "page",
+            ],
         )
         context["back"] = back
         context["activity_types"] = ActivityType.choices
@@ -98,8 +160,32 @@ class ActivityListView(LoginRequiredMixin, ListView):
         context["current_direction"] = self.request.GET.get("direction", "")
         context["current_status"] = self.request.GET.get("status", "active")
         context["current_date"] = self.request.GET.get("date", "")
+        context["occurred_after"] = self.request.GET.get("occurred_after", "")
+        context["occurred_before"] = self.request.GET.get("occurred_before", "")
         context["current_mode"] = self.request.GET.get("mode", "daily" if not self.request.GET else "")
         context["current_q"] = self.request.GET.get("q", "")
+
+        # ユーザー一覧および選択状態
+        if "user_id" in self.request.GET:
+            current_user_id = self.request.GET.get("user_id", "").strip()
+        elif not self.request.GET or not self.request.GET.get("mode"):
+            current_user_id = str(self.request.user.id)
+        else:
+            current_user_id = ""
+        context["current_user_id"] = current_user_id
+        context["users"] = get_user_model().objects.filter(is_active=True).order_by("username")
+
+        # ソートおよび表示件数
+        sort = self.request.GET.get("sort", "date_desc")
+        if sort not in ("date_desc", "date_asc"):
+            sort = "date_desc"
+        context["current_sort"] = sort
+
+        per_page = self.request.GET.get("per_page", "20")
+        if per_page not in ("20", "50", "100"):
+            per_page = "20"
+        context["current_per_page"] = per_page
+
         context["active_menu"] = "activities:activity_list"
         return context
 
@@ -132,9 +218,11 @@ class ActivityDetailView(LoginRequiredMixin, DetailView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         activity = self.object
-        context["activity_persons"] = activity.activity_persons.select_related(
-            "person__primary_contact__company"
-        ).all()
+        context["activity_persons"] = (
+            activity.activity_persons.filter(person__status=Person.Status.ACTIVE)
+            .select_related("person__primary_contact__company")
+            .all()
+        )
         context["activity_users"] = activity.activity_users.select_related("user").all()
         context["attachments"] = activity.attachments.select_related("uploaded_by").all()
         context["can_edit"] = can_edit_activity(self.request.user, activity)
@@ -203,16 +291,50 @@ class ActivityCreateView(LoginRequiredMixin, PermissionRequiredMixin, CreateView
         return kwargs
 
     def get_success_url(self):
-        back = BackNavigator(self.request)
-        if back.back_exist:
-            return back.back_url
-        return reverse("activities:activity_detail", kwargs={"pk": self.object.pk})
+        url = reverse("activities:activity_persons_manage", kwargs={"pk": self.object.pk}) + "?wizard=1"
+        raw_back = self.request.GET.get(BackNavigator.PARAM_NAME) or self.request.POST.get(BackNavigator.PARAM_NAME)
+        if raw_back:
+            from urllib.parse import quote
+            url += f"&{BackNavigator.PARAM_NAME}={quote(raw_back)}"
+        return url
 
+    @transaction.atomic
     def form_valid(self, form):
         form.instance.user = self.request.user
         form.instance.created_by = self.request.user
         activity = form.save()
         self.object = activity
+
+        # 案件に紐づく場合の初期自動引き継ぎ
+        if activity.deal:
+            deal = activity.deal
+            # 相手方パーソン
+            if deal.primary_person and deal.primary_person.status == Person.Status.ACTIVE:
+                ActivityPerson.objects.get_or_create(
+                    activity=activity,
+                    person=deal.primary_person,
+                    defaults={"role": PersonRole.CONTACT_WINDOW},
+                )
+            for dp in deal.deal_persons.filter(person__status=Person.Status.ACTIVE):
+                ActivityPerson.objects.get_or_create(
+                    activity=activity,
+                    person=dp.person,
+                    defaults={"role": dp.role, "memo": dp.memo},
+                )
+
+            # 社内同席者
+            if deal.owner:
+                ActivityUser.objects.get_or_create(
+                    activity=activity,
+                    user=deal.owner,
+                    defaults={"role": UserRole.PRIMARY},
+                )
+            for du in deal.deal_users.all():
+                ActivityUser.objects.get_or_create(
+                    activity=activity,
+                    user=du.user,
+                    defaults={"role": du.role, "memo": du.memo},
+                )
 
         person_id = (
             self.request.POST.get("person_id")
@@ -293,6 +415,13 @@ class ActivityUpdateView(LoginRequiredMixin, PermissionRequiredMixin, UpdateView
             },
         )
         messages.success(self.request, "活動記録を更新しました。")
+        if self.request.GET.get("wizard") == "1" or self.request.POST.get("wizard") == "1":
+            url = reverse("activities:activity_persons_manage", kwargs={"pk": activity.pk}) + "?wizard=1"
+            raw_back = self.request.POST.get(BackNavigator.PARAM_NAME) or self.request.GET.get(BackNavigator.PARAM_NAME)
+            if raw_back:
+                from urllib.parse import quote
+                url += f"&{BackNavigator.PARAM_NAME}={quote(raw_back)}"
+            return redirect(url)
         return redirect("activities:activity_detail", pk=activity.pk)
 
     def get_context_data(self, **kwargs):
@@ -469,7 +598,11 @@ class ActivityPersonManageView(LoginRequiredMixin, View):
 
         back = BackNavigator(request)
         activity_detail_url = reverse("activities:activity_detail", kwargs={"pk": activity.pk})
-        back.push_current(title=f"関係者管理: {activity}", keys=["q"])
+        is_wizard = request.GET.get("wizard") == "1"
+        if not is_wizard:
+            back.push_current(title=f"関係者管理: {activity}", keys=["q"])
+        else:
+            back.push_current(title=f"相手方関係者: {activity}", keys=["wizard", "q"])
 
         is_edit_mode = request.GET.get("edit") == "1"
 
@@ -484,6 +617,7 @@ class ActivityPersonManageView(LoginRequiredMixin, View):
                 "q": q,
                 "is_searched": is_searched,
                 "is_edit_mode": is_edit_mode,
+                "is_wizard": is_wizard,
                 "person_roles": PersonRole.choices,
                 "back": back,
                 "activity_detail_url": activity_detail_url,
@@ -521,9 +655,18 @@ class ActivityPersonManageView(LoginRequiredMixin, View):
 
         messages.success(request, f"社外関係者情報を一括更新しました（{updated_count}件）。")
         redirect_url = reverse("activities:activity_persons_manage", kwargs={"pk": activity.pk})
+        params = []
+        if request.POST.get("wizard") == "1" or request.GET.get("wizard") == "1":
+            params.append("wizard=1")
         q = request.POST.get("q", "").strip()
         if q:
-            redirect_url += f"?q={q}"
+            params.append(f"q={q}")
+        raw_back = request.POST.get(BackNavigator.PARAM_NAME) or request.GET.get(BackNavigator.PARAM_NAME)
+        if raw_back:
+            from urllib.parse import quote
+            params.append(f"{BackNavigator.PARAM_NAME}={quote(raw_back)}")
+        if params:
+            redirect_url += "?" + "&".join(params)
         return redirect(redirect_url)
 
 
@@ -574,7 +717,11 @@ class ActivityUserManageView(LoginRequiredMixin, View):
 
         back = BackNavigator(request)
         activity_detail_url = reverse("activities:activity_detail", kwargs={"pk": activity.pk})
-        back.push_current(title=f"同席者管理: {activity}", keys=["q"])
+        is_wizard = request.GET.get("wizard") == "1"
+        if not is_wizard:
+            back.push_current(title=f"同席者管理: {activity}", keys=["q"])
+        else:
+            back.push_current(title=f"社内同席者: {activity}", keys=["wizard", "q"])
 
         is_edit_mode = request.GET.get("edit") == "1"
 
@@ -589,6 +736,7 @@ class ActivityUserManageView(LoginRequiredMixin, View):
                 "q": q,
                 "is_searched": is_searched,
                 "is_edit_mode": is_edit_mode,
+                "is_wizard": is_wizard,
                 "user_roles": UserRole.choices,
                 "back": back,
                 "activity_detail_url": activity_detail_url,
@@ -626,7 +774,238 @@ class ActivityUserManageView(LoginRequiredMixin, View):
 
         messages.success(request, f"社内同席者情報を一括更新しました（{updated_count}件）。")
         redirect_url = reverse("activities:activity_users_manage", kwargs={"pk": activity.pk})
+        params = []
+        if request.POST.get("wizard") == "1" or request.GET.get("wizard") == "1":
+            params.append("wizard=1")
         q = request.POST.get("q", "").strip()
         if q:
-            redirect_url += f"?q={q}"
+            params.append(f"q={q}")
+        raw_back = request.POST.get(BackNavigator.PARAM_NAME) or request.GET.get(BackNavigator.PARAM_NAME)
+        if raw_back:
+            from urllib.parse import quote
+            params.append(f"{BackNavigator.PARAM_NAME}={quote(raw_back)}")
+        if params:
+            redirect_url += "?" + "&".join(params)
         return redirect(redirect_url)
+
+
+class ActivityMembersView(LoginRequiredMixin, View):
+    """活動参加者設定画面（ウィザード対応）。"""
+
+    def get(self, request, pk):
+        activity = get_object_or_404(
+            Activity.objects.select_related("deal__company", "user"),
+            pk=pk,
+        )
+        if not can_edit_activity(request.user, activity):
+            raise PermissionDenied
+
+        activity_persons = activity.activity_persons.select_related(
+            "person__primary_contact__company",
+        ).all()
+
+        existing_person_ids = set(activity_persons.values_list("person_id", flat=True))
+
+        q = request.GET.get("q", "").strip()
+        is_searched = bool(q)
+        if is_searched:
+            person_qs = (
+                Person.objects.exclude(status=Person.Status.MERGED)
+                .exclude(id__in=existing_person_ids)
+                .select_related("primary_contact__company")
+                .filter(
+                    Q(primary_contact__first_name__icontains=q)
+                    | Q(primary_contact__last_name__icontains=q)
+                    | Q(primary_contact__company__organization__icontains=q)
+                    | Q(primary_contact__organization__icontains=q)
+                    | Q(primary_contact__title__icontains=q)
+                    | Q(primary_contact__email__icontains=q)
+                )
+                .distinct()[:50]
+            )
+        else:
+            person_qs = Person.objects.none()
+
+        back = BackNavigator(request)
+        activity_detail_url = reverse("activities:activity_detail", kwargs={"pk": activity.pk})
+        is_wizard = request.GET.get("wizard") == "1"
+        if not is_wizard:
+            back.push_current(title=f"参加者管理: {activity}", keys=["q"])
+
+        is_edit_mode = request.GET.get("edit") == "1"
+
+        return render(
+            request,
+            "activities/activity_members.html",
+            {
+                "activity": activity,
+                "activity_persons": activity_persons,
+                "candidate_persons": person_qs,
+                "current_q": q,
+                "q": q,
+                "is_searched": is_searched,
+                "is_edit_mode": is_edit_mode,
+                "is_wizard": is_wizard,
+                "person_roles": PersonRole.choices,
+                "back": back,
+                "activity_detail_url": activity_detail_url,
+                "active_menu": "activities:activity_list",
+            },
+        )
+
+    def post(self, request, pk):
+        """活動社外参加者の一括更新。"""
+        activity = get_object_or_404(Activity, pk=pk)
+        if not can_edit_activity(request.user, activity):
+            raise PermissionDenied
+
+        activity_persons = activity.activity_persons.all()
+        updated_count = 0
+        with transaction.atomic():
+            for ap in activity_persons:
+                exists_key = f"person_{ap.id}_exists"
+                if exists_key not in request.POST:
+                    continue
+                role_key = f"person_{ap.id}_role"
+                memo_key = f"person_{ap.id}_memo"
+
+                if role_key in request.POST:
+                    new_role = request.POST.get(role_key)
+                    if new_role in dict(PersonRole.choices):
+                        ap.role = new_role
+
+                if memo_key in request.POST:
+                    ap.memo = request.POST.get(memo_key, "").strip()
+
+                ap.full_clean()
+                ap.save()
+                updated_count += 1
+
+        messages.success(request, f"参加者情報を一括更新しました（{updated_count}件）。")
+        redirect_url = reverse("activities:activity_members", kwargs={"pk": activity.pk})
+        params = []
+        if request.POST.get("wizard") == "1" or request.GET.get("wizard") == "1":
+            params.append("wizard=1")
+        q = request.POST.get("q", "").strip()
+        if q:
+            params.append(f"q={q}")
+        raw_back = request.POST.get(BackNavigator.PARAM_NAME) or request.GET.get(BackNavigator.PARAM_NAME)
+        if raw_back:
+            from urllib.parse import quote
+            params.append(f"{BackNavigator.PARAM_NAME}={quote(raw_back)}")
+        if params:
+            redirect_url += "?" + "&".join(params)
+        return redirect(redirect_url)
+
+
+class ActivityAttachmentManageView(LoginRequiredMixin, View):
+    """活動添付ファイル管理画面（ウィザード Step 4 対応）。"""
+
+    def get(self, request, pk):
+        activity = get_object_or_404(
+            Activity.objects.select_related("deal", "campaign", "user"),
+            pk=pk,
+        )
+        if not can_edit_activity(request.user, activity):
+            raise PermissionDenied
+
+        attachments = activity.attachments.select_related("uploaded_by").all()
+        can_edit = can_edit_activity(request.user, activity)
+
+        back = BackNavigator(request)
+        activity_detail_url = reverse("activities:activity_detail", kwargs={"pk": activity.pk})
+        is_wizard = request.GET.get("wizard") == "1"
+        if not is_wizard:
+            back.push_current(title=f"添付ファイル: {activity}", keys=["wizard"])
+        else:
+            back.push_current(title=f"添付ファイル: {activity}", keys=["wizard"])
+
+        return render(
+            request,
+            "activities/activity_attachments_manage.html",
+            {
+                "activity": activity,
+                "attachments": attachments,
+                "can_edit": can_edit,
+                "is_wizard": is_wizard,
+                "back": back,
+                "activity_detail_url": activity_detail_url,
+                "active_menu": "activities:activity_list",
+            },
+        )
+
+    def post(self, request, pk):
+        """活動添付ファイルのアップロード（ウィザード Step 4 対応）。"""
+        activity = get_object_or_404(Activity, pk=pk)
+        if not can_edit_activity(request.user, activity):
+            raise PermissionDenied
+
+        files = request.FILES.getlist("files") or request.FILES.getlist("file")
+        next_url = request.POST.get("next") or request.GET.get("next")
+        default_redirect = reverse("activities:activity_detail", kwargs={"pk": activity.pk})
+        redirect_url = next_url or default_redirect
+
+        # ファイルが選択されていない場合はそのまま完了・リダイレクト
+        if not files:
+            return redirect(redirect_url)
+
+        if not request.user.has_perm("attachments.add_attachment"):
+            raise PermissionDenied
+
+        memo = request.POST.get("memo", "").strip()
+        from attachments.views import MAX_ATTACHMENT_SIZE, BLOCKED_EXTENSIONS
+        from attachments.models import Attachment
+        from actionlogs.models import ActionLog
+        from pathlib import Path
+
+        errors = []
+        for f in files:
+            if f.size > MAX_ATTACHMENT_SIZE:
+                errors.append(f"「{f.name}」: ファイルサイズは15MB以下にしてください。")
+            ext = Path(f.name).suffix.lower()
+            if ext in BLOCKED_EXTENSIONS:
+                errors.append(f"「{f.name}」: このファイル形式はセキュリティ上の理由によりアップロードできません。")
+
+        if errors:
+            for error in errors:
+                messages.error(request, error)
+            step4_url = reverse("activities:activity_attachments_manage", kwargs={"pk": activity.pk}) + "?wizard=1"
+            return redirect(step4_url)
+
+        created_attachments = []
+        try:
+            with transaction.atomic():
+                for f in files:
+                    attachment = Attachment(
+                        file=f,
+                        memo=memo,
+                        uploaded_by=request.user,
+                        original_filename=f.name,
+                        activity=activity,
+                    )
+                    attachment.save()
+                    created_attachments.append(attachment)
+
+                    ActionLog.record(
+                        user=request.user,
+                        action="attachment_uploaded",
+                        content_object=attachment,
+                        data={
+                            "original_filename": attachment.original_filename,
+                            "target_type": "activity",
+                            "target_id": str(activity.id),
+                        },
+                    )
+        except Exception as e:
+            messages.error(request, f"ファイルのアップロード中にエラーが発生しました: {e}")
+            step4_url = reverse("activities:activity_attachments_manage", kwargs={"pk": activity.pk}) + "?wizard=1"
+            return redirect(step4_url)
+
+        if len(created_attachments) == 1:
+            messages.success(request, "ファイルをアップロードしました。")
+        else:
+            messages.success(request, f"{len(created_attachments)}件のファイルをアップロードしました。")
+
+        return redirect(redirect_url)
+
+

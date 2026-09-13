@@ -12,9 +12,10 @@ from activities.admin import ActivityAdmin, ActivityPersonAdmin, ActivityUserAdm
 from activities.models import Activity, ActivityPerson, ActivityType, ActivityUser, Direction
 from companies.models import Company
 from contacts.models import Contact
-from deals.models import Deal, PersonRole, UserRole
+from deals.models import Deal, DealPerson, DealUser, PersonRole, UserRole
 from mailings.models import Campaign, ClickLog, EmailTemplate, TrackingLink
 from persons.models import Person
+from back_navigator.back_navigator import BackNavigator
 
 User = get_user_model()
 
@@ -346,8 +347,275 @@ class ActivityViewTests(TestCase):
         self.client.login(username="act_owner", password="password")
         response = self.client.get(reverse("activities:activity_list") + "?mode=all")
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "訪問")  # get_activity_type_display
         self.assertContains(response, "初回訪問議事録")
+        # HIG準拠レイアウト・表示（コンテナ幅、種別バッジ、方向バッジ、省略メモ）
+        self.assertContains(response, "max-width: 1200px;")
+        self.assertContains(response, '<span class="app-badge app-badge--neutral">訪問</span>')
+        self.assertContains(response, '<span class="app-badge app-badge--info">発信</span>')
+        self.assertContains(response, 'white-space:nowrap;')
+        # 期間検索フォーム要素（occurred_after, occurred_before, クイックプリセット）
+        self.assertContains(response, 'name="occurred_after"')
+        self.assertContains(response, 'name="occurred_before"')
+        self.assertContains(response, 'js-date-quick')
+        self.assertContains(response, 'js-date-clear')
+        # 実施者、ソート、表示件数フォーム要素、プレースホルダー
+        self.assertContains(response, 'name="user_id"')
+        self.assertContains(response, 'name="sort"')
+        self.assertContains(response, 'name="per_page"')
+        self.assertContains(response, 'placeholder="内容・場所・案件名・会社名・担当者名..."')
+        # 関連案件リンクに back_stack が含まれていること
+        deal_url = reverse("deals:deal_detail", kwargs={"pk": self.deal.pk})
+        self.assertIn(f'href="{deal_url}?back_stack=', response.content.decode("utf-8"))
+
+    def test_activity_list_date_range_filter(self):
+        """occurred_after / occurred_before による期間範囲検索の検証。"""
+        self.client.login(username="act_owner", password="password")
+        url = reverse("activities:activity_list")
+
+        base_time = timezone.now()
+        act_past = Activity.objects.create(
+            deal=self.deal,
+            activity_type=ActivityType.PHONE,
+            direction=Direction.INCOMING,
+            occurred_at=base_time - timezone.timedelta(days=10),
+            user=self.user,
+            memo="10日前の電話",
+        )
+        act_mid = Activity.objects.create(
+            deal=self.deal,
+            activity_type=ActivityType.EMAIL,
+            direction=Direction.OUTGOING,
+            occurred_at=base_time - timezone.timedelta(days=5),
+            user=self.user,
+            memo="5日前のメール",
+        )
+
+        d_past = (base_time - timezone.timedelta(days=10)).strftime("%Y-%m-%d")
+        d_mid = (base_time - timezone.timedelta(days=5)).strftime("%Y-%m-%d")
+
+        # 1. occurred_after のみ（5日前以降） -> act_mid と self.activity(当日) が含まれ、act_past は除外
+        resp_after = self.client.get(f"{url}?occurred_after={d_mid}")
+        self.assertEqual(resp_after.status_code, 200)
+        self.assertContains(resp_after, "5日前のメール")
+        self.assertContains(resp_after, "初回訪問議事録")
+        self.assertNotContains(resp_after, "10日前の電話")
+
+        # 2. occurred_before のみ（5日前以前） -> act_past と act_mid が含まれ、self.activity は除外
+        resp_before = self.client.get(f"{url}?occurred_before={d_mid}")
+        self.assertEqual(resp_before.status_code, 200)
+        self.assertContains(resp_before, "10日前の電話")
+        self.assertContains(resp_before, "5日前のメール")
+        self.assertNotContains(resp_before, "初回訪問議事録")
+
+        # 3. occurred_after & occurred_before（期間指定：10日前〜5日前）
+        resp_range = self.client.get(f"{url}?occurred_after={d_past}&occurred_before={d_mid}")
+        self.assertEqual(resp_range.status_code, 200)
+        self.assertContains(resp_range, "10日前の電話")
+        self.assertContains(resp_range, "5日前のメール")
+        self.assertNotContains(resp_range, "初回訪問議事録")
+
+    def test_activity_list_user_filter_sort_and_pagination(self):
+        """実施者絞り込み（デフォルト自分、すべて選択）、ソート（昇順/降順）、表示件数（per_page）の検証。"""
+        self.client.login(username="act_owner", password="password")
+        url = reverse("activities:activity_list")
+
+        # 別のユーザーによる活動を作成
+        other_user = self.attendee
+        act_other = Activity.objects.create(
+            deal=self.deal,
+            activity_type=ActivityType.WEB_MEETING,
+            direction=Direction.INCOMING,
+            occurred_at=timezone.now(),
+            user=other_user,
+            memo="同席者のWeb会議",
+        )
+
+        # 1. 初回アクセス（パラメータなし）: デフォルトでログインユーザー自身（act_owner）の活動のみ表示
+        res_initial = self.client.get(url)
+        self.assertEqual(res_initial.status_code, 200)
+        self.assertContains(res_initial, "初回訪問議事録")
+        self.assertNotContains(res_initial, "同席者のWeb会議")
+        self.assertEqual(res_initial.context["current_user_id"], str(self.user.id))
+
+        # 2. 実施者「すべて」選択（user_id=""）: 両方の活動が表示される
+        res_all_users = self.client.get(f"{url}?mode=all&user_id=")
+        self.assertEqual(res_all_users.status_code, 200)
+        self.assertContains(res_all_users, "初回訪問議事録")
+        self.assertContains(res_all_users, "同席者のWeb会議")
+        self.assertEqual(res_all_users.context["current_user_id"], "")
+
+        # 3. 別の実施者選択（user_id=other_user.id）: other_user の活動のみ表示
+        res_other = self.client.get(f"{url}?mode=all&user_id={other_user.id}")
+        self.assertEqual(res_other.status_code, 200)
+        self.assertNotContains(res_other, "初回訪問議事録")
+        self.assertContains(res_other, "同席者のWeb会議")
+        self.assertEqual(res_other.context["current_user_id"], str(other_user.id))
+
+        # 4. ソート順: date_asc vs date_desc
+        past_act = Activity.objects.create(
+            deal=self.deal,
+            activity_type=ActivityType.PHONE,
+            direction=Direction.OUTGOING,
+            occurred_at=timezone.now() - timezone.timedelta(days=30),
+            user=self.user,
+            memo="30日前の電話",
+        )
+        # date_asc (古い順): past_act が先頭
+        res_asc = self.client.get(f"{url}?mode=all&user_id=&sort=date_asc")
+        self.assertEqual(res_asc.status_code, 200)
+        acts_asc = list(res_asc.context["activities"])
+        self.assertEqual(acts_asc[0], past_act)
+
+        # date_desc (新しい順): past_act が末尾
+        res_desc = self.client.get(f"{url}?mode=all&user_id=&sort=date_desc")
+        self.assertEqual(res_desc.status_code, 200)
+        acts_desc = list(res_desc.context["activities"])
+        self.assertEqual(acts_desc[-1], past_act)
+
+        # 5. 表示件数 (per_page) の動的切り替え
+        for i in range(23):
+            Activity.objects.create(
+                deal=self.deal,
+                activity_type=ActivityType.OTHER,
+                occurred_at=timezone.now() - timezone.timedelta(minutes=i + 1),
+                user=self.user,
+                memo=f"追加活動{i}",
+            )
+        # per_page=20: ページネーションあり（1ページ目20件）
+        res_p20 = self.client.get(f"{url}?mode=all&user_id=&per_page=20")
+        self.assertEqual(len(res_p20.context["activities"]), 20)
+        self.assertTrue(res_p20.context["is_paginated"])
+
+        # per_page=50: 1ページですべて収まる（26件）
+        res_p50 = self.client.get(f"{url}?mode=all&user_id=&per_page=50")
+        self.assertEqual(len(res_p50.context["activities"]), 26)
+        self.assertFalse(res_p50.context["is_paginated"])
+
+    def test_activity_list_keyword_search(self):
+        """会社名（案件・パーソン）、実施者名、同席者名によるキーワード検索（?q=...&user_id=）の検証。"""
+        self.client.login(username="act_owner", password="password")
+        url = reverse("activities:activity_list")
+
+        # 1. 案件の取引先会社名
+        deal_company = Company.objects.create(organization="株式会社テスト商事")
+        deal_with_company = Deal.objects.create(
+            name="商事案件",
+            primary_person=self.person,
+            company=deal_company,
+            owner=self.user,
+        )
+        act_deal_company = Activity.objects.create(
+            deal=deal_with_company,
+            activity_type=ActivityType.VISIT,
+            occurred_at=timezone.now(),
+            user=self.user,
+            memo="商事案件の活動メモ",
+        )
+
+        # 2. 相手方パーソンの所属会社名
+        person_company = Company.objects.create(organization="未来テクノロジー合同会社")
+        person_with_company = Person.objects.create()
+        contact_person = Contact.objects.create(
+            person=person_with_company,
+            company=person_company,
+            last_name="鈴木",
+            first_name="一郎",
+        )
+        person_with_company.primary_contact = contact_person
+        person_with_company.save(update_fields=["primary_contact"])
+        act_person_company = Activity.objects.create(
+            deal=self.deal,
+            activity_type=ActivityType.EMAIL,
+            occurred_at=timezone.now(),
+            user=self.user,
+            memo="パーソン会社所属の活動メモ",
+        )
+        ActivityPerson.objects.create(
+            activity=act_person_company,
+            person=person_with_company,
+            role=PersonRole.ATTENDEE,
+        )
+
+        # 3. 実施者ユーザー名・氏名
+        rep_user = User.objects.create_user(
+            username="rep_tanaka",
+            first_name="花子",
+            last_name="田中",
+            password="password",
+        )
+        act_user_search = Activity.objects.create(
+            deal=self.deal,
+            activity_type=ActivityType.PHONE,
+            occurred_at=timezone.now(),
+            user=rep_user,
+            memo="田中さんの活動メモ",
+        )
+
+        # 4. 同席者ユーザー名・氏名
+        support_user = User.objects.create_user(
+            username="supporter_yamamoto",
+            first_name="三郎",
+            last_name="山本",
+            password="password",
+        )
+        act_supporter_search = Activity.objects.create(
+            deal=self.deal,
+            activity_type=ActivityType.WEB_MEETING,
+            occurred_at=timezone.now(),
+            user=self.user,
+            memo="山本さん同席の活動メモ",
+        )
+        ActivityUser.objects.create(
+            activity=act_supporter_search,
+            user=support_user,
+            role=UserRole.SUPPORT,
+        )
+
+        # 案件会社名で検索
+        res1 = self.client.get(f"{url}?mode=all&user_id=&q=テスト商事")
+        self.assertEqual(res1.status_code, 200)
+        self.assertContains(res1, "商事案件の活動メモ")
+        self.assertNotContains(res1, "パーソン会社所属の活動メモ")
+
+        # パーソン所属会社名で検索
+        res2 = self.client.get(f"{url}?mode=all&user_id=&q=未来テクノロジー")
+        self.assertEqual(res2.status_code, 200)
+        self.assertContains(res2, "パーソン会社所属の活動メモ")
+        self.assertNotContains(res2, "商事案件の活動メモ")
+
+        # 実施者（ユーザー名・姓・名）で検索
+        res3_user = self.client.get(f"{url}?mode=all&user_id=&q=rep_tanaka")
+        self.assertEqual(res3_user.status_code, 200)
+        self.assertContains(res3_user, "田中さんの活動メモ")
+
+        res3_last = self.client.get(f"{url}?mode=all&user_id=&q=田中")
+        self.assertEqual(res3_last.status_code, 200)
+        self.assertContains(res3_last, "田中さんの活動メモ")
+
+        res3_first = self.client.get(f"{url}?mode=all&user_id=&q=花子")
+        self.assertEqual(res3_first.status_code, 200)
+        self.assertContains(res3_first, "田中さんの活動メモ")
+
+        # 同席者（ユーザー名・姓・名）で検索
+        res4_user = self.client.get(f"{url}?mode=all&user_id=&q=supporter_yamamoto")
+        self.assertEqual(res4_user.status_code, 200)
+        self.assertContains(res4_user, "山本さん同席の活動メモ")
+
+        res4_last = self.client.get(f"{url}?mode=all&user_id=&q=山本")
+        self.assertEqual(res4_last.status_code, 200)
+        self.assertContains(res4_last, "山本さん同席の活動メモ")
+
+        res4_first = self.client.get(f"{url}?mode=all&user_id=&q=三郎")
+        self.assertEqual(res4_first.status_code, 200)
+        self.assertContains(res4_first, "山本さん同席の活動メモ")
+
+        # 不一致キーワードで検索
+        res_none = self.client.get(f"{url}?mode=all&user_id=&q=存在しないキーワードXYZ")
+        self.assertEqual(res_none.status_code, 200)
+        self.assertNotContains(res_none, "商事案件の活動メモ")
+        self.assertNotContains(res_none, "パーソン会社所属の活動メモ")
+        self.assertNotContains(res_none, "田中さんの活動メモ")
+        self.assertNotContains(res_none, "山本さん同席の活動メモ")
 
     def test_activity_detail_view_permissions(self):
         # 実施者
@@ -721,9 +989,9 @@ class ActivityViewTests(TestCase):
         }
         post_resp = self.client.post(url, data=post_data)
         self.assertEqual(post_resp.status_code, 302)
-        self.assertEqual(post_resp.url, f"/mailings/campaigns/{campaign.pk}/report/clicked/")
-
         created_activity = Activity.objects.get(memo="クリック受信者へのフォロー架電")
+        expected_url = reverse("activities:activity_persons_manage", kwargs={"pk": created_activity.pk}) + f"?wizard=1&back_stack={back_stack}"
+        self.assertEqual(post_resp.url, expected_url)
         self.assertEqual(created_activity.campaign, campaign)
         self.assertTrue(ActivityPerson.objects.filter(activity=created_activity, person=self.person).exists())
 
@@ -807,3 +1075,367 @@ class ActivityCreateInitialParamTests(TestCase):
         activity = Activity.objects.get(memo="パーソン起点での電話活動")
         self.assertEqual(activity.deal, self.deal1)
         self.assertTrue(ActivityPerson.objects.filter(activity=activity, person=self.person1).exists())
+
+
+class ActivityWizardTests(TestCase):
+    """活動新規作成ウィザード（基本情報 ➔ 参加者設定フロー）のテスト"""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="wizard_act_user", password="password")
+        add_perm = Permission.objects.get(codename="add_activity")
+        change_perm = Permission.objects.get(codename="change_activity")
+        view_perm = Permission.objects.get(codename="view_activity")
+        att_perm = Permission.objects.get(codename="add_attachment")
+        self.user.user_permissions.add(add_perm, change_perm, view_perm, att_perm)
+        self.company = Company.objects.create(organization="活動ウィザード社")
+        self.person = Person.objects.create()
+        Contact.objects.create(
+            person=self.person,
+            company=self.company,
+            first_name="次郎",
+            last_name="佐藤",
+        )
+        self.client.login(username="wizard_act_user", password="password")
+
+    def test_activity_wizard_4step_flow_and_titles(self):
+        """活動新規作成ウィザードの 4ステップ（Step 1 ➔ Step 2 ➔ Step 3 ➔ Step 4 ➔ 詳細）遷移および各画面のタイトル表記・ボタン・BackNavigator検証。"""
+        # Step 1: 基本情報入力画面
+        nav = BackNavigator(self.client.get("/").wsgi_request)
+        back_stack = nav._calc_encode_stack([{"url": reverse("activities:activity_list"), "title": "活動一覧"}])
+        res1 = self.client.get(f"{reverse('activities:activity_create')}?back_stack={back_stack}")
+        self.assertEqual(res1.status_code, 200)
+        content1 = res1.content.decode("utf-8")
+        self.assertIn("活動記録作成 (1/4) 基本情報", content1)
+        self.assertContains(res1, "次へ")
+        self.assertNotContains(res1, "スキップ")
+        # ステップインジケーター検証: (現在)が無く、シンプル化された表記であること
+        self.assertNotContains(res1, "(現在)")
+        self.assertContains(res1, "1. 基本情報")
+        # 日時クイック入力ボタン（今日・昨日）およびOKボタン
+        self.assertContains(res1, "今日")
+        self.assertContains(res1, "昨日")
+        self.assertContains(res1, "OK")
+
+        # Step 1 POST -> Step 2 へリダイレクト
+        post_data = {
+            "activity_type": ActivityType.PHONE,
+            "direction": Direction.OUTGOING,
+            "occurred_at": timezone.localtime().strftime("%Y-%m-%dT%H:%M"),
+            "memo": "ウィザード4ステップ活動",
+            "back_stack": back_stack,
+        }
+        res_post = self.client.post(f"{reverse('activities:activity_create')}?back_stack={back_stack}", data=post_data)
+        self.assertEqual(res_post.status_code, 302)
+        activity = Activity.objects.get(memo="ウィザード4ステップ活動")
+        self.assertTrue(res_post.url.startswith(reverse("activities:activity_persons_manage", kwargs={"pk": activity.pk})))
+        self.assertIn("wizard=1", res_post.url)
+
+        # Step 2: 相手方関係者設定画面
+        step2_url = res_post.url
+        res2 = self.client.get(step2_url)
+        self.assertEqual(res2.status_code, 200)
+        self.assertTrue(res2.context.get("is_wizard"))
+        content2 = res2.content.decode("utf-8")
+        self.assertIn("活動参加者設定 (2/4) 相手方関係者", content2)
+        self.assertContains(res2, "次へ")
+        self.assertNotContains(res2, "スキップ")
+        self.assertNotContains(res2, "(現在)")
+        self.assertContains(res2, "2. 相手方関係者")
+        # BackNavigator: 直前の Step 1 への戻るリンクが存在すること
+        self.assertTrue(res2.context["back"].back_exist)
+
+        # Step 3: 社内同席者設定画面
+        step3_base = reverse("activities:activity_users_manage", kwargs={"pk": activity.pk}) + "?wizard=1"
+        step3_url = res2.context["back"].append_url(step3_base)
+        res3 = self.client.get(step3_url)
+        self.assertEqual(res3.status_code, 200)
+        self.assertTrue(res3.context.get("is_wizard"))
+        content3 = res3.content.decode("utf-8")
+        self.assertIn("活動参加者設定 (3/4) 社内同席者", content3)
+        self.assertContains(res3, "次へ")
+        self.assertNotContains(res3, "スキップ")
+        self.assertNotContains(res3, "(現在)")
+        self.assertContains(res3, "3. 社内同席者")
+        # BackNavigator: 直前の Step 2 への戻るリンクが存在すること
+        self.assertTrue(res3.context["back"].back_exist)
+
+        # Step 4: 添付ファイル設定画面
+        step4_base = reverse("activities:activity_attachments_manage", kwargs={"pk": activity.pk}) + "?wizard=1"
+        step4_url = res3.context["back"].append_url(step4_base)
+        res4 = self.client.get(step4_url)
+        self.assertEqual(res4.status_code, 200)
+        self.assertTrue(res4.context.get("is_wizard"))
+        content4 = res4.content.decode("utf-8")
+        self.assertIn("活動ファイル添付 (4/4) 添付ファイル", content4)
+        self.assertContains(res4, "保存")
+        self.assertNotContains(res4, "スキップ")
+        self.assertNotContains(res4, "(現在)")
+        self.assertContains(res4, "4. 添付ファイル")
+        # BackNavigator: 直前の Step 3 への戻るリンクが存在すること
+        self.assertTrue(res4.context["back"].back_exist)
+
+        # 詳細画面へ遷移
+        detail_url = reverse("activities:activity_detail", kwargs={"pk": activity.pk})
+        res_detail = self.client.get(detail_url)
+        self.assertEqual(res_detail.status_code, 200)
+
+    def test_activity_create_auto_copies_deal_members(self):
+        """案件から活動を作成した際、案件の primary_person、deal_persons、owner、deal_users が自動的に初期コピーされること。"""
+        deal_owner = User.objects.create_user(username="deal_owner_user", password="password")
+        deal_member = User.objects.create_user(username="deal_member_user", password="password")
+
+        person1 = self.person
+        person2 = Person.objects.create()
+        Contact.objects.create(
+            person=person2,
+            company=self.company,
+            first_name="花子",
+            last_name="山田",
+        )
+
+        deal = Deal.objects.create(
+            name="メンバー引き継ぎ元案件",
+            company=self.company,
+            owner=deal_owner,
+            primary_person=person1,
+            created_by=self.user,
+        )
+        DealPerson.objects.create(
+            deal=deal,
+            person=person2,
+            role=PersonRole.ATTENDEE,
+            memo="案件側同席者メモ",
+        )
+        DealUser.objects.create(
+            deal=deal,
+            user=deal_member,
+            role=UserRole.SUPPORT,
+            memo="案件側サポートメモ",
+        )
+
+        post_data = {
+            "activity_type": ActivityType.WEB_MEETING,
+            "direction": Direction.OUTGOING,
+            "occurred_at": timezone.localtime().strftime("%Y-%m-%dT%H:%M"),
+            "deal": str(deal.id),
+            "memo": "案件引き継ぎ活動",
+        }
+        res = self.client.post(reverse("activities:activity_create"), data=post_data)
+        self.assertEqual(res.status_code, 302)
+
+        activity = Activity.objects.get(memo="案件引き継ぎ活動")
+
+        # 相手方パーソンのコピー検証
+        ap_person_ids = set(activity.activity_persons.values_list("person_id", flat=True))
+        self.assertIn(person1.id, ap_person_ids)
+        self.assertIn(person2.id, ap_person_ids)
+        self.assertEqual(activity.activity_persons.count(), 2)
+
+        ap1 = activity.activity_persons.get(person=person1)
+        self.assertEqual(ap1.role, PersonRole.CONTACT_WINDOW)
+
+        ap2 = activity.activity_persons.get(person=person2)
+        self.assertEqual(ap2.role, PersonRole.ATTENDEE)
+        self.assertEqual(ap2.memo, "案件側同席者メモ")
+
+        # 社内同席者のコピー検証
+        au_user_ids = set(activity.activity_users.values_list("user_id", flat=True))
+        self.assertIn(deal_owner.id, au_user_ids)
+        self.assertIn(deal_member.id, au_user_ids)
+        self.assertEqual(activity.activity_users.count(), 2)
+
+        au_owner = activity.activity_users.get(user=deal_owner)
+        self.assertEqual(au_owner.role, UserRole.PRIMARY)
+
+        au_member = activity.activity_users.get(user=deal_member)
+        self.assertEqual(au_member.role, UserRole.SUPPORT)
+        self.assertEqual(au_member.memo, "案件側サポートメモ")
+
+    def test_activity_wizard_step4_upload_attachment(self):
+        """Step 4（添付ファイル管理画面）において活動のファイルが正常にアップロード・紐付け保存され、詳細画面等へ遷移できること。"""
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from attachments.models import Attachment
+
+        activity = Activity.objects.create(
+            activity_type=ActivityType.PHONE,
+            direction=Direction.OUTGOING,
+            occurred_at=timezone.now(),
+            user=self.user,
+            memo="Step4添付検証活動",
+        )
+        step4_url = reverse("activities:activity_attachments_manage", kwargs={"pk": activity.pk}) + "?wizard=1"
+        detail_url = reverse("activities:activity_detail", kwargs={"pk": activity.pk})
+
+        test_file = SimpleUploadedFile("minute_doc.pdf", b"meeting minute content", content_type="application/pdf")
+        post_data = {
+            "activity_id": str(activity.id),
+            "next": detail_url,
+            "memo": "議事録",
+            "files": test_file,
+        }
+        res = self.client.post(step4_url, data=post_data)
+        self.assertEqual(res.status_code, 302)
+        self.assertEqual(res.url, detail_url)
+
+        att = Attachment.objects.filter(activity=activity).first()
+        self.assertIsNotNone(att)
+        self.assertEqual(att.original_filename, "minute_doc.pdf")
+        self.assertEqual(att.memo, "議事録")
+        self.assertEqual(att.uploaded_by, self.user)
+
+        # ファイル未選択で保存した場合はエラーにならず詳細画面へリダイレクトされること
+        empty_res = self.client.post(step4_url, data={"activity_id": str(activity.id), "next": detail_url})
+        self.assertEqual(empty_res.status_code, 302)
+        self.assertEqual(empty_res.url, detail_url)
+
+
+
+
+class ActivityPersonMergeTests(TestCase):
+    """Personマージ時のActivity / ActivityPerson付け替え・重複解消および表示安全化テスト"""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="merge_act_user", password="password")
+        add_perm = Permission.objects.get(codename="add_activity")
+        change_perm = Permission.objects.get(codename="change_activity")
+        view_perm = Permission.objects.get(codename="view_activity")
+        self.user.user_permissions.add(add_perm, change_perm, view_perm)
+        self.client.login(username="merge_act_user", password="password")
+
+        self.company = Company.objects.create(organization="活動テスト商事")
+
+        # マージ元（source）
+        self.source_person = Person.objects.create()
+        self.source_contact = Contact.objects.create(
+            person=self.source_person,
+            company=self.company,
+            last_name="佐藤",
+            first_name="次郎",
+            full_name="佐藤 次郎",
+            status=Contact.Status.PRIMARY,
+        )
+        self.source_person.primary_contact = self.source_contact
+        self.source_person.save(update_fields=["primary_contact"])
+
+        # マージ先（target / surviving）
+        self.target_person = Person.objects.create()
+        self.target_contact = Contact.objects.create(
+            person=self.target_person,
+            company=self.company,
+            last_name="佐藤",
+            first_name="次郎（本）",
+            full_name="佐藤 次郎（本）",
+            status=Contact.Status.PRIMARY,
+        )
+        self.target_person.primary_contact = self.target_contact
+        self.target_person.save(update_fields=["primary_contact"])
+
+    def test_activity_person_merge_transfer_and_role_merge(self):
+        """マージ時に ActivityPerson がマージ先へ移行し、重複解消・role/memoマージされること。"""
+        # act1: source (DECISION_MAKER, "重要決裁者") と target (ATTENDEE, "") が存在
+        act1 = Activity.objects.create(
+            activity_type=ActivityType.VISIT,
+            direction=Direction.OUTGOING,
+            occurred_at=timezone.now(),
+            user=self.user,
+            memo="活動1",
+        )
+        ActivityPerson.objects.create(
+            activity=act1,
+            person=self.source_person,
+            role=PersonRole.DECISION_MAKER,
+            memo="重要決裁者",
+        )
+        ActivityPerson.objects.create(
+            activity=act1,
+            person=self.target_person,
+            role=PersonRole.ATTENDEE,
+            memo="",
+        )
+
+        # act2: source のみ存在（通常移行ケース）
+        act2 = Activity.objects.create(
+            activity_type=ActivityType.PHONE,
+            direction=Direction.OUTGOING,
+            occurred_at=timezone.now(),
+            user=self.user,
+            memo="活動2",
+        )
+        ActivityPerson.objects.create(
+            activity=act2,
+            person=self.source_person,
+            role=PersonRole.CONTACT_WINDOW,
+            memo="窓口担当",
+        )
+
+        # マージ実行
+        from config.constants import DuplicateMergeReason
+        self.source_person.transfer_contacts_to(
+            self.target_person, [DuplicateMergeReason.SAME_CARD.value]
+        )
+        self.source_person.mark_as_merged(self.target_person)
+
+        # 検証1: act1 で source が削除され、target のみ 1 件存在すること
+        self.assertFalse(act1.activity_persons.filter(person=self.source_person).exists())
+        self.assertEqual(act1.activity_persons.filter(person=self.target_person).count(), 1)
+
+        # 検証2: act1 の target の ActivityPerson に、より優先度の高い role と memo が引き継がれていること
+        target_ap1 = act1.activity_persons.filter(person=self.target_person).first()
+        self.assertEqual(target_ap1.role, PersonRole.DECISION_MAKER)
+        self.assertEqual(target_ap1.memo, "重要決裁者")
+
+        # 検証3: act2 の ActivityPerson が target に移行されていること
+        self.assertFalse(act2.activity_persons.filter(person=self.source_person).exists())
+        self.assertEqual(act2.activity_persons.filter(person=self.target_person).count(), 1)
+        target_ap2 = act2.activity_persons.filter(person=self.target_person).first()
+        self.assertEqual(target_ap2.role, PersonRole.CONTACT_WINDOW)
+        self.assertEqual(target_ap2.memo, "窓口担当")
+
+        # 検証4: 活動詳細画面で「Person <UUID>」が生露出せず、「マージ済み」文字列も存在せず、相手方関係者が正常に1件表示されること
+        resp1 = self.client.get(reverse("activities:activity_detail", kwargs={"pk": act1.pk}))
+        self.assertEqual(resp1.status_code, 200)
+        content1 = resp1.content.decode("utf-8")
+        self.assertNotIn(f"Person {self.source_person.id}", content1)
+        self.assertNotIn(f"Person {self.target_person.id}", content1)
+        self.assertIn("佐藤 次郎（本）", content1)
+        self.assertNotContains(resp1, "マージ済み")
+        self.assertEqual(len(resp1.context["activity_persons"]), 1)
+
+        resp2 = self.client.get(reverse("activities:activity_detail", kwargs={"pk": act2.pk}))
+        self.assertEqual(resp2.status_code, 200)
+        content2 = resp2.content.decode("utf-8")
+        self.assertNotIn(f"Person {self.source_person.id}", content2)
+        self.assertNotIn(f"Person {self.target_person.id}", content2)
+        self.assertIn("佐藤 次郎（本）", content2)
+        self.assertNotContains(resp2, "マージ済み")
+        self.assertEqual(len(resp2.context["activity_persons"]), 1)
+
+    def test_activity_detail_completely_excludes_merged_person_records(self):
+        """中間テーブルに merged Person が残存している場合でも、ActivityDetailView がクエリセットから除外し、「マージ済み」文字列が表示されないこと。"""
+        act = Activity.objects.create(
+            activity_type=ActivityType.PHONE,
+            direction=Direction.OUTGOING,
+            occurred_at=timezone.now(),
+            user=self.user,
+            memo="不整合残存活動",
+        )
+        ActivityPerson.objects.create(
+            activity=act,
+            person=self.target_person,
+            role=PersonRole.CONTACT_WINDOW,
+        )
+        merged_person = Person.objects.create(status=Person.Status.MERGED, merged_into=self.target_person)
+        ActivityPerson.objects.create(
+            activity=act,
+            person=merged_person,
+            role=PersonRole.ATTENDEE,
+        )
+
+        resp = self.client.get(reverse("activities:activity_detail", kwargs={"pk": act.pk}))
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, "マージ済み")
+        self.assertEqual(len(resp.context["activity_persons"]), 1)
+        self.assertEqual(resp.context["activity_persons"][0].person, self.target_person)
+
+
+

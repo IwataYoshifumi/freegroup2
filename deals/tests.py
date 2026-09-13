@@ -15,6 +15,7 @@ from contacts.models import Contact
 from deals.admin import DealAdmin, DealPersonAdmin, DealUserAdmin
 from deals.models import Deal, DealPerson, DealType, DealUser, PersonRole, Stage, UserRole
 from persons.models import Person
+from back_navigator.back_navigator import BackNavigator
 
 User = get_user_model()
 
@@ -458,7 +459,12 @@ class DealViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "基幹システム導入")
         self.assertContains(response, "テスト株式会社")
-        self.assertContains(response, "見積提示")
+        # HIG準拠レイアウト・表示（コンテナ幅、金額3桁カンマ区切り、確度%表示、ステージバッジ）
+        self.assertContains(response, "max-width: 1200px;")
+        self.assertContains(response, "¥5,000,000")
+        self.assertContains(response, "80%")
+        self.assertContains(response, '<span class="app-badge app-badge--neutral">見積提示</span>')
+        self.assertContains(response, 'text-align: right; font-variant-numeric: tabular-nums;')
 
     def test_deal_detail_view_permissions(self):
         # 権限あり（owner）
@@ -534,15 +540,15 @@ class DealViewTests(TestCase):
         }
         post_resp = self.client.post(url, data=post_data)
         self.assertEqual(post_resp.status_code, 302)
-        self.assertEqual(post_resp.url, f"/mailings/campaigns/{campaign.pk}/report/")
-
         created_deal = Deal.objects.get(name="キャンペーン経由案件")
+        expected_url = reverse("deals:deal_persons_manage", kwargs={"pk": created_deal.pk}) + f"?wizard=1&back_stack={back_stack}"
+        self.assertEqual(post_resp.url, expected_url)
         self.assertEqual(created_deal.source_campaign, campaign)
         self.assertEqual(created_deal.lead_source, "campaign")
 
     def test_deal_create_view_with_company_person_and_campaign_creates_deal_person(self):
         """DealCreateView に company, person, source_campaign を渡して POST した際、
-        案件と DealPerson が同時に作成されて直前の画面へリダイレクトされること。
+        案件と DealPerson が同時に作成されてウィザード画面へリダイレクトされること。
         """
         from mailings.models import Campaign, EmailTemplate, MailingList
         from back_navigator.back_navigator import BackNavigator
@@ -579,9 +585,9 @@ class DealViewTests(TestCase):
         }
         post_resp = self.client.post(url, data=post_data)
         self.assertEqual(post_resp.status_code, 302)
-        self.assertEqual(post_resp.url, clicked_list_url)
-
         created_deal = Deal.objects.get(name="クリック受信者からの案件")
+        expected_url = reverse("deals:deal_persons_manage", kwargs={"pk": created_deal.pk}) + f"?wizard=1&back_stack={back_stack}"
+        self.assertEqual(post_resp.url, expected_url)
         self.assertEqual(created_deal.company, self.company)
         self.assertEqual(created_deal.source_campaign, campaign)
         self.assertEqual(created_deal.lead_source, "campaign")
@@ -1810,5 +1816,336 @@ class DealCreateInitialParamTests(TestCase):
         self.assertEqual(deal.company, self.company)
         self.assertEqual(deal.primary_person, self.person)
         self.assertTrue(DealPerson.objects.filter(deal=deal, person=self.person).exists())
+
+
+class DealWizardTests(TestCase):
+    """案件新規作成ウィザード（基本情報 ➔ 関係者設定フロー）のテスト"""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="wizard_user", password="password")
+        perm_add = Permission.objects.get(codename="add_deal")
+        perm_change = Permission.objects.get(codename="change_deal")
+        perm_view = Permission.objects.get(codename="view_deal")
+        perm_att = Permission.objects.get(codename="add_attachment")
+        self.user.user_permissions.add(perm_add, perm_change, perm_view, perm_att)
+        self.company = Company.objects.create(organization="ウィザード社")
+        self.person = Person.objects.create()
+        Contact.objects.create(
+            person=self.person,
+            company=self.company,
+            first_name="太郎",
+            last_name="山田",
+        )
+        self.client.login(username="wizard_user", password="password")
+
+    def test_deal_wizard_4step_flow_and_titles(self):
+        """案件新規作成ウィザードの 4ステップ（Step 1 ➔ Step 2 ➔ Step 3 ➔ Step 4 ➔ 詳細）遷移および各画面のタイトル表記・ボタン・BackNavigator検証。"""
+        # Step 1: 基本情報入力画面
+        nav = BackNavigator(self.client.get("/").wsgi_request)
+        back_stack = nav._calc_encode_stack([{"url": reverse("deals:deal_list"), "title": "案件一覧"}])
+        res1 = self.client.get(f"{reverse('deals:deal_create')}?back_stack={back_stack}")
+        self.assertEqual(res1.status_code, 200)
+        content1 = res1.content.decode("utf-8")
+        self.assertIn("案件新規作成 (1/4) 基本情報", content1)
+        self.assertContains(res1, "次へ")
+        self.assertNotContains(res1, "スキップ")
+        # ステップインジケーター検証: (現在)が無く、シンプル化された表記であること
+        self.assertNotContains(res1, "(現在)")
+        self.assertContains(res1, "1. 基本情報")
+        # 日時クイック入力ボタン（今日・昨日）およびOKボタン
+        self.assertContains(res1, "今日")
+        self.assertContains(res1, "昨日")
+        self.assertContains(res1, "OK")
+
+        # Step 1 POST -> Step 2 へリダイレクト
+        post_data = {
+            "name": "ウィザード4ステップ案件",
+            "company": str(self.company.id),
+            "stage": Stage.INITIAL_MEETING,
+            "probability": 50,
+            "deal_type": DealType.NEW,
+            "amount": 1000000,
+            "back_stack": back_stack,
+        }
+        res_post = self.client.post(f"{reverse('deals:deal_create')}?back_stack={back_stack}", data=post_data)
+        self.assertEqual(res_post.status_code, 302)
+        deal = Deal.objects.get(name="ウィザード4ステップ案件")
+        self.assertTrue(res_post.url.startswith(reverse("deals:deal_persons_manage", kwargs={"pk": deal.pk})))
+        self.assertIn("wizard=1", res_post.url)
+
+        # Step 2: 社外関係者設定画面
+        step2_url = res_post.url
+        res2 = self.client.get(step2_url)
+        self.assertEqual(res2.status_code, 200)
+        self.assertTrue(res2.context.get("is_wizard"))
+        content2 = res2.content.decode("utf-8")
+        self.assertIn("案件関係者設定 (2/4) 社外関係者", content2)
+        self.assertContains(res2, "次へ")
+        self.assertNotContains(res2, "スキップ")
+        self.assertNotContains(res2, "(現在)")
+        self.assertContains(res2, "2. 社外関係者")
+        # BackNavigator: 直前の Step 1 への戻るリンクが存在すること
+        self.assertTrue(res2.context["back"].back_exist)
+
+        # Step 3: 社内担当者設定画面
+        step3_base = reverse("deals:deal_users_manage", kwargs={"pk": deal.pk}) + "?wizard=1"
+        step3_url = res2.context["back"].append_url(step3_base)
+        res3 = self.client.get(step3_url)
+        self.assertEqual(res3.status_code, 200)
+        self.assertTrue(res3.context.get("is_wizard"))
+        content3 = res3.content.decode("utf-8")
+        self.assertIn("案件関係者設定 (3/4) 社内担当者", content3)
+        self.assertContains(res3, "次へ")
+        self.assertNotContains(res3, "スキップ")
+        self.assertNotContains(res3, "(現在)")
+        self.assertContains(res3, "3. 社内担当者")
+        # BackNavigator: 直前の Step 2 への戻るリンクが存在すること
+        self.assertTrue(res3.context["back"].back_exist)
+
+        # Step 4: 添付ファイル設定画面
+        step4_base = reverse("deals:deal_attachments_manage", kwargs={"pk": deal.pk}) + "?wizard=1"
+        step4_url = res3.context["back"].append_url(step4_base)
+        res4 = self.client.get(step4_url)
+        self.assertEqual(res4.status_code, 200)
+        self.assertTrue(res4.context.get("is_wizard"))
+        content4 = res4.content.decode("utf-8")
+        self.assertIn("案件ファイル添付 (4/4) 添付ファイル", content4)
+        self.assertContains(res4, "保存")
+        self.assertNotContains(res4, "スキップ")
+        self.assertNotContains(res4, "(現在)")
+        self.assertContains(res4, "4. 添付ファイル")
+        # BackNavigator: 直前の Step 3 への戻るリンクが存在すること
+        self.assertTrue(res4.context["back"].back_exist)
+
+        # 詳細画面へ遷移
+        detail_url = reverse("deals:deal_detail", kwargs={"pk": deal.pk})
+        res_detail = self.client.get(detail_url)
+        self.assertEqual(res_detail.status_code, 200)
+
+    def test_deal_wizard_step3_add_and_delete_user(self):
+        """Step 3（社内担当者設定）においてユーザーの追加・削除が正常に動作し、wizard=1 が維持されること。"""
+        deal = Deal.objects.create(
+            name="Step3担当者検証案件",
+            company=self.company,
+            owner=self.user,
+            created_by=self.user,
+        )
+        target_user = User.objects.create_user(username="team_member_1", password="password")
+
+        step3_url = reverse("deals:deal_users_manage", kwargs={"pk": deal.pk}) + "?wizard=1"
+
+        # 追加 POST
+        add_url = reverse("deals:deal_add_user", kwargs={"pk": deal.pk})
+        add_data = {
+            "next": step3_url,
+            "user": str(target_user.id),
+            "role": "support",
+            "can_edit": "on",
+            "memo": "サポート担当",
+        }
+        add_res = self.client.post(add_url, data=add_data)
+        self.assertEqual(add_res.status_code, 302)
+        self.assertEqual(add_res.url, step3_url)
+
+        deal_user = DealUser.objects.filter(deal=deal, user=target_user).first()
+        self.assertIsNotNone(deal_user)
+        self.assertEqual(deal_user.memo, "サポート担当")
+
+        # 削除 POST
+        del_url = reverse("deals:deal_delete_user", kwargs={"pk": deal.pk, "user_rel_id": deal_user.id})
+        del_res = self.client.post(del_url, data={"next": step3_url})
+        self.assertEqual(del_res.status_code, 302)
+        self.assertEqual(del_res.url, step3_url)
+        self.assertFalse(DealUser.objects.filter(deal=deal, user=target_user).exists())
+
+    def test_deal_wizard_step4_upload_attachment(self):
+        """Step 4（添付ファイル管理画面）においてファイルが正常にアップロード・紐付け保存され、詳細画面等へ遷移できること。"""
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from attachments.models import Attachment
+
+        deal = Deal.objects.create(
+            name="Step4添付検証案件",
+            company=self.company,
+            owner=self.user,
+            created_by=self.user,
+        )
+        step4_url = reverse("deals:deal_attachments_manage", kwargs={"pk": deal.pk}) + "?wizard=1"
+        detail_url = reverse("deals:deal_detail", kwargs={"pk": deal.pk})
+
+        test_file = SimpleUploadedFile("quote_doc.pdf", b"sample content", content_type="application/pdf")
+        post_data = {
+            "deal_id": str(deal.id),
+            "next": detail_url,
+            "memo": "見積書",
+            "files": test_file,
+        }
+        res = self.client.post(step4_url, data=post_data)
+        self.assertEqual(res.status_code, 302)
+        self.assertEqual(res.url, detail_url)
+
+        att = Attachment.objects.filter(deal=deal).first()
+        self.assertIsNotNone(att)
+        self.assertEqual(att.original_filename, "quote_doc.pdf")
+        self.assertEqual(att.memo, "見積書")
+        self.assertEqual(att.uploaded_by, self.user)
+
+        # ファイル未選択で保存した場合はエラーにならず詳細画面へリダイレクトされること
+        empty_res = self.client.post(step4_url, data={"deal_id": str(deal.id), "next": detail_url})
+        self.assertEqual(empty_res.status_code, 302)
+        self.assertEqual(empty_res.url, detail_url)
+
+
+
+class DealPersonMergeTests(TestCase):
+    """Personマージ時のDeal / DealPerson付け替え・重複解消および表示安全化テスト"""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="merge_deal_user", password="password")
+        perm_add = Permission.objects.get(codename="add_deal")
+        perm_change = Permission.objects.get(codename="change_deal")
+        perm_view = Permission.objects.get(codename="view_deal")
+        self.user.user_permissions.add(perm_add, perm_change, perm_view)
+        self.client.login(username="merge_deal_user", password="password")
+
+        self.company = Company.objects.create(organization="テスト商事")
+
+        # マージ元（source）
+        self.source_person = Person.objects.create()
+        self.source_contact = Contact.objects.create(
+            person=self.source_person,
+            company=self.company,
+            last_name="山田",
+            first_name="太郎",
+            full_name="山田 太郎",
+            status=Contact.Status.PRIMARY,
+        )
+        self.source_person.primary_contact = self.source_contact
+        self.source_person.save(update_fields=["primary_contact"])
+
+        # マージ先（target / surviving）
+        self.target_person = Person.objects.create()
+        self.target_contact = Contact.objects.create(
+            person=self.target_person,
+            company=self.company,
+            last_name="山田",
+            first_name="太郎（本）",
+            full_name="山田 太郎（本）",
+            status=Contact.Status.PRIMARY,
+        )
+        self.target_person.primary_contact = self.target_contact
+        self.target_person.save(update_fields=["primary_contact"])
+
+    def test_deal_person_merge_transfer_and_deduplication(self):
+        """マージ時に Deal.primary_person および DealPerson がマージ先へ移行し、重複が解消されること。"""
+        # deal1: primary_person が source で、target の DealPerson が既に存在
+        deal1 = Deal.objects.create(
+            name="マージ案件1",
+            company=self.company,
+            primary_person=self.source_person,
+            owner=self.user,
+            created_by=self.user,
+        )
+        DealPerson.objects.create(
+            deal=deal1,
+            person=self.target_person,
+            role=PersonRole.ATTENDEE,
+        )
+
+        # deal2: source と target 両方の DealPerson が存在（重複ケース）
+        deal2 = Deal.objects.create(
+            name="マージ案件2",
+            company=self.company,
+            owner=self.user,
+            created_by=self.user,
+        )
+        DealPerson.objects.create(
+            deal=deal2,
+            person=self.source_person,
+            role=PersonRole.CONTACT_WINDOW,
+        )
+        DealPerson.objects.create(
+            deal=deal2,
+            person=self.target_person,
+            role=PersonRole.ATTENDEE,
+        )
+
+        # deal3: source の DealPerson のみ（通常移行ケース）
+        deal3 = Deal.objects.create(
+            name="マージ案件3",
+            company=self.company,
+            owner=self.user,
+            created_by=self.user,
+        )
+        DealPerson.objects.create(
+            deal=deal3,
+            person=self.source_person,
+            role=PersonRole.DECISION_MAKER,
+        )
+
+        # マージ実行
+        from config.constants import DuplicateMergeReason
+        self.source_person.transfer_contacts_to(
+            self.target_person, [DuplicateMergeReason.SAME_CARD.value]
+        )
+        self.source_person.mark_as_merged(self.target_person)
+
+        # 検証1: deal1 の primary_person が target になり、target の DealPerson は削除されること
+        deal1.refresh_from_db()
+        self.assertEqual(deal1.primary_person, self.target_person)
+        self.assertFalse(deal1.deal_persons.filter(person=self.target_person).exists())
+
+        # 検証2: deal2 の重複 DealPerson が解消され、target のみ 1件存在すること
+        self.assertFalse(deal2.deal_persons.filter(person=self.source_person).exists())
+        self.assertEqual(deal2.deal_persons.filter(person=self.target_person).count(), 1)
+
+        # 検証3: deal3 の DealPerson が target に移行されていること
+        self.assertFalse(deal3.deal_persons.filter(person=self.source_person).exists())
+        self.assertEqual(deal3.deal_persons.filter(person=self.target_person).count(), 1)
+
+        # 検証4: 案件詳細画面で「Person <UUID>」が生露出せず、「マージ済み」文字列も存在せず、関係者が正常に1件表示されること
+        resp1 = self.client.get(reverse("deals:deal_detail", kwargs={"pk": deal1.pk}))
+        self.assertEqual(resp1.status_code, 200)
+        content1 = resp1.content.decode("utf-8")
+        self.assertNotIn(f"Person {self.source_person.id}", content1)
+        self.assertNotIn(f"Person {self.target_person.id}", content1)
+        self.assertIn("山田 太郎（本）", content1)
+        self.assertNotContains(resp1, "マージ済み")
+
+        resp3 = self.client.get(reverse("deals:deal_detail", kwargs={"pk": deal3.pk}))
+        self.assertEqual(resp3.status_code, 200)
+        content3 = resp3.content.decode("utf-8")
+        self.assertNotIn(f"Person {self.source_person.id}", content3)
+        self.assertNotIn(f"Person {self.target_person.id}", content3)
+        self.assertIn("山田 太郎（本）", content3)
+        self.assertNotContains(resp3, "マージ済み")
+        self.assertEqual(len(resp3.context["deal_persons"]), 1)
+
+    def test_deal_detail_completely_excludes_merged_person_records(self):
+        """中間テーブルに merged Person が残存している場合でも、DealDetailView がクエリセットから除外し、「マージ済み」文字列が表示されないこと。"""
+        deal = Deal.objects.create(
+            name="不整合残存案件",
+            company=self.company,
+            owner=self.user,
+            created_by=self.user,
+        )
+        DealPerson.objects.create(
+            deal=deal,
+            person=self.target_person,
+            role=PersonRole.CONTACT_WINDOW,
+        )
+        merged_person = Person.objects.create(status=Person.Status.MERGED, merged_into=self.target_person)
+        DealPerson.objects.create(
+            deal=deal,
+            person=merged_person,
+            role=PersonRole.ATTENDEE,
+        )
+
+        resp = self.client.get(reverse("deals:deal_detail", kwargs={"pk": deal.pk}))
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, "マージ済み")
+        self.assertEqual(len(resp.context["deal_persons"]), 1)
+        self.assertEqual(resp.context["deal_persons"][0].person, self.target_person)
+
+
 
 

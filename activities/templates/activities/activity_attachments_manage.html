@@ -1,0 +1,280 @@
+{% extends "deals/app_base.html" %}
+{% load back_tags %}
+
+{% block title %}{% if is_wizard %}活動ファイル添付 (4/4) 添付ファイル — {{ activity }} — FreeGroup2{% else %}添付ファイル管理 — {{ activity }} — FreeGroup2{% endif %}{% endblock %}
+
+{% block content %}
+<div style="max-width: 1040px; margin-left: 0; margin-right: auto;">
+  <div class="app-page-header">
+    <div>
+      <div style="font-size:13px; color:var(--app-muted); margin-bottom:4px;">
+        活動: <strong>{{ activity }}</strong>
+        {% if activity.deal %}
+          / 案件: <a href="{% url 'deals:deal_detail' pk=activity.deal.id %}">{{ activity.deal.name }}</a>
+        {% endif %}
+      </div>
+      <h1>{% if is_wizard %}活動ファイル添付 (4/4) 添付ファイル{% else %}添付ファイル管理{% endif %}</h1>
+    </div>
+    <div class="app-action-area">
+      {% back_all_link back %}
+      {% if back.back_exist %}
+        {% back_link back %}
+      {% else %}
+        <a href="{{ activity_detail_url }}" class="app-btn app-btn--secondary">戻る</a>
+      {% endif %}
+    </div>
+  </div>
+
+  {# ステップインジケーター（ウィザード時） #}
+  {% if is_wizard %}
+    <div class="wizard-steps" style="display:flex; align-items:center; gap:12px; background:var(--app-bg-subtle, #f8fafc); border:1px solid var(--app-border, #e2e8f0); border-radius:8px; padding:12px 16px; margin-bottom:20px; flex-wrap:wrap;">
+      <span style="color:var(--app-muted, #64748b); font-weight:500; font-size:13px;">1. 基本情報</span>
+      <i class="bi bi-chevron-right" style="color:#cbd5e1; font-size:12px;"></i>
+      <span style="color:var(--app-muted, #64748b); font-weight:500; font-size:13px;">2. 相手方関係者</span>
+      <i class="bi bi-chevron-right" style="color:#cbd5e1; font-size:12px;"></i>
+      <span style="color:var(--app-muted, #64748b); font-weight:500; font-size:13px;">3. 社内同席者</span>
+      <i class="bi bi-chevron-right" style="color:#cbd5e1; font-size:12px;"></i>
+      <span style="background:#f59e0b; color:#0f172a; font-weight:600; border-radius:6px; padding:4px 10px; font-size:13px;">4. 添付ファイル</span>
+    </div>
+  {% endif %}
+
+  <!-- 添付ファイルカード -->
+  <section class="app-card" style="width: 100%; box-sizing: border-box;">
+    <h2 style="font-size:16px; margin-bottom:16px;">添付ファイル一覧</h2>
+    <div class="app-table-wrapper" style="margin-bottom:16px;">
+      <table class="app-table">
+        <thead>
+          <tr>
+            <th>ファイル名</th>
+            <th>メモ</th>
+            <th>アップロード者</th>
+            <th>日時</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for att in attachments %}
+            <tr>
+              <td>
+                <a href="{% url 'attachments:attachment_download' pk=att.id %}" target="_blank">
+                  {{ att.original_filename }}
+                </a>
+              </td>
+              <td class="attachment-memo-cell" data-attachment-id="{{ att.id }}" data-update-url="{% url 'attachments:attachment_update_memo' pk=att.id %}">
+                <div class="memo-view-mode" style="display:flex; align-items:center; gap:6px;">
+                  <span class="memo-text" style="word-break:break-word;">{{ att.memo|default:"-" }}</span>
+                  {% if can_edit %}
+                    <button type="button" class="app-icon-btn memo-edit-btn" title="メモを編集" aria-label="メモを編集" style="border:none; background:none; cursor:pointer; padding:2px; color:var(--app-muted, #64748b); font-size:12px; display:inline-flex; align-items:center;">
+                      <i class="bi bi-pencil-fill"></i>
+                    </button>
+                  {% endif %}
+                </div>
+                {% if can_edit %}
+                  <div class="memo-edit-mode" style="display:none; align-items:center; gap:4px;">
+                    <input type="text" class="app-input app-input--compact memo-input" value="{{ att.memo|default:'' }}" placeholder="メモを入力..." style="padding:2px 6px; font-size:12px; height:28px; width:180px; max-width:100%;">
+                    <button type="button" class="app-btn app-btn--success app-btn--xs memo-save-btn" style="padding:2px 8px; font-size:11px; height:28px; line-height:24px;">保存</button>
+                    <button type="button" class="app-btn app-btn--ghost app-btn--xs memo-cancel-btn" style="padding:2px 6px; font-size:11px; height:28px; line-height:24px;">取消</button>
+                  </div>
+                {% endif %}
+              </td>
+              <td>{{ att.uploaded_by|default:"-" }}</td>
+              <td>{{ att.created_at|date:"Y-m-d H:i" }}</td>
+              <td>
+                {% if perms.attachments.delete_attachment %}
+                  <form method="post" action="{% url 'attachments:attachment_delete' pk=att.id %}" style="margin:0;">
+                    {% csrf_token %}
+                    {% hidden_back_field back %}
+                    <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                    <button type="submit" class="app-btn app-btn--ghost app-btn--sm" style="color:var(--app-color-danger, #ef4444);" onclick="return confirm('この添付ファイルを削除しますか？');">削除</button>
+                  </form>
+                {% endif %}
+              </td>
+            </tr>
+          {% empty %}
+            <tr>
+              <td colspan="5" class="app-muted" style="text-align:center; padding:16px;">添付ファイルはありません。</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    {% if can_edit and perms.attachments.add_attachment %}
+      <form method="post" action="{% url 'activities:activity_attachments_manage' pk=activity.id %}{% if is_wizard %}?wizard=1{% endif %}" enctype="multipart/form-data" id="attachment-upload-form" style="margin-top:16px;">
+        {% csrf_token %}
+        {% hidden_back_field back %}
+        <input type="hidden" name="activity_id" value="{{ activity.id }}">
+        <input type="hidden" name="next" id="attachment-next-input" value="{{ request.get_full_path }}">
+
+        {# D&D ドロップゾーン #}
+        <div id="attachment-dropzone" class="attachment-dropzone" style="border: 2px dashed var(--app-border, #cbd5e1); border-radius: 8px; padding: 20px; text-align: center; background: var(--app-bg-subtle, #f8fafc); cursor: pointer; transition: all 0.2s ease;">
+          <input type="file" name="files" id="attachment-file-input" style="display:none;" multiple>
+          <div id="dropzone-prompt">
+            <i class="bi bi-cloud-arrow-up" style="font-size:26px; color:var(--app-muted, #64748b); display:block; margin-bottom:6px;"></i>
+            <div style="font-size:13px; font-weight:600; color:var(--app-text, #0f172a); margin-bottom:4px;">
+              ファイルをここにドラッグ＆ドロップ、またはクリックして選択（15MB以下・複数可）
+            </div>
+            <div style="font-size:12px; color:var(--app-muted, #94a3b8);">
+              複数ファイルを同時に選択して一括アップロードできます
+            </div>
+          </div>
+          <div id="dropzone-file-info" style="display:none;">
+            <div style="display:inline-flex; flex-direction:column; align-items:center; gap:8px; max-width:100%; padding:10px 16px; background:var(--app-card-bg, #ffffff); border:1px solid var(--app-border, #cbd5e1); border-radius:6px; box-shadow:0 1px 2px rgba(0,0,0,0.05);">
+              <div style="display:inline-flex; align-items:center; gap:8px; width:100%; justify-content:center;">
+                <i class="bi bi-file-earmark-check" style="color:var(--app-color-primary, #2563eb); font-size:18px;"></i>
+                <span id="dropzone-summary-text" style="font-size:13px; color:var(--app-text, #0f172a);"></span>
+                <button type="button" id="dropzone-clear-btn" class="app-icon-btn" title="クリア" aria-label="ファイルをクリア" style="border:none; background:none; cursor:pointer; padding:2px; font-size:16px; color:var(--app-muted, #94a3b8); margin-left:4px; line-height:1;">
+                  <i class="bi bi-x"></i>
+                </button>
+              </div>
+              <div id="dropzone-file-list" style="display:flex; flex-wrap:wrap; gap:6px; justify-content:center; max-height:120px; overflow-y:auto; width:100%;"></div>
+            </div>
+          </div>
+        </div>
+
+        {# メモ入力およびアップロードボタン #}
+        <div id="upload-controls" style="display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end; margin-top:12px;">
+          <div class="app-form__group" style="margin-bottom:0; flex:1; min-width:200px;">
+            <label class="app-form__label" for="attachment-memo-input" style="font-size:12px;">メモ（任意）</label>
+            <input type="text" name="memo" id="attachment-memo-input" class="app-input" placeholder="メモ・備考（任意）" style="height:36px;">
+          </div>
+          <button type="submit" id="attachment-upload-btn" class="app-btn app-btn--primary" style="height:36px;">アップロード</button>
+        </div>
+      </form>
+      <style>
+        .attachment-dropzone.dragover {
+          border-color: var(--app-color-primary, #2563eb) !important;
+          background-color: #eff6ff !important;
+        }
+      </style>
+    {% endif %}
+  </section>
+
+  {% if is_wizard %}
+    <div class="app-action-area" style="margin-top:24px; display:flex; justify-content:flex-end;">
+      {% url 'activities:activity_detail' pk=activity.id as finish_url %}
+      <a href="{% append_back_url finish_url back %}" id="wizard-finish-btn" class="app-btn app-btn--primary" style="min-width:120px; text-align:center;">保存</a>
+    </div>
+  {% endif %}
+</div>
+
+<script>
+  (function() {
+    var dropzone = document.getElementById('attachment-dropzone');
+    var fileInput = document.getElementById('attachment-file-input');
+    var promptEl = document.getElementById('dropzone-prompt');
+    var fileInfoEl = document.getElementById('dropzone-file-info');
+    var summaryText = document.getElementById('dropzone-summary-text');
+    var fileListEl = document.getElementById('dropzone-file-list');
+    var clearBtn = document.getElementById('dropzone-clear-btn');
+    var uploadBtn = document.getElementById('attachment-upload-btn');
+    var finishBtn = document.getElementById('wizard-finish-btn');
+    var form = document.getElementById('attachment-upload-form');
+    var nextInput = document.getElementById('attachment-next-input');
+
+    if (uploadBtn) {
+      uploadBtn.addEventListener('click', function(e) {
+        if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
+          e.preventDefault();
+          alert('アップロードするファイルを選択してください。');
+          return;
+        }
+        if (nextInput) {
+          nextInput.value = window.location.href;
+        }
+      });
+    }
+
+    if (finishBtn) {
+      finishBtn.addEventListener('click', function(e) {
+        if (form && fileInput && fileInput.files && fileInput.files.length > 0) {
+          e.preventDefault();
+          if (nextInput) {
+            nextInput.value = finishBtn.getAttribute('href');
+          }
+          form.submit();
+        }
+      });
+    }
+
+    if (!dropzone || !fileInput) return;
+
+    dropzone.addEventListener('click', function(e) {
+      if (e.target.closest('#dropzone-clear-btn')) return;
+      fileInput.click();
+    });
+
+    ['dragenter', 'dragover'].forEach(function(eventName) {
+      dropzone.addEventListener(eventName, function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        dropzone.classList.add('dragover');
+      });
+    });
+
+    ['dragleave', 'drop'].forEach(function(eventName) {
+      dropzone.addEventListener(eventName, function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        dropzone.classList.remove('dragover');
+      });
+    });
+
+    dropzone.addEventListener('drop', function(e) {
+      var dt = e.dataTransfer;
+      if (dt && dt.files && dt.files.length > 0) {
+        fileInput.files = dt.files;
+        updateFileList();
+      }
+    });
+
+    fileInput.addEventListener('change', function() {
+      updateFileList();
+    });
+
+    if (clearBtn) {
+      clearBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        fileInput.value = '';
+        updateFileList();
+      });
+    }
+
+    function formatSize(bytes) {
+      if (bytes < 1024) return bytes + ' B';
+      if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+      return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+    }
+
+    function updateFileList() {
+      var files = fileInput.files;
+      if (!files || files.length === 0) {
+        if (promptEl) promptEl.style.display = 'block';
+        if (fileInfoEl) fileInfoEl.style.display = 'none';
+        return;
+      }
+      if (promptEl) promptEl.style.display = 'none';
+      if (fileInfoEl) fileInfoEl.style.display = 'inline-flex';
+
+      if (summaryText) {
+        summaryText.textContent = files.length === 1
+          ? files[0].name + ' (' + formatSize(files[0].size) + ')'
+          : files.length + ' 件のファイルが選択されています';
+      }
+
+      if (fileListEl) {
+        fileListEl.innerHTML = '';
+        if (files.length > 1) {
+          Array.from(files).forEach(function(f) {
+            var badge = document.createElement('span');
+            badge.className = 'app-badge app-badge--neutral';
+            badge.style.cssText = 'font-size:11px; padding:2px 8px; max-width:240px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;';
+            badge.textContent = f.name + ' (' + formatSize(f.size) + ')';
+            fileListEl.appendChild(badge);
+          });
+        }
+      }
+    }
+  })();
+</script>
+{% endblock %}
