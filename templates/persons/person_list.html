@@ -14,9 +14,11 @@
     </div>
   </div>
 
+  {% if perms.contacts.add_contact %}
   <div class="app-action-area" style="justify-content:flex-start; margin-bottom:16px;">
     <a href="{% append_back_url create_url back %}" class="app-btn app-btn--primary">新規パーソン</a>
   </div>
+  {% endif %}
 
   <section class="app-card app-person-search">
     {% url 'persons:person_list' as reset_url %}
@@ -60,7 +62,7 @@
               <td class="app-table__col--action">
                 <div class="app-table__actions">
                   <a href="{% append_back_url detail_url back %}" class="app-icon-btn" style="color:var(--app-text);" title="詳細" aria-label="詳細"><i class="bi bi-search"></i></a>
-                  {% if person.primary_contact and person.status == "active" %}
+                  {% if person.primary_contact and person.status == "active" and perms.contacts.change_contact %}
                     {% url 'contacts:contact_update_primary' pk=person.primary_contact_id as update_url %}
                     <a href="{% append_back_url update_url back %}" class="app-icon-btn" style="color:var(--app-text);" title="編集" aria-label="編集"><i class="bi bi-pencil-fill"></i></a>
                   {% endif %}

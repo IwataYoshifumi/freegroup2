@@ -15,12 +15,14 @@
             元画像を見る
           </a>
         {% endif %}
+        {% if perms.cards.add_originalimage %}
         <a href="{% url 'cards:card_upload' %}"
            class="app-btn app-btn--secondary app-btn--sm">
           名刺画像アップロード
         </a>
+        {% endif %}
         {# Contact 未生成の BC のみ編集可（押せないボタンは出さない。サーバ側ガードと二重構え、v1.7） #}
-        {% if not contact %}
+        {% if not contact and perms.cards.change_businesscard %}
           {% url 'cards:card_edit' pk=card.id as card_edit_url %}
           <a href="{% append_back_url card_edit_url back %}"
              class="app-btn app-btn--secondary app-btn--sm">名刺を編集</a>
@@ -328,7 +330,7 @@
   {% endif %}
 
   <div class="app-action-area" style="margin-top:24px; max-width:1100px;">
-    {% if card.can_delete %}
+    {% if card.can_delete and perms.cards.delete_businesscard %}
       {% comment %}
       HIG v1.3 §3.3：物理削除の入口はトラッシュ＋黒系。最終実行（confirm 後）に danger を残す方針。
       削除確認ダイアログは js-card-delete-btn の JS が出す。

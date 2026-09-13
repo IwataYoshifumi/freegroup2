@@ -611,6 +611,7 @@ class PersonDetailViewTests(TestCase):
             username="person_detail_test_user", password="dummy"
         )
         _grant_view_person(self.user)
+        _grant_add_contact(self.user)
         self.client = Client()
         self.client.force_login(self.user)
 
@@ -1626,7 +1627,12 @@ class PersonMailingListMembershipUITests(TestCase):
     def test_pending_duplicates_badge_rendered_as_clickable_link(self):
         """pending_duplicates がある場合、マージ候補バッジがリンクボタンとしてレンダリングされる。"""
         import uuid
+        from django.contrib.auth.models import Permission
         from duplicates.models import DuplicateCandidate
+
+        self.user.user_permissions.add(
+            Permission.objects.get(codename="merge_person", content_type__app_label="persons")
+        )
 
         person_b = Person.objects.create(status=Person.Status.ACTIVE)
         group_id = uuid.uuid4()
@@ -1755,6 +1761,14 @@ class PersonDetailActionButtonsTests(TestCase):
             username="person_btn_tester", password="password"
         )
         _grant_view_person(self.user)
+        from django.contrib.auth.models import Permission
+        self.user.user_permissions.add(
+            Permission.objects.get(codename="add_deal", content_type__app_label="deals"),
+            Permission.objects.get(codename="add_activity", content_type__app_label="activities"),
+            Permission.objects.get(codename="change_contact", content_type__app_label="contacts"),
+            Permission.objects.get(codename="change_person", content_type__app_label="persons"),
+            Permission.objects.get(codename="merge_person", content_type__app_label="persons"),
+        )
         self.client.login(username="person_btn_tester", password="password")
 
         self.person = Person.objects.create(status=Person.Status.ACTIVE)
@@ -1920,6 +1934,64 @@ class PersonDetailActionButtonsTests(TestCase):
         self.assertIn("紐づく案件はありません。", html)
         self.assertIn("活動履歴（0件）", html)
         self.assertIn("紐づく活動履歴はありません。", html)
+
+
+class ViewerActionButtonsGuardedTests(TestCase):
+    """閲覧者（Viewer）ロール相当の権限（view_* のみ）時に操作系UIが非表示になることの検証。"""
+
+    def setUp(self):
+        self.viewer = User.objects.create_user(
+            username="viewer_user", password="password"
+        )
+        _grant_view_person(self.viewer)
+        self.client = Client()
+        self.client.force_login(self.viewer)
+
+        self.person = Person.objects.create(status=Person.Status.ACTIVE)
+        self.contact = Contact.objects.create(
+            person=self.person,
+            last_name="閲覧",
+            first_name="太郎",
+            status=Contact.Status.PRIMARY,
+        )
+        self.person.primary_contact = self.contact
+        self.person.save(update_fields=["primary_contact"])
+
+    def test_person_list_guarded_for_viewer(self):
+        """パーソン一覧で新規パーソンボタン・行編集鉛筆アイコンが非表示であること。"""
+        resp = self.client.get(reverse("persons:person_list"))
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode("utf-8")
+        self.assertNotIn("新規パーソン", html)
+        self.assertNotIn("bi-pencil-fill", html)
+
+    def test_person_detail_guarded_for_viewer(self):
+        """パーソン詳細で主コンタクト修正鉛筆・アーカイブ・別肩書追加・新規案件・活動記録・マージ候補ボタンが非表示であること。"""
+        from duplicates.models import DuplicateCandidate
+
+        other_person = Person.objects.create(status=Person.Status.ACTIVE)
+        DuplicateCandidate.objects.create(
+            person_a=self.person,
+            person_b=other_person,
+            score=90,
+            rank="A",
+        )
+
+        resp = self.client.get(
+            reverse("persons:person_detail", kwargs={"pk": self.person.pk})
+        )
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode("utf-8")
+        self.assertNotIn("主コンタクトを修正", html)
+        self.assertNotIn("bi-pencil-fill", html)
+        self.assertNotIn("bi-archive-fill", html)
+        self.assertNotIn("別肩書を追加", html)
+        self.assertNotIn("新規案件", html)
+        self.assertNotIn("活動記録", html)
+        self.assertNotIn("マージ候補", html)
+        self.assertNotIn("名刺画像アップロード", html)
+        self.assertNotIn("重複チェック", html)
+
 
 
 

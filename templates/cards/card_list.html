@@ -167,6 +167,7 @@
     <form method="post" action="{% url 'cards:card_bulk_delete' %}" class="js-card-bulk-delete-form">
       {% csrf_token %}
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:8px;">
+        {% if perms.cards.delete_businesscard %}
         <div style="display:flex; align-items:center; gap:8px;">
           <button type="button" class="app-btn app-btn--secondary app-btn--sm js-bulk-delete-toggle" aria-expanded="false">
             <span class="js-bulk-delete-toggle-icon">▼</span> <span class="js-bulk-delete-toggle-text">削除</span>
@@ -175,6 +176,7 @@
             無効画像を削除する
           </button>
         </div>
+        {% endif %}
       </div>
 
       <div class="app-table-wrapper">

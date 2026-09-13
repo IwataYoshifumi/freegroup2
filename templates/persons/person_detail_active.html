@@ -15,7 +15,7 @@
   {# タイトル直下：左側マージ候補（＋本人紐付け）、右側戻るボタン（同一水平ライン・高さ合わせ） #}
   <div style="max-width:1100px; display:flex; justify-content:space-between; align-items:center; margin-bottom:var(--app-space-sm); flex-wrap:wrap; gap:8px;">
     <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-      {% if pending_duplicates %}
+      {% if perms.persons.merge_person and pending_duplicates %}
         {% with first_dup=pending_duplicates.first %}
           {% if first_dup.group_id %}
             {% url 'duplicates:duplicate_group_detail' group_id=first_dup.group_id as dup_url %}
@@ -66,7 +66,7 @@
               <strong>{{ contact.full_name|default:"(氏名なし)" }}</strong>
               {% status_badge contact %}
               {% if contact.person.status != "active" %}{% status_badge contact.person %}{% endif %}
-              {% if is_editable %}
+              {% if is_editable and perms.contacts.change_contact %}
                 {% if is_primary %}{% url 'contacts:contact_update_primary' contact.id as edit_url %}{% elif is_active %}{% url 'contacts:contact_update_active' contact.id as edit_url %}{% endif %}
                 {% if edit_url %}
                   <a href="{% append_back_url edit_url back %}"
@@ -79,7 +79,7 @@
                 {% if not is_editable %}
                   <span class="app-muted">表示のみモード（編集不可）</span>
                 {% endif %}
-                {% if contact.person and contact.person.status == "active" %}
+                {% if contact.person and contact.person.status == "active" and perms.persons.change_person %}
                   <form method="post" action="{% url 'persons:person_archive' pk=contact.person.id %}" style="margin:0; display:inline-flex;" onsubmit="return confirm('「{{ contact.person }}」をアーカイブ化します。よろしいですか？');">
                     {% csrf_token %}
                     {% hidden_back_field back %}
@@ -287,8 +287,10 @@
     <div class="app-section__header" style="display:flex; align-items:center; gap:var(--app-space-sm); flex-wrap:wrap;">
       <h2 style="margin:0;">別肩書</h2>
       <div style="margin-left:auto; display:flex; gap:8px; align-items:center;">
-        {% url 'persons:person_add_additional_role' contact.person_id as add_role_url %}
-        <a href="{% append_back_url add_role_url back %}" class="app-btn app-btn--primary app-btn--sm">別肩書を追加</a>
+        {% if perms.contacts.add_contact %}
+          {% url 'persons:person_add_additional_role' contact.person_id as add_role_url %}
+          <a href="{% append_back_url add_role_url back %}" class="app-btn app-btn--primary app-btn--sm">別肩書を追加</a>
+        {% endif %}
         {% if contact_list_url %}
           <a href="{{ contact_list_url }}" class="app-btn app-btn--secondary app-btn--sm">コンタクト一覧</a>
         {% endif %}
@@ -341,14 +343,16 @@
   <section class="app-card" style="max-width:1100px; margin-top:var(--app-space-md);">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
       <h2 style="font-size:16px; margin:0;">関連案件（{% if deals.count %}{{ deals.count }}{% else %}{{ deals|length }}{% endif %}件）</h2>
-      {% url 'deals:deal_create' as create_deal_url %}
-      {% with person_id=person.id|stringformat:"s" %}
-      {% with deal_create_url=create_deal_url|add:"?person="|add:person_id %}
-        <a href="{% append_back_url deal_create_url back %}" class="app-btn app-btn--primary app-btn--sm">
-          新規案件
-        </a>
-      {% endwith %}
-      {% endwith %}
+      {% if perms.deals.add_deal %}
+        {% url 'deals:deal_create' as create_deal_url %}
+        {% with person_id=person.id|stringformat:"s" %}
+        {% with deal_create_url=create_deal_url|add:"?person="|add:person_id %}
+          <a href="{% append_back_url deal_create_url back %}" class="app-btn app-btn--primary app-btn--sm">
+            新規案件
+          </a>
+        {% endwith %}
+        {% endwith %}
+      {% endif %}
     </div>
     <div class="app-table-wrapper">
       <table class="app-table">
@@ -396,14 +400,16 @@
   <section class="app-card" style="max-width:1100px; margin-top:var(--app-space-md);">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
       <h2 style="font-size:16px; margin:0;">活動履歴（{% if activities.count %}{{ activities.count }}{% else %}{{ activities|length }}{% endif %}件）</h2>
-      {% url 'activities:activity_create' as create_activity_url %}
-      {% with person_id=person.id|stringformat:"s" %}
-      {% with act_create_url=create_activity_url|add:"?person="|add:person_id %}
-        <a href="{% append_back_url act_create_url back %}" class="app-btn app-btn--primary app-btn--sm">
-          活動記録
-        </a>
-      {% endwith %}
-      {% endwith %}
+      {% if perms.activities.add_activity %}
+        {% url 'activities:activity_create' as create_activity_url %}
+        {% with person_id=person.id|stringformat:"s" %}
+        {% with act_create_url=create_activity_url|add:"?person="|add:person_id %}
+          <a href="{% append_back_url act_create_url back %}" class="app-btn app-btn--primary app-btn--sm">
+            活動記録
+          </a>
+        {% endwith %}
+        {% endwith %}
+      {% endif %}
     </div>
     <div class="app-table-wrapper">
       <table class="app-table">

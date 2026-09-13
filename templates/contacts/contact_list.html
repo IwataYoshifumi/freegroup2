@@ -13,8 +13,11 @@
     </div>
   </div>
 
+  {% if perms.contacts.add_contact or perms.contacts.import_contact %}
   <div class="app-action-area" style="justify-content:flex-start; margin-bottom:16px; gap:8px;">
-    <a href="{% append_back_url create_url back %}" class="app-btn app-btn--primary">コンタクト新規作成</a>
+    {% if perms.contacts.add_contact %}
+      <a href="{% append_back_url create_url back %}" class="app-btn app-btn--primary">コンタクト新規作成</a>
+    {% endif %}
     {% if perms.contacts.import_contact %}
       {% url 'contacts:contact_import_upload' as import_url %}
       <a href="{% append_back_url import_url back %}" class="app-btn app-btn--secondary">
@@ -22,6 +25,7 @@
       </a>
     {% endif %}
   </div>
+  {% endif %}
 
   <section class="app-card app-person-search">
     {% include "contacts/_search_form.html" %}
