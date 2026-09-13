@@ -261,7 +261,7 @@
   {% if is_wizard %}
     <div class="app-action-area" style="margin-top:24px; display:flex; justify-content:flex-end;">
       {% url 'activities:activity_users_manage' pk=activity.id as next_step_url %}
-      <a href="{% append_back_url next_step_url back %}{% if back.back_exist %}&{% else %}?{% endif %}wizard=1" class="app-btn app-btn--primary" style="min-width:120px; text-align:center;">次へ</a>
+      <a href="{% append_back_url next_step_url|add:'?wizard=1' back %}" class="app-btn app-btn--primary" style="min-width:120px; text-align:center;">次へ</a>
     </div>
   {% endif %}
 </div>

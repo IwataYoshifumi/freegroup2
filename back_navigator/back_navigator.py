@@ -248,6 +248,23 @@ class BackNavigator:
         separator = "&" if clean_query else "?"
         return f"{clean_url}{separator}{new_param}"
 
+    def append_root_url(self, url):
+        """URLにback_stackの起点（最初の要素のみ）をエンコードして付与して返す（ウィザード完了時等）"""
+        if not self.back_stack:
+            return url
+
+        root_stack = [self.back_stack[0]]
+        parsed = urlparse(url)
+        params = {
+            k: v[0] for k, v in parse_qs(parsed.query).items() if k != self.PARAM_NAME
+        }
+        clean_query = urlencode(params)
+        clean_url = urlunparse(parsed._replace(query=clean_query))
+
+        new_param = urlencode({self.PARAM_NAME: self._calc_encode_stack(root_stack)})
+        separator = "&" if clean_query else "?"
+        return f"{clean_url}{separator}{new_param}"
+
     def hidden_fields(self):
         """POSTフォーム用のhiddenフィールドを生成"""
         if not self.back_stack:

@@ -153,7 +153,7 @@
   {% if is_wizard %}
     <div class="app-action-area" style="margin-top:24px; display:flex; justify-content:flex-end;">
       {% url 'deals:deal_detail' pk=deal.id as finish_url %}
-      <a href="{% append_back_url finish_url back %}" id="wizard-finish-btn" class="app-btn app-btn--primary" style="min-width:120px; text-align:center;">保存</a>
+      <a href="{% append_root_back_url finish_url back %}" id="wizard-finish-btn" class="app-btn app-btn--primary" style="min-width:120px; text-align:center;">保存</a>
     </div>
   {% endif %}
 </div>

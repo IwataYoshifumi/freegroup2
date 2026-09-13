@@ -11,6 +11,12 @@ def append_back_url(url, back):
 
 
 @register.simple_tag
+def append_root_back_url(url, back):
+    """URLにback_stackの起点（最初の要素のみ）を付与して返す（ウィザード完了時等）"""
+    return back.append_root_url(url)
+
+
+@register.simple_tag
 def back_url(back):
     """直前の画面へ戻るURL文字列のみを返す。
 
