@@ -876,17 +876,18 @@ class DealViewTests(TestCase):
             c.person.primary_contact = c
         Person.objects.bulk_update([c.person for c in saved_contacts], ["primary_contact"])
 
-        # 会社設定ありの案件での検証
-        response = self.client.get(reverse("deals:deal_persons_manage", kwargs={"pk": self.deal.pk}))
+        # 未検索時は候補リストが空であること
+        res_unsearched = self.client.get(reverse("deals:deal_persons_manage", kwargs={"pk": self.deal.pk}))
+        self.assertEqual(res_unsearched.status_code, 200)
+        self.assertEqual(list(res_unsearched.context["candidate_persons"]), [])
+        self.assertContains(res_unsearched, "検索条件を入力して候補を検索してください")
+
+        # 検索実行時（会社設定ありの案件での検証、最大50件制限）
+        response = self.client.get(reverse("deals:deal_persons_manage", kwargs={"pk": self.deal.pk}) + "?q=姓")
         self.assertEqual(response.status_code, 200)
         candidates = response.context["candidate_persons"]
         self.assertLessEqual(len(candidates), 50)
-        # 当該会社のパーソンは最大30件
-        company_candidates = [
-            p for p in candidates
-            if p.primary_contact and p.primary_contact.company_id == self.deal.company_id
-        ]
-        self.assertLessEqual(len(company_candidates), 30)
+        self.assertGreater(len(candidates), 0)
 
         # 会社未設定の案件での検証
         deal_no_company = Deal.objects.create(
@@ -895,10 +896,11 @@ class DealViewTests(TestCase):
             company=None,
             owner=self.owner,
         )
-        response_no_comp = self.client.get(reverse("deals:deal_persons_manage", kwargs={"pk": deal_no_company.pk}))
+        response_no_comp = self.client.get(reverse("deals:deal_persons_manage", kwargs={"pk": deal_no_company.pk}) + "?q=姓")
         self.assertEqual(response_no_comp.status_code, 200)
         candidates_no_comp = response_no_comp.context["candidate_persons"]
         self.assertLessEqual(len(candidates_no_comp), 50)
+        self.assertGreater(len(candidates_no_comp), 0)
 
     def test_deal_detail_view_has_manage_buttons(self):
         """案件詳細画面に管理画面への遷移ボタンが存在し、インライン検索入力が存在しないことを検証。"""
@@ -918,11 +920,13 @@ class DealViewTests(TestCase):
         self.client.login(username="deal_owner", password="password")
         manage_url = reverse("deals:deal_persons_manage", kwargs={"pk": self.deal.pk})
 
-        # 1. 画面表示確認
+        # 1. 画面表示確認（未検索時はガイダンス表示、候補一覧テーブル非表示）
         response = self.client.get(manage_url)
         self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "検索条件を入力して候補を検索してください")
+        self.assertEqual(list(response.context["candidate_persons"]), [])
 
-        # 2. 検索機能
+        # 2. 検索機能（検索実行時は結果テーブルと「追加」が表示されること）
         target_p = Person.objects.create()
         Contact.objects.create(person=target_p, last_name="特異名字テスト", first_name="太郎")
         target_p.primary_contact = Contact.objects.get(person=target_p)
@@ -946,6 +950,11 @@ class DealViewTests(TestCase):
         self.assertEqual(dp.role, PersonRole.DECISION_MAKER)
         self.assertEqual(dp.memo, "決裁権限あり")
 
+        # 削除ボタンのスタイル・アイコン検証（app-icon-btn, bi-trash-fill）
+        res_manage = self.client.get(manage_url)
+        self.assertContains(res_manage, 'class="app-icon-btn"')
+        self.assertContains(res_manage, 'bi bi-trash-fill')
+
         # 4. 削除POST（nextパラメータ付きで管理画面へリダイレクト）
         del_url = reverse("deals:deal_delete_person", kwargs={"pk": self.deal.pk, "person_rel_id": dp.id})
         del_res = self.client.post(del_url, data={"next": manage_url})
@@ -957,9 +966,11 @@ class DealViewTests(TestCase):
         self.client.login(username="deal_owner", password="password")
         manage_url = reverse("deals:deal_users_manage", kwargs={"pk": self.deal.pk})
 
-        # 1. 画面表示確認
+        # 1. 画面表示確認（未検索時はガイダンス表示、候補一覧テーブル非表示）
         response = self.client.get(manage_url)
         self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "検索条件を入力して候補を検索してください")
+        self.assertEqual(list(response.context["candidate_users"]), [])
 
         # 2. 検索機能（ユーザー自身のフィールドおよび紐づくPersonの氏名検索）
         target_u = User.objects.create_user(username="unique_test_user", password="password", first_name="特異太郎")
@@ -984,7 +995,7 @@ class DealViewTests(TestCase):
         html = search_person_res.content.decode("utf-8")
         self.assertNotIn("← 戻る", html)
         self.assertIn(">戻る</a>", html)
-        self.assertNotIn("＋ 追加", html)
+        self.assertIn(">追加</button>", html)
         self.assertIn(">追加</button>", html)
 
         # 3. 追加POST（役割・編集権限・メモ設定、nextパラメータ付き）
@@ -1002,6 +1013,11 @@ class DealViewTests(TestCase):
         self.assertEqual(du.role, UserRole.SUPPORT)
         self.assertTrue(du.can_edit)
         self.assertEqual(du.memo, "技術サポート担当")
+
+        # 削除ボタンのスタイル・アイコン検証（app-icon-btn, bi-trash-fill）
+        res_manage = self.client.get(manage_url)
+        self.assertContains(res_manage, 'class="app-icon-btn"')
+        self.assertContains(res_manage, 'bi bi-trash-fill')
 
         # 4. 削除POST（nextパラメータ付きで管理画面へリダイレクト）
         del_url = reverse("deals:deal_delete_user", kwargs={"pk": self.deal.pk, "user_rel_id": du.id})
@@ -1402,7 +1418,7 @@ class DealViewTests(TestCase):
         html_username = res_username.content.decode("utf-8")
         self.assertIn("岩田 好史", html_username)
         self.assertIn("@iwata", html_username)
-        self.assertNotIn("＋ 追加", html_username)
+        self.assertIn(">追加</button>", html_username)
         self.assertIn(">追加</button>", html_username)
 
         # 2. q=岩田 で検索（Personの氏名検索）

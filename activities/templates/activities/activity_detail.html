@@ -5,104 +5,145 @@
 
 {% block content %}
 <div class="activity-detail-container" style="max-width: 1040px; margin-left: 0; margin-right: auto; width: 100%;">
-  {% url 'activities:activity_update' pk=activity.id as edit_url %}
-  {% url 'activities:activity_archive' pk=activity.id as archive_url %}
-  <div style="margin-bottom: 20px;">
-    <div class="app-page-header" style="display: flex; justify-content: space-between; align-items: center;">
-      <!-- 左側: タイトル・バッジ・アクションアイコン -->
-      <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
-        <h1 style="margin: 0; font-size: 20px; font-weight: 700; color: var(--app-text, #0f172a);">活動詳細</h1>
-        <span class="app-status-badge">{{ activity.get_activity_type_display }}</span>
-        {% if activity.direction %}
-          <span class="app-status-badge">{{ activity.get_direction_display }}</span>
-        {% endif %}
-        {% if activity.is_archived %}
-          <span class="app-status-badge app-status-badge--warning">アーカイブ済み</span>
-        {% endif %}
-
-        <!-- アクションアイコン群（HIG準拠: app-icon-btn） -->
-        <div style="display: flex; align-items: center; gap: 6px; margin-left: 4px;">
-          {% if can_edit %}
-            <a href="{% append_back_url edit_url back %}" class="app-icon-btn" title="編集" aria-label="編集">
-              <i class="bi bi-pencil-fill"></i>
-            </a>
-          {% endif %}
-          {% if can_archive %}
-            <a href="{% append_back_url archive_url back %}" class="app-icon-btn" title="アーカイブ" aria-label="アーカイブ">
-              <i class="bi bi-archive-fill"></i>
-            </a>
-          {% endif %}
-        </div>
-      </div>
-
-      <!-- 右側: 戻るボタン（BackNavigator） -->
-      <div>
-        {% if back.has_back %}
-          {% back_link back %}
-        {% else %}
-          <a href="{% url 'activities:activity_list' %}" class="app-btn app-btn--secondary app-btn--sm">戻る</a>
-        {% endif %}
-      </div>
+  {# 画面上部: アクションエリア #}
+  <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:16px;">
+    <div>
+      <h1 class="app-title" style="margin: 0; font-size: 20px; font-weight: 700; color: var(--app-text, #0f172a);">活動詳細</h1>
+    </div>
+    <div style="margin-left:auto;">
+      {% back_all_link back %}{% back_link back %}
     </div>
   </div>
 
-  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 24px; width: 100%; box-sizing: border-box;">
-    <section class="app-card">
-      <h2 style="font-size:16px; margin-bottom:16px;">活動内容</h2>
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
-        <div>
-          <div class="app-form__label">実施日時</div>
-          <div style="font-size:16px; font-weight:600;">{{ activity.occurred_at|date:"Y-m-d H:i" }}</div>
+  {# 基本情報カード（幅 100% = 1040px、統合1枚カード） #}
+  <section class="app-card" style="padding:16px 20px; width: 100%; box-sizing: border-box; margin-bottom: 24px;">
+    <div style="display:flex; flex-direction:column; gap:12px;">
+
+      {# 先頭行: 活動識別・アイコン行（HIG 3.4 / 3.5 / 7.6 準拠） #}
+      <div style="display:flex; justify-content:space-between; align-items:center; padding-bottom:10px; border-bottom:1px solid var(--app-border, #e5e7eb);">
+        <div style="display:flex; align-items:center; gap:8px; flex:1;">
+          <span style="display:inline-block; min-width:96px; width:96px; font-size:12px; color:var(--app-muted, #64748b); white-space:nowrap;">活動種別:</span>
+          <span style="font-size:16px; font-weight:700; color:var(--app-text, #0f172a); word-break:break-word;">
+            {{ activity.get_activity_type_display }}{% if activity.direction %}（{{ activity.get_direction_display }}）{% endif %}
+          </span>
+          {% if can_edit %}
+            {% url 'activities:activity_update' pk=activity.id as edit_url %}
+            <a href="{% append_back_url edit_url back %}" class="app-icon-btn" title="活動を編集" aria-label="活動を編集" style="color:var(--app-text, #0f172a); text-decoration:none; margin-left:4px;">
+              <i class="bi bi-pencil-fill"></i>
+            </a>
+          {% endif %}
         </div>
-        <div>
-          <div class="app-form__label">場所・URL</div>
-          <div>{{ activity.place|default:"-" }}</div>
+        {% if can_archive %}
+          {% url 'activities:activity_archive' pk=activity.id as archive_url %}
+          <div style="margin-left:auto;">
+            <a href="{% append_back_url archive_url back %}" class="app-icon-btn" title="活動を削除" aria-label="活動を削除" style="color:var(--app-text, #0f172a); text-decoration:none;">
+              <i class="bi bi-trash-fill"></i>
+            </a>
+          </div>
+        {% endif %}
+      </div>
+
+      {# 1行目: 実施日時 / 種別 / 方向（3列横並び） #}
+      <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:16px; padding-bottom:8px; border-bottom:1px dashed var(--app-border, #f1f5f9);">
+        <div style="display:flex; align-items:baseline; gap:8px;">
+          <span style="display:inline-block; min-width:96px; width:96px; font-size:12px; color:var(--app-muted, #64748b); white-space:nowrap;">実施日時:</span>
+          <span style="flex:1; word-break:break-word; font-size:14px; font-weight:600; color:var(--app-text, #0f172a);">
+            {{ activity.occurred_at|date:"Y-m-d H:i" }}
+          </span>
         </div>
-        <div>
-          <div class="app-form__label">関連案件</div>
-          <div>
+        <div style="display:flex; align-items:baseline; gap:8px;">
+          <span style="display:inline-block; min-width:96px; width:96px; font-size:12px; color:var(--app-muted, #64748b); white-space:nowrap;">種別:</span>
+          <div style="flex:1; word-break:break-word;"><span class="app-status-badge">{{ activity.get_activity_type_display }}</span></div>
+        </div>
+        <div style="display:flex; align-items:baseline; gap:8px;">
+          <span style="display:inline-block; min-width:96px; width:96px; font-size:12px; color:var(--app-muted, #64748b); white-space:nowrap;">方向:</span>
+          <div style="flex:1; word-break:break-word;">
+            {% if activity.direction %}
+              <span class="app-status-badge">{{ activity.get_direction_display }}</span>
+            {% else %}
+              <span style="font-size:13px; color:var(--app-muted, #94a3b8);">-</span>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+
+      {# 2行目: 関連案件 / 関連キャンペーン / 場所・URL（3列横並び） #}
+      <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:16px; padding-bottom:8px; border-bottom:1px dashed var(--app-border, #f1f5f9);">
+        <div style="display:flex; align-items:baseline; gap:8px;">
+          <span style="display:inline-block; min-width:96px; width:96px; font-size:12px; color:var(--app-muted, #64748b); white-space:nowrap;">関連案件:</span>
+          <span style="flex:1; word-break:break-word; font-size:13px; font-weight:600;">
             {% if activity.deal %}
               {% url 'deals:deal_detail' pk=activity.deal.id as deal_url %}
               <a href="{% append_back_url deal_url back %}">{{ activity.deal.name }}</a>
-            {% else %}-{% endif %}
-          </div>
+            {% else %}
+              <span style="color:var(--app-muted, #94a3b8);">-</span>
+            {% endif %}
+          </span>
         </div>
-        <div>
-          <div class="app-form__label">関連キャンペーン</div>
-          <div>
+        <div style="display:flex; align-items:baseline; gap:8px;">
+          <span style="display:inline-block; min-width:96px; width:96px; font-size:12px; color:var(--app-muted, #64748b); white-space:nowrap;">関連キャンペーン:</span>
+          <span style="flex:1; word-break:break-word; font-size:13px;">
             {% if activity.campaign %}
               {% url 'mailings:campaign_detail' pk=activity.campaign.id as campaign_url %}
               <a href="{% append_back_url campaign_url back %}">{{ activity.campaign.name }}</a>
             {% else %}
-              -
+              <span style="color:var(--app-muted, #94a3b8);">-</span>
             {% endif %}
-          </div>
+          </span>
         </div>
-        <div style="grid-column:1 / -1;">
-          <div class="app-form__label">内容メモ・議事録</div>
-          <div>{{ activity.memo|linebreaksbr|default:"-" }}</div>
+        <div style="display:flex; align-items:baseline; gap:8px;">
+          <span style="display:inline-block; min-width:96px; width:96px; font-size:12px; color:var(--app-muted, #64748b); white-space:nowrap;">場所・URL:</span>
+          <span style="flex:1; word-break:break-word; font-size:13px; color:var(--app-text, #0f172a);">
+            {{ activity.place|default:"-" }}
+          </span>
         </div>
       </div>
-    </section>
 
-    <section class="app-card">
-      <h2 style="font-size:16px; margin-bottom:16px;">担当情報</h2>
-      <div style="margin-bottom:14px;">
-        <div class="app-form__label">実施者</div>
-        <div>{{ activity.user|default:"-" }}</div>
+      {# 3行目: 内容メモ・議事録（全幅・地の文表示、長文時省略＆モーダル） #}
+      <div style="display:flex; align-items:flex-start; gap:8px;">
+        <span style="display:inline-block; min-width:96px; width:96px; font-size:12px; color:var(--app-muted, #64748b); white-space:nowrap;">内容メモ:</span>
+        <div style="flex:1; word-break:break-word; position:relative;">
+          <div id="activity-memo-text" style="font-size:13px; line-height:1.6; color:var(--app-text, #0f172a); white-space:pre-wrap; -webkit-line-clamp:3; display:-webkit-box; -webkit-box-orient:vertical; overflow:hidden; word-break:break-word;">{{ activity.memo|default:"-" }}</div>
+          {% if activity.memo %}
+            <div id="activity-memo-more-btn-wrapper" style="display:none; margin-top:4px;">
+              <button type="button" id="activity-memo-more-btn" class="app-btn app-btn--ghost app-btn--xs" style="padding:0; color:var(--app-color-primary, #2563eb); font-size:12px; border:none; background:none; cursor:pointer;">
+                ...すべて見る
+              </button>
+            </div>
+          {% endif %}
+        </div>
       </div>
-      <div style="margin-bottom:14px;">
-        <div class="app-form__label">起票者</div>
-        <div>{{ activity.created_by|default:"-" }}</div>
-      </div>
-      <div style="margin-bottom:14px;">
-        <div class="app-form__label">登録日時</div>
-        <div>{{ activity.created_at|date:"Y-m-d H:i" }}</div>
-      </div>
-    </section>
-  </div>
 
-  {# 社外関係者 ＋ 社内同席者 2列グリッド #}
+      {# 下部メタ情報バー #}
+      <div style="display:flex; justify-content:flex-end; align-items:center; flex-wrap:wrap; gap:16px; margin-top:4px; padding-top:8px; border-top:1px solid var(--app-border, #f1f5f9); font-size:11px; color:var(--app-muted, #94a3b8);">
+        <div>実施者: {% if activity.user %}{{ activity.user.display_name|default:activity.user.username }}{% else %}-{% endif %}</div>
+        <div>作成者: {% if activity.created_by %}{{ activity.created_by.display_name|default:activity.created_by.username }}{% else %}-{% endif %}</div>
+        <div>登録日時: {{ activity.created_at|date:"Y-m-d H:i" }}</div>
+      </div>
+
+    </div>
+  </section>
+
+  {# 内容メモ全文表示モーダル #}
+  {% if activity.memo %}
+    <div class="app-modal-backdrop" id="activityMemoModalBackdrop" hidden></div>
+    <div class="app-modal" id="activityMemoModal" hidden role="dialog" aria-modal="true" aria-labelledby="activityMemoModalTitle">
+      <div class="app-modal__panel" style="width:min(640px, 95vw); max-height:85vh; display:flex; flex-direction:column;">
+        <div class="app-modal__header" style="display:flex; justify-content:space-between; align-items:center; padding:16px 20px; border-bottom:1px solid var(--app-border, #e5e7eb);">
+          <h2 id="activityMemoModalTitle" style="font-size:16px; font-weight:600; margin:0;">内容メモ・議事録</h2>
+          <button type="button" class="app-btn app-btn--icon" data-action="close-memo-modal" aria-label="閉じる" style="font-size:20px; line-height:1; cursor:pointer; background:none; border:none; color:var(--app-muted, #64748b);">&times;</button>
+        </div>
+        <div class="app-modal__body" style="padding:20px; overflow-y:auto; flex:1;">
+          <div style="font-size:14px; line-height:1.7; color:var(--app-text, #0f172a); white-space:pre-wrap; word-break:break-word;">{{ activity.memo }}</div>
+        </div>
+        <div class="app-modal__footer" style="padding:12px 20px; border-top:1px solid var(--app-border, #e5e7eb); display:flex; justify-content:flex-end;">
+          <button type="button" class="app-btn app-btn--secondary app-btn--sm" data-action="close-memo-modal">閉じる</button>
+        </div>
+      </div>
+    </div>
+  {% endif %}
+
+  {# 社外関係者 ＋ 社内同席者 2列グリッド（合計幅 100% = 1040px） #}
   <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; width: 100%; box-sizing: border-box; margin-bottom: 24px;">
     {# 左：相手方関係者（社外）カード #}
     <section class="app-card" style="margin: 0; width: 100%; min-width: 0; box-sizing: border-box;">
@@ -113,7 +154,9 @@
         </div>
         {% if can_edit %}
           {% url 'activities:activity_persons_manage' pk=activity.id as persons_manage_url %}
-          <a href="{% append_back_url persons_manage_url back %}" class="app-btn app-btn--secondary app-btn--sm">関係者を管理・追加</a>
+          <a href="{% append_back_url persons_manage_url back %}" class="app-icon-btn" title="関係者を管理・追加" aria-label="関係者を管理・追加" style="color:var(--app-text, #0f172a); text-decoration:none;">
+            <i class="bi bi-pencil-fill"></i>
+          </a>
         {% endif %}
       </div>
 
@@ -121,11 +164,11 @@
         <table class="app-table" style="table-layout: fixed; width: 100%; min-width: 0;">
           <thead>
             <tr>
-              <th style="width: 25%;">会社名</th>
-              <th style="width: 20%;">部署</th>
-              <th style="width: 25%;">名前</th>
-              <th style="width: 15%;">役割</th>
-              <th style="width: 15%;">メモ</th>
+              <th style="width: 28%;">会社名</th>
+              <th style="width: 22%;">部署</th>
+              <th style="width: 22%;">名前</th>
+              <th style="width: 14%;">役割</th>
+              <th style="width: 14%;">メモ</th>
             </tr>
           </thead>
           <tbody>
@@ -172,7 +215,9 @@
         </div>
         {% if can_edit %}
           {% url 'activities:activity_users_manage' pk=activity.id as users_manage_url %}
-          <a href="{% append_back_url users_manage_url back %}" class="app-btn app-btn--secondary app-btn--sm">同席者を管理・追加</a>
+          <a href="{% append_back_url users_manage_url back %}" class="app-icon-btn" title="同席者を管理・追加" aria-label="同席者を管理・追加" style="color:var(--app-text, #0f172a); text-decoration:none;">
+            <i class="bi bi-pencil-fill"></i>
+          </a>
         {% endif %}
       </div>
 
@@ -180,10 +225,10 @@
         <table class="app-table" style="table-layout: fixed; width: 100%; min-width: 0;">
           <thead>
             <tr>
-              <th style="width: 30%;">部署名</th>
-              <th style="width: 35%;">名前</th>
-              <th style="width: 20%;">役割</th>
-              <th style="width: 15%;">メモ</th>
+              <th style="width: 28%;">部署名</th>
+              <th style="width: 34%;">名前</th>
+              <th style="width: 18%;">役割</th>
+              <th style="width: 20%;">メモ</th>
             </tr>
           </thead>
           <tbody>
@@ -214,8 +259,8 @@
     </section>
   </div>
 
-  {# 添付ファイル #}
-  <section class="app-card">
+  {# 添付ファイルカード（幅 100% = 1040px） #}
+  <section class="app-card" style="width: 100%; box-sizing: border-box;">
     <h2 style="font-size:16px; margin-bottom:16px;">添付ファイル</h2>
     <div class="app-table-wrapper" style="margin-bottom:16px;">
       <table class="app-table">
@@ -236,16 +281,21 @@
                   {{ att.original_filename }}
                 </a>
               </td>
-              <td>
+              <td class="attachment-memo-cell" data-attachment-id="{{ att.id }}" data-update-url="{% url 'attachments:attachment_update_memo' pk=att.id %}">
+                <div class="memo-view-mode" style="display:flex; align-items:center; gap:6px;">
+                  <span class="memo-text" style="word-break:break-word;">{{ att.memo|default:"-" }}</span>
+                  {% if can_edit %}
+                    <button type="button" class="app-icon-btn memo-edit-btn" title="メモを編集" aria-label="メモを編集" style="border:none; background:none; cursor:pointer; padding:2px; color:var(--app-muted, #64748b); font-size:12px; display:inline-flex; align-items:center;">
+                      <i class="bi bi-pencil-fill"></i>
+                    </button>
+                  {% endif %}
+                </div>
                 {% if can_edit %}
-                  <form method="post" action="{% url 'attachments:attachment_update_memo' pk=att.id %}" style="display:flex; gap:4px; margin:0;">
-                    {% csrf_token %}
-                    {% hidden_back_field back %}
-                    <input type="text" name="memo" value="{{ att.memo }}" class="app-input" style="padding:2px 6px; font-size:12px; height:28px;">
-                    <button type="submit" class="app-btn app-btn--ghost app-btn--sm">保存</button>
-                  </form>
-                {% else %}
-                  {{ att.memo|default:"-" }}
+                  <div class="memo-edit-mode" style="display:none; align-items:center; gap:4px;">
+                    <input type="text" class="app-input app-input--compact memo-input" value="{{ att.memo|default:'' }}" placeholder="メモを入力..." style="padding:2px 6px; font-size:12px; height:28px; width:180px; max-width:100%;">
+                    <button type="button" class="app-btn app-btn--success app-btn--xs memo-save-btn" style="padding:2px 8px; font-size:11px; height:28px; line-height:24px;">保存</button>
+                    <button type="button" class="app-btn app-btn--ghost app-btn--xs memo-cancel-btn" style="padding:2px 6px; font-size:11px; height:28px; line-height:24px;">取消</button>
+                  </div>
                 {% endif %}
               </td>
               <td>{{ att.uploaded_by|default:"-" }}</td>
@@ -270,21 +320,313 @@
     </div>
 
     {% if can_edit and perms.attachments.add_attachment %}
-      <form method="post" action="{% url 'attachments:attachment_upload' %}" enctype="multipart/form-data" style="display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end;">
+      <form method="post" action="{% url 'attachments:attachment_upload' %}" enctype="multipart/form-data" id="attachment-upload-form" style="margin-top:16px;">
         {% csrf_token %}
         {% hidden_back_field back %}
         <input type="hidden" name="activity_id" value="{{ activity.id }}">
-        <div class="app-form__group" style="margin-bottom:0;">
-          <label class="app-form__label">ファイル追加（15MB以下）</label>
-          {{ attachment_form.file }}
+
+        {# D&D ドロップゾーン #}
+        <div id="attachment-dropzone" class="attachment-dropzone" style="border: 2px dashed var(--app-border, #cbd5e1); border-radius: 8px; padding: 20px; text-align: center; background: var(--app-bg-subtle, #f8fafc); cursor: pointer; transition: all 0.2s ease;">
+          <input type="file" name="files" id="attachment-file-input" style="display:none;" multiple required>
+          <div id="dropzone-prompt">
+            <i class="bi bi-cloud-arrow-up" style="font-size:26px; color:var(--app-muted, #64748b); display:block; margin-bottom:6px;"></i>
+            <div style="font-size:13px; font-weight:600; color:var(--app-text, #0f172a); margin-bottom:4px;">
+              ファイルをここにドラッグ＆ドロップ、またはクリックして選択（15MB以下・複数可）
+            </div>
+            <div style="font-size:12px; color:var(--app-muted, #94a3b8);">
+              複数ファイルを同時に選択して一括アップロードできます
+            </div>
+          </div>
+          <div id="dropzone-file-info" style="display:none;">
+            <div style="display:inline-flex; flex-direction:column; align-items:center; gap:8px; max-width:100%; padding:10px 16px; background:var(--app-card-bg, #ffffff); border:1px solid var(--app-border, #cbd5e1); border-radius:6px; box-shadow:0 1px 2px rgba(0,0,0,0.05);">
+              <div style="display:inline-flex; align-items:center; gap:8px; width:100%; justify-content:center;">
+                <i class="bi bi-file-earmark-check" style="color:var(--app-color-primary, #2563eb); font-size:18px;"></i>
+                <span id="dropzone-summary-text" style="font-size:13px; color:var(--app-text, #0f172a);"></span>
+                <button type="button" id="dropzone-clear-btn" class="app-icon-btn" title="クリア" aria-label="ファイルをクリア" style="border:none; background:none; cursor:pointer; padding:2px; font-size:16px; color:var(--app-muted, #94a3b8); margin-left:4px; line-height:1;">
+                  <i class="bi bi-x"></i>
+                </button>
+              </div>
+              <div id="dropzone-file-list" style="display:flex; flex-wrap:wrap; gap:6px; justify-content:center; max-height:120px; overflow-y:auto; width:100%;"></div>
+            </div>
+          </div>
         </div>
-        <div class="app-form__group" style="margin-bottom:0; flex:1;">
-          <label class="app-form__label">メモ</label>
-          {{ attachment_form.memo }}
+
+        {# メモ入力およびアップロードボタン #}
+        <div id="upload-controls" style="display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end; margin-top:12px;">
+          <div class="app-form__group" style="margin-bottom:0; flex:1; min-width:200px;">
+            <label class="app-form__label" for="attachment-memo-input" style="font-size:12px;">メモ（任意）</label>
+            <input type="text" name="memo" id="attachment-memo-input" class="app-input" placeholder="メモ・備考（任意）" style="height:36px;">
+          </div>
+          <button type="submit" id="attachment-upload-btn" class="app-btn app-btn--primary" style="height:36px;">アップロード</button>
         </div>
-        <button type="submit" class="app-btn app-btn--primary">アップロード</button>
       </form>
+      <style>
+        .attachment-dropzone.dragover {
+          border-color: var(--app-color-primary, #2563eb) !important;
+          background-color: #eff6ff !important;
+        }
+      </style>
     {% endif %}
   </section>
 </div>
+
+<script>
+  (function() {
+    var memoEl = document.getElementById('activity-memo-text');
+    var moreBtnWrapper = document.getElementById('activity-memo-more-btn-wrapper');
+    var modal = document.getElementById('activityMemoModal');
+    var backdrop = document.getElementById('activityMemoModalBackdrop');
+    var openBtn = document.getElementById('activity-memo-more-btn');
+
+    if (memoEl && moreBtnWrapper) {
+      if (memoEl.scrollHeight > memoEl.clientHeight + 2) {
+        moreBtnWrapper.style.display = 'block';
+      }
+    }
+
+    if (!modal) return;
+
+    function openModal() {
+      modal.hidden = false;
+      if (backdrop) backdrop.hidden = false;
+    }
+    function closeModal() {
+      modal.hidden = true;
+      if (backdrop) backdrop.hidden = true;
+    }
+
+    if (openBtn) {
+      openBtn.addEventListener('click', openModal);
+    }
+    if (backdrop) {
+      backdrop.addEventListener('click', closeModal);
+    }
+    modal.querySelectorAll('[data-action="close-memo-modal"]').forEach(function(btn) {
+      btn.addEventListener('click', closeModal);
+    });
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape' && !modal.hidden) {
+        closeModal();
+      }
+    });
+  })();
+
+  // 添付ファイル メモAJAXインライン編集
+  (function() {
+    function getCsrfToken() {
+      var cookieValue = null;
+      if (document.cookie && document.cookie !== '') {
+        var cookies = document.cookie.split(';');
+        for (var i = 0; i < cookies.length; i++) {
+          var cookie = cookies[i].trim();
+          if (cookie.substring(0, 10) === 'csrftoken=') {
+            cookieValue = decodeURIComponent(cookie.substring(10));
+            break;
+          }
+        }
+      }
+      if (!cookieValue) {
+        var input = document.querySelector('input[name="csrfmiddlewaretoken"]');
+        if (input) cookieValue = input.value;
+      }
+      return cookieValue;
+    }
+
+    document.querySelectorAll('.attachment-memo-cell').forEach(function(cell) {
+      var viewMode = cell.querySelector('.memo-view-mode');
+      var editMode = cell.querySelector('.memo-edit-mode');
+      var memoText = cell.querySelector('.memo-text');
+      var editBtn = cell.querySelector('.memo-edit-btn');
+      var input = cell.querySelector('.memo-input');
+      var saveBtn = cell.querySelector('.memo-save-btn');
+      var cancelBtn = cell.querySelector('.memo-cancel-btn');
+      var updateUrl = cell.getAttribute('data-update-url');
+
+      if (!editBtn || !editMode || !saveBtn || !cancelBtn) return;
+
+      function openEdit() {
+        viewMode.style.display = 'none';
+        editMode.style.display = 'flex';
+        input.focus();
+        input.select();
+      }
+
+      function closeEdit() {
+        input.style.borderColor = '';
+        var currentText = memoText.textContent.trim();
+        input.value = currentText === '-' ? '' : currentText;
+        editMode.style.display = 'none';
+        viewMode.style.display = 'flex';
+      }
+
+      function saveMemo() {
+        var newMemo = input.value.trim();
+        saveBtn.disabled = true;
+        input.style.borderColor = '';
+
+        fetch(updateUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'X-CSRFToken': getCsrfToken(),
+            'X-Requested-With': 'XMLHttpRequest'
+          },
+          body: new URLSearchParams({ memo: newMemo })
+        })
+        .then(function(res) {
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          return res.json();
+        })
+        .then(function(data) {
+          if (data && data.status === 'success') {
+            var updated = data.memo !== undefined ? data.memo : newMemo;
+            memoText.textContent = updated || '-';
+            input.value = updated || '';
+            editMode.style.display = 'none';
+            viewMode.style.display = 'flex';
+            memoText.style.transition = 'color 0.3s ease';
+            memoText.style.color = 'var(--app-color-success, #16a34a)';
+            setTimeout(function() { memoText.style.color = ''; }, 1200);
+          } else {
+            throw new Error('Save failed');
+          }
+        })
+        .catch(function() {
+          input.style.borderColor = 'var(--app-color-danger, #ef4444)';
+          alert('メモの更新に失敗しました。');
+        })
+        .finally(function() {
+          saveBtn.disabled = false;
+        });
+      }
+
+      editBtn.addEventListener('click', openEdit);
+      cancelBtn.addEventListener('click', closeEdit);
+      saveBtn.addEventListener('click', saveMemo);
+      input.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          saveMemo();
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          closeEdit();
+        }
+      });
+    });
+  })();
+
+  // 添付ファイル追加 D&D ゾーン制御（複数ファイル対応）
+  (function() {
+    var dropzone = document.getElementById('attachment-dropzone');
+    var fileInput = document.getElementById('attachment-file-input');
+    var promptEl = document.getElementById('dropzone-prompt');
+    var infoEl = document.getElementById('dropzone-file-info');
+    var summaryTextEl = document.getElementById('dropzone-summary-text');
+    var fileListEl = document.getElementById('dropzone-file-list');
+    var clearBtn = document.getElementById('dropzone-clear-btn');
+
+    if (!dropzone || !fileInput) return;
+
+    function formatBytes(bytes) {
+      if (bytes === 0) return '0 B';
+      var k = 1024;
+      var sizes = ['B', 'KB', 'MB', 'GB'];
+      var i = Math.floor(Math.log(bytes) / Math.log(k));
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+    }
+
+    function escapeHtml(str) {
+      var div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    }
+
+    function showFiles(files) {
+      if (!files || files.length === 0) {
+        resetFiles();
+        return;
+      }
+      var count = files.length;
+      var totalSize = 0;
+      if (fileListEl) fileListEl.innerHTML = '';
+
+      for (var i = 0; i < count; i++) {
+        totalSize += files[i].size;
+      }
+
+      if (count === 1) {
+        if (summaryTextEl) {
+          summaryTextEl.innerHTML = '<span style="font-weight:600; word-break:break-all;">' + escapeHtml(files[0].name) + '</span> <span style="font-size:12px; color:var(--app-muted, #64748b);">(' + formatBytes(files[0].size) + ')</span>';
+        }
+        if (fileListEl) fileListEl.style.display = 'none';
+      } else {
+        if (summaryTextEl) {
+          summaryTextEl.innerHTML = '<strong style="font-weight:700;">' + count + '件のファイルを選択中（合計 ' + formatBytes(totalSize) + '）</strong>';
+        }
+        if (fileListEl) {
+          fileListEl.style.display = 'flex';
+          for (var j = 0; j < count; j++) {
+            var tag = document.createElement('span');
+            tag.style.cssText = 'display:inline-flex; align-items:center; font-size:11px; padding:2px 8px; background:var(--app-bg-subtle, #f1f5f9); border:1px solid var(--app-border, #e2e8f0); border-radius:4px; color:var(--app-text, #334155); max-width:240px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;';
+            tag.textContent = files[j].name + ' (' + formatBytes(files[j].size) + ')';
+            tag.title = files[j].name;
+            fileListEl.appendChild(tag);
+          }
+        }
+      }
+
+      promptEl.style.display = 'none';
+      infoEl.style.display = 'block';
+    }
+
+    function resetFiles() {
+      fileInput.value = '';
+      promptEl.style.display = 'block';
+      infoEl.style.display = 'none';
+      if (fileListEl) fileListEl.innerHTML = '';
+      if (summaryTextEl) summaryTextEl.innerHTML = '';
+    }
+
+    dropzone.addEventListener('click', function(e) {
+      if (e.target.closest('#dropzone-clear-btn')) return;
+      fileInput.click();
+    });
+
+    dropzone.addEventListener('dragover', function(e) {
+      e.preventDefault();
+      dropzone.classList.add('dragover');
+    });
+
+    ['dragleave', 'dragend'].forEach(function(evt) {
+      dropzone.addEventListener(evt, function(e) {
+        e.preventDefault();
+        dropzone.classList.remove('dragover');
+      });
+    });
+
+    dropzone.addEventListener('drop', function(e) {
+      e.preventDefault();
+      dropzone.classList.remove('dragover');
+      if (e.dataTransfer && e.dataTransfer.files.length > 0) {
+        fileInput.files = e.dataTransfer.files;
+        showFiles(e.dataTransfer.files);
+      }
+    });
+
+    fileInput.addEventListener('change', function() {
+      if (fileInput.files && fileInput.files.length > 0) {
+        showFiles(fileInput.files);
+      } else {
+        resetFiles();
+      }
+    });
+
+    if (clearBtn) {
+      clearBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        resetFiles();
+      });
+    }
+  })();
+</script>
 {% endblock %}

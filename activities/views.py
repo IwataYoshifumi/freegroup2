@@ -448,43 +448,24 @@ class ActivityPersonManageView(LoginRequiredMixin, View):
         existing_person_ids = set(activity_persons.values_list("person_id", flat=True))
 
         q = request.GET.get("q", "").strip()
-        person_qs = (
-            Person.objects.exclude(status=Person.Status.MERGED)
-            .exclude(id__in=existing_person_ids)
-            .select_related("primary_contact__company")
-        )
-
-        if q:
-            person_qs = person_qs.filter(
-                Q(primary_contact__first_name__icontains=q)
-                | Q(primary_contact__last_name__icontains=q)
-                | Q(primary_contact__company__organization__icontains=q)
-                | Q(primary_contact__organization__icontains=q)
-                | Q(primary_contact__title__icontains=q)
-                | Q(primary_contact__email__icontains=q)
-            ).distinct()[:50]
-        elif activity.deal_id:
-            deal_person_ids = list(
-                activity.deal.deal_persons.exclude(person_id__in=existing_person_ids).values_list("person_id", flat=True)
+        is_searched = bool(q)
+        if is_searched:
+            person_qs = (
+                Person.objects.exclude(status=Person.Status.MERGED)
+                .exclude(id__in=existing_person_ids)
+                .select_related("primary_contact__company")
+                .filter(
+                    Q(primary_contact__first_name__icontains=q)
+                    | Q(primary_contact__last_name__icontains=q)
+                    | Q(primary_contact__company__organization__icontains=q)
+                    | Q(primary_contact__organization__icontains=q)
+                    | Q(primary_contact__title__icontains=q)
+                    | Q(primary_contact__email__icontains=q)
+                )
+                .distinct()[:50]
             )
-            if (
-                activity.deal.primary_person_id
-                and activity.deal.primary_person_id not in existing_person_ids
-                and activity.deal.primary_person_id not in deal_person_ids
-            ):
-                deal_person_ids.insert(0, activity.deal.primary_person_id)
-
-            deal_persons_list = list(
-                person_qs.filter(id__in=deal_person_ids).order_by("-created_at")[:30]
-            )
-            deal_person_id_set = {p.id for p in deal_persons_list}
-            remaining_limit = 50 - len(deal_persons_list)
-            other_persons = list(
-                person_qs.exclude(id__in=deal_person_id_set).order_by("-created_at")[:remaining_limit]
-            )
-            person_qs = deal_persons_list + other_persons
         else:
-            person_qs = list(person_qs.order_by("-created_at")[:50])
+            person_qs = Person.objects.none()
 
         back = BackNavigator(request)
         activity_detail_url = reverse("activities:activity_detail", kwargs={"pk": activity.pk})
@@ -500,6 +481,8 @@ class ActivityPersonManageView(LoginRequiredMixin, View):
                 "activity_persons": activity_persons,
                 "candidate_persons": person_qs,
                 "current_q": q,
+                "q": q,
+                "is_searched": is_searched,
                 "is_edit_mode": is_edit_mode,
                 "person_roles": PersonRole.choices,
                 "back": back,
@@ -563,29 +546,31 @@ class ActivityUserManageView(LoginRequiredMixin, View):
             existing_user_ids.add(activity.user_id)
 
         User = get_user_model()
-        user_qs = (
-            User.objects.filter(is_active=True)
-            .exclude(id__in=existing_user_ids)
-            .select_related("person__primary_contact")
-            .order_by("username")
-        )
 
         q = request.GET.get("q", "").strip()
-        if q:
-            user_qs = user_qs.filter(
-                Q(username__icontains=q)
-                | Q(first_name__icontains=q)
-                | Q(last_name__icontains=q)
-                | Q(email__icontains=q)
-                | Q(person__primary_contact__full_name__icontains=q)
-                | Q(person__primary_contact__last_name__icontains=q)
-                | Q(person__primary_contact__first_name__icontains=q)
-                | Q(person__contact__full_name__icontains=q)
-                | Q(person__contact__last_name__icontains=q)
-                | Q(person__contact__first_name__icontains=q)
-            ).distinct()[:50]
+        is_searched = bool(q)
+        if is_searched:
+            user_qs = (
+                User.objects.filter(is_active=True)
+                .exclude(id__in=existing_user_ids)
+                .select_related("person__primary_contact")
+                .order_by("username")
+                .filter(
+                    Q(username__icontains=q)
+                    | Q(first_name__icontains=q)
+                    | Q(last_name__icontains=q)
+                    | Q(email__icontains=q)
+                    | Q(person__primary_contact__full_name__icontains=q)
+                    | Q(person__primary_contact__last_name__icontains=q)
+                    | Q(person__primary_contact__first_name__icontains=q)
+                    | Q(person__contact__full_name__icontains=q)
+                    | Q(person__contact__last_name__icontains=q)
+                    | Q(person__contact__first_name__icontains=q)
+                )
+                .distinct()[:50]
+            )
         else:
-            user_qs = list(user_qs[:50])
+            user_qs = User.objects.none()
 
         back = BackNavigator(request)
         activity_detail_url = reverse("activities:activity_detail", kwargs={"pk": activity.pk})
@@ -601,6 +586,8 @@ class ActivityUserManageView(LoginRequiredMixin, View):
                 "activity_users": activity_users,
                 "candidate_users": user_qs,
                 "current_q": q,
+                "q": q,
+                "is_searched": is_searched,
                 "is_edit_mode": is_edit_mode,
                 "user_roles": UserRole.choices,
                 "back": back,

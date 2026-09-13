@@ -321,7 +321,8 @@ class ActivityViewTests(TestCase):
 
         add_perm = Permission.objects.get(codename="add_activity")
         change_perm = Permission.objects.get(codename="change_activity")
-        self.user.user_permissions.add(add_perm, change_perm)
+        add_att_perm = Permission.objects.get(codename="add_attachment")
+        self.user.user_permissions.add(add_perm, change_perm, add_att_perm)
         self.attendee.user_permissions.add(add_perm, change_perm)
 
         self.person = Person.objects.create()
@@ -379,16 +380,25 @@ class ActivityViewTests(TestCase):
         self.assertTrue(len(back.back_stack) >= 1)
         self.assertEqual(back.back_stack[-1]["url"], detail_url)
 
-        # テキストボタン「編集」「アーカイブ」が存在しないこと
+        # テキストボタン「編集」「アーカイブ」「関係者を管理・追加」「同席者を管理・追加」が存在しないこと
         content = response.content.decode("utf-8")
         self.assertNotIn('class="app-btn app-btn--success">編集<', content)
         self.assertNotIn('class="app-btn app-btn--warning">アーカイブ<', content)
+        # タイトル行の検証（活動詳細テキストのみで種別・方向バッジが撤去されていること）
+        self.assertIn('<h1 class="app-title"', content)
+        self.assertIn('活動詳細</h1>', content)
+        header_part = content.split('<section class="app-card"')[0]
+        self.assertNotIn('app-status-badge', header_part)
 
-        # アイコンボタン（app-icon-btn, bi-pencil-fill, bi-archive-fill）が存在すること
-        self.assertIn('class="app-icon-btn" title="編集" aria-label="編集"', content)
+        # 基本情報カード内にアイコンボタン（app-icon-btn, bi-pencil-fill, bi-trash-fill）が存在すること
+        self.assertIn('class="app-icon-btn" title="活動を編集" aria-label="活動を編集"', content)
         self.assertIn('bi bi-pencil-fill', content)
-        self.assertIn('class="app-icon-btn" title="アーカイブ" aria-label="アーカイブ"', content)
-        self.assertIn('bi bi-archive-fill', content)
+        self.assertIn('class="app-icon-btn" title="活動を削除" aria-label="活動を削除"', content)
+        self.assertIn('bi bi-trash-fill', content)
+
+        # 相手方関係者・社内同席者カードに編集アイコン（app-icon-btn, bi-pencil-fill）が存在すること
+        self.assertIn('title="関係者を管理・追加"', content)
+        self.assertIn('title="同席者を管理・追加"', content)
 
         # アイコンリンクに back_stack が付与されていること
         edit_url = reverse("activities:activity_update", kwargs={"pk": self.activity.pk})
@@ -396,10 +406,41 @@ class ActivityViewTests(TestCase):
         archive_url = reverse("activities:activity_archive", kwargs={"pk": self.activity.pk})
         self.assertIn(f'{archive_url}?back_stack=', content)
 
+        # 添付ファイルエリアの検証（D&Dゾーン、multiple属性）
+        self.assertIn('id="attachment-dropzone"', content)
+        self.assertIn('id="attachment-file-input"', content)
+        self.assertIn('multiple', content)
+
         # コンテナ幅（1040px）およびグリッド（1fr 1fr）のレイアウト検証
         self.assertIn('class="activity-detail-container"', content)
         self.assertIn('max-width: 1040px;', content)
         self.assertIn('grid-template-columns: 1fr 1fr;', content)
+
+    def test_activity_detail_attachment_memo_inline_ui(self):
+        """活動詳細画面において添付ファイルメモが常時フォームではなくテキスト＋編集トリガーであることを検証。"""
+        from attachments.models import Attachment
+        from django.core.files.base import ContentFile
+
+        att = Attachment.objects.create(
+            activity=self.activity,
+            file=ContentFile(b"dummy activity attachment", name="act_file.pdf"),
+            original_filename="act_file.pdf",
+            memo="活動添付メモテスト",
+            uploaded_by=self.user,
+        )
+
+        self.client.login(username="act_owner", password="password")
+        url = reverse("activities:activity_detail", kwargs={"pk": self.activity.pk})
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode("utf-8")
+
+        # メモ列が常時フォームではなくテキスト表示＋編集トリガー（memo-edit-btn）になっていること
+        self.assertIn('class="attachment-memo-cell"', html)
+        self.assertIn('class="memo-view-mode"', html)
+        self.assertIn("活動添付メモテスト", html)
+        self.assertIn('class="app-icon-btn memo-edit-btn"', html)
+        self.assertIn('class="memo-edit-mode"', html)
 
     def test_activity_create_view_auto_user_and_badge(self):
         """活動新規作成画面で実施者が固定バッジ表示され、POST時にuserとcreated_byが自動保存されること。"""
@@ -413,16 +454,16 @@ class ActivityViewTests(TestCase):
         self.assertContains(response, self.user.display_name)
         self.assertNotContains(response, '<select name="user"')
 
-        # POST時に user / created_by がログインユーザーで自動設定されること（代理指定があってもログインユーザーで固定）
         post_data = {
             "activity_type": ActivityType.VISIT,
             "direction": Direction.OUTGOING,
             "occurred_at": timezone.localtime().strftime("%Y-%m-%dT%H:%M"),
-            "user": str(self.attendee.id),
+            "deal": str(self.deal.id),
             "memo": "自動固定の訪問活動",
+            "person_id": str(self.person.id),
         }
-        post_resp = self.client.post(url, data=post_data)
-        self.assertEqual(post_resp.status_code, 302)
+        res_post = self.client.post(url, data=post_data)
+        self.assertEqual(res_post.status_code, 302)
 
         created = Activity.objects.get(memo="自動固定の訪問活動")
         self.assertEqual(created.user, self.user)
@@ -441,17 +482,22 @@ class ActivityViewTests(TestCase):
         self.assertEqual(self.client.get(manage_url).status_code, 403)
         self.assertEqual(self.client.post(manage_url, data={}).status_code, 403)
 
-        # 権限ありユーザーでアクセス
+        # 権限ありユーザーでアクセス（未検索時はガイダンス表示、候補一覧テーブル非表示）
         self.client.login(username="act_owner", password="password")
         resp = self.client.get(manage_url)
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "社外関係者（パーソン）管理")
         self.assertContains(resp, "登録済みの関係者")
+        self.assertContains(resp, "検索条件を入力して候補を検索してください")
+        self.assertEqual(list(resp.context["candidate_persons"]), [])
+        self.assertNotContains(resp, "鈴木 一郎")
 
-        # 検索機能
+        # 検索機能（検索実行時は結果テーブルと「追加」が表示されること）
         resp_q = self.client.get(manage_url + "?q=鈴木")
         self.assertEqual(resp_q.status_code, 200)
         self.assertContains(resp_q, "鈴木 一郎")
+        self.assertContains(resp_q, ">追加</button>")
+        self.assertIn(p_new, resp_q.context["candidate_persons"])
 
         # 追加（デフォルト attendee）
         add_url = reverse("activities:activity_add_person", kwargs={"pk": self.activity.pk})
@@ -476,6 +522,11 @@ class ActivityViewTests(TestCase):
         self.assertEqual(rel.role, PersonRole.DECISION_MAKER)
         self.assertEqual(rel.memo, "決裁者として参加")
 
+        # 削除ボタンのスタイル・アイコン検証（app-icon-btn, bi-trash-fill）
+        res_manage = self.client.get(manage_url)
+        self.assertContains(res_manage, 'class="app-icon-btn"')
+        self.assertContains(res_manage, 'bi bi-trash-fill')
+
         # 解除（削除）
         del_url = reverse("activities:activity_delete_person", kwargs={"pk": self.activity.pk, "person_rel_id": rel.id})
         del_resp = self.client.post(del_url, data={"next": manage_url})
@@ -492,15 +543,23 @@ class ActivityViewTests(TestCase):
         self.assertEqual(self.client.get(manage_url).status_code, 403)
         self.assertEqual(self.client.post(manage_url, data={}).status_code, 403)
 
-        # 権限ありユーザーでアクセス
+        # 権限ありユーザーでアクセス（未検索時はガイダンス表示、候補一覧テーブル非表示）
         self.client.login(username="act_owner", password="password")
         resp = self.client.get(manage_url)
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "社内同席者（ユーザー）管理")
         self.assertContains(resp, "登録済みの同席者")
+        self.assertContains(resp, "検索条件を入力して候補を検索してください")
+        self.assertEqual(list(resp.context["candidate_users"]), [])
 
-        # 実施者本人（act_owner）は候補から除外されていること
-        candidate_ids = [u.id for u in resp.context["candidate_users"]]
+        # 検索機能（検索実行時は結果テーブルと「追加」が表示されること）
+        resp_q = self.client.get(manage_url + "?q=act_colleague")
+        self.assertEqual(resp_q.status_code, 200)
+        self.assertContains(resp_q, "act_colleague")
+        self.assertContains(resp_q, ">追加</button>")
+
+        # 実施者本人（act_owner）は候補から除外され、colleagueが含まれること
+        candidate_ids = [u.id for u in resp_q.context["candidate_users"]]
         self.assertNotIn(self.user.id, candidate_ids)
         self.assertIn(colleague.id, candidate_ids)
 
@@ -526,6 +585,11 @@ class ActivityViewTests(TestCase):
         rel.refresh_from_db()
         self.assertEqual(rel.role, UserRole.APPROVER)
         self.assertEqual(rel.memo, "承認者として同席")
+
+        # 削除ボタンのスタイル・アイコン検証（app-icon-btn, bi-trash-fill）
+        res_manage = self.client.get(manage_url)
+        self.assertContains(res_manage, 'class="app-icon-btn"')
+        self.assertContains(res_manage, 'bi bi-trash-fill')
 
         # 解除（削除）
         del_url = reverse("activities:activity_delete_user", kwargs={"pk": self.activity.pk, "user_rel_id": rel.id})

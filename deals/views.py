@@ -601,33 +601,24 @@ class DealPersonManageView(LoginRequiredMixin, View):
             existing_person_ids.add(deal.primary_person_id)
 
         q = request.GET.get("q", "").strip()
-        person_qs = (
-            Person.objects.exclude(status=Person.Status.MERGED)
-            .exclude(id__in=existing_person_ids)
-            .select_related("primary_contact__company")
-        )
-
-        if q:
-            person_qs = person_qs.filter(
-                Q(primary_contact__first_name__icontains=q)
-                | Q(primary_contact__last_name__icontains=q)
-                | Q(primary_contact__company__organization__icontains=q)
-                | Q(primary_contact__organization__icontains=q)
-                | Q(primary_contact__title__icontains=q)
-                | Q(primary_contact__email__icontains=q)
-            ).distinct()[:50]
-        elif deal.company_id:
-            company_persons = list(
-                person_qs.filter(primary_contact__company_id=deal.company_id).order_by("-created_at")[:30]
+        is_searched = bool(q)
+        if is_searched:
+            person_qs = (
+                Person.objects.exclude(status=Person.Status.MERGED)
+                .exclude(id__in=existing_person_ids)
+                .select_related("primary_contact__company")
+                .filter(
+                    Q(primary_contact__first_name__icontains=q)
+                    | Q(primary_contact__last_name__icontains=q)
+                    | Q(primary_contact__company__organization__icontains=q)
+                    | Q(primary_contact__organization__icontains=q)
+                    | Q(primary_contact__title__icontains=q)
+                    | Q(primary_contact__email__icontains=q)
+                )
+                .distinct()[:50]
             )
-            company_person_ids = {p.id for p in company_persons}
-            remaining_limit = 50 - len(company_persons)
-            other_persons = list(
-                person_qs.exclude(id__in=company_person_ids).order_by("-created_at")[:remaining_limit]
-            )
-            person_qs = company_persons + other_persons
         else:
-            person_qs = list(person_qs.order_by("-created_at")[:50])
+            person_qs = Person.objects.none()
 
         back = BackNavigator(request)
         deal_detail_url = reverse("deals:deal_detail", kwargs={"pk": deal.pk})
@@ -643,6 +634,8 @@ class DealPersonManageView(LoginRequiredMixin, View):
                 "deal_persons": deal_persons,
                 "candidate_persons": person_qs,
                 "current_q": q,
+                "q": q,
+                "is_searched": is_searched,
                 "is_edit_mode": is_edit_mode,
                 "person_roles": PersonRole.choices,
                 "back": back,
@@ -703,29 +696,31 @@ class DealUserManageView(LoginRequiredMixin, View):
         existing_user_ids = set(deal_users.values_list("user_id", flat=True))
 
         User = get_user_model()
-        user_qs = (
-            User.objects.filter(is_active=True)
-            .exclude(id__in=existing_user_ids)
-            .select_related("person__primary_contact")
-            .order_by("username")
-        )
 
         q = request.GET.get("q", "").strip()
-        if q:
-            user_qs = user_qs.filter(
-                Q(username__icontains=q)
-                | Q(first_name__icontains=q)
-                | Q(last_name__icontains=q)
-                | Q(email__icontains=q)
-                | Q(person__primary_contact__full_name__icontains=q)
-                | Q(person__primary_contact__last_name__icontains=q)
-                | Q(person__primary_contact__first_name__icontains=q)
-                | Q(person__contact__full_name__icontains=q)
-                | Q(person__contact__last_name__icontains=q)
-                | Q(person__contact__first_name__icontains=q)
-            ).distinct()[:50]
+        is_searched = bool(q)
+        if is_searched:
+            user_qs = (
+                User.objects.filter(is_active=True)
+                .exclude(id__in=existing_user_ids)
+                .select_related("person__primary_contact")
+                .order_by("username")
+                .filter(
+                    Q(username__icontains=q)
+                    | Q(first_name__icontains=q)
+                    | Q(last_name__icontains=q)
+                    | Q(email__icontains=q)
+                    | Q(person__primary_contact__full_name__icontains=q)
+                    | Q(person__primary_contact__last_name__icontains=q)
+                    | Q(person__primary_contact__first_name__icontains=q)
+                    | Q(person__contact__full_name__icontains=q)
+                    | Q(person__contact__last_name__icontains=q)
+                    | Q(person__contact__first_name__icontains=q)
+                )
+                .distinct()[:50]
+            )
         else:
-            user_qs = list(user_qs[:50])
+            user_qs = User.objects.none()
 
         back = BackNavigator(request)
         deal_detail_url = reverse("deals:deal_detail", kwargs={"pk": deal.pk})
@@ -741,6 +736,8 @@ class DealUserManageView(LoginRequiredMixin, View):
                 "deal_users": deal_users,
                 "candidate_users": user_qs,
                 "current_q": q,
+                "q": q,
+                "is_searched": is_searched,
                 "is_edit_mode": is_edit_mode,
                 "user_roles": UserRole.choices,
                 "back": back,
