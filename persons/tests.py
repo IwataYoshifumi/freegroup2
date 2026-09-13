@@ -621,7 +621,10 @@ class PersonDetailViewTests(TestCase):
     def _make_active_with_primary(self):
         person = Person.objects.create()
         contact = Contact.objects.create(
-            person=person, status=Contact.Status.PRIMARY, full_name="A"
+            person=person,
+            status=Contact.Status.PRIMARY,
+            full_name="A",
+            created_by=self.user,
         )
         person.primary_contact = contact
         person.save(update_fields=["primary_contact", "updated_at"])
@@ -1777,6 +1780,7 @@ class PersonDetailActionButtonsTests(TestCase):
             last_name="佐藤",
             first_name="花子",
             status=Contact.Status.ACTIVE,
+            created_by=self.user,
         )
         self.person.primary_contact = self.contact
         self.person.save(update_fields=["primary_contact"])
@@ -1991,6 +1995,83 @@ class ViewerActionButtonsGuardedTests(TestCase):
         self.assertNotIn("マージ候補", html)
         self.assertNotIn("名刺画像アップロード", html)
         self.assertNotIn("重複チェック", html)
+
+
+class SalesActionButtonsGuardedTests(TestCase):
+    """営業（sales）ロール等の行レベル認可ユーザーにおける詳細画面編集ガードの検証。"""
+
+    def setUp(self):
+        from accounts.models import Role
+        from django.contrib.auth.models import Permission
+
+        self.sales_user = get_user_model().objects.create_user(
+            username="sales_tester", password="password"
+        )
+        sales_role = Role.objects.filter(code="sales").first()
+        if sales_role:
+            self.sales_user.role = sales_role
+            self.sales_user.save()
+            for g in sales_role.default_groups.all():
+                self.sales_user.groups.add(g)
+        else:
+            _grant_view_person(self.sales_user)
+            self.sales_user.user_permissions.add(
+                Permission.objects.get(codename="change_contact", content_type__app_label="contacts"),
+            )
+
+        self.other_user = get_user_model().objects.create_user(
+            username="other_sales_user", password="password"
+        )
+
+        self.client = Client()
+        self.client.login(username="sales_tester", password="password")
+
+        # 他人のパーソン
+        self.other_person = Person.objects.create(status=Person.Status.ACTIVE)
+        self.other_contact = Contact.objects.create(
+            person=self.other_person,
+            last_name="他社",
+            first_name="太郎",
+            status=Contact.Status.PRIMARY,
+            created_by=self.other_user,
+        )
+        self.other_person.primary_contact = self.other_contact
+        self.other_person.save(update_fields=["primary_contact"])
+
+        # 自身のパーソン
+        self.own_person = Person.objects.create(status=Person.Status.ACTIVE)
+        self.own_contact = Contact.objects.create(
+            person=self.own_person,
+            last_name="自社",
+            first_name="次郎",
+            status=Contact.Status.PRIMARY,
+            created_by=self.sales_user,
+        )
+        self.own_person.primary_contact = self.own_contact
+        self.own_person.save(update_fields=["primary_contact"])
+
+    def test_other_person_detail_is_read_only_for_sales(self):
+        """他人のパーソン詳細では is_editable が False となり編集鉛筆アイコンが非表示で表示のみモードとなること。"""
+        resp = self.client.get(
+            reverse("persons:person_detail", kwargs={"pk": self.other_person.pk})
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(resp.context["is_editable"])
+        html = resp.content.decode("utf-8")
+        self.assertNotIn("主コンタクトを修正", html)
+        self.assertIn("表示のみモード（編集不可）", html)
+
+    def test_own_person_detail_is_editable_for_sales(self):
+        """自身のパーソン詳細では is_editable が True となり編集鉛筆アイコンが表示されること。"""
+        resp = self.client.get(
+            reverse("persons:person_detail", kwargs={"pk": self.own_person.pk})
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.context["is_editable"])
+        html = resp.content.decode("utf-8")
+        self.assertIn("主コンタクトを修正", html)
+        self.assertNotIn("表示のみモード（編集不可）", html)
+
 
 
 

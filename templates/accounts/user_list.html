@@ -76,7 +76,14 @@
                   {% url 'accounts:user_detail' user_id=user.id as user_detail_url %}
                   <a href="{% append_back_url user_detail_url back %}">{{ user.username }}</a>
                 </td>
-                <td>{{ user.get_full_name|default:"-" }}</td>
+                <td>
+                  {% if user.person %}
+                    {% url 'persons:person_detail' pk=user.person.id as person_detail_url %}
+                    <a href="{% append_back_url person_detail_url back %}">{{ user.display_name }}</a>
+                  {% else %}
+                    {{ user.get_full_name|default:"-" }}
+                  {% endif %}
+                </td>
                 <td>{{ user.role|default:"-" }}</td>
                 <td>{{ user.department|default:"-" }}</td>
                 <td>{{ user.auth_source }}</td>

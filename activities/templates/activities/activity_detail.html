@@ -302,11 +302,13 @@
               <td>{{ att.created_at|date:"Y-m-d H:i" }}</td>
               <td>
                 {% if perms.attachments.delete_attachment %}
-                  <form method="post" action="{% url 'attachments:attachment_delete' pk=att.id %}" style="margin:0;">
-                    {% csrf_token %}
-                    {% hidden_back_field back %}
-                    <button type="submit" class="app-btn app-btn--ghost app-btn--sm" style="color:var(--app-color-danger, #ef4444);" onclick="return confirm('この添付ファイルを削除しますか？');">削除</button>
-                  </form>
+                  {% if att.uploaded_by_id == request.user.id or activity.user_id == request.user.id or activity.created_by_id == request.user.id or perms.activities.edit_all_activities %}
+                    <form method="post" action="{% url 'attachments:attachment_delete' pk=att.id %}" style="margin:0;">
+                      {% csrf_token %}
+                      {% hidden_back_field back %}
+                      <button type="submit" class="app-btn app-btn--ghost app-btn--sm" style="color:var(--app-color-danger, #ef4444);" onclick="return confirm('この添付ファイルを削除しますか？');">削除</button>
+                    </form>
+                  {% endif %}
                 {% endif %}
               </td>
             </tr>

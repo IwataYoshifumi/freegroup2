@@ -185,7 +185,11 @@ class UserListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
     permission_required = "accounts.retire_user"
 
     def get_queryset(self):
-        qs = super().get_queryset()
+        qs = (
+            super()
+            .get_queryset()
+            .select_related("person", "person__primary_contact", "role", "department")
+        )
         if self.request.GET.get("show_retired") != "1":
             qs = qs.filter(is_active=True)
 

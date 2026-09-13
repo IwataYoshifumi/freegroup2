@@ -157,3 +157,64 @@ class UserDetailAssignButtonTests(TestCase):
         apply_role(admin_user, Role.objects.get(code="admin"))
         resp = self.client.get(self._detail_url(admin_user))
         self.assertNotContains(resp, self._assign_url(admin_user))
+
+
+class UserListPersonNameDisplayTests(TestCase):
+    """UserListView における Person 紐付け氏名表示・リンクおよび N+1 最適化の検証。"""
+
+    def setUp(self):
+        self.operator = User.objects.create_user("list_op", password="x")
+        self.operator = _grant(self.operator, "retire_user")
+        self.client = Client()
+        self.client.force_login(self.operator)
+        self.url = reverse("accounts:user_list")
+
+        self.person = Person.objects.create()
+        self.contact = Contact.objects.create(
+            person=self.person,
+            status=Contact.Status.PRIMARY,
+            full_name="山田 太郎",
+        )
+        self.person.primary_contact = self.contact
+        self.person.save(update_fields=["primary_contact", "updated_at"])
+
+        self.user_with_person = User.objects.create_user(
+            "linked_u", password="x", person=self.person
+        )
+        self.user_with_name_only = User.objects.create_user(
+            "name_u", password="x", first_name="花子", last_name="鈴木"
+        )
+        self.user_empty_name = User.objects.create_user(
+            "empty_u", password="x"
+        )
+
+    def test_linked_person_displays_name_and_detail_link(self):
+        resp = self.client.get(self.url)
+        self.assertEqual(resp.status_code, 200)
+
+        # Person が紐づいている場合はパーソン表示名が表示され、詳細リンクが存在する
+        self.assertContains(resp, "山田 太郎")
+        person_detail_url = reverse(
+            "persons:person_detail", kwargs={"pk": self.person.pk}
+        )
+        self.assertContains(resp, person_detail_url)
+
+    def test_unlinked_user_displays_full_name_or_dash(self):
+        resp = self.client.get(self.url)
+        self.assertEqual(resp.status_code, 200)
+
+        # Person 未紐付けで氏名あり: full_name が表示される
+        self.assertContains(resp, self.user_with_name_only.get_full_name())
+
+    def test_queryset_select_related_optimization(self):
+        from accounts.views import UserListView
+
+        view = UserListView()
+        view.request = self.client.get(self.url).wsgi_request
+        qs = view.get_queryset()
+        select_related = qs.query.select_related
+        self.assertIn("person", select_related)
+        self.assertIn("primary_contact", select_related["person"])
+        self.assertIn("role", select_related)
+        self.assertIn("department", select_related)
+

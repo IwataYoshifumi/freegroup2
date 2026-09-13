@@ -160,6 +160,20 @@ class CustomUserAdmin(UserAdmin):
                 .values_list("role_id", flat=True)
                 .first()
             )
+        role_changed = not change or old_role_id != obj.role_id
+        obj._role_changed = role_changed
         super().save_model(request, obj, form, change)
-        if not change or old_role_id != obj.role_id:
+        if role_changed:
             apply_role(obj, obj.role)
+
+    def save_related(self, request, form, formsets, change):
+        """フォームの M2M 保存後に apply_role を実行し、groups 競合を解消する。
+
+        Django Admin 標準の form.save_m2m() でフォーム表示時の古い groups 選択状態が
+        再上書きされてしまうため、M2M 保存完了直後に apply_role を再適用して
+        ロールに対応するグループ（ロール解除時は clear）を最終確定させる。
+        """
+        super().save_related(request, form, formsets, change)
+        if getattr(form.instance, "_role_changed", False):
+            apply_role(form.instance, form.instance.role)
+

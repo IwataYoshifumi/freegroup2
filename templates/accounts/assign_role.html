@@ -3,6 +3,7 @@
 {% block title %}ロール変更 — {{ target_user.username }} — FreeGroup2{% endblock %}
 
 {% block content %}
+  <div style="max-width: 800px; margin-left: 0; margin-right: auto;">
     <section class="app-card">
       <div class="app-section__header">
         <h1>ロール変更</h1>
@@ -26,7 +27,7 @@
       <form method="post" action="">
         {% csrf_token %}
         {% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
-        <div class="app-form__group">
+        <div class="app-form__group" style="max-width: 480px;">
           <label class="app-form__label" for="role">ロール</label>
           <select name="role" id="role" class="app-input" required>
             <option value="">--- 選択してください ---</option>
@@ -42,4 +43,5 @@
         </div>
       </form>
     </section>
+  </div>
 {% endblock %}

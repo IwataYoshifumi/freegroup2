@@ -1,10 +1,20 @@
 {# アプリ横断ナビ（名刺管理・会社管理・案件管理・活動管理・メール配信・ユーザ管理）の共通項目。 #}
 {# トップバー（.app-app-switcher）とドロワー（.app-drawer）の両方から include して二重管理を防ぐ。 #}
-<a href="{% url 'persons:person_list' %}" class="{% if active_app == 'cards' or active_app == 'persons' or '/cards/' in request.path or '/persons/' in request.path or '/contacts/' in request.path or '/originals/' in request.path or '/duplicates/' in request.path %}{% if '/companies/' not in request.path and '/deals/' not in request.path and '/activities/' not in request.path %}is-active active{% endif %}{% endif %}">名刺管理</a>
-<a href="{% url 'companies:company_list' %}" class="{% if active_app == 'companies' or '/companies/' in request.path %}is-active active{% endif %}">会社管理</a>
-<a href="{% url 'deals:deal_list' %}" class="{% if active_app == 'deals' or '/deals/' in request.path %}{% if '/activities/' not in request.path %}is-active active{% endif %}{% endif %}">案件管理</a>
-<a href="{% url 'activities:activity_list' %}" class="{% if active_app == 'activities' or '/activities/' in request.path %}is-active active{% endif %}">活動管理</a>
-<a href="{% url 'mailings:campaign_list' %}" class="{% if active_app == 'mailings' or '/mailings/' in request.path %}is-active active{% endif %}">メール配信</a>
+{% if perms.persons.view_person or perms.cards.view_card %}
+  <a href="{% url 'persons:person_list' %}" class="{% if active_app == 'cards' or active_app == 'persons' or '/cards/' in request.path or '/persons/' in request.path or '/contacts/' in request.path or '/originals/' in request.path or '/duplicates/' in request.path %}{% if '/companies/' not in request.path and '/deals/' not in request.path and '/activities/' not in request.path %}is-active active{% endif %}{% endif %}">名刺管理</a>
+{% endif %}
+{% if perms.companies.view_company %}
+  <a href="{% url 'companies:company_list' %}" class="{% if active_app == 'companies' or '/companies/' in request.path %}is-active active{% endif %}">会社管理</a>
+{% endif %}
+{% if perms.deals.view_deal %}
+  <a href="{% url 'deals:deal_list' %}" class="{% if active_app == 'deals' or '/deals/' in request.path %}{% if '/activities/' not in request.path %}is-active active{% endif %}{% endif %}">案件管理</a>
+{% endif %}
+{% if perms.activities.view_activity %}
+  <a href="{% url 'activities:activity_list' %}" class="{% if active_app == 'activities' or '/activities/' in request.path %}is-active active{% endif %}">活動管理</a>
+{% endif %}
+{% if perms.mailings.view_campaign %}
+  <a href="{% url 'mailings:campaign_list' %}" class="{% if active_app == 'mailings' or '/mailings/' in request.path %}is-active active{% endif %}">メール配信</a>
+{% endif %}
 {% if perms.accounts.retire_user %}
   <a href="{% url 'accounts:user_list' %}" class="{% if active_app == 'user_mgmt' or '/accounts/' in request.path and '/accounts/login/' not in request.path and '/accounts/profile/' not in request.path %}is-active active{% endif %}">ユーザ管理</a>
 {% endif %}

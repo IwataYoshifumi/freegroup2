@@ -15,6 +15,7 @@ from duplicates.models import DuplicateCandidate, PersonMergeLog
 from persons.models import Person
 
 from ..models import Contact
+from ..services.permissions import can_edit_contact
 
 
 def build_contact_detail_context(contact, user):
@@ -36,6 +37,7 @@ def build_contact_detail_context(contact, user):
     is_editable = (
         contact.status in (Contact.Status.PRIMARY, Contact.Status.ACTIVE)
         and contact.person.status == "active"
+        and can_edit_contact(user, contact)
     )
 
     # 他のアクティブコンタクト（D-3b 論点 4）
