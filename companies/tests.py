@@ -1060,6 +1060,63 @@ class CompanyDetailActivityTitleTests(TestCase):
         self.assertContains(response, f"/activities/{self.activity.id}/")
 
 
+class CompanyDetailContactPhoneTests(TestCase):
+    """会社詳細画面の所属コンタクト一覧における電話番号（org_phone / mobile_phone）表示検証。"""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="comp_phone_user", password="password")
+        self.client.login(username="comp_phone_user", password="password")
+        self.company = Company.objects.create(organization="電話番号テスト会社")
+        self.person1 = Person.objects.create()
+        self.person2 = Person.objects.create()
+        self.person3 = Person.objects.create()
+
+    def test_company_detail_displays_contact_org_phone_formatted(self):
+        """所属コンタクトの org_phone が国内形式ハイフン付きで表示されること。"""
+        Contact.objects.create(
+            person=self.person1,
+            company=self.company,
+            last_name="山田",
+            first_name="太郎",
+            org_phone="+81312345678",
+        )
+        url = reverse("companies:company_detail", kwargs={"pk": self.company.pk})
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "03-1234-5678")
+
+    def test_company_detail_displays_contact_mobile_phone_fallback(self):
+        """org_phone が未設定で mobile_phone が設定されている場合、mobile_phone がハイフン付きで表示されること。"""
+        Contact.objects.create(
+            person=self.person2,
+            company=self.company,
+            last_name="鈴木",
+            first_name="次郎",
+            org_phone="",
+            mobile_phone="+819012345678",
+        )
+        url = reverse("companies:company_detail", kwargs={"pk": self.company.pk})
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "090-1234-5678")
+
+    def test_company_detail_displays_contact_without_phone_shows_dash(self):
+        """電話番号が未設定の場合、ハイフン '-' が表示されること。"""
+        Contact.objects.create(
+            person=self.person3,
+            company=self.company,
+            last_name="佐藤",
+            first_name="三郎",
+            org_phone="",
+            mobile_phone="",
+        )
+        url = reverse("companies:company_detail", kwargs={"pk": self.company.pk})
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "-")
+
+
+
 
 
 

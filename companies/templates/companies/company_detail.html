@@ -255,7 +255,11 @@
               <td>{{ contact.title|default:"-" }}</td>
               <td>{{ contact.department|default:"-" }}</td>
               <td>{{ contact.email|default:"-" }}</td>
-              <td>{% if contact.phone %}{% format_phone contact.phone %}{% else %}-{% endif %}</td>
+              <td>
+                {% with c_phone=contact.org_phone|default:contact.mobile_phone %}
+                  {% if c_phone %}{% format_phone c_phone %}{% else %}-{% endif %}
+                {% endwith %}
+              </td>
               <td>
                 <a href="{% append_back_url contact_detail_url back %}" class="app-btn app-btn--ghost app-btn--sm">詳細</a>
               </td>
