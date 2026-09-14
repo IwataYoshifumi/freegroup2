@@ -1,3 +1,4 @@
+import re
 from datetime import timedelta
 from django.contrib.admin.sites import AdminSite
 from django.contrib.auth import get_user_model
@@ -1288,6 +1289,90 @@ class ActivityWizardTests(TestCase):
         self.assertEqual(empty_res.status_code, 302)
         self.assertEqual(empty_res.url, detail_url)
 
+    def test_activity_wizard_from_deal_detail_back_navigator(self):
+        """案件詳細起点の活動ウィザード完了時、活動詳細の戻り先（back.back_url）が当該案件詳細画面を正しく指していること。"""
+        deal = Deal.objects.create(
+            name="活動起点の案件",
+            company=self.company,
+            owner=self.user,
+        )
+        deal_list_url = reverse("deals:deal_list")
+        deal_detail_url = reverse("deals:deal_detail", kwargs={"pk": deal.pk})
+
+        nav = BackNavigator(self.client.get("/").wsgi_request)
+        initial_stack = [
+            {"url": deal_list_url, "title": "案件一覧", "view_name": "deals:deal_list", "view_kwargs": {}},
+        ]
+        back_stack = nav._calc_encode_stack(initial_stack)
+
+        # 1. 案件詳細画面へアクセス（案件一覧からの back_stack 付き）
+        deal_detail_res = self.client.get(f"{deal_detail_url}?back_stack={back_stack}")
+        self.assertEqual(deal_detail_res.status_code, 200)
+        detail_html = deal_detail_res.content.decode("utf-8")
+
+        # 「活動を記録」リンクの href を抽出
+        import re
+        match_create = re.search(r'href="([^"]+)"[^>]*>活動を記録</a>', detail_html)
+        self.assertIsNotNone(match_create, "「活動を記録」リンクが見つかりません")
+        step1_url = match_create.group(1).replace("&amp;", "&")
+
+        # 2. Step 1: 活動作成画面
+        res1 = self.client.get(step1_url)
+        self.assertEqual(res1.status_code, 200)
+
+        # Step 1 POST
+        post_data = {
+            "activity_type": ActivityType.PHONE,
+            "direction": Direction.OUTGOING,
+            "occurred_at": timezone.localtime().strftime("%Y-%m-%dT%H:%M"),
+            "memo": "案件詳細起点ウィザード活動",
+            "deal": str(deal.pk),
+        }
+        # form の hidden back_stack を引き継ぐ
+        raw_back = res1.context["back"]._calc_encode_stack()
+        post_data["back_stack"] = raw_back
+        res1_post = self.client.post(step1_url, data=post_data)
+        self.assertEqual(res1_post.status_code, 302)
+        activity = Activity.objects.get(memo="案件詳細起点ウィザード活動")
+
+        # 3. Step 2: 相手方関係者設定
+        step2_url = res1_post.url
+        self.assertIn(f"activities/{activity.pk}/persons/manage/", step2_url)
+        self.assertIn("wizard=1", step2_url)
+        res2 = self.client.get(step2_url)
+        self.assertEqual(res2.status_code, 200)
+
+        # 4. Step 3: 社内同席者設定
+        step3_base = reverse("activities:activity_users_manage", kwargs={"pk": activity.pk}) + "?wizard=1"
+        step3_url = res2.context["back"].append_url(step3_base)
+        res3 = self.client.get(step3_url)
+        self.assertEqual(res3.status_code, 200)
+
+        # 5. Step 4: 添付ファイル設定
+        step4_base = reverse("activities:activity_attachments_manage", kwargs={"pk": activity.pk}) + "?wizard=1"
+        step4_url = res3.context["back"].append_url(step4_base)
+        res4 = self.client.get(step4_url)
+        self.assertEqual(res4.status_code, 200)
+
+        # Step 4 の完了ボタン（保存 / wizard-finish-btn）の href を抽出
+        content4 = res4.content.decode("utf-8")
+        match = re.search(r'id="wizard-finish-btn"[^>]*href="([^"]+)"', content4)
+        if not match:
+            match = re.search(r'href="([^"]+)"[^>]*id="wizard-finish-btn"', content4)
+        self.assertIsNotNone(match, "wizard-finish-btn の href が見つかりません")
+        finish_url = match.group(1).replace("&amp;", "&")
+
+        # 6. 活動詳細画面へ遷移
+        res_detail = self.client.get(finish_url)
+        self.assertEqual(res_detail.status_code, 200)
+
+        detail_back = res_detail.context["back"]
+        self.assertTrue(detail_back.back_exist, "戻り先（案件詳細）が存在すること")
+        # 直前の戻り先が案件詳細であること
+        self.assertTrue(detail_back.back_url.startswith(deal_detail_url), f"back_url: {detail_back.back_url} が {deal_detail_url} で始まること")
+        # 最初の戻り先が案件一覧であること
+        self.assertEqual(detail_back.back_all_url, deal_list_url)
+
 
 
 
@@ -1436,6 +1521,60 @@ class ActivityPersonMergeTests(TestCase):
         self.assertNotContains(resp, "マージ済み")
         self.assertEqual(len(resp.context["activity_persons"]), 1)
         self.assertEqual(resp.context["activity_persons"][0].person, self.target_person)
+
+
+class ActivityDetailAttachmentModalTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username="att_act_user", password="password", first_name="添付", last_name="活動")
+        perm_change_activity = Permission.objects.get(codename="change_activity")
+        perm_add_att = Permission.objects.get(codename="add_attachment")
+        self.user.user_permissions.add(perm_change_activity, perm_add_att)
+        self.activity = Activity.objects.create(
+            activity_type=ActivityType.PHONE,
+            direction=Direction.OUTGOING,
+            occurred_at=timezone.now(),
+            user=self.user,
+            created_by=self.user,
+            memo="添付テスト活動",
+        )
+        self.client.login(username="att_act_user", password="password")
+
+    def test_activity_detail_attachment_modal_structure(self):
+        """活動詳細の添付ファイルカード内に常時表示フォームが存在せず、モーダルトリガーとモーダル内フォームが存在することを検証。"""
+        url = reverse("activities:activity_detail", kwargs={"pk": self.activity.pk})
+        res = self.client.get(url)
+        self.assertEqual(res.status_code, 200)
+        html = res.content.decode("utf-8")
+
+        # 1. カード内に常時表示のファイル入力フォームが存在しないこと
+        card_match = re.search(r'<section class="app-card"[^>]*>(?:(?!<section)[\s\S])*?<h2[^>]*>添付ファイル</h2>[\s\S]*?</section>', html)
+        self.assertIsNotNone(card_match)
+        card_html = card_match.group(0)
+        self.assertNotIn('id="attachment-upload-form"', card_html)
+        self.assertNotIn('id="attachment-dropzone"', card_html)
+        self.assertIn("添付ファイルはありません。", card_html)
+
+        # 2. モーダルトリガーボタンが存在すること
+        self.assertIn('data-action="open-modal"', card_html)
+        self.assertIn('data-target="attachmentUploadModal"', card_html)
+        self.assertIn("ファイルをアップロード", card_html)
+
+        # 3. モーダル（#attachmentUploadModal）内にフォームと各要素が存在すること
+        modal_match = re.search(r'<div class="app-modal" id="attachmentUploadModal"[\s\S]*?</form>\s*</div>\s*</div>', html)
+        self.assertIsNotNone(modal_match)
+        modal_html = modal_match.group(0)
+        upload_url = reverse("attachments:attachment_upload")
+        self.assertIn(f'action="{upload_url}"', modal_html)
+        self.assertIn('enctype="multipart/form-data"', modal_html)
+        self.assertIn('name="activity_id"', modal_html)
+        self.assertIn(f'value="{self.activity.id}"', modal_html)
+        self.assertIn('name="files"', modal_html)
+        self.assertIn("multiple", modal_html)
+        self.assertIn('name="memo"', modal_html)
+        self.assertIn('id="attachment-dropzone"', modal_html)
+        self.assertIn('id="attachment-upload-btn"', modal_html)
+        self.assertIn('data-action="close-modal"', modal_html)
+
 
 
 

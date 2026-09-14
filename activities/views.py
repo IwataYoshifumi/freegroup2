@@ -9,6 +9,7 @@ from django.urls import reverse
 from django.utils import timezone
 from django.views import View
 from django.views.generic import CreateView, DetailView, ListView, UpdateView
+from urllib.parse import parse_qs, urlparse
 
 from actionlogs.models import ActionLog
 from activities.forms import (
@@ -898,6 +899,31 @@ class ActivityMembersView(LoginRequiredMixin, View):
         return redirect(redirect_url)
 
 
+def _is_wizard_entry(entry):
+    """スタック要素がウィザード画面かどうか判定する"""
+    if not isinstance(entry, dict):
+        return False
+    url = entry.get("url", "")
+    parsed = urlparse(url)
+    qs = parse_qs(parsed.query)
+    return "wizard" in qs
+
+
+def _calc_wizard_finish_url(request, activity):
+    """ウィザード完了時（Step 4 保存）の戻り先（活動詳細画面）URLを生成する。
+    ウィザード画面以外の直前のスタック状態（案件詳細や活動一覧等）を維持して付与する。
+    """
+    back = BackNavigator(request)
+    activity_detail_url = reverse("activities:activity_detail", kwargs={"pk": activity.pk})
+    pre_wizard_stack = [
+        entry for entry in back.back_stack if not _is_wizard_entry(entry)
+    ]
+    if pre_wizard_stack:
+        encoded = back._calc_encode_stack(pre_wizard_stack)
+        return f"{activity_detail_url}?{BackNavigator.PARAM_NAME}={encoded}"
+    return activity_detail_url
+
+
 class ActivityAttachmentManageView(LoginRequiredMixin, View):
     """活動添付ファイル管理画面（ウィザード Step 4 対応）。"""
 
@@ -920,6 +946,8 @@ class ActivityAttachmentManageView(LoginRequiredMixin, View):
         else:
             back.push_current(title=f"添付ファイル: {activity}", keys=["wizard"])
 
+        finish_url = _calc_wizard_finish_url(request, activity) if is_wizard else activity_detail_url
+
         return render(
             request,
             "activities/activity_attachments_manage.html",
@@ -930,6 +958,7 @@ class ActivityAttachmentManageView(LoginRequiredMixin, View):
                 "is_wizard": is_wizard,
                 "back": back,
                 "activity_detail_url": activity_detail_url,
+                "finish_url": finish_url,
                 "active_menu": "activities:activity_list",
             },
         )
@@ -942,7 +971,7 @@ class ActivityAttachmentManageView(LoginRequiredMixin, View):
 
         files = request.FILES.getlist("files") or request.FILES.getlist("file")
         next_url = request.POST.get("next") or request.GET.get("next")
-        default_redirect = reverse("activities:activity_detail", kwargs={"pk": activity.pk})
+        default_redirect = _calc_wizard_finish_url(request, activity)
         redirect_url = next_url or default_redirect
 
         # ファイルが選択されていない場合はそのまま完了・リダイレクト

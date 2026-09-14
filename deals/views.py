@@ -122,6 +122,13 @@ class DealDetailView(LoginRequiredMixin, DetailView):
             raise PermissionDenied
         return obj
 
+    def get(self, request, *args, **kwargs):
+        self.object = self.get_object()
+        back = BackNavigator(request)
+        back.push_current(title=f"案件: {self.object.name}", keys=["page"])
+        context = self.get_context_data(object=self.object, back=back)
+        return self.render_to_response(context)
+
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         deal = self.object
@@ -147,9 +154,12 @@ class DealDetailView(LoginRequiredMixin, DetailView):
         from attachments.forms import AttachmentUploadForm
 
         context["attachment_form"] = AttachmentUploadForm()
-        back = BackNavigator(self.request)
-        back.push_current(title=f"案件: {deal.name}", keys=["page"])
-        context["back"] = back
+        if "back" in kwargs:
+            context["back"] = kwargs["back"]
+        else:
+            back = BackNavigator(self.request)
+            back.push_current(title=f"案件: {deal.name}", keys=["page"])
+            context["back"] = back
         context["active_menu"] = "deals:deal_list"
         return context
 

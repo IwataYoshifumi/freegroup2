@@ -1,3 +1,4 @@
+import re
 from datetime import timedelta
 from decimal import Decimal
 from django.contrib.admin.sites import AdminSite
@@ -2147,5 +2148,53 @@ class DealPersonMergeTests(TestCase):
         self.assertEqual(resp.context["deal_persons"][0].person, self.target_person)
 
 
+class DealDetailAttachmentModalTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username="att_deal_user", password="password", first_name="添付", last_name="テスト")
+        perm_change_deal = Permission.objects.get(codename="change_deal")
+        perm_add_att = Permission.objects.get(codename="add_attachment")
+        self.user.user_permissions.add(perm_change_deal, perm_add_att)
+        self.company = Company.objects.create(organization="添付テスト企業", created_by=self.user)
+        self.deal = Deal.objects.create(
+            name="添付テスト案件",
+            company=self.company,
+            owner=self.user,
+            created_by=self.user,
+        )
+        self.client.login(username="att_deal_user", password="password")
 
+    def test_deal_detail_attachment_modal_structure(self):
+        """案件詳細の添付ファイルカード内に常時表示フォームが存在せず、モーダルトリガーとモーダル内フォームが存在することを検証。"""
+        url = reverse("deals:deal_detail", kwargs={"pk": self.deal.pk})
+        res = self.client.get(url)
+        self.assertEqual(res.status_code, 200)
+        html = res.content.decode("utf-8")
 
+        # 1. カード内に常時表示のファイル入力フォームが存在しないこと
+        card_match = re.search(r'<section class="app-card"[^>]*>(?:(?!<section)[\s\S])*?<h2[^>]*>添付ファイル</h2>[\s\S]*?</section>', html)
+        self.assertIsNotNone(card_match)
+        card_html = card_match.group(0)
+        self.assertNotIn('id="attachment-upload-form"', card_html)
+        self.assertNotIn('id="attachment-dropzone"', card_html)
+        self.assertIn("添付ファイルはありません。", card_html)
+
+        # 2. モーダルトリガーボタンが存在すること
+        self.assertIn('data-action="open-modal"', card_html)
+        self.assertIn('data-target="attachmentUploadModal"', card_html)
+        self.assertIn("ファイルをアップロード", card_html)
+
+        # 3. モーダル（#attachmentUploadModal）内にフォームと各要素が存在すること
+        modal_match = re.search(r'<div class="app-modal" id="attachmentUploadModal"[\s\S]*?</form>\s*</div>\s*</div>', html)
+        self.assertIsNotNone(modal_match)
+        modal_html = modal_match.group(0)
+        upload_url = reverse("attachments:attachment_upload")
+        self.assertIn(f'action="{upload_url}"', modal_html)
+        self.assertIn('enctype="multipart/form-data"', modal_html)
+        self.assertIn('name="deal_id"', modal_html)
+        self.assertIn(f'value="{self.deal.id}"', modal_html)
+        self.assertIn('name="files"', modal_html)
+        self.assertIn("multiple", modal_html)
+        self.assertIn('name="memo"', modal_html)
+        self.assertIn('id="attachment-dropzone"', modal_html)
+        self.assertIn('id="attachment-upload-btn"', modal_html)
+        self.assertIn('data-action="close-modal"', modal_html)

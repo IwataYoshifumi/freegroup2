@@ -261,8 +261,13 @@
 
   {# 添付ファイルカード（幅 100% = 1040px） #}
   <section class="app-card" style="width: 100%; box-sizing: border-box;">
-    <h2 style="font-size:16px; margin-bottom:16px;">添付ファイル</h2>
-    <div class="app-table-wrapper" style="margin-bottom:16px;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+      <h2 style="font-size:16px; margin:0;">添付ファイル</h2>
+      {% if can_edit %}
+        <button type="button" class="app-btn app-btn--primary app-btn--sm" data-action="open-modal" data-target="attachmentUploadModal">ファイルをアップロード</button>
+      {% endif %}
+    </div>
+    <div class="app-table-wrapper" style="margin-bottom:0;">
       <table class="app-table">
         <thead>
           <tr>
@@ -320,56 +325,70 @@
         </tbody>
       </table>
     </div>
-
-    {% if can_edit and perms.attachments.add_attachment %}
-      <form method="post" action="{% url 'attachments:attachment_upload' %}" enctype="multipart/form-data" id="attachment-upload-form" style="margin-top:16px;">
-        {% csrf_token %}
-        {% hidden_back_field back %}
-        <input type="hidden" name="activity_id" value="{{ activity.id }}">
-
-        {# D&D ドロップゾーン #}
-        <div id="attachment-dropzone" class="attachment-dropzone" style="border: 2px dashed var(--app-border, #cbd5e1); border-radius: 8px; padding: 20px; text-align: center; background: var(--app-bg-subtle, #f8fafc); cursor: pointer; transition: all 0.2s ease;">
-          <input type="file" name="files" id="attachment-file-input" style="display:none;" multiple required>
-          <div id="dropzone-prompt">
-            <i class="bi bi-cloud-arrow-up" style="font-size:26px; color:var(--app-muted, #64748b); display:block; margin-bottom:6px;"></i>
-            <div style="font-size:13px; font-weight:600; color:var(--app-text, #0f172a); margin-bottom:4px;">
-              ファイルをここにドラッグ＆ドロップ、またはクリックして選択（15MB以下・複数可）
-            </div>
-            <div style="font-size:12px; color:var(--app-muted, #94a3b8);">
-              複数ファイルを同時に選択して一括アップロードできます
-            </div>
-          </div>
-          <div id="dropzone-file-info" style="display:none;">
-            <div style="display:inline-flex; flex-direction:column; align-items:center; gap:8px; max-width:100%; padding:10px 16px; background:var(--app-card-bg, #ffffff); border:1px solid var(--app-border, #cbd5e1); border-radius:6px; box-shadow:0 1px 2px rgba(0,0,0,0.05);">
-              <div style="display:inline-flex; align-items:center; gap:8px; width:100%; justify-content:center;">
-                <i class="bi bi-file-earmark-check" style="color:var(--app-color-primary, #2563eb); font-size:18px;"></i>
-                <span id="dropzone-summary-text" style="font-size:13px; color:var(--app-text, #0f172a);"></span>
-                <button type="button" id="dropzone-clear-btn" class="app-icon-btn" title="クリア" aria-label="ファイルをクリア" style="border:none; background:none; cursor:pointer; padding:2px; font-size:16px; color:var(--app-muted, #94a3b8); margin-left:4px; line-height:1;">
-                  <i class="bi bi-x"></i>
-                </button>
-              </div>
-              <div id="dropzone-file-list" style="display:flex; flex-wrap:wrap; gap:6px; justify-content:center; max-height:120px; overflow-y:auto; width:100%;"></div>
-            </div>
-          </div>
-        </div>
-
-        {# メモ入力およびアップロードボタン #}
-        <div id="upload-controls" style="display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end; margin-top:12px;">
-          <div class="app-form__group" style="margin-bottom:0; flex:1; min-width:200px;">
-            <label class="app-form__label" for="attachment-memo-input" style="font-size:12px;">メモ（任意）</label>
-            <input type="text" name="memo" id="attachment-memo-input" class="app-input" placeholder="メモ・備考（任意）" style="height:36px;">
-          </div>
-          <button type="submit" id="attachment-upload-btn" class="app-btn app-btn--primary" style="height:36px;">アップロード</button>
-        </div>
-      </form>
-      <style>
-        .attachment-dropzone.dragover {
-          border-color: var(--app-color-primary, #2563eb) !important;
-          background-color: #eff6ff !important;
-        }
-      </style>
-    {% endif %}
   </section>
+
+  {# 添付ファイルアップロードモーダル #}
+  {% if can_edit %}
+    <div class="app-modal" id="attachmentUploadModal" hidden role="dialog" aria-modal="true" aria-labelledby="attachmentUploadModalTitle">
+      <div class="app-modal__panel" style="width: min(600px, 95vw);">
+        <form method="post" action="{% url 'attachments:attachment_upload' %}" enctype="multipart/form-data" id="attachment-upload-form" style="display:flex; flex-direction:column; margin:0;">
+          {% csrf_token %}
+          {% hidden_back_field back %}
+          <input type="hidden" name="activity_id" value="{{ activity.id }}">
+
+          <div class="app-modal__header">
+            <h2 id="attachmentUploadModalTitle" style="font-size:16px; font-weight:600; margin:0;">ファイルを添付</h2>
+            <button type="button" class="app-btn app-btn--icon" data-action="close-modal" aria-label="閉じる" style="font-size:20px; line-height:1; cursor:pointer; background:none; border:none; color:var(--app-muted, #64748b);">&times;</button>
+          </div>
+
+          <div class="app-modal__body" style="padding:20px; display:flex; flex-direction:column; gap:16px;">
+            {# D&D ドロップゾーン #}
+            <div id="attachment-dropzone" class="attachment-dropzone" style="border: 2px dashed var(--app-border, #cbd5e1); border-radius: 8px; padding: 24px 16px; text-align: center; background: var(--app-bg-subtle, #f8fafc); cursor: pointer; transition: all 0.2s ease;">
+              <input type="file" name="files" id="attachment-file-input" style="display:none;" multiple required>
+              <div id="dropzone-prompt">
+                <i class="bi bi-cloud-arrow-up" style="font-size:32px; color:var(--app-muted, #64748b); display:block; margin-bottom:8px;"></i>
+                <div style="font-size:13px; font-weight:600; color:var(--app-text, #0f172a); margin-bottom:4px;">
+                  ファイルをここにドラッグ＆ドロップ、またはクリックして選択
+                </div>
+                <div style="font-size:12px; color:var(--app-muted, #94a3b8);">
+                  15MB以下・複数選択可能
+                </div>
+              </div>
+              <div id="dropzone-file-info" style="display:none;">
+                <div style="display:inline-flex; flex-direction:column; align-items:center; gap:8px; max-width:100%; padding:10px 16px; background:var(--app-card-bg, #ffffff); border:1px solid var(--app-border, #cbd5e1); border-radius:6px; box-shadow:0 1px 2px rgba(0,0,0,0.05);">
+                  <div style="display:inline-flex; align-items:center; gap:8px; width:100%; justify-content:center;">
+                    <i class="bi bi-file-earmark-check" style="color:var(--app-color-primary, #2563eb); font-size:18px;"></i>
+                    <span id="dropzone-summary-text" style="font-size:13px; color:var(--app-text, #0f172a);"></span>
+                    <button type="button" id="dropzone-clear-btn" class="app-icon-btn" title="クリア" aria-label="ファイルをクリア" style="border:none; background:none; cursor:pointer; padding:2px; font-size:16px; color:var(--app-muted, #94a3b8); margin-left:4px; line-height:1;">
+                      <i class="bi bi-x"></i>
+                    </button>
+                  </div>
+                  <div id="dropzone-file-list" style="display:flex; flex-wrap:wrap; gap:6px; justify-content:center; max-height:120px; overflow-y:auto; width:100%;"></div>
+                </div>
+              </div>
+            </div>
+
+            {# メモ入力欄（任意） #}
+            <div class="app-form__group" style="margin-bottom:0;">
+              <label class="app-form__label" for="attachment-memo-input" style="font-size:12px; margin-bottom:4px; display:block;">メモ・備考（任意：全ファイル共通）</label>
+              <input type="text" name="memo" id="attachment-memo-input" class="app-input" placeholder="メモ・備考（任意：全ファイル共通）" style="height:36px; width:100%; box-sizing:border-box;">
+            </div>
+          </div>
+
+          <div class="app-modal__footer" style="padding:12px 20px; border-top:1px solid var(--app-border, #e5e7eb); display:flex; justify-content:flex-end; gap:8px;">
+            <button type="button" class="app-btn app-btn--secondary app-btn--sm" data-action="close-modal">キャンセル</button>
+            <button type="submit" id="attachment-upload-btn" class="app-btn app-btn--primary app-btn--sm">アップロード</button>
+          </div>
+        </form>
+      </div>
+    </div>
+    <style>
+      .attachment-dropzone.dragover {
+        border-color: var(--app-color-primary, #2563eb) !important;
+        background-color: #eff6ff !important;
+      }
+    </style>
+  {% endif %}
 </div>
 
 <script>
@@ -526,8 +545,15 @@
     var summaryTextEl = document.getElementById('dropzone-summary-text');
     var fileListEl = document.getElementById('dropzone-file-list');
     var clearBtn = document.getElementById('dropzone-clear-btn');
+    var uploadBtn = document.getElementById('attachment-upload-btn');
+    var uploadForm = document.getElementById('attachment-upload-form');
+    var modal = document.getElementById('attachmentUploadModal');
 
     if (!dropzone || !fileInput) return;
+
+    if (uploadBtn) {
+      uploadBtn.disabled = true;
+    }
 
     function formatBytes(bytes) {
       if (bytes === 0) return '0 B';
@@ -579,6 +605,7 @@
 
       promptEl.style.display = 'none';
       infoEl.style.display = 'block';
+      if (uploadBtn) uploadBtn.disabled = false;
     }
 
     function resetFiles() {
@@ -587,6 +614,7 @@
       infoEl.style.display = 'none';
       if (fileListEl) fileListEl.innerHTML = '';
       if (summaryTextEl) summaryTextEl.innerHTML = '';
+      if (uploadBtn) uploadBtn.disabled = true;
     }
 
     dropzone.addEventListener('click', function(e) {
@@ -627,6 +655,23 @@
       clearBtn.addEventListener('click', function(e) {
         e.stopPropagation();
         resetFiles();
+      });
+    }
+
+    if (uploadForm) {
+      uploadForm.addEventListener('submit', function(e) {
+        if (!fileInput.files || fileInput.files.length === 0) {
+          e.preventDefault();
+          alert('ファイルを選択してください。');
+        }
+      });
+    }
+
+    if (modal) {
+      modal.querySelectorAll('[data-action="close-modal"]').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+          resetFiles();
+        });
       });
     }
   })();
