@@ -8,14 +8,6 @@
         <h1>パーミッション一覧</h1>
       </div>
 
-      {% if messages %}
-        {% for message in messages %}
-          <div class="app-alert app-alert--{% if message.tags == 'error' %}danger{% else %}info{% endif %}">
-            {{ message }}
-          </div>
-        {% endfor %}
-      {% endif %}
-
       {# 閲覧専用の補足は見出し行から出し、案内文の直前に独立行で置く（控えめ表示の app-muted は維持）。 #}
       <p class="app-muted">閲覧専用（permission はコード定義・編集は Django 管理サイト）</p>
       <p class="app-muted">各 permission を「含むグループ」を逆引き表示します。フレームワーク app（admin/auth/contenttypes/sessions）由来は初期表示では隠しています。「アプリ」の絞り込みから表示できます。</p>

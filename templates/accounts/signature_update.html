@@ -16,14 +16,6 @@
         </div>
       </div>
 
-      {% if messages %}
-        {% for message in messages %}
-          <div class="app-alert app-alert--{% if message.tags == 'error' %}danger{% else %}info{% endif %}">
-            {{ message }}
-          </div>
-        {% endfor %}
-      {% endif %}
-
       <section class="app-card">
         <p class="app-muted" style="margin-bottom:16px;">
           メール送信時の署名（プレーンテキスト、HTML タグ不可）を設定します。<br>

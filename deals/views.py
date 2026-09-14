@@ -44,6 +44,14 @@ from deals.services import (
 from persons.models import Person
 
 
+def _is_wizard_request(request):
+    """リクエストがウィザード進行中かどうか判定する。"""
+    if request.POST.get("wizard") == "1" or request.GET.get("wizard") == "1":
+        return True
+    next_url = request.POST.get("next") or request.GET.get("next") or ""
+    return "wizard=1" in next_url
+
+
 class DealListView(LoginRequiredMixin, ListView):
     """案件一覧画面（仕様書 v1.5 §2.5, §7.1, §9.1）。"""
 
@@ -124,6 +132,8 @@ class DealDetailView(LoginRequiredMixin, DetailView):
 
     def get(self, request, *args, **kwargs):
         self.object = self.get_object()
+        if request.GET.get("wizard_completed") == "1":
+            messages.success(request, f"案件「{self.object.name}」を登録しました。")
         back = BackNavigator(request)
         back.push_current(title=f"案件: {self.object.name}", keys=["page"])
         context = self.get_context_data(object=self.object, back=back)
@@ -251,7 +261,7 @@ class DealCreateView(LoginRequiredMixin, PermissionRequiredMixin, CreateView):
             content_object=deal,
             data={"name": deal.name, "deal_id": str(deal.id)},
         )
-        messages.success(self.request, f"案件「{deal.name}」を作成しました。")
+        # ウィザード進行中は都度メッセージを抑制（最終ステップ完了時に詳細画面で発行）
         return redirect(self.get_success_url())
 
     def get_context_data(self, **kwargs):
@@ -303,8 +313,10 @@ class DealUpdateView(LoginRequiredMixin, PermissionRequiredMixin, UpdateView):
             content_object=deal,
             data={"name": deal.name, "deal_id": str(deal.id)},
         )
-        messages.success(self.request, f"案件「{deal.name}」を更新しました。")
-        if self.request.GET.get("wizard") == "1" or self.request.POST.get("wizard") == "1":
+        is_wizard = (self.request.GET.get("wizard") == "1" or self.request.POST.get("wizard") == "1")
+        if not is_wizard:
+            messages.success(self.request, f"案件「{deal.name}」を更新しました。")
+        if is_wizard:
             url = reverse("deals:deal_persons_manage", kwargs={"pk": deal.pk}) + "?wizard=1"
             raw_back = self.request.POST.get(BackNavigator.PARAM_NAME) or self.request.GET.get(BackNavigator.PARAM_NAME)
             if raw_back:
@@ -542,7 +554,8 @@ class DealAddPersonView(LoginRequiredMixin, View):
             try:
                 person_rel.full_clean()
                 person_rel.save()
-                messages.success(request, f"関係者「{person_rel.person}」を追加しました。")
+                if not _is_wizard_request(request):
+                    messages.success(request, f"関係者「{person_rel.person}」を追加しました。")
             except Exception as e:
                 messages.error(request, f"関係者の追加に失敗しました: {e}")
         else:
@@ -560,7 +573,8 @@ class DealDeletePersonView(LoginRequiredMixin, View):
             raise PermissionDenied
         rel = get_object_or_404(DealPerson, pk=person_rel_id, deal=deal)
         rel.delete()
-        messages.success(request, "関係者を解除しました。")
+        if not _is_wizard_request(request):
+            messages.success(request, "関係者を解除しました。")
         next_url = request.POST.get("next") or reverse("deals:deal_detail", kwargs={"pk": deal.pk})
         return redirect(next_url)
 
@@ -579,7 +593,8 @@ class DealAddUserView(LoginRequiredMixin, View):
             try:
                 user_rel.full_clean()
                 user_rel.save()
-                messages.success(request, f"社内担当者「{user_rel.user}」を追加しました。")
+                if not _is_wizard_request(request):
+                    messages.success(request, f"社内担当者「{user_rel.user}」を追加しました。")
             except Exception as e:
                 messages.error(request, f"社内担当者の追加に失敗しました: {e}")
         else:
@@ -597,7 +612,8 @@ class DealDeleteUserView(LoginRequiredMixin, View):
             raise PermissionDenied
         rel = get_object_or_404(DealUser, pk=user_rel_id, deal=deal)
         rel.delete()
-        messages.success(request, "社内担当者を解除しました。")
+        if not _is_wizard_request(request):
+            messages.success(request, "社内担当者を解除しました。")
         next_url = request.POST.get("next") or reverse("deals:deal_detail", kwargs={"pk": deal.pk})
         return redirect(next_url)
 
@@ -698,7 +714,8 @@ class DealPersonManageView(LoginRequiredMixin, View):
                 dp.save()
                 updated_count += 1
 
-        messages.success(request, f"社外関係者情報を一括更新しました（{updated_count}件）。")
+        if not _is_wizard_request(request):
+            messages.success(request, f"社外関係者情報を一括更新しました（{updated_count}件）。")
         redirect_url = reverse("deals:deal_persons_manage", kwargs={"pk": deal.pk})
         params = []
         if request.POST.get("wizard") == "1" or request.GET.get("wizard") == "1":
@@ -817,7 +834,8 @@ class DealUserManageView(LoginRequiredMixin, View):
                 du.save()
                 updated_count += 1
 
-        messages.success(request, f"社内担当者情報を一括更新しました（{updated_count}件）。")
+        if not _is_wizard_request(request):
+            messages.success(request, f"社内担当者情報を一括更新しました（{updated_count}件）。")
         redirect_url = reverse("deals:deal_users_manage", kwargs={"pk": deal.pk})
         params = []
         if request.POST.get("wizard") == "1" or request.GET.get("wizard") == "1":
@@ -928,7 +946,8 @@ class DealMembersView(LoginRequiredMixin, View):
                 dp.save()
                 updated_count += 1
 
-        messages.success(request, f"社外関係者情報を一括更新しました（{updated_count}件）。")
+        if not _is_wizard_request(request):
+            messages.success(request, f"社外関係者情報を一括更新しました（{updated_count}件）。")
         redirect_url = reverse("deals:deal_members", kwargs={"pk": deal.pk})
         params = []
         if request.POST.get("wizard") == "1" or request.GET.get("wizard") == "1":

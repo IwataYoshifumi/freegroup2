@@ -6,14 +6,6 @@
 {% block content %}
     {# 紐付け確認画面（link_user_person_confirm）と同じ収まり：最大幅 960px・左寄せ。 #}
     <div style="max-width: 960px; margin-inline: 0;">
-    {% if messages %}
-      {% for message in messages %}
-        <div class="app-alert app-alert--{% if message.tags == 'error' %}danger{% else %}info{% endif %}">
-          {{ message }}
-        </div>
-      {% endfor %}
-    {% endif %}
-
     {# 見出し行に見出し＋全ボタンを横並び（space-between）。左群＝見出し＋ロール変更、右群＝退職処理→戻る。 #}
     {# 全ボタン app-btn--sm・align-items:center で見出しと同じ行に高さ・縦位置を揃える。 #}
     <div class="app-section__header">

@@ -32,6 +32,14 @@ from mailings.models import Campaign
 from persons.models import Person
 
 
+def _is_wizard_request(request):
+    """リクエストがウィザード進行中かどうか判定する。"""
+    if request.POST.get("wizard") == "1" or request.GET.get("wizard") == "1":
+        return True
+    next_url = request.POST.get("next") or request.GET.get("next") or ""
+    return "wizard=1" in next_url
+
+
 class ActivityListView(LoginRequiredMixin, ListView):
     """活動一覧画面（仕様書 v1.5 第3章, §7.3）。"""
 
@@ -211,6 +219,8 @@ class ActivityDetailView(LoginRequiredMixin, DetailView):
 
     def get(self, request, *args, **kwargs):
         self.object = self.get_object()
+        if request.GET.get("wizard_completed") == "1":
+            messages.success(request, "活動を記録しました。")
         back = BackNavigator(request)
         back.push_current(title=f"活動: {self.object}", keys=["page"])
         context = self.get_context_data(object=self.object, back=back)
@@ -362,7 +372,7 @@ class ActivityCreateView(LoginRequiredMixin, PermissionRequiredMixin, CreateView
                 "activity_type": activity.activity_type,
             },
         )
-        messages.success(self.request, "活動を記録しました。")
+        # ウィザード進行中は都度メッセージを抑制（最終ステップ完了時に詳細画面で発行）
         return redirect(self.get_success_url())
 
     def get_context_data(self, **kwargs):
@@ -415,8 +425,10 @@ class ActivityUpdateView(LoginRequiredMixin, PermissionRequiredMixin, UpdateView
                 "activity_type": activity.activity_type,
             },
         )
-        messages.success(self.request, "活動記録を更新しました。")
-        if self.request.GET.get("wizard") == "1" or self.request.POST.get("wizard") == "1":
+        is_wizard = (self.request.GET.get("wizard") == "1" or self.request.POST.get("wizard") == "1")
+        if not is_wizard:
+            messages.success(self.request, "活動記録を更新しました。")
+        if is_wizard:
             url = reverse("activities:activity_persons_manage", kwargs={"pk": activity.pk}) + "?wizard=1"
             raw_back = self.request.POST.get(BackNavigator.PARAM_NAME) or self.request.GET.get(BackNavigator.PARAM_NAME)
             if raw_back:
@@ -497,7 +509,8 @@ class ActivityAddPersonView(LoginRequiredMixin, View):
             try:
                 rel.full_clean()
                 rel.save()
-                messages.success(request, f"関係者「{rel.person}」を追加しました。")
+                if not _is_wizard_request(request):
+                    messages.success(request, f"関係者「{rel.person}」を追加しました。")
             except Exception as e:
                 messages.error(request, f"関係者の追加に失敗しました: {e}")
         else:
@@ -515,7 +528,8 @@ class ActivityDeletePersonView(LoginRequiredMixin, View):
             raise PermissionDenied
         rel = get_object_or_404(ActivityPerson, pk=person_rel_id, activity=activity)
         rel.delete()
-        messages.success(request, "関係者を解除しました。")
+        if not _is_wizard_request(request):
+            messages.success(request, "関係者を解除しました。")
         next_url = request.POST.get("next") or reverse("activities:activity_detail", kwargs={"pk": activity.pk})
         return redirect(next_url)
 
@@ -537,7 +551,8 @@ class ActivityAddUserView(LoginRequiredMixin, View):
                 try:
                     rel.full_clean()
                     rel.save()
-                    messages.success(request, f"同席者「{rel.user}」を追加しました。")
+                    if not _is_wizard_request(request):
+                        messages.success(request, f"同席者「{rel.user}」を追加しました。")
                 except Exception as e:
                     messages.error(request, f"同席者の追加に失敗しました: {e}")
         else:
@@ -555,7 +570,8 @@ class ActivityDeleteUserView(LoginRequiredMixin, View):
             raise PermissionDenied
         rel = get_object_or_404(ActivityUser, pk=user_rel_id, activity=activity)
         rel.delete()
-        messages.success(request, "同席者を解除しました。")
+        if not _is_wizard_request(request):
+            messages.success(request, "同席者を解除しました。")
         next_url = request.POST.get("next") or reverse("activities:activity_detail", kwargs={"pk": activity.pk})
         return redirect(next_url)
 
@@ -654,7 +670,8 @@ class ActivityPersonManageView(LoginRequiredMixin, View):
                 ap.save()
                 updated_count += 1
 
-        messages.success(request, f"社外関係者情報を一括更新しました（{updated_count}件）。")
+        if not _is_wizard_request(request):
+            messages.success(request, f"社外関係者情報を一括更新しました（{updated_count}件）。")
         redirect_url = reverse("activities:activity_persons_manage", kwargs={"pk": activity.pk})
         params = []
         if request.POST.get("wizard") == "1" or request.GET.get("wizard") == "1":
@@ -773,7 +790,8 @@ class ActivityUserManageView(LoginRequiredMixin, View):
                 au.save()
                 updated_count += 1
 
-        messages.success(request, f"社内同席者情報を一括更新しました（{updated_count}件）。")
+        if not _is_wizard_request(request):
+            messages.success(request, f"社内同席者情報を一括更新しました（{updated_count}件）。")
         redirect_url = reverse("activities:activity_users_manage", kwargs={"pk": activity.pk})
         params = []
         if request.POST.get("wizard") == "1" or request.GET.get("wizard") == "1":
@@ -882,7 +900,8 @@ class ActivityMembersView(LoginRequiredMixin, View):
                 ap.save()
                 updated_count += 1
 
-        messages.success(request, f"参加者情報を一括更新しました（{updated_count}件）。")
+        if not _is_wizard_request(request):
+            messages.success(request, f"参加者情報を一括更新しました（{updated_count}件）。")
         redirect_url = reverse("activities:activity_members", kwargs={"pk": activity.pk})
         params = []
         if request.POST.get("wizard") == "1" or request.GET.get("wizard") == "1":
@@ -920,8 +939,8 @@ def _calc_wizard_finish_url(request, activity):
     ]
     if pre_wizard_stack:
         encoded = back._calc_encode_stack(pre_wizard_stack)
-        return f"{activity_detail_url}?{BackNavigator.PARAM_NAME}={encoded}"
-    return activity_detail_url
+        return f"{activity_detail_url}?{BackNavigator.PARAM_NAME}={encoded}&wizard_completed=1"
+    return f"{activity_detail_url}?wizard_completed=1"
 
 
 class ActivityAttachmentManageView(LoginRequiredMixin, View):

@@ -6,6 +6,10 @@
 
 {% block app_content %}
   <main class="app-main">
+    {% block page_messages %}
+      {% include "core/includes/messages.html" %}
+    {% endblock %}
+
     {# 紐付け候補アラートは共通 partial に切り出し（profile と同一部品・同一分岐）。 #}
     {# ホームは 0 件状態を出さない現行挙動を維持するため show_no_candidate は渡さない（＝偽）。 #}
     {% include "accounts/_link_candidate_alert.html" %}

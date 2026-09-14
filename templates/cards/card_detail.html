@@ -35,14 +35,6 @@
     </div>
   </div>
 
-  {% if messages %}
-    <div style="max-width:1100px; margin-bottom:var(--app-space-md);">
-      {% for message in messages %}
-        <div class="app-alert app-alert--danger">{{ message }}</div>
-      {% endfor %}
-    </div>
-  {% endif %}
-
   {% if debug %}
     <div style="max-width:1100px; margin-bottom:var(--app-space-sm); font-size:12px;">
       Card UID: <code class="app-debug-uid">{{ card.id }}</code>

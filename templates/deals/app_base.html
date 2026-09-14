@@ -8,6 +8,9 @@
   <div class="app-main-area">
     {% include "deals/_sidebar.html" %}
     <main class="app-main">
+      {% block page_messages %}
+        {% include "core/includes/messages.html" %}
+      {% endblock %}
       {% block content %}{% endblock %}
     </main>
   </div>

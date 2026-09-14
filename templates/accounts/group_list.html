@@ -9,14 +9,6 @@
         <span class="app-muted">閲覧専用（編集は Django 管理サイト）</span>
       </div>
 
-      {% if messages %}
-        {% for message in messages %}
-          <div class="app-alert app-alert--{% if message.tags == 'error' %}danger{% else %}info{% endif %}">
-            {{ message }}
-          </div>
-        {% endfor %}
-      {% endif %}
-
       <div class="app-table-wrapper">
         <table class="app-table app-table--nowrap">
           <thead>

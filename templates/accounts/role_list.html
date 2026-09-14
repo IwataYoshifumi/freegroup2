@@ -14,14 +14,6 @@
     <a href="{% url 'accounts:role_create' %}" class="app-btn app-btn--primary">ロールを作成</a>
   </div>
 
-  {% if messages %}
-    {% for message in messages %}
-      <section class="app-card" style="max-width:1000px;">
-        <div class="app-message">{{ message }}</div>
-      </section>
-    {% endfor %}
-  {% endif %}
-
   <section class="app-card" style="max-width:1000px;">
     <div class="app-table-wrapper">
       <table class="app-table app-table--nowrap">

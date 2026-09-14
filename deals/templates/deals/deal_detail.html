@@ -23,7 +23,15 @@
       <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
         {% if can_edit %}
           {% url 'deals:deal_close' pk=deal.id as close_url %}
-          <a href="{% append_back_url close_url back %}" class="app-btn app-btn--primary">クローズ（受注/失注）</a>
+          <a href="{% append_back_url close_url back %}" class="app-btn app-btn--success">クローズ（受注/失注）</a>
+        {% endif %}
+        {% if perms.activities.add_activity %}
+          {% url 'activities:activity_create' as act_create_url %}
+          {% with deal_id_str=deal.id|stringformat:"s" %}
+          {% with act_url=act_create_url|add:"?deal_id="|add:deal_id_str %}
+          <a href="{% append_back_url act_url back %}" class="app-btn app-btn--primary">活動を記録</a>
+          {% endwith %}
+          {% endwith %}
         {% endif %}
       </div>
       <div style="display: flex; align-items: center; gap: 8px; margin-left: auto;">

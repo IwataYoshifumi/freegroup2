@@ -46,14 +46,6 @@
       </form>
     </section>
 
-    {% if messages %}
-      {% for message in messages %}
-        <div class="app-alert app-alert--{% if message.tags == 'error' %}danger{% else %}info{% endif %}">
-          {{ message }}
-        </div>
-      {% endfor %}
-    {% endif %}
-
     {# 一覧表示のカード（検索カードと分離）。 #}
     <section class="app-card" style="margin-top: var(--app-space-md);">
       <div class="app-table-wrapper">
