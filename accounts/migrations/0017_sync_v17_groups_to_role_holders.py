@@ -1,13 +1,15 @@
-"""v1.7 案件管理・活動記録・会社機能の PermissionGroup 初期データ（仕様書 v1.5 §7.6）。
+"""v1.7 案件管理・活動記録・会社機能のグループ権限および既存ロール保持者への反映是正（deals.add_deal 403 解消）。
 
-新設9グループ（deal_admin/editor/viewer, activity_admin/editor/viewer, company_admin/editor/viewer）を
-作成し、仕様書 §7.6 に準拠した権限を付与する。
-既存 Role（admin, sales, viewer）の default_groups に各グループを増分追加する。
+1. deal_editor に deals.add_deal 等の権限を確実に付与
+2. activity_editor に activities.add_activity 等の権限を確実に付与
+3. 各 Role（admin, sales, viewer）の default_groups を最新化
+4. 既存の各 Role 保持ユーザーの groups に default_groups を確実に同期反映
 """
 
 from django.apps import apps as django_apps
 from django.contrib.auth.management import create_permissions
 from django.db import migrations
+
 
 GROUP_PERMISSIONS = {
     "deal_admin": [
@@ -83,7 +85,6 @@ ROLE_DEFAULT_GROUPS_ADD = {
 
 
 def ensure_permissions(apps, schema_editor):
-    """post_migrate を待たずに Permission レコードを先に生成する。"""
     for app_config in django_apps.get_app_configs():
         create_permissions(
             app_config,
@@ -99,17 +100,18 @@ def forward(apps, schema_editor):
     Group = apps.get_model("auth", "Group")
     Permission = apps.get_model("auth", "Permission")
     Role = apps.get_model("accounts", "Role")
+    CustomUser = apps.get_model("accounts", "CustomUser")
 
     for group_name, perms in GROUP_PERMISSIONS.items():
         group, _ = Group.objects.get_or_create(name=group_name)
         for app_label, codename in perms:
-            perm = Permission.objects.get(
+            perm = Permission.objects.filter(
                 content_type__app_label=app_label,
                 codename=codename,
-            )
-            group.permissions.add(perm)
+            ).first()
+            if perm:
+                group.permissions.add(perm)
 
-    CustomUser = apps.get_model("accounts", "CustomUser")
     for code, group_names in ROLE_DEFAULT_GROUPS_ADD.items():
         role = Role.objects.filter(code=code).first()
         if role is None:
@@ -117,26 +119,17 @@ def forward(apps, schema_editor):
         groups = [Group.objects.get_or_create(name=n)[0] for n in group_names]
         role.default_groups.add(*groups)
         for user in CustomUser.objects.filter(role=role):
-            user.groups.add(*groups)
+            user.groups.add(*role.default_groups.all())
 
 
 def reverse(apps, schema_editor):
-    Group = apps.get_model("auth", "Group")
-    Role = apps.get_model("accounts", "Role")
-
-    for code, group_names in ROLE_DEFAULT_GROUPS_ADD.items():
-        role = Role.objects.filter(code=code).first()
-        if role is not None:
-            groups = Group.objects.filter(name__in=group_names)
-            role.default_groups.remove(*groups)
-
-    Group.objects.filter(name__in=GROUP_PERMISSIONS.keys()).delete()
+    pass
 
 
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("accounts", "0015_grant_export_import_contact"),
+        ("accounts", "0016_add_v17_deal_activity_company_groups"),
         ("companies", "0001_initial"),
         ("deals", "0001_initial"),
         ("activities", "0001_initial"),

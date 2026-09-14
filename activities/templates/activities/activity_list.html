@@ -8,7 +8,7 @@
   {% url 'activities:activity_create' as create_url %}
   <div class="app-page-header" style="margin-bottom: 16px;">
     <div>
-      <h1 style="margin:0;">活動一覧</h1>
+      <h1 style="margin:0; font-size:20px; font-weight:700;">活動一覧</h1>
     </div>
     <div class="app-action-area">
       {% back_all_link back %}
@@ -27,50 +27,50 @@
     <form method="get" class="app-filter-form js-activity-filter-form" style="display:flex; flex-direction:column; gap:16px;">
       {# ブロック1：実施期間 #}
       <div class="app-form__group js-date-range" style="margin-bottom:0;">
-        <label class="app-form__label" style="margin-bottom:6px; font-weight:600;">実施期間</label>
+        <label class="app-form__label" style="margin-bottom:6px; font-size:12px; font-weight:600; color:var(--app-muted, #64748b);">実施期間</label>
         <div style="display:flex; flex-direction:column; gap:8px;">
           <div style="display:flex; gap:8px; align-items:center;">
-            <input type="date" name="occurred_after" value="{{ occurred_after }}" class="app-input js-date-from" style="width:160px;" aria-label="開始日">
+            <input type="date" name="occurred_after" value="{{ occurred_after }}" class="app-input js-date-from" style="width:160px; font-size:13px;" aria-label="開始日">
             <span class="app-muted">〜</span>
-            <input type="date" name="occurred_before" value="{{ occurred_before }}" class="app-input js-date-to" style="width:160px;" aria-label="終了日">
+            <input type="date" name="occurred_before" value="{{ occurred_before }}" class="app-input js-date-to" style="width:160px; font-size:13px;" aria-label="終了日">
           </div>
           <div style="display:flex; flex-wrap:wrap; gap:6px; align-items:center;">
-            <button type="button" class="app-btn app-btn--ghost app-btn--xs js-date-quick" data-range="today">今日</button>
-            <button type="button" class="app-btn app-btn--ghost app-btn--xs js-date-quick" data-range="week">今週</button>
-            <button type="button" class="app-btn app-btn--ghost app-btn--xs js-date-quick" data-range="lastweek">先週</button>
-            <button type="button" class="app-btn app-btn--ghost app-btn--xs js-date-quick" data-range="month">今月</button>
-            <button type="button" class="app-btn app-btn--ghost app-btn--xs js-date-quick" data-range="lastmonth">先月</button>
+            <button type="button" class="app-btn app-btn--ghost app-btn--xs js-date-quick" data-range="today" style="font-size:12px;">今日</button>
+            <button type="button" class="app-btn app-btn--ghost app-btn--xs js-date-quick" data-range="week" style="font-size:12px;">今週</button>
+            <button type="button" class="app-btn app-btn--ghost app-btn--xs js-date-quick" data-range="lastweek" style="font-size:12px;">先週</button>
+            <button type="button" class="app-btn app-btn--ghost app-btn--xs js-date-quick" data-range="month" style="font-size:12px;">今月</button>
+            <button type="button" class="app-btn app-btn--ghost app-btn--xs js-date-quick" data-range="lastmonth" style="font-size:12px;">先月</button>
             <span style="width:1px; height:16px; background:var(--app-border, #e2e8f0); margin:0 2px;"></span>
-            <button type="button" class="app-btn app-btn--ghost app-btn--xs js-date-clear">クリア</button>
+            <button type="button" class="app-btn app-btn--ghost app-btn--xs js-date-clear" style="font-size:12px;">クリア</button>
           </div>
         </div>
       </div>
 
       {# ブロック2：キーワード検索 #}
       <div class="app-form__group" style="margin-bottom:0; width:100%;">
-        <label class="app-form__label" for="filter-q" style="font-weight:600;">キーワード検索</label>
-        <input type="text" id="filter-q" name="q" value="{{ current_q }}" class="app-input" style="width:100%; box-sizing:border-box;" placeholder="内容・場所・案件名・会社名・担当者名...">
+        <label class="app-form__label" for="filter-q" style="font-size:12px; font-weight:600; color:var(--app-muted, #64748b);">キーワード検索</label>
+        <input type="text" id="filter-q" name="q" value="{{ current_q }}" class="app-input" style="width:100%; box-sizing:border-box; font-size:13px;" placeholder="内容・場所・案件名・会社名・担当者名...">
       </div>
 
       {# ブロック3：実施者 ＆ 同席者（モーダル複数選択） #}
       <div style="display:flex; flex-wrap:wrap; gap:16px;">
         {# 実施者（user） #}
         <div class="app-form__group" style="margin-bottom:0; flex:1; min-width:260px;">
-          <label class="app-form__label" style="font-weight:600;">実施者</label>
+          <label class="app-form__label" style="font-size:12px; font-weight:600; color:var(--app-muted, #64748b);">実施者</label>
           <input type="hidden" name="user_ids" id="id_user_ids" value="{{ selected_user_ids_str }}">
           <input type="hidden" name="user_id" id="id_user_id_compat" value="{{ current_user_id }}">
           <div id="user-chips-container" style="display:flex; flex-wrap:wrap; gap:6px; align-items:center; min-height:36px; padding:4px 8px; border:1px solid var(--app-border, #cbd5e1); border-radius:6px; background:#fff;">
             {% for u in selected_users %}
-              <span class="app-badge app-badge--neutral js-user-chip" data-user-id="{{ u.id }}" style="display:inline-flex; align-items:center; gap:4px; padding:3px 8px; font-size:12px; border-radius:9999px; background:#f1f5f9; color:#334155;">
+              <span class="app-badge app-badge--neutral js-user-chip" data-user-id="{{ u.id }}" style="display:inline-flex; align-items:center; gap:4px; padding:2px 8px; font-size:11px; font-weight:600; border-radius:9999px; background:#f1f5f9; color:#334155;">
                 {{ u.display_name|default:u.username }}
-                <button type="button" class="js-remove-user-chip" data-user-id="{{ u.id }}" style="background:none; border:none; padding:0; cursor:pointer; font-size:14px; line-height:1; color:#94a3b8;" title="削除">&times;</button>
+                <button type="button" class="js-remove-user-chip" data-user-id="{{ u.id }}" style="background:none; border:none; padding:0; cursor:pointer; font-size:13px; line-height:1; color:#94a3b8;" title="削除">&times;</button>
               </span>
             {% empty %}
               <span class="app-muted js-no-user-label" style="font-size:13px;">（未指定：すべて）</span>
             {% endfor %}
           </div>
           <div style="margin-top:6px;">
-            <button type="button" class="app-btn app-btn--secondary app-btn--sm" data-action="open-modal" data-target="userSelectModal">
+            <button type="button" class="app-btn app-btn--secondary app-btn--sm" data-action="open-modal" data-target="userSelectModal" style="font-size:12px;">
               ユーザーを選択 / 変更
             </button>
           </div>
@@ -78,20 +78,20 @@
 
         {# 同席者（ActivityUser） #}
         <div class="app-form__group" style="margin-bottom:0; flex:1; min-width:260px;">
-          <label class="app-form__label" style="font-weight:600;">同席者</label>
+          <label class="app-form__label" style="font-size:12px; font-weight:600; color:var(--app-muted, #64748b);">同席者</label>
           <input type="hidden" name="attendee_user_ids" id="id_attendee_user_ids" value="{{ selected_attendee_ids_str }}">
           <div id="attendee-chips-container" style="display:flex; flex-wrap:wrap; gap:6px; align-items:center; min-height:36px; padding:4px 8px; border:1px solid var(--app-border, #cbd5e1); border-radius:6px; background:#fff;">
             {% for u in selected_attendee_users %}
-              <span class="app-badge app-badge--neutral js-attendee-chip" data-user-id="{{ u.id }}" style="display:inline-flex; align-items:center; gap:4px; padding:3px 8px; font-size:12px; border-radius:9999px; background:#f1f5f9; color:#334155;">
+              <span class="app-badge app-badge--neutral js-attendee-chip" data-user-id="{{ u.id }}" style="display:inline-flex; align-items:center; gap:4px; padding:2px 8px; font-size:11px; font-weight:600; border-radius:9999px; background:#f1f5f9; color:#334155;">
                 {{ u.display_name|default:u.username }}
-                <button type="button" class="js-remove-attendee-chip" data-user-id="{{ u.id }}" style="background:none; border:none; padding:0; cursor:pointer; font-size:14px; line-height:1; color:#94a3b8;" title="削除">&times;</button>
+                <button type="button" class="js-remove-attendee-chip" data-user-id="{{ u.id }}" style="background:none; border:none; padding:0; cursor:pointer; font-size:13px; line-height:1; color:#94a3b8;" title="削除">&times;</button>
               </span>
             {% empty %}
               <span class="app-muted js-no-attendee-label" style="font-size:13px;">（未指定：すべて）</span>
             {% endfor %}
           </div>
           <div style="margin-top:6px;">
-            <button type="button" class="app-btn app-btn--secondary app-btn--sm" data-action="open-modal" data-target="attendeeSelectModal">
+            <button type="button" class="app-btn app-btn--secondary app-btn--sm" data-action="open-modal" data-target="attendeeSelectModal" style="font-size:12px;">
               同席者を選択 / 変更
             </button>
           </div>
@@ -101,8 +101,8 @@
       {# ブロック4：種別 ＆ 方向 ＆ 状態（ボタングループ） #}
       <div style="display:flex; flex-wrap:wrap; gap:16px; align-items:flex-end;">
         <div class="app-form__group" style="margin-bottom:0; flex:1; min-width:140px;">
-          <label class="app-form__label" for="filter-type" style="font-weight:600;">活動種別</label>
-          <select id="filter-type" name="activity_type" class="app-select app-input">
+          <label class="app-form__label" for="filter-type" style="font-size:12px; font-weight:600; color:var(--app-muted, #64748b);">活動種別</label>
+          <select id="filter-type" name="activity_type" class="app-select app-input" style="font-size:13px;">
             <option value="">（すべて）</option>
             {% for code, label in activity_types %}
               <option value="{{ code }}" {% if current_activity_type == code %}selected{% endif %}>{{ label }}</option>
@@ -110,8 +110,8 @@
           </select>
         </div>
         <div class="app-form__group" style="margin-bottom:0; flex:1; min-width:130px;">
-          <label class="app-form__label" for="filter-direction" style="font-weight:600;">方向</label>
-          <select id="filter-direction" name="direction" class="app-select app-input">
+          <label class="app-form__label" for="filter-direction" style="font-size:12px; font-weight:600; color:var(--app-muted, #64748b);">方向</label>
+          <select id="filter-direction" name="direction" class="app-select app-input" style="font-size:13px;">
             <option value="">（すべて）</option>
             {% for code, label in directions %}
               <option value="{{ code }}" {% if current_direction == code %}selected{% endif %}>{{ label }}</option>
@@ -119,12 +119,12 @@
           </select>
         </div>
         <div class="app-form__group" style="margin-bottom:0; min-width:200px;">
-          <label class="app-form__label" style="font-weight:600;">状態</label>
+          <label class="app-form__label" style="font-size:12px; font-weight:600; color:var(--app-muted, #64748b);">状態</label>
           <input type="hidden" name="status" id="filter-status-input" value="{{ current_status }}">
           <div class="app-btn-group" style="display:inline-flex; border:1px solid var(--app-border, #cbd5e1); border-radius:6px; overflow:hidden;">
-            <button type="button" class="app-btn app-btn--sm js-status-btn {% if current_status == 'active' %}app-btn--primary{% else %}app-btn--ghost{% endif %}" data-status="active" style="border-radius:0; border:none;">有効</button>
-            <button type="button" class="app-btn app-btn--sm js-status-btn {% if current_status == 'archived' %}app-btn--primary{% else %}app-btn--ghost{% endif %}" data-status="archived" style="border-radius:0; border:none;">アーカイブ</button>
-            <button type="button" class="app-btn app-btn--sm js-status-btn {% if current_status == 'all' %}app-btn--primary{% else %}app-btn--ghost{% endif %}" data-status="all" style="border-radius:0; border:none;">全件</button>
+            <button type="button" class="app-btn app-btn--sm js-status-btn {% if current_status == 'active' %}app-btn--primary{% else %}app-btn--ghost{% endif %}" data-status="active" style="border-radius:0; border:none; font-size:12px;">有効</button>
+            <button type="button" class="app-btn app-btn--sm js-status-btn {% if current_status == 'archived' %}app-btn--primary{% else %}app-btn--ghost{% endif %}" data-status="archived" style="border-radius:0; border:none; font-size:12px;">アーカイブ</button>
+            <button type="button" class="app-btn app-btn--sm js-status-btn {% if current_status == 'all' %}app-btn--primary{% else %}app-btn--ghost{% endif %}" data-status="all" style="border-radius:0; border:none; font-size:12px;">全件</button>
           </div>
         </div>
       </div>
@@ -132,7 +132,7 @@
       {# ブロック5：ソート ＆ 表示件数（パーソン一覧準拠の折りたたみブロック） #}
       <div class="app-collapsible app-person-filter-collapsible js-activity-sort-control{% if sort_is_active or per_page and per_page != 20 %} is-open{% endif %}" style="width:100%; box-sizing:border-box;">
         <button type="button" class="app-collapsible__header" data-action="toggle-collapsible"
-                aria-expanded="{% if sort_is_active or per_page and per_page != 20 %}true{% else %}false{% endif %}">
+                aria-expanded="{% if sort_is_active or per_page and per_page != 20 %}true{% else %}false{% endif %}" style="font-size:13px; font-weight:600;">
           <span>ソート・表示件数</span>
           <span class="app-collapsible__icon">{% if sort_is_active or per_page and per_page != 20 %}▾{% else %}▸{% endif %}</span>
         </button>
@@ -142,8 +142,8 @@
                    value="{{ sort_value }}"{% if not sort_is_active %} disabled{% endif %}>
             {% for row in sort_rows %}
               <div class="js-activity-sort-row" style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-                <span class="app-form__label" style="min-width:5em; margin:0; white-space:nowrap; font-size:0.9em;">第{{ forloop.counter }}キー</span>
-                <select class="app-input js-activity-sort-key" style="min-width:140px; max-width:180px;">
+                <span class="app-form__label" style="min-width:5em; margin:0; white-space:nowrap; font-size:12px; font-weight:600; color:var(--app-muted, #64748b);">第{{ forloop.counter }}キー</span>
+                <select class="app-input js-activity-sort-key" style="min-width:130px; max-width:140px; font-size:13px;">
                   <option value="">指定なし</option>
                   {% for val, lbl in sort_choices %}
                     <option value="{{ val }}"{% if row.key == val %} selected{% endif %}>{{ lbl }}</option>
@@ -151,7 +151,7 @@
                 </select>
                 <ul class="app-radio-toggle" style="flex-shrink:0; margin:0; list-style:none; display:inline-flex; border:1px solid var(--app-border, #cbd5e1); border-radius:6px; overflow:hidden; padding:0;">
                   <li style="margin:0;">
-                    <label style="display:inline-block; padding:4px 12px; cursor:pointer; font-size:12px; background:{% if row.dir != 'desc' %}var(--app-primary, #0284c7){% else %}transparent{% endif %}; color:{% if row.dir != 'desc' %}#fff{% else %}inherit{% endif %};">
+                    <label style="display:inline-block; padding:3px 10px; cursor:pointer; font-size:12px; background:{% if row.dir != 'desc' %}var(--app-primary, #0284c7){% else %}transparent{% endif %}; color:{% if row.dir != 'desc' %}#fff{% else %}inherit{% endif %};">
                       <input type="radio" name="_asortdir{{ forloop.counter }}"
                              class="js-activity-sort-dir" value="asc"
                              style="display:none;"
@@ -160,7 +160,7 @@
                     </label>
                   </li>
                   <li style="margin:0;">
-                    <label style="display:inline-block; padding:4px 12px; cursor:pointer; font-size:12px; background:{% if row.dir == 'desc' %}var(--app-primary, #0284c7){% else %}transparent{% endif %}; color:{% if row.dir == 'desc' %}#fff{% else %}inherit{% endif %};">
+                    <label style="display:inline-block; padding:3px 10px; cursor:pointer; font-size:12px; background:{% if row.dir == 'desc' %}var(--app-primary, #0284c7){% else %}transparent{% endif %}; color:{% if row.dir == 'desc' %}#fff{% else %}inherit{% endif %};">
                       <input type="radio" name="_asortdir{{ forloop.counter }}"
                              class="js-activity-sort-dir" value="desc"
                              style="display:none;"
@@ -173,8 +173,8 @@
             {% endfor %}
 
             <div style="display:flex; align-items:center; gap:8px; flex-wrap:nowrap; margin-top:4px;">
-              <span class="app-form__label" style="min-width:5em; margin:0; white-space:nowrap; font-size:0.9em;">表示件数</span>
-              <select name="per_page" class="app-input" style="max-width:120px;">
+              <span class="app-form__label" style="min-width:5em; margin:0; white-space:nowrap; font-size:12px; font-weight:600; color:var(--app-muted, #64748b);">表示件数</span>
+              <select name="per_page" class="app-input" style="max-width:110px; font-size:13px;">
                 {% for n in per_page_choices %}
                   <option value="{{ n }}"{% if n == per_page %} selected{% endif %}>{{ n }} 件</option>
                 {% endfor %}
@@ -194,18 +194,19 @@
 
   <section class="app-card">
     <div class="app-table-wrapper">
-      <table class="app-table app-table--nowrap">
+      <table class="app-table app-table--nowrap" style="font-size: 13px;">
         <thead>
           <tr>
-            <th style="width:72px; min-width:72px; white-space:nowrap; text-align:center;">操作</th>
-            <th style="white-space:nowrap;">実施日時</th>
-            <th style="white-space:nowrap;">種別</th>
-            <th style="white-space:nowrap;">方向</th>
-            <th style="white-space:nowrap;">実施者</th>
-            <th>相手方参加者</th>
-            <th>関連案件</th>
-            <th>場所・URL</th>
-            <th style="width:240px; max-width:240px;">内容メモ</th>
+            <th style="width:72px; min-width:72px; white-space:nowrap; text-align:center; font-size: 12px; color: var(--app-muted, #64748b);">操作</th>
+            <th style="white-space:nowrap; font-size: 12px; color: var(--app-muted, #64748b);">実施日時</th>
+            <th style="white-space:nowrap; font-size: 12px; color: var(--app-muted, #64748b);">タイトル</th>
+            <th style="white-space:nowrap; font-size: 12px; color: var(--app-muted, #64748b);">種別</th>
+            <th style="white-space:nowrap; font-size: 12px; color: var(--app-muted, #64748b);">方向</th>
+            <th style="white-space:nowrap; font-size: 12px; color: var(--app-muted, #64748b);">実施者</th>
+            <th style="font-size: 12px; color: var(--app-muted, #64748b);">相手方参加者</th>
+            <th style="font-size: 12px; color: var(--app-muted, #64748b);">関連案件</th>
+            <th style="font-size: 12px; color: var(--app-muted, #64748b);">場所・URL</th>
+            <th style="width:240px; max-width:240px; font-size: 12px; color: var(--app-muted, #64748b);">内容メモ</th>
           </tr>
         </thead>
         <tbody>
@@ -213,11 +214,14 @@
             {% url 'activities:activity_detail' pk=activity.id as detail_url %}
             <tr>
               <td style="white-space:nowrap; text-align:center;">
-                <a href="{% append_back_url detail_url back %}" class="app-btn app-btn--ghost app-btn--sm" style="display:inline-block; white-space:nowrap;" title="詳細">詳細</a>
+                <a href="{% append_back_url detail_url back %}" class="app-btn app-btn--ghost app-btn--sm" style="display:inline-block; white-space:nowrap; font-size: 12px;" title="詳細">詳細</a>
               </td>
               <td style="white-space:nowrap;">{{ activity.occurred_at|date:"Y-m-d H:i" }}</td>
-              <td><span class="app-badge app-badge--neutral">{{ activity.get_activity_type_display }}</span></td>
-              <td>{% if activity.direction %}<span class="app-badge app-badge--info">{{ activity.get_direction_display }}</span>{% else %}-{% endif %}</td>
+              <td>
+                <a href="{% append_back_url detail_url back %}" style="font-size: 13px; font-weight:600; color:var(--app-text, #0f172a); text-decoration:none;">{{ activity.title|default:"（タイトルなし）" }}</a>
+              </td>
+              <td><span class="app-badge app-badge--neutral" style="font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 9999px;">{{ activity.get_activity_type_display }}</span></td>
+              <td>{% if activity.direction %}<span class="app-badge app-badge--info" style="font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 9999px;">{{ activity.get_direction_display }}</span>{% else %}-{% endif %}</td>
               <td>{{ activity.user|default:"-" }}</td>
               <td>
                 {% for ap in activity.activity_persons.all %}
@@ -227,7 +231,7 @@
               <td>
                 {% if activity.deal %}
                   {% url 'deals:deal_detail' pk=activity.deal.id as deal_url %}
-                  <a href="{% append_back_url deal_url back %}" style="font-weight:600; color:var(--app-text, #0f172a); text-decoration:none;">{{ activity.deal.name }}</a>
+                  <a href="{% append_back_url deal_url back %}" style="font-size: 13px; font-weight:600; color:var(--app-text, #0f172a); text-decoration:none;">{{ activity.deal.name }}</a>
                 {% else %}-{% endif %}
               </td>
               <td>{{ activity.place|default:"-" }}</td>
@@ -235,7 +239,7 @@
             </tr>
           {% empty %}
             <tr>
-              <td colspan="9" class="app-muted" style="text-align:center; padding:24px;">該当する活動記録がありません。</td>
+              <td colspan="10" class="app-muted" style="text-align:center; padding:24px;">該当する活動記録がありません。</td>
             </tr>
           {% endfor %}
         </tbody>
@@ -267,17 +271,17 @@
       <button type="button" class="app-btn--icon" data-action="close-modal" aria-label="閉じる" style="border:none; background:transparent; font-size:18px; cursor:pointer; color:var(--app-muted);">&times;</button>
     </div>
     <div class="app-modal__body" style="padding:16px; display:flex; flex-direction:column; gap:12px; overflow:hidden;">
-      <input type="text" id="user-modal-search" class="app-input" placeholder="氏名・ユーザー名・部署で検索..." autocomplete="off">
+      <input type="text" id="user-modal-search" class="app-input" placeholder="氏名・ユーザー名・部署で検索..." autocomplete="off" style="font-size: 13px;">
       <div style="flex:1; overflow-y:auto; border:1px solid var(--app-border, #cbd5e1); border-radius:6px; max-height:360px;">
         <table class="app-table" style="min-width:100%; font-size:13px; border-collapse:collapse;">
           <thead style="position:sticky; top:0; background:#f8fafc; z-index:1;">
             <tr>
-              <th style="width:40px; text-align:center;">
+              <th style="width:40px; text-align:center; font-size: 12px; color: var(--app-muted, #64748b);">
                 <input type="checkbox" id="user-modal-select-all" title="全選択/全解除">
               </th>
-              <th>氏名</th>
-              <th>ユーザー名</th>
-              <th>部署</th>
+              <th style="font-size: 12px; color: var(--app-muted, #64748b);">氏名</th>
+              <th style="font-size: 12px; color: var(--app-muted, #64748b);">ユーザー名</th>
+              <th style="font-size: 12px; color: var(--app-muted, #64748b);">部署</th>
             </tr>
           </thead>
           <tbody id="user-modal-tbody">
@@ -296,10 +300,10 @@
       </div>
     </div>
     <div class="app-modal__footer" style="padding:12px 16px; border-top:1px solid var(--app-border, #cbd5e1); display:flex; justify-content:space-between; align-items:center;">
-      <button type="button" class="app-btn app-btn--ghost app-btn--sm" id="btn-clear-modal-users">全選択解除</button>
+      <button type="button" class="app-btn app-btn--ghost app-btn--sm" id="btn-clear-modal-users" style="font-size: 12px;">全選択解除</button>
       <div style="display:flex; gap:8px;">
-        <button type="button" class="app-btn app-btn--secondary app-btn--sm" data-action="close-modal">閉じる</button>
-        <button type="button" class="app-btn app-btn--primary app-btn--sm" id="btn-apply-modal-users">選択したユーザーを適用</button>
+        <button type="button" class="app-btn app-btn--secondary app-btn--sm" data-action="close-modal" style="font-size: 12px;">閉じる</button>
+        <button type="button" class="app-btn app-btn--primary app-btn--sm" id="btn-apply-modal-users" style="font-size: 12px;">選択したユーザーを適用</button>
       </div>
     </div>
   </div>
@@ -316,17 +320,17 @@
       <button type="button" class="app-btn--icon" data-action="close-modal" aria-label="閉じる" style="border:none; background:transparent; font-size:18px; cursor:pointer; color:var(--app-muted);">&times;</button>
     </div>
     <div class="app-modal__body" style="padding:16px; display:flex; flex-direction:column; gap:12px; overflow:hidden;">
-      <input type="text" id="attendee-modal-search" class="app-input" placeholder="氏名・ユーザー名・部署で検索..." autocomplete="off">
+      <input type="text" id="attendee-modal-search" class="app-input" placeholder="氏名・ユーザー名・部署で検索..." autocomplete="off" style="font-size: 13px;">
       <div style="flex:1; overflow-y:auto; border:1px solid var(--app-border, #cbd5e1); border-radius:6px; max-height:360px;">
         <table class="app-table" style="min-width:100%; font-size:13px; border-collapse:collapse;">
           <thead style="position:sticky; top:0; background:#f8fafc; z-index:1;">
             <tr>
-              <th style="width:40px; text-align:center;">
+              <th style="width:40px; text-align:center; font-size: 12px; color: var(--app-muted, #64748b);">
                 <input type="checkbox" id="attendee-modal-select-all" title="全選択/全解除">
               </th>
-              <th>氏名</th>
-              <th>ユーザー名</th>
-              <th>部署</th>
+              <th style="font-size: 12px; color: var(--app-muted, #64748b);">氏名</th>
+              <th style="font-size: 12px; color: var(--app-muted, #64748b);">ユーザー名</th>
+              <th style="font-size: 12px; color: var(--app-muted, #64748b);">部署</th>
             </tr>
           </thead>
           <tbody id="attendee-modal-tbody">
@@ -345,10 +349,10 @@
       </div>
     </div>
     <div class="app-modal__footer" style="padding:12px 16px; border-top:1px solid var(--app-border, #cbd5e1); display:flex; justify-content:space-between; align-items:center;">
-      <button type="button" class="app-btn app-btn--ghost app-btn--sm" id="btn-clear-modal-attendees">全選択解除</button>
+      <button type="button" class="app-btn app-btn--ghost app-btn--sm" id="btn-clear-modal-attendees" style="font-size: 12px;">全選択解除</button>
       <div style="display:flex; gap:8px;">
-        <button type="button" class="app-btn app-btn--secondary app-btn--sm" data-action="close-modal">閉じる</button>
-        <button type="button" class="app-btn app-btn--primary app-btn--sm" id="btn-apply-modal-attendees">選択したユーザーを適用</button>
+        <button type="button" class="app-btn app-btn--secondary app-btn--sm" data-action="close-modal" style="font-size: 12px;">閉じる</button>
+        <button type="button" class="app-btn app-btn--primary app-btn--sm" id="btn-apply-modal-attendees" style="font-size: 12px;">選択したユーザーを適用</button>
       </div>
     </div>
   </div>
@@ -628,14 +632,14 @@
           var chip = document.createElement('span');
           chip.className = 'app-badge app-badge--neutral ' + opts.chipClass;
           chip.setAttribute('data-user-id', item.id);
-          chip.style.cssText = 'display:inline-flex; align-items:center; gap:4px; padding:3px 8px; font-size:12px; border-radius:9999px; background:#f1f5f9; color:#334155;';
+          chip.style.cssText = 'display:inline-flex; align-items:center; gap:4px; padding:2px 8px; font-size:11px; font-weight:600; border-radius:9999px; background:#f1f5f9; color:#334155;';
           chip.textContent = item.name + ' ';
 
           var btn = document.createElement('button');
           btn.type = 'button';
           btn.className = opts.removeBtnClass;
           btn.setAttribute('data-user-id', item.id);
-          btn.style.cssText = 'background:none; border:none; padding:0; cursor:pointer; font-size:14px; line-height:1; color:#94a3b8;';
+          btn.style.cssText = 'background:none; border:none; padding:0; cursor:pointer; font-size:13px; line-height:1; color:#94a3b8;';
           btn.title = '削除';
           btn.innerHTML = '&times;';
 

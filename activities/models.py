@@ -68,6 +68,7 @@ class Activity(models.Model):
         related_name="+",
     )
     place = models.CharField(max_length=255, blank=True, default="")
+    title = models.CharField("タイトル", max_length=255, blank=True, default="")
     memo = models.TextField(blank=True, default="")
     is_archived = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -108,7 +109,10 @@ class Activity(models.Model):
 
     def __str__(self):
         date_str = timezone.localtime(self.occurred_at).strftime("%Y-%m-%d") if self.occurred_at else ""
-        return f"{date_str} {self.get_activity_type_display()}"
+        type_str = self.get_activity_type_display()
+        if self.title:
+            return f"{self.title} ({type_str})" if type_str else self.title
+        return f"{date_str} {type_str}".strip()
 
 
 class ActivityPerson(models.Model):

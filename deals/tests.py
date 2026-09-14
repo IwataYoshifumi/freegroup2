@@ -10,7 +10,8 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from accounts.models import Department
+from accounts.models import Department, Role
+from accounts.services import apply_role
 from companies.models import Company
 from contacts.models import Contact
 from deals.admin import DealAdmin, DealPersonAdmin, DealUserAdmin
@@ -1567,9 +1568,9 @@ class DealViewTests(TestCase):
         self.assertIn("max-width: 1040px; margin-left: 0; margin-right: auto; width: 100%;", html_detail)
         self.assertIn("min-width:96px; width:96px;", html_detail)
         self.assertIn('table-layout: fixed; width: 100%;', html_detail)
-        self.assertIn('style="width: 30%;"', html_detail)
-        self.assertIn('style="width: 25%;"', html_detail)
-        self.assertIn('style="width: 20%;"', html_detail)
+        self.assertIn('width: 30%;', html_detail)
+        self.assertIn('width: 25%;', html_detail)
+        self.assertIn('width: 20%;', html_detail)
         self.assertIn('overflow: hidden; text-overflow: ellipsis;', html_detail)
 
     def test_deal_detail_push_current_stack(self):
@@ -2618,6 +2619,175 @@ class DealStageBadgeStyleTests(TestCase):
         res_detail = self.client.get(detail_url)
         self.assertEqual(res_detail.status_code, 200)
         self.assertContains(res_detail, expected_badge_html)
+
+
+class SalesRoleDealCreatePermissionTests(TestCase):
+    """営業（sales）ロールを持つ一般ユーザーの案件起票権限（deals.add_deal）検証。"""
+
+    def setUp(self):
+        self.sales_role = Role.objects.get(code="sales")
+        self.sales_user = User.objects.create_user(username="sales_rep", password="password")
+        apply_role(self.sales_user, self.sales_role)
+        self.company = Company.objects.create(organization="テスト商事")
+
+    def test_sales_role_user_can_access_deal_create_view(self):
+        """営業ロールを持つユーザーが GET /deals/create/ にアクセスした際、403 Forbidden にならず 200 OK で表示されること。"""
+        self.client.login(username="sales_rep", password="password")
+        url = reverse("deals:deal_create")
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "案件新規作成")
+
+    def test_sales_role_user_can_create_deal(self):
+        """営業ロールを持つユーザーが POST /deals/create/ で案件を正常に起票できること。"""
+        self.client.login(username="sales_rep", password="password")
+        url = reverse("deals:deal_create")
+        post_data = {
+            "name": "営業担当起票案件",
+            "company": str(self.company.pk),
+            "stage": Stage.INITIAL_MEETING,
+            "probability": 20,
+            "deal_type": DealType.NEW,
+        }
+        response = self.client.post(url, data=post_data)
+        self.assertEqual(response.status_code, 302)
+        created_deal = Deal.objects.filter(name="営業担当起票案件").first()
+        self.assertIsNotNone(created_deal)
+        self.assertEqual(created_deal.company, self.company)
+        self.assertEqual(created_deal.owner, self.sales_user)
+
+
+class DealWizardBackNavigationTests(TestCase):
+    """新規案件ウィザードの各ステップ間のBackNavigator戻り先検証。"""
+
+    def setUp(self):
+        from django.contrib.auth.models import Permission
+
+        self.user = User.objects.create_user(username="wizard_deal_user", password="password")
+        self.user.user_permissions.add(
+            Permission.objects.get(codename="add_deal"),
+            Permission.objects.get(codename="change_deal"),
+            Permission.objects.get(codename="view_deal"),
+        )
+        self.client.login(username="wizard_deal_user", password="password")
+        self.company = Company.objects.create(organization="案件ウィザード会社")
+
+    def test_step1_to_step2_back_link_points_to_step1_edit(self):
+        """Step 1（新規作成）から Step 2（社外関係者設定）へ遷移した際、Step 2 画面の戻るリンク先が Step 1（編集画面 ?wizard=1 付き）を指していること。"""
+        origin_url = reverse("companies:company_detail", kwargs={"pk": self.company.pk})
+        back = BackNavigator(self.client.get(origin_url).wsgi_request)
+        back.push_current(title="会社詳細", keys=["page"])
+        create_url = back.append_url(reverse("deals:deal_create"))
+
+        post_data = {
+            "name": "ウィザードテスト案件",
+            "company": str(self.company.pk),
+            "stage": Stage.INITIAL_MEETING,
+            "probability": 20,
+            "deal_type": DealType.NEW,
+            BackNavigator.PARAM_NAME: back._encode_stack(),
+        }
+        res_step1 = self.client.post(create_url, data=post_data)
+        self.assertEqual(res_step1.status_code, 302)
+
+        step2_url = res_step1.url
+        deal = Deal.objects.filter(name="ウィザードテスト案件").first()
+        self.assertIsNotNone(deal)
+        expected_step2_base = reverse("deals:deal_persons_manage", kwargs={"pk": deal.pk})
+        self.assertIn(expected_step2_base, step2_url)
+        self.assertIn("wizard=1", step2_url)
+
+        res_step2 = self.client.get(step2_url)
+        self.assertEqual(res_step2.status_code, 200)
+        html_step2 = res_step2.content.decode("utf-8")
+
+        step1_edit_base = reverse("deals:deal_update", kwargs={"pk": deal.pk})
+        import re
+        pattern = rf'<a[^>]+href="({re.escape(step1_edit_base)}\?[^"]*wizard=1[^"]*)"[^>]*>\s*戻る\s*</a>'
+        match = re.search(pattern, html_step2)
+        self.assertIsNotNone(match, f"Step 2 画面の戻るリンク先に Step 1 編集画面（{step1_edit_base}?wizard=1）が見つかりません。")
+
+    def test_step2_back_to_step1_and_proceed_again(self):
+        """Step 2 から Step 1 編集画面へ引き返し、再度「次へ」を押して Step 2 に進んだ場合も戻り先が Step 1 を維持すること。"""
+        deal = Deal.objects.create(
+            name="再進行テスト案件",
+            company=self.company,
+            stage=Stage.INITIAL_MEETING,
+            owner=self.user,
+        )
+        origin_url = reverse("companies:company_detail", kwargs={"pk": self.company.pk})
+        back = BackNavigator(self.client.get(origin_url).wsgi_request)
+        back.push_current(title="会社詳細", keys=["page"])
+
+        step1_edit_url = reverse("deals:deal_update", kwargs={"pk": deal.pk}) + "?wizard=1"
+        step1_with_back = back.append_url(step1_edit_url)
+
+        post_data = {
+            "name": "再進行テスト案件（更新後）",
+            "company": str(self.company.pk),
+            "stage": Stage.QUOTATION,
+            "probability": 40,
+            "deal_type": DealType.NEW,
+            "wizard": "1",
+            BackNavigator.PARAM_NAME: back._encode_stack(),
+        }
+        res_step1_post = self.client.post(step1_with_back, data=post_data)
+        self.assertEqual(res_step1_post.status_code, 302)
+
+        res_step2 = self.client.get(res_step1_post.url)
+        self.assertEqual(res_step2.status_code, 200)
+        html_step2 = res_step2.content.decode("utf-8")
+
+        step1_edit_base = reverse("deals:deal_update", kwargs={"pk": deal.pk})
+        import re
+        pattern = rf'<a[^>]+href="({re.escape(step1_edit_base)}\?[^"]*wizard=1[^"]*)"[^>]*>\s*戻る\s*</a>'
+        self.assertRegex(html_step2, pattern)
+
+    def test_step1_create_back_link_points_to_origin(self):
+        """Step 1（新規作成画面）の時点で「戻る」リンクが起点画面を指していること。"""
+        origin_url = reverse("companies:company_detail", kwargs={"pk": self.company.pk})
+        back = BackNavigator(self.client.get(origin_url).wsgi_request)
+        back.push_current(title="会社詳細", keys=["page"])
+        create_url = back.append_url(reverse("deals:deal_create"))
+
+        res = self.client.get(create_url)
+        self.assertEqual(res.status_code, 200)
+        html = res.content.decode("utf-8")
+        import re
+        pattern = rf'<a class="app-btn app-btn--secondary" href="({re.escape(origin_url)})">\s*戻る\s*</a>'
+        self.assertRegex(html, pattern)
+
+
+class DealDetailActivityTitleTests(TestCase):
+    """案件詳細画面の活動履歴テーブルにおけるタイトル表示検証。"""
+
+    def setUp(self):
+        from activities.models import Activity, ActivityType
+        self.user = User.objects.create_user(username="deal_act_user", password="password")
+        self.client.login(username="deal_act_user", password="password")
+        self.company = Company.objects.create(organization="案件活動会社")
+        self.deal = Deal.objects.create(
+            name="活動タイトルテスト案件",
+            company=self.company,
+            owner=self.user,
+        )
+        self.activity = Activity.objects.create(
+            deal=self.deal,
+            title="案件紐づけ活動タイトル",
+            occurred_at=timezone.now(),
+            activity_type=ActivityType.VISIT,
+            user=self.user,
+        )
+
+    def test_activity_title_displayed_in_deal_detail(self):
+        """案件詳細の活動履歴テーブルにタイトルが表示され、リンクが含まれていること。"""
+        url = reverse("deals:deal_detail", kwargs={"pk": self.deal.pk})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "案件紐づけ活動タイトル")
+        self.assertContains(response, f"/activities/{self.activity.id}/")
+
+
 
 
 

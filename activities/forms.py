@@ -11,6 +11,7 @@ class ActivityForm(forms.ModelForm):
     class Meta:
         model = Activity
         fields = [
+            "title",
             "activity_type",
             "direction",
             "occurred_at",
@@ -20,6 +21,7 @@ class ActivityForm(forms.ModelForm):
             "campaign",
         ]
         labels = {
+            "title": "タイトル",
             "activity_type": "活動種別",
             "direction": "受発信種別",
             "occurred_at": "活動日時",
@@ -29,6 +31,7 @@ class ActivityForm(forms.ModelForm):
             "campaign": "関連キャンペーン",
         }
         widgets = {
+            "title": forms.TextInput(attrs={"class": "app-input", "placeholder": "件名・タイトルを入力"}),
             "activity_type": forms.Select(attrs={"class": "app-select app-input"}),
             "direction": forms.Select(attrs={"class": "app-select app-input"}),
             "occurred_at": forms.DateTimeInput(

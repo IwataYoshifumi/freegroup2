@@ -9,11 +9,12 @@
   <div style="margin-bottom: 16px;">
     <div class="app-page-header" style="margin-bottom: 8px;">
       <div>
-        <h1>案件詳細</h1>
-        <div style="font-size:13px; color:var(--app-muted); margin-top:4px;">
-          ステージ: <span class="app-status-badge">{{ deal.get_stage_display }}</span>
+        <h1 style="font-size:20px; font-weight:700; margin:0;">案件詳細</h1>
+        <div style="font-size:12px; color:var(--app-muted, #64748b); margin-top:4px; display:flex; align-items:center; gap:6px;">
+          <span>ステージ:</span>
+          <span class="app-badge" style="{{ deal.stage_badge_style }} font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 9999px;">{{ deal.get_stage_display }}</span>
           {% if deal.is_archived %}
-            <span class="app-status-badge app-status-badge--warning">アーカイブ済み</span>
+            <span class="app-badge app-badge--warning" style="font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 9999px;">アーカイブ済み</span>
           {% endif %}
         </div>
       </div>
@@ -71,7 +72,7 @@
       {# 2. 会社（全幅） #}
       <div style="display:flex; align-items:baseline; gap:8px; padding-bottom:8px; border-bottom:1px dashed var(--app-border, #f1f5f9);">
         <span style="display:inline-block; min-width:96px; width:96px; font-size:12px; color:var(--app-muted, #64748b); white-space:nowrap;">会社:</span>
-        <span style="flex:1; word-break:break-word; font-size:14px; font-weight:600;">
+        <span style="flex:1; word-break:break-word; font-size:13px; font-weight:600;">
           {% if deal.company %}
             {% url 'companies:company_detail' pk=deal.company.id as company_url %}
             <a href="{% append_back_url company_url back %}">{{ deal.company.organization }}</a>
@@ -112,7 +113,7 @@
         </div>
         <div style="display:flex; align-items:baseline; gap:8px;">
           <span style="display:inline-block; min-width:96px; width:96px; font-size:12px; color:var(--app-muted, #64748b); white-space:nowrap;">確度:</span>
-          <span style="flex:1; word-break:break-word; font-size:14px; font-weight:600; color:var(--app-text, #0f172a);">
+          <span style="flex:1; word-break:break-word; font-size:13px; font-weight:600; color:var(--app-text, #0f172a);">
             {% if deal.probability is not None %}{{ deal.probability }}%{% else %}-{% endif %}
           </span>
         </div>
@@ -122,7 +123,7 @@
       <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:16px; padding-bottom:8px; border-bottom:1px dashed var(--app-border, #f1f5f9);">
         <div style="display:flex; align-items:baseline; gap:8px;">
           <span style="display:inline-block; min-width:96px; width:96px; font-size:12px; color:var(--app-muted, #64748b); white-space:nowrap;">金額:</span>
-          <span style="flex:1; word-break:break-word; font-size:15px; font-weight:700; color:var(--app-text, #0f172a);">
+          <span style="flex:1; word-break:break-word; font-size:13px; font-weight:700; color:var(--app-text, #0f172a);">
             {% if deal.amount is not None %}¥{{ deal.amount|floatformat:"0g" }}{% else %}-{% endif %}
           </span>
         </div>
@@ -221,7 +222,7 @@
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
         <div style="display:flex; align-items:center; gap:8px;">
           <h2 style="font-size:16px; margin:0;">案件関係者（社外）</h2>
-          <span class="app-status-badge">{{ deal.deal_persons.count }}名</span>
+          <span class="app-badge app-badge--neutral" style="font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 9999px;">{{ deal.deal_persons.count }}名</span>
         </div>
         {% if can_edit %}
           {% url 'deals:deal_persons_manage' pk=deal.id as persons_manage_url %}
@@ -232,13 +233,13 @@
       </div>
 
       <div class="app-table-wrapper" style="min-width: 0;">
-        <table class="app-table" style="table-layout: fixed; width: 100%; min-width: 0;">
+        <table class="app-table" style="table-layout: fixed; width: 100%; min-width: 0; font-size: 13px;">
           <thead>
             <tr>
-              <th style="width: 30%;">会社名</th>
-              <th style="width: 25%;">部署</th>
-              <th style="width: 25%;">名前</th>
-              <th style="width: 20%;">権限</th>
+              <th style="width: 30%; font-size: 12px; color: var(--app-muted, #64748b);">会社名</th>
+              <th style="width: 25%; font-size: 12px; color: var(--app-muted, #64748b);">部署</th>
+              <th style="width: 25%; font-size: 12px; color: var(--app-muted, #64748b);">名前</th>
+              <th style="width: 20%; font-size: 12px; color: var(--app-muted, #64748b);">権限</th>
             </tr>
           </thead>
           <tbody>
@@ -262,7 +263,7 @@
                   <a href="{% append_back_url dp_person_url back %}" style="font-weight:600;">{{ dp.person.display_name }}</a>
                 </td>
                 <td style="word-break: break-word; overflow: hidden; text-overflow: ellipsis;">
-                  <span class="app-status-badge">{{ dp.get_role_display }}</span>
+                  <span class="app-badge app-badge--neutral" style="font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 9999px;">{{ dp.get_role_display }}</span>
                 </td>
               </tr>
             {% empty %}
@@ -280,7 +281,7 @@
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
         <div style="display:flex; align-items:center; gap:8px;">
           <h2 style="font-size:16px; margin:0;">案件担当者（社内）</h2>
-          <span class="app-status-badge">{{ deal.deal_users.count }}名</span>
+          <span class="app-badge app-badge--neutral" style="font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 9999px;">{{ deal.deal_users.count }}名</span>
         </div>
         {% if can_edit %}
           {% url 'deals:deal_users_manage' pk=deal.id as users_manage_url %}
@@ -291,13 +292,13 @@
       </div>
 
       <div class="app-table-wrapper" style="min-width: 0;">
-        <table class="app-table" style="table-layout: fixed; width: 100%; min-width: 0;">
+        <table class="app-table" style="table-layout: fixed; width: 100%; min-width: 0; font-size: 13px;">
           <thead>
             <tr>
-              <th style="width: 30%;">部署名</th>
-              <th style="width: 25%;">名前</th>
-              <th style="width: 25%;">役割</th>
-              <th style="width: 20%;">編集可否</th>
+              <th style="width: 30%; font-size: 12px; color: var(--app-muted, #64748b);">部署名</th>
+              <th style="width: 25%; font-size: 12px; color: var(--app-muted, #64748b);">名前</th>
+              <th style="width: 25%; font-size: 12px; color: var(--app-muted, #64748b);">役割</th>
+              <th style="width: 20%; font-size: 12px; color: var(--app-muted, #64748b);">編集可否</th>
             </tr>
           </thead>
           <tbody>
@@ -310,11 +311,11 @@
                   <strong>{{ du.user.display_name }}</strong>
                 </td>
                 <td style="word-break: break-word; overflow: hidden; text-overflow: ellipsis;">
-                  <span class="app-status-badge">{{ du.get_role_display }}</span>
+                  <span class="app-badge app-badge--neutral" style="font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 9999px;">{{ du.get_role_display }}</span>
                 </td>
                 <td style="word-break: break-word; overflow: hidden; text-overflow: ellipsis;">
                   {% if du.can_edit %}
-                    <span class="app-status-badge" style="background:#e0f2fe; color:#0369a1;">編集可</span>
+                    <span class="app-badge" style="background:#e0f2fe; color:#0369a1; border:1px solid #bae6fd; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 9999px;">編集可</span>
                   {% else %}
                     <span class="app-muted" style="font-size:12px;">閲覧のみ</span>
                   {% endif %}
@@ -345,23 +346,28 @@
       {% endif %}
     </div>
     <div class="app-table-wrapper">
-      <table class="app-table">
+      <table class="app-table" style="font-size: 13px;">
         <thead>
           <tr>
-            <th>実施日時</th>
-            <th>種別</th>
-            <th>方向</th>
-            <th>実施者</th>
-            <th>参加者</th>
-            <th>内容メモ</th>
-            <th>操作</th>
+            <th style="font-size: 12px; color: var(--app-muted, #64748b);">実施日時</th>
+            <th style="font-size: 12px; color: var(--app-muted, #64748b);">タイトル</th>
+            <th style="font-size: 12px; color: var(--app-muted, #64748b);">種別</th>
+            <th style="font-size: 12px; color: var(--app-muted, #64748b);">方向</th>
+            <th style="font-size: 12px; color: var(--app-muted, #64748b);">実施者</th>
+            <th style="font-size: 12px; color: var(--app-muted, #64748b);">参加者</th>
+            <th style="font-size: 12px; color: var(--app-muted, #64748b);">内容メモ</th>
+            <th style="font-size: 12px; color: var(--app-muted, #64748b);">操作</th>
           </tr>
         </thead>
         <tbody>
           {% for activity in activities %}
             <tr>
               <td>{{ activity.occurred_at|date:"Y-m-d H:i" }}</td>
-              <td><span class="app-status-badge">{{ activity.get_activity_type_display }}</span></td>
+              <td>
+                {% url 'activities:activity_detail' pk=activity.id as act_detail_url %}
+                <a href="{% append_back_url act_detail_url back %}" style="font-size: 13px; font-weight:600; color:var(--app-text, #0f172a); text-decoration:none;">{{ activity.title|default:"（タイトルなし）" }}</a>
+              </td>
+              <td><span class="app-badge app-badge--neutral" style="font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 9999px;">{{ activity.get_activity_type_display }}</span></td>
               <td>{{ activity.get_direction_display|default:"-" }}</td>
               <td>{{ activity.user|default:"-" }}</td>
               <td>
@@ -377,7 +383,7 @@
             </tr>
           {% empty %}
             <tr>
-              <td colspan="7" class="app-muted" style="text-align:center; padding:16px;">活動履歴はありません。</td>
+              <td colspan="8" class="app-muted" style="text-align:center; padding:16px;">活動履歴はありません。</td>
             </tr>
           {% endfor %}
         </tbody>
@@ -394,14 +400,14 @@
       {% endif %}
     </div>
     <div class="app-table-wrapper" style="margin-bottom:0;">
-      <table class="app-table">
+      <table class="app-table" style="font-size: 13px;">
         <thead>
           <tr>
-            <th>ファイル名</th>
-            <th>メモ</th>
-            <th>アップロード者</th>
-            <th>日時</th>
-            <th>操作</th>
+            <th style="font-size: 12px; color: var(--app-muted, #64748b);">ファイル名</th>
+            <th style="font-size: 12px; color: var(--app-muted, #64748b);">メモ</th>
+            <th style="font-size: 12px; color: var(--app-muted, #64748b);">アップロード者</th>
+            <th style="font-size: 12px; color: var(--app-muted, #64748b);">日時</th>
+            <th style="font-size: 12px; color: var(--app-muted, #64748b);">操作</th>
           </tr>
         </thead>
         <tbody>

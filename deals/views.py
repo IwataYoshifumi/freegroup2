@@ -396,14 +396,18 @@ class DealUpdateView(LoginRequiredMixin, PermissionRequiredMixin, UpdateView):
             messages.success(self.request, f"案件「{deal.name}」を更新しました。")
         if is_wizard:
             url = reverse("deals:deal_persons_manage", kwargs={"pk": deal.pk}) + "?wizard=1"
-            back = BackNavigator(self.request)
-            return redirect(back.append_url(url))
+            raw_back = self.request.POST.get(BackNavigator.PARAM_NAME) or self.request.GET.get(BackNavigator.PARAM_NAME)
+            if raw_back:
+                from urllib.parse import quote
+                url += f"&{BackNavigator.PARAM_NAME}={quote(raw_back)}"
+            return redirect(url)
         self.object = deal
         return redirect(self.get_success_url())
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context["is_create"] = False
+        context["is_wizard"] = (self.request.GET.get("wizard") == "1" or self.request.POST.get("wizard") == "1")
         context["back"] = BackNavigator(self.request)
         context["active_menu"] = "deals:deal_list"
         company_val = self.request.POST.get("company")

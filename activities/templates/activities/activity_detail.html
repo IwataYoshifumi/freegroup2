@@ -19,12 +19,12 @@
   <section class="app-card" style="padding:16px 20px; width: 100%; box-sizing: border-box; margin-bottom: 24px;">
     <div style="display:flex; flex-direction:column; gap:12px;">
 
-      {# 先頭行: 活動識別・アイコン行（HIG 3.4 / 3.5 / 7.6 準拠） #}
+      {# 先頭行: タイトル・アイコン行（HIG 3.4 / 3.5 / 7.6 準拠） #}
       <div style="display:flex; justify-content:space-between; align-items:center; padding-bottom:10px; border-bottom:1px solid var(--app-border, #e5e7eb);">
         <div style="display:flex; align-items:center; gap:8px; flex:1;">
-          <span style="display:inline-block; min-width:96px; width:96px; font-size:12px; color:var(--app-muted, #64748b); white-space:nowrap;">活動種別:</span>
+          <span style="display:inline-block; min-width:96px; width:96px; font-size:12px; color:var(--app-muted, #64748b); white-space:nowrap;">タイトル:</span>
           <span style="font-size:16px; font-weight:700; color:var(--app-text, #0f172a); word-break:break-word;">
-            {{ activity.get_activity_type_display }}{% if activity.direction %}（{{ activity.get_direction_display }}）{% endif %}
+            {{ activity.title|default:"（タイトルなし）" }}
           </span>
           {% if can_edit %}
             {% url 'activities:activity_update' pk=activity.id as edit_url %}
@@ -47,19 +47,19 @@
       <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:16px; padding-bottom:8px; border-bottom:1px dashed var(--app-border, #f1f5f9);">
         <div style="display:flex; align-items:baseline; gap:8px;">
           <span style="display:inline-block; min-width:96px; width:96px; font-size:12px; color:var(--app-muted, #64748b); white-space:nowrap;">実施日時:</span>
-          <span style="flex:1; word-break:break-word; font-size:14px; font-weight:600; color:var(--app-text, #0f172a);">
+          <span style="flex:1; word-break:break-word; font-size:13px; font-weight:600; color:var(--app-text, #0f172a);">
             {{ activity.occurred_at|date:"Y-m-d H:i" }}
           </span>
         </div>
         <div style="display:flex; align-items:baseline; gap:8px;">
           <span style="display:inline-block; min-width:96px; width:96px; font-size:12px; color:var(--app-muted, #64748b); white-space:nowrap;">種別:</span>
-          <div style="flex:1; word-break:break-word;"><span class="app-status-badge">{{ activity.get_activity_type_display }}</span></div>
+          <div style="flex:1; word-break:break-word;"><span class="app-badge app-badge--neutral" style="font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 9999px;">{{ activity.get_activity_type_display }}</span></div>
         </div>
         <div style="display:flex; align-items:baseline; gap:8px;">
           <span style="display:inline-block; min-width:96px; width:96px; font-size:12px; color:var(--app-muted, #64748b); white-space:nowrap;">方向:</span>
           <div style="flex:1; word-break:break-word;">
             {% if activity.direction %}
-              <span class="app-status-badge">{{ activity.get_direction_display }}</span>
+              <span class="app-badge app-badge--info" style="font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 9999px;">{{ activity.get_direction_display }}</span>
             {% else %}
               <span style="font-size:13px; color:var(--app-muted, #94a3b8);">-</span>
             {% endif %}
@@ -150,7 +150,7 @@
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
         <div style="display:flex; align-items:center; gap:8px;">
           <h2 style="font-size:16px; margin:0;">相手方関係者（社外）</h2>
-          <span class="app-status-badge">{{ activity_persons.count }}名</span>
+          <span class="app-badge app-badge--neutral" style="font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 9999px;">{{ activity_persons.count }}名</span>
         </div>
         {% if can_edit %}
           {% url 'activities:activity_persons_manage' pk=activity.id as persons_manage_url %}
@@ -161,14 +161,14 @@
       </div>
 
       <div class="app-table-wrapper" style="min-width: 0;">
-        <table class="app-table" style="table-layout: fixed; width: 100%; min-width: 0;">
+        <table class="app-table" style="table-layout: fixed; width: 100%; min-width: 0; font-size: 13px;">
           <thead>
             <tr>
-              <th style="width: 28%;">会社名</th>
-              <th style="width: 22%;">部署</th>
-              <th style="width: 22%;">名前</th>
-              <th style="width: 14%;">役割</th>
-              <th style="width: 14%;">メモ</th>
+              <th style="width: 28%; font-size: 12px; color: var(--app-muted, #64748b);">会社名</th>
+              <th style="width: 22%; font-size: 12px; color: var(--app-muted, #64748b);">部署</th>
+              <th style="width: 22%; font-size: 12px; color: var(--app-muted, #64748b);">名前</th>
+              <th style="width: 14%; font-size: 12px; color: var(--app-muted, #64748b);">役割</th>
+              <th style="width: 14%; font-size: 12px; color: var(--app-muted, #64748b);">メモ</th>
             </tr>
           </thead>
           <tbody>
@@ -190,7 +190,7 @@
                   <a href="{% append_back_url ap_person_url back %}" style="font-weight:600;">{{ ap.person.display_name }}</a>
                 </td>
                 <td style="word-break: break-word; overflow: hidden; text-overflow: ellipsis;">
-                  <span class="app-status-badge">{{ ap.get_role_display }}</span>
+                  <span class="app-badge app-badge--neutral" style="font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 9999px;">{{ ap.get_role_display }}</span>
                 </td>
                 <td style="word-break: break-word; overflow: hidden; text-overflow: ellipsis;">
                   {{ ap.memo|default:"-" }}
@@ -211,7 +211,7 @@
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
         <div style="display:flex; align-items:center; gap:8px;">
           <h2 style="font-size:16px; margin:0;">社内同席者</h2>
-          <span class="app-status-badge">{{ activity_users.count }}名</span>
+          <span class="app-badge app-badge--neutral" style="font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 9999px;">{{ activity_users.count }}名</span>
         </div>
         {% if can_edit %}
           {% url 'activities:activity_users_manage' pk=activity.id as users_manage_url %}
@@ -222,13 +222,13 @@
       </div>
 
       <div class="app-table-wrapper" style="min-width: 0;">
-        <table class="app-table" style="table-layout: fixed; width: 100%; min-width: 0;">
+        <table class="app-table" style="table-layout: fixed; width: 100%; min-width: 0; font-size: 13px;">
           <thead>
             <tr>
-              <th style="width: 28%;">部署名</th>
-              <th style="width: 34%;">名前</th>
-              <th style="width: 18%;">役割</th>
-              <th style="width: 20%;">メモ</th>
+              <th style="width: 28%; font-size: 12px; color: var(--app-muted, #64748b);">部署名</th>
+              <th style="width: 34%; font-size: 12px; color: var(--app-muted, #64748b);">名前</th>
+              <th style="width: 18%; font-size: 12px; color: var(--app-muted, #64748b);">役割</th>
+              <th style="width: 20%; font-size: 12px; color: var(--app-muted, #64748b);">メモ</th>
             </tr>
           </thead>
           <tbody>
@@ -242,7 +242,7 @@
                   <span style="color:var(--app-muted); font-size:12px;">@{{ au.user.username }}</span>
                 </td>
                 <td style="word-break: break-word; overflow: hidden; text-overflow: ellipsis;">
-                  <span class="app-status-badge">{{ au.get_role_display }}</span>
+                  <span class="app-badge app-badge--neutral" style="font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 9999px;">{{ au.get_role_display }}</span>
                 </td>
                 <td style="word-break: break-word; overflow: hidden; text-overflow: ellipsis;">
                   {{ au.memo|default:"-" }}
@@ -268,14 +268,14 @@
       {% endif %}
     </div>
     <div class="app-table-wrapper" style="margin-bottom:0;">
-      <table class="app-table">
+      <table class="app-table" style="font-size: 13px;">
         <thead>
           <tr>
-            <th>ファイル名</th>
-            <th>メモ</th>
-            <th>アップロード者</th>
-            <th>日時</th>
-            <th>操作</th>
+            <th style="font-size: 12px; color: var(--app-muted, #64748b);">ファイル名</th>
+            <th style="font-size: 12px; color: var(--app-muted, #64748b);">メモ</th>
+            <th style="font-size: 12px; color: var(--app-muted, #64748b);">アップロード者</th>
+            <th style="font-size: 12px; color: var(--app-muted, #64748b);">日時</th>
+            <th style="font-size: 12px; color: var(--app-muted, #64748b);">操作</th>
           </tr>
         </thead>
         <tbody>

@@ -416,6 +416,7 @@
         <thead>
           <tr>
             <th>日時</th>
+            <th>タイトル</th>
             <th>種別</th>
             <th>方向</th>
             <th>実施者</th>
@@ -428,6 +429,10 @@
           {% for activity in activities %}
             <tr>
               <td>{{ activity.occurred_at|date:"Y-m-d H:i" }}</td>
+              <td>
+                {% url 'activities:activity_detail' pk=activity.id as act_detail_url %}
+                <a href="{% append_back_url act_detail_url back %}" style="font-weight:600;">{{ activity.title|default:"（タイトルなし）" }}</a>
+              </td>
               <td><span class="app-status-badge">{{ activity.get_activity_type_display }}</span></td>
               <td>{{ activity.get_direction_display|default:"-" }}</td>
               <td>{{ activity.user|default:"-" }}</td>
@@ -445,7 +450,7 @@
             </tr>
           {% empty %}
             <tr>
-              <td colspan="7" class="app-muted" style="text-align:center; padding:16px;">紐づく活動履歴はありません。</td>
+              <td colspan="8" class="app-muted" style="text-align:center; padding:16px;">紐づく活動履歴はありません。</td>
             </tr>
           {% endfor %}
         </tbody>

@@ -399,6 +399,41 @@ class CompanyViewTests(TestCase):
         self.assertContains(resp, "company-detail-container")
         self.assertContains(resp, "max-width: 1040px")
 
+    def test_company_detail_hig_layout_and_actions(self):
+        """会社詳細画面のHIG準拠レイアウト（無駄な状態表示の撤去、アイコン化、上部アクション、電話成型）を検証。"""
+        # 国番号付き生電話番号の会社を用意
+        formatted_co = Company.objects.create(
+            organization="フォーマット電話会社",
+            phone="81561424300",
+            address="愛知県瀬戸市",
+        )
+        self.client.login(username="comp_user", password="password")
+        resp = self.client.get(reverse("companies:company_detail", kwargs={"pk": formatted_co.pk}))
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode("utf-8")
+
+        # 1. 正常状態「状態: 有効」の完全撤去
+        self.assertNotContains(resp, "状態: 有効")
+        self.assertNotContains(resp, "状態:")
+
+        # 2. テキストの「編集」「アーカイブ」ベタ塗りボタンが撤去されていること
+        self.assertNotIn("app-btn--success", html)
+        self.assertNotIn("app-btn--warning", html)
+
+        # 3. アイコンボタンの存在（鉛筆: bi-pencil-fill, アーカイブ箱: bi-archive-fill）
+        self.assertContains(resp, "bi-pencil-fill")
+        self.assertContains(resp, "bi-archive-fill")
+        self.assertContains(resp, 'title="会社を編集"')
+        self.assertContains(resp, 'title="アーカイブ"')
+
+        # 4. 上部アクション導線（新規案件・活動記録）の存在
+        self.assertContains(resp, "新規案件")
+        self.assertContains(resp, "活動記録")
+
+        # 5. 電話番号の成型フォーマット表示（81561424300 -> 0561-42-4300）
+        self.assertContains(resp, "0561-42-4300")
+        self.assertNotContains(resp, "81561424300")
+
     def test_company_update_view(self):
         self.client.login(username="comp_user", password="password")
         target_co = Company.objects.create(
@@ -987,6 +1022,43 @@ class CompanyDetailActionButtonsTests(TestCase):
         # コンタクト詳細リンク（氏名 & 詳細ボタン）に back_stack が含まれる
         contact_detail_url = reverse("contacts:contact_detail", kwargs={"pk": contact.pk})
         self.assertIn(f'href="{contact_detail_url}?back_stack=', html)
+
+
+class CompanyDetailActivityTitleTests(TestCase):
+    """会社詳細画面の活動履歴テーブルにおけるタイトル表示検証。"""
+
+    def setUp(self):
+        from activities.models import Activity, ActivityType
+        self.user = User.objects.create_user(username="comp_act_user", password="password")
+        self.client.login(username="comp_act_user", password="password")
+        self.company = Company.objects.create(organization="会社活動会社")
+        self.activity = Activity.objects.create(
+            title="会社詳細表示用タイトル",
+            occurred_at=self.company.created_at,
+            activity_type=ActivityType.VISIT,
+            user=self.user,
+        )
+        self.activity.deal = None
+        self.activity.save()
+
+    def test_activity_title_displayed_in_company_detail(self):
+        """会社詳細の活動履歴テーブルにタイトルが表示され、リンクが含まれていること。"""
+        from deals.models import Deal
+        # deal に紐づけ、または company の活動として表示
+        deal = Deal.objects.create(
+            name="会社紐づけ案件",
+            company=self.company,
+            owner=self.user,
+        )
+        self.activity.deal = deal
+        self.activity.save()
+
+        url = reverse("companies:company_detail", kwargs={"pk": self.company.pk})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "会社詳細表示用タイトル")
+        self.assertContains(response, f"/activities/{self.activity.id}/")
+
 
 
 

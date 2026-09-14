@@ -45,6 +45,7 @@ def _is_wizard_request(request):
 # ----------------------------------------------------------------------
 ACTIVITY_LIST_SORT_FIELD_MAP = {
     "occurred_at": "occurred_at",
+    "title": "title",
     "activity_type": "activity_type",
     "direction": "direction",
     "created_at": "created_at",
@@ -52,6 +53,7 @@ ACTIVITY_LIST_SORT_FIELD_MAP = {
 }
 ACTIVITY_LIST_SORT_CHOICES = [
     ("occurred_at", "実施日時"),
+    ("title", "タイトル"),
     ("activity_type", "活動種別"),
     ("direction", "方向"),
     ("created_at", "登録日時"),
@@ -228,7 +230,8 @@ class ActivityListView(LoginRequiredMixin, ListView):
         if q:
             q = q.strip()
             qs = qs.filter(
-                Q(memo__icontains=q)
+                Q(title__icontains=q)
+                | Q(memo__icontains=q)
                 | Q(place__icontains=q)
                 | Q(deal__name__icontains=q)
                 | Q(deal__company__organization__icontains=q)
@@ -564,6 +567,7 @@ class ActivityUpdateView(LoginRequiredMixin, PermissionRequiredMixin, UpdateView
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context["is_create"] = False
+        context["is_wizard"] = (self.request.GET.get("wizard") == "1" or self.request.POST.get("wizard") == "1")
         context["back"] = BackNavigator(self.request)
         context["active_menu"] = "activities:activity_list"
         return context

@@ -6,9 +6,9 @@
 {% block content %}
 <div class="deal-list-container" style="max-width: 100%; margin-left: 0; margin-right: auto; width: 100%;">
   {% url 'deals:deal_create' as create_url %}
-  <div class="app-page-header">
+  <div class="app-page-header" style="margin-bottom: 16px;">
     <div>
-      <h1>案件一覧</h1>
+      <h1 style="margin:0; font-size: 20px; font-weight: 700;">案件一覧</h1>
     </div>
     <div class="app-action-area">
       {% back_all_link back %}
@@ -26,12 +26,12 @@
     <form method="get" class="app-filter-form" style="display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end;">
       <input type="hidden" name="view" value="{{ current_view }}">
       <div class="app-form__group" style="margin-bottom:0;">
-        <label class="app-form__label" for="filter-q">キーワード検索</label>
-        <input type="text" id="filter-q" name="q" value="{{ current_q }}" class="app-input" placeholder="案件名・会社名・パーソン名">
+        <label class="app-form__label" for="filter-q" style="font-size: 12px; font-weight: 600; color: var(--app-muted, #64748b);">キーワード検索</label>
+        <input type="text" id="filter-q" name="q" value="{{ current_q }}" class="app-input" placeholder="案件名・会社名・パーソン名" style="font-size: 13px;">
       </div>
       <div class="app-form__group" style="margin-bottom:0;">
-        <label class="app-form__label" for="filter-stage">ステージ</label>
-        <select id="filter-stage" name="stage" class="app-select app-input">
+        <label class="app-form__label" for="filter-stage" style="font-size: 12px; font-weight: 600; color: var(--app-muted, #64748b);">ステージ</label>
+        <select id="filter-stage" name="stage" class="app-select app-input" style="font-size: 13px;">
           <option value="">（すべて）</option>
           {% for code, label in stages %}
             <option value="{{ code }}" {% if current_stage == code %}selected{% endif %}>{{ label }}</option>
@@ -39,21 +39,21 @@
         </select>
       </div>
       <div class="app-form__group" style="margin-bottom:0;">
-        <label class="app-form__label" for="filter-status">状態</label>
-        <select id="filter-status" name="status" class="app-select app-input">
+        <label class="app-form__label" for="filter-status" style="font-size: 12px; font-weight: 600; color: var(--app-muted, #64748b);">状態</label>
+        <select id="filter-status" name="status" class="app-select app-input" style="font-size: 13px;">
           <option value="active" {% if current_status == "active" %}selected{% endif %}>有効な案件</option>
           <option value="archived" {% if current_status == "archived" %}selected{% endif %}>アーカイブ済み</option>
           <option value="all" {% if current_status == "all" %}selected{% endif %}>全件</option>
         </select>
       </div>
       <div style="display:flex; gap:8px;">
-        <button type="submit" class="app-btn app-btn--primary app-btn--sm">絞り込み</button>
-        <a href="{% url 'deals:deal_list' %}?view={{ current_view }}" class="app-btn app-btn--secondary app-btn--sm">リセット</a>
+        <button type="submit" class="app-btn app-btn--primary app-btn--sm" style="font-size: 12px;">絞り込み</button>
+        <a href="{% url 'deals:deal_list' %}?view={{ current_view }}" class="app-btn app-btn--secondary app-btn--sm" style="font-size: 12px;">リセット</a>
       </div>
       <div style="margin-left:auto; display:flex; align-items:center;">
         <div class="app-btn-group" style="display:inline-flex; border:1px solid var(--app-border, #cbd5e1); border-radius:6px; overflow:hidden;">
-          <a href="{{ list_url }}" class="app-btn app-btn--sm {% if current_view == 'list' %}app-btn--primary{% else %}app-btn--ghost{% endif %}" style="border-radius:0; border:none; text-decoration:none;">一覧</a>
-          <a href="{{ kanban_url }}" class="app-btn app-btn--sm {% if current_view == 'kanban' %}app-btn--primary{% else %}app-btn--ghost{% endif %}" style="border-radius:0; border:none; text-decoration:none;">パイプライン</a>
+          <a href="{{ list_url }}" class="app-btn app-btn--sm {% if current_view == 'list' %}app-btn--primary{% else %}app-btn--ghost{% endif %}" style="border-radius:0; border:none; text-decoration:none; font-size: 12px;">一覧</a>
+          <a href="{{ kanban_url }}" class="app-btn app-btn--sm {% if current_view == 'kanban' %}app-btn--primary{% else %}app-btn--ghost{% endif %}" style="border-radius:0; border:none; text-decoration:none; font-size: 12px;">パイプライン</a>
         </div>
       </div>
     </form>
@@ -64,18 +64,18 @@
   {% else %}
     <section class="app-card">
       <div class="app-table-wrapper">
-        <table class="app-table app-table--nowrap">
+        <table class="app-table app-table--nowrap" style="font-size: 13px;">
           <thead>
             <tr>
-              <th style="width:80px; min-width:80px; white-space:nowrap; text-align:center;">操作</th>
-              <th>案件名</th>
-              <th>会社名</th>
-              <th>相手方主担当</th>
-              <th>ステージ</th>
-              <th style="text-align: right;">確度</th>
-              <th style="text-align: right; font-variant-numeric: tabular-nums;">金額</th>
-              <th>社内担当</th>
-              <th>最終接触日</th>
+              <th style="width:80px; min-width:80px; white-space:nowrap; text-align:center; font-size: 12px; color: var(--app-muted, #64748b);">操作</th>
+              <th style="font-size: 12px; color: var(--app-muted, #64748b);">案件名</th>
+              <th style="font-size: 12px; color: var(--app-muted, #64748b);">会社名</th>
+              <th style="font-size: 12px; color: var(--app-muted, #64748b);">相手方主担当</th>
+              <th style="font-size: 12px; color: var(--app-muted, #64748b);">ステージ</th>
+              <th style="text-align: right; font-size: 12px; color: var(--app-muted, #64748b);">確度</th>
+              <th style="text-align: right; font-variant-numeric: tabular-nums; font-size: 12px; color: var(--app-muted, #64748b);">金額</th>
+              <th style="font-size: 12px; color: var(--app-muted, #64748b);">社内担当</th>
+              <th style="font-size: 12px; color: var(--app-muted, #64748b);">最終接触日</th>
             </tr>
           </thead>
           <tbody>
@@ -83,10 +83,10 @@
               {% url 'deals:deal_detail' pk=deal.id as detail_url %}
               <tr>
                 <td style="white-space:nowrap; text-align:center;">
-                  <a href="{% append_back_url detail_url back %}" class="app-btn app-btn--ghost app-btn--sm" style="display:inline-block; white-space:nowrap;" title="詳細">詳細</a>
+                  <a href="{% append_back_url detail_url back %}" class="app-btn app-btn--ghost app-btn--sm" style="display:inline-block; white-space:nowrap; font-size: 12px;" title="詳細">詳細</a>
                 </td>
                 <td>
-                  <a href="{% append_back_url detail_url back %}" style="font-weight: 600; color: var(--app-text, #0f172a); text-decoration: none;">{{ deal.name }}</a>
+                  <a href="{% append_back_url detail_url back %}" style="font-size: 13px; font-weight: 600; color: var(--app-text, #0f172a); text-decoration: none;">{{ deal.name }}</a>
                 </td>
                 <td>
                   {% if deal.company %}

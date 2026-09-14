@@ -1,65 +1,121 @@
 {% extends "companies/app_base.html" %}
-{% load back_tags %}
+{% load back_tags phone_tags %}
 
 {% block title %}{{ company.organization }} — 会社詳細 — FreeGroup2{% endblock %}
 
 {% block content %}
 <div class="company-detail-container" style="max-width: 1040px; margin-left: 0; margin-right: auto; width: 100%;">
-  <div class="app-page-header">
-    <div>
-      <h1>{{ company.organization }}</h1>
-      <div style="font-size:13px; color:var(--app-muted); margin-top:4px;">
-        状態: <span class="app-status-badge">{{ company.get_status_display }}</span>
-        {% if company.merged_into %}
-          {% url 'companies:company_detail' pk=company.merged_into.id as merged_url %}
-          （統合先: <a href="{% append_back_url merged_url back %}">{{ company.merged_into.organization }}</a>）
+  <!-- 画面上部ヘッダー（タイトル・操作ボタン・戻る） -->
+  <div style="margin-bottom: 16px;">
+    <div class="app-page-header" style="margin-bottom: 8px;">
+      <div>
+        <h1 style="font-size:20px; font-weight:700; margin:0;">{{ company.organization }}</h1>
+        {% if company.status == "archived" or company.merged_into %}
+          <div style="font-size:12px; color:var(--app-muted, #64748b); margin-top:4px; display:flex; align-items:center; gap:6px;">
+            {% if company.status == "archived" %}
+              <span class="app-badge app-badge--warning" style="font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 9999px;">アーカイブ済み</span>
+            {% endif %}
+            {% if company.merged_into %}
+              {% url 'companies:company_detail' pk=company.merged_into.id as merged_url %}
+              <span>（統合先: <a href="{% append_back_url merged_url back %}">{{ company.merged_into.organization }}</a>）</span>
+            {% endif %}
+          </div>
         {% endif %}
       </div>
     </div>
-    <div class="app-action-area">
-      {% back_all_link back %}
-      {% back_link back %}
+
+    <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap;">
+      <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+        {% url 'deals:deal_create' as deal_create_base_url %}
+        {% with comp_id=company.id|stringformat:"s" %}
+        {% with deal_create_url=deal_create_base_url|add:"?company="|add:comp_id %}
+          <a href="{% append_back_url deal_create_url back %}" class="app-btn app-btn--primary app-btn--sm">新規案件</a>
+        {% endwith %}
+        {% endwith %}
+
+        {% url 'activities:activity_create' as act_create_base_url %}
+        {% with comp_id=company.id|stringformat:"s" %}
+        {% with act_create_url=act_create_base_url|add:"?company="|add:comp_id %}
+          <a href="{% append_back_url act_create_url back %}" class="app-btn app-btn--primary app-btn--sm">活動記録</a>
+        {% endwith %}
+        {% endwith %}
+      </div>
+      <div style="display: flex; align-items: center; gap: 8px; margin-left: auto;">
+        {% back_all_link back %}
+        {% back_link back %}
+      </div>
     </div>
   </div>
 
-  <div class="app-action-area" style="justify-content:flex-start; margin-bottom:20px; gap:8px;">
-    {% if can_edit %}
-      {% url 'companies:company_update' pk=company.id as edit_url %}
-      <a href="{% append_back_url edit_url back %}" class="app-btn app-btn--success">編集</a>
-    {% endif %}
-    {% if can_archive and company.status != "archived" %}
-      {% url 'companies:company_archive' pk=company.id as archive_url %}
-      <a href="{% append_back_url archive_url back %}" class="app-btn app-btn--warning">アーカイブ</a>
-    {% endif %}
-  </div>
+  {# 会社概要カード（HIG 7.6 準拠） #}
+  <section class="app-card" style="padding:16px 20px; width: 100%; box-sizing: border-box; margin-bottom: 24px;">
+    <div style="display:flex; flex-direction:column; gap:12px;">
 
-  <section class="app-card" style="margin-bottom:24px;">
-    <h2 style="font-size:16px; margin-bottom:16px;">会社概要</h2>
-    <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
-      <div>
-        <div class="app-form__label">ドメイン</div>
-        <div>{{ company.domain|default:"-" }}</div>
+      {# 1. 会社名行（全幅・flex） #}
+      <div style="display:flex; justify-content:space-between; align-items:center; padding-bottom:10px; border-bottom:1px solid var(--app-border, #e5e7eb);">
+        <div style="display:flex; align-items:center; gap:8px; flex:1;">
+          <span style="display:inline-block; min-width:96px; width:96px; font-size:12px; color:var(--app-muted, #64748b); white-space:nowrap;">会社名:</span>
+          <span style="font-size:16px; font-weight:700; color:var(--app-text, #0f172a); word-break:break-word;">{{ company.organization }}</span>
+          {% if can_edit %}
+            {% url 'companies:company_update' pk=company.id as edit_url %}
+            <a href="{% append_back_url edit_url back %}" class="app-icon-btn" title="会社を編集" aria-label="会社を編集" style="color:var(--app-text, #0f172a); text-decoration:none; margin-left:4px;">
+              <i class="bi bi-pencil-fill"></i>
+            </a>
+          {% endif %}
+        </div>
+
+        {% if can_archive and company.status != "archived" %}
+          {% url 'companies:company_archive' pk=company.id as archive_url %}
+          <div style="margin-left:auto;">
+            <a href="{% append_back_url archive_url back %}" class="app-icon-btn" title="アーカイブ" aria-label="アーカイブ" style="color:var(--app-text, #0f172a); text-decoration:none;">
+              <i class="bi bi-archive-fill"></i>
+            </a>
+          </div>
+        {% endif %}
       </div>
-      <div>
-        <div class="app-form__label">電話番号</div>
-        <div>{{ company.phone|default:"-" }}</div>
-      </div>
-      <div>
-        <div class="app-form__label">Webサイト</div>
-        <div>
-          {% if company.website %}
-            <a href="{{ company.website }}" target="_blank" rel="noopener noreferrer">{{ company.website }}</a>
-          {% else %}-{% endif %}
+
+      {# 2. ドメイン / 電話番号（2列横並び） #}
+      <div style="display:grid; grid-template-columns:repeat(2, 1fr); gap:16px; padding-bottom:8px; border-bottom:1px dashed var(--app-border, #f1f5f9);">
+        <div style="display:flex; align-items:baseline; gap:8px;">
+          <span style="display:inline-block; min-width:96px; width:96px; font-size:12px; color:var(--app-muted, #64748b); white-space:nowrap;">ドメイン:</span>
+          <span style="flex:1; word-break:break-word; font-size:13px; color:var(--app-text, #0f172a);">
+            {{ company.domain|default:"-" }}
+          </span>
+        </div>
+        <div style="display:flex; align-items:baseline; gap:8px;">
+          <span style="display:inline-block; min-width:96px; width:96px; font-size:12px; color:var(--app-muted, #64748b); white-space:nowrap;">電話番号:</span>
+          <span style="flex:1; word-break:break-word; font-size:13px; color:var(--app-text, #0f172a);">
+            {% if company.phone %}{% format_phone company.phone %}{% else %}-{% endif %}
+          </span>
         </div>
       </div>
-      <div>
-        <div class="app-form__label">登録日時</div>
-        <div>{{ company.created_at|date:"Y-m-d H:i" }}</div>
+
+      {# 3. Webサイト / 登録日時（2列横並び） #}
+      <div style="display:grid; grid-template-columns:repeat(2, 1fr); gap:16px; padding-bottom:8px; border-bottom:1px dashed var(--app-border, #f1f5f9);">
+        <div style="display:flex; align-items:baseline; gap:8px;">
+          <span style="display:inline-block; min-width:96px; width:96px; font-size:12px; color:var(--app-muted, #64748b); white-space:nowrap;">Webサイト:</span>
+          <span style="flex:1; word-break:break-word; font-size:13px;">
+            {% if company.website %}
+              <a href="{{ company.website }}" target="_blank" rel="noopener noreferrer">{{ company.website }}</a>
+            {% else %}-{% endif %}
+          </span>
+        </div>
+        <div style="display:flex; align-items:baseline; gap:8px;">
+          <span style="display:inline-block; min-width:96px; width:96px; font-size:12px; color:var(--app-muted, #64748b); white-space:nowrap;">登録日時:</span>
+          <span style="flex:1; word-break:break-word; font-size:13px; color:var(--app-text, #0f172a);">
+            {{ company.created_at|date:"Y-m-d H:i" }}
+          </span>
+        </div>
       </div>
-      <div style="grid-column:1 / -1;">
-        <div class="app-form__label">住所</div>
-        <div>{{ company.address|default:"-" }}</div>
+
+      {# 4. 住所（全幅） #}
+      <div style="display:flex; align-items:baseline; gap:8px;">
+        <span style="display:inline-block; min-width:96px; width:96px; font-size:12px; color:var(--app-muted, #64748b); white-space:nowrap;">住所:</span>
+        <span style="flex:1; word-break:break-word; font-size:13px; color:var(--app-text, #0f172a);">
+          {{ company.address|default:"-" }}
+        </span>
       </div>
+
     </div>
   </section>
 
@@ -77,16 +133,16 @@
       {% endwith %}
     </div>
     <div class="app-table-wrapper">
-      <table class="app-table">
+      <table class="app-table" style="font-size: 13px;">
         <thead>
           <tr>
-            <th>案件名</th>
-            <th>ステージ</th>
-            <th>金額</th>
-            <th>主担当</th>
-            <th>担当者</th>
-            <th>更新日時</th>
-            <th>操作</th>
+            <th style="font-size: 12px; color: var(--app-muted, #64748b);">案件名</th>
+            <th style="font-size: 12px; color: var(--app-muted, #64748b);">ステージ</th>
+            <th style="font-size: 12px; color: var(--app-muted, #64748b);">金額</th>
+            <th style="font-size: 12px; color: var(--app-muted, #64748b);">主担当</th>
+            <th style="font-size: 12px; color: var(--app-muted, #64748b);">担当者</th>
+            <th style="font-size: 12px; color: var(--app-muted, #64748b);">更新日時</th>
+            <th style="font-size: 12px; color: var(--app-muted, #64748b);">操作</th>
           </tr>
         </thead>
         <tbody>
@@ -129,16 +185,17 @@
       {% endwith %}
     </div>
     <div class="app-table-wrapper">
-      <table class="app-table">
+      <table class="app-table" style="font-size: 13px;">
         <thead>
           <tr>
-            <th>日時</th>
-            <th>種別</th>
-            <th>方向</th>
-            <th>実施者</th>
-            <th>関連案件</th>
-            <th>メモ</th>
-            <th>操作</th>
+            <th style="font-size: 12px; color: var(--app-muted, #64748b);">日時</th>
+            <th style="font-size: 12px; color: var(--app-muted, #64748b);">タイトル</th>
+            <th style="font-size: 12px; color: var(--app-muted, #64748b);">種別</th>
+            <th style="font-size: 12px; color: var(--app-muted, #64748b);">方向</th>
+            <th style="font-size: 12px; color: var(--app-muted, #64748b);">実施者</th>
+            <th style="font-size: 12px; color: var(--app-muted, #64748b);">関連案件</th>
+            <th style="font-size: 12px; color: var(--app-muted, #64748b);">メモ</th>
+            <th style="font-size: 12px; color: var(--app-muted, #64748b);">操作</th>
           </tr>
         </thead>
         <tbody>
@@ -146,6 +203,9 @@
             {% url 'activities:activity_detail' pk=activity.id as act_detail_url %}
             <tr>
               <td>{{ activity.occurred_at|date:"Y-m-d H:i" }}</td>
+              <td>
+                <a href="{% append_back_url act_detail_url back %}" style="font-size: 13px; font-weight:600; color:var(--app-text, #0f172a); text-decoration:none;">{{ activity.title|default:"（タイトルなし）" }}</a>
+              </td>
               <td><span class="app-status-badge">{{ activity.get_activity_type_display }}</span></td>
               <td>{{ activity.get_direction_display|default:"-" }}</td>
               <td>{{ activity.user|default:"-" }}</td>
@@ -162,7 +222,7 @@
             </tr>
           {% empty %}
             <tr>
-              <td colspan="7" class="app-muted" style="text-align:center; padding:16px;">紐づく活動履歴はありません。</td>
+              <td colspan="8" class="app-muted" style="text-align:center; padding:16px;">紐づく活動履歴はありません。</td>
             </tr>
           {% endfor %}
         </tbody>
@@ -174,15 +234,15 @@
   <section class="app-card">
     <h2 style="font-size:16px; margin-bottom:16px;">所属コンタクト（{{ contacts.count }}件）</h2>
     <div class="app-table-wrapper">
-      <table class="app-table">
+      <table class="app-table" style="font-size: 13px;">
         <thead>
           <tr>
-            <th>氏名</th>
-            <th>役職</th>
-            <th>部署</th>
-            <th>メール</th>
-            <th>電話番号</th>
-            <th>操作</th>
+            <th style="font-size: 12px; color: var(--app-muted, #64748b);">氏名</th>
+            <th style="font-size: 12px; color: var(--app-muted, #64748b);">役職</th>
+            <th style="font-size: 12px; color: var(--app-muted, #64748b);">部署</th>
+            <th style="font-size: 12px; color: var(--app-muted, #64748b);">メール</th>
+            <th style="font-size: 12px; color: var(--app-muted, #64748b);">電話番号</th>
+            <th style="font-size: 12px; color: var(--app-muted, #64748b);">操作</th>
           </tr>
         </thead>
         <tbody>
@@ -195,7 +255,7 @@
               <td>{{ contact.title|default:"-" }}</td>
               <td>{{ contact.department|default:"-" }}</td>
               <td>{{ contact.email|default:"-" }}</td>
-              <td>{{ contact.phone|default:"-" }}</td>
+              <td>{% if contact.phone %}{% format_phone contact.phone %}{% else %}-{% endif %}</td>
               <td>
                 <a href="{% append_back_url contact_detail_url back %}" class="app-btn app-btn--ghost app-btn--sm">詳細</a>
               </td>

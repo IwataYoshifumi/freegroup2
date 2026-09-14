@@ -20,7 +20,10 @@
     </div>
     <div class="app-action-area">
       {% back_all_link back %}
-      {% if back.back_exist %}
+      {% if is_wizard %}
+        {% url 'activities:activity_update' pk=activity.id as step1_url %}
+        <a href="{% append_back_url step1_url|add:'?wizard=1' back %}" class="app-btn app-btn--secondary">戻る</a>
+      {% elif back.back_exist %}
         {% back_link back %}
       {% else %}
         <a href="{{ activity_detail_url }}" class="app-btn app-btn--secondary">戻る</a>
@@ -259,9 +262,15 @@
   </section>
 
   {% if is_wizard %}
-    <div class="app-action-area" style="margin-top:24px; display:flex; justify-content:flex-end;">
-      {% url 'activities:activity_users_manage' pk=activity.id as next_step_url %}
-      <a href="{% append_back_url next_step_url|add:'?wizard=1' back %}" class="app-btn app-btn--primary" style="min-width:120px; text-align:center;">次へ</a>
+    <div class="app-action-area" style="margin-top:24px; display:flex; justify-content:space-between; align-items:center;">
+      <div>
+        {% url 'activities:activity_update' pk=activity.id as step1_url %}
+        <a href="{% append_back_url step1_url|add:'?wizard=1' back %}" class="app-btn app-btn--secondary" style="min-width:100px; text-align:center;">戻る</a>
+      </div>
+      <div>
+        {% url 'activities:activity_users_manage' pk=activity.id as next_step_url %}
+        <a href="{% append_back_url next_step_url|add:'?wizard=1' back %}" class="app-btn app-btn--primary" style="min-width:120px; text-align:center;">次へ</a>
+      </div>
     </div>
   {% endif %}
 </div>

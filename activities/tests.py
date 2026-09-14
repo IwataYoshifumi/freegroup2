@@ -16,6 +16,8 @@ from contacts.models import Contact
 from deals.models import Deal, DealPerson, DealUser, PersonRole, UserRole
 from mailings.models import Campaign, ClickLog, EmailTemplate, TrackingLink
 from persons.models import Person
+from accounts.models import Role
+from accounts.services import apply_role
 from back_navigator.back_navigator import BackNavigator
 
 User = get_user_model()
@@ -351,8 +353,8 @@ class ActivityViewTests(TestCase):
         self.assertContains(response, "初回訪問議事録")
         # HIG準拠レイアウト・表示（コンテナ幅、種別バッジ、方向バッジ、省略メモ）
         self.assertContains(response, "max-width: 1200px;")
-        self.assertContains(response, '<span class="app-badge app-badge--neutral">訪問</span>')
-        self.assertContains(response, '<span class="app-badge app-badge--info">発信</span>')
+        self.assertContains(response, '<span class="app-badge app-badge--neutral" style="font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 9999px;">訪問</span>')
+        self.assertContains(response, '<span class="app-badge app-badge--info" style="font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 9999px;">発信</span>')
         self.assertContains(response, 'white-space:nowrap;')
         # 不要ボタン撤去（日報/全期間ボタンの完全撤去）および新規作成ボタン配置
         self.assertNotContains(response, "本日の日報")
@@ -1717,6 +1719,249 @@ class ActivityDetailAttachmentModalTests(TestCase):
         self.assertIn('id="attachment-dropzone"', modal_html)
         self.assertIn('id="attachment-upload-btn"', modal_html)
         self.assertIn('data-action="close-modal"', modal_html)
+
+
+class SalesRoleActivityCreatePermissionTests(TestCase):
+    """営業（sales）ロールを持つ一般ユーザーの活動起票権限（activities.add_activity）検証。"""
+
+    def setUp(self):
+        self.sales_role = Role.objects.get(code="sales")
+        self.sales_user = User.objects.create_user(username="sales_act_user", password="password")
+        apply_role(self.sales_user, self.sales_role)
+        self.company = Company.objects.create(organization="活動テスト商事")
+
+    def test_sales_role_user_can_access_activity_create_view(self):
+        """営業ロールを持つユーザーが GET /activities/create/ にアクセスした際、403 Forbidden にならず 200 OK で表示されること。"""
+        self.client.login(username="sales_act_user", password="password")
+        url = reverse("activities:activity_create")
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "活動記録作成")
+
+    def test_sales_role_user_can_create_activity(self):
+        """営業ロールを持つユーザーが POST /activities/create/ で活動を正常に起票できること。"""
+        self.client.login(username="sales_act_user", password="password")
+        url = reverse("activities:activity_create")
+        post_data = {
+            "occurred_at": timezone.now().strftime("%Y-%m-%d %H:%M"),
+            "activity_type": ActivityType.VISIT,
+            "direction": Direction.OUTGOING,
+            "company_id": str(self.company.pk),
+            "memo": "営業担当起票の活動メモ",
+        }
+        response = self.client.post(url, data=post_data)
+        self.assertEqual(response.status_code, 302)
+        created_activity = Activity.objects.filter(memo="営業担当起票の活動メモ").first()
+        self.assertIsNotNone(created_activity)
+        self.assertEqual(created_activity.user, self.sales_user)
+
+
+class ActivityWizardBackNavigationTests(TestCase):
+    """新規活動ウィザードの各ステップ間のBackNavigator戻り先検証。"""
+
+    def setUp(self):
+        from django.contrib.auth.models import Permission
+
+        self.user = User.objects.create_user(username="wizard_act_user", password="password")
+        self.user.user_permissions.add(
+            Permission.objects.get(codename="add_activity"),
+            Permission.objects.get(codename="change_activity"),
+            Permission.objects.get(codename="view_activity"),
+        )
+        self.client.login(username="wizard_act_user", password="password")
+        self.company = Company.objects.create(organization="ウィザードテスト会社")
+
+    def test_step1_to_step2_back_link_points_to_step1_edit(self):
+        """Step 1（新規作成）から Step 2（パーソン設定）へ遷移した際、Step 2 画面の戻るリンク先が Step 1（編集画面 ?wizard=1 付き）を指していること。"""
+        origin_url = reverse("companies:company_detail", kwargs={"pk": self.company.pk})
+        back = BackNavigator(self.client.get(origin_url).wsgi_request)
+        back.push_current(title="会社詳細", keys=["page"])
+        create_url = back.append_url(reverse("activities:activity_create"))
+
+        post_data = {
+            "occurred_at": timezone.now().strftime("%Y-%m-%d %H:%M"),
+            "activity_type": ActivityType.VISIT,
+            "direction": Direction.OUTGOING,
+            "company_id": str(self.company.pk),
+            "memo": "ウィザードテスト活動",
+            BackNavigator.PARAM_NAME: back._encode_stack(),
+        }
+        res_step1 = self.client.post(create_url, data=post_data)
+        self.assertEqual(res_step1.status_code, 302)
+
+        step2_url = res_step1.url
+        activity = Activity.objects.filter(memo="ウィザードテスト活動").first()
+        self.assertIsNotNone(activity)
+        expected_step2_base = reverse("activities:activity_persons_manage", kwargs={"pk": activity.pk})
+        self.assertIn(expected_step2_base, step2_url)
+        self.assertIn("wizard=1", step2_url)
+
+        res_step2 = self.client.get(step2_url)
+        self.assertEqual(res_step2.status_code, 200)
+        html_step2 = res_step2.content.decode("utf-8")
+
+        step1_edit_base = reverse("activities:activity_update", kwargs={"pk": activity.pk})
+        import re
+        pattern = rf'<a[^>]+href="({re.escape(step1_edit_base)}\?[^"]*wizard=1[^"]*)"[^>]*>\s*戻る\s*</a>'
+        match = re.search(pattern, html_step2)
+        self.assertIsNotNone(match, f"Step 2 画面の戻るリンク先に Step 1 編集画面（{step1_edit_base}?wizard=1）が見つかりません。")
+
+    def test_step2_back_to_step1_and_proceed_again(self):
+        """Step 2 から Step 1 編集画面へ引き返し、再度「次へ」を押して Step 2 に進んだ場合も戻り先が Step 1 を維持すること。"""
+        activity = Activity.objects.create(
+            occurred_at=timezone.now(),
+            activity_type=ActivityType.VISIT,
+            direction=Direction.OUTGOING,
+            user=self.user,
+            memo="再進行テスト活動",
+        )
+        origin_url = reverse("companies:company_detail", kwargs={"pk": self.company.pk})
+        back = BackNavigator(self.client.get(origin_url).wsgi_request)
+        back.push_current(title="会社詳細", keys=["page"])
+
+        step1_edit_url = reverse("activities:activity_update", kwargs={"pk": activity.pk}) + "?wizard=1"
+        step1_with_back = back.append_url(step1_edit_url)
+
+        post_data = {
+            "occurred_at": timezone.now().strftime("%Y-%m-%d %H:%M"),
+            "activity_type": ActivityType.VISIT,
+            "direction": Direction.OUTGOING,
+            "memo": "再進行テスト活動（更新後）",
+            "wizard": "1",
+            BackNavigator.PARAM_NAME: back._encode_stack(),
+        }
+        res_step1_post = self.client.post(step1_with_back, data=post_data)
+        self.assertEqual(res_step1_post.status_code, 302)
+
+        res_step2 = self.client.get(res_step1_post.url)
+        self.assertEqual(res_step2.status_code, 200)
+        html_step2 = res_step2.content.decode("utf-8")
+
+        step1_edit_base = reverse("activities:activity_update", kwargs={"pk": activity.pk})
+        import re
+        pattern = rf'<a[^>]+href="({re.escape(step1_edit_base)}\?[^"]*wizard=1[^"]*)"[^>]*>\s*戻る\s*</a>'
+        self.assertRegex(html_step2, pattern)
+
+    def test_step1_create_back_link_points_to_origin(self):
+        """Step 1（新規作成画面）の時点で「戻る」リンクが起点画面を指していること。"""
+        origin_url = reverse("companies:company_detail", kwargs={"pk": self.company.pk})
+        back = BackNavigator(self.client.get(origin_url).wsgi_request)
+        back.push_current(title="会社詳細", keys=["page"])
+        create_url = back.append_url(reverse("activities:activity_create"))
+
+        res = self.client.get(create_url)
+        self.assertEqual(res.status_code, 200)
+        html = res.content.decode("utf-8")
+        import re
+        pattern = rf'<a class="app-btn app-btn--secondary" href="({re.escape(origin_url)})">\s*戻る\s*</a>'
+        self.assertRegex(html, pattern)
+
+
+class ActivityTitleFieldTests(TestCase):
+    """活動記録のタイトル（件名）フィールドに関する単体テスト。"""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="title_test_user", password="password")
+        self.user.user_permissions.add(
+            Permission.objects.get(codename="add_activity"),
+            Permission.objects.get(codename="change_activity"),
+            Permission.objects.get(codename="view_activity"),
+        )
+        self.client.login(username="title_test_user", password="password")
+        self.company = Company.objects.create(organization="タイトルテスト株式会社")
+
+    def test_activity_str_representation(self):
+        """__str__ メソッドがタイトルあり・なしで適切に表現されること。"""
+        now = timezone.now()
+        date_str = timezone.localtime(now).strftime("%Y-%m-%d")
+
+        # タイトルなし
+        act_no_title = Activity.objects.create(
+            occurred_at=now,
+            activity_type=ActivityType.PHONE,
+            user=self.user,
+        )
+        self.assertEqual(str(act_no_title), f"{date_str} 電話")
+
+        # タイトルあり
+        act_with_title = Activity.objects.create(
+            title="初回ヒアリング会議",
+            occurred_at=now,
+            activity_type=ActivityType.VISIT,
+            user=self.user,
+        )
+        self.assertEqual(str(act_with_title), "初回ヒアリング会議 (訪問)")
+
+    def test_activity_create_and_update_view_with_title(self):
+        """新規作成および更新画面でタイトルが正常に保存されること。"""
+        url = reverse("activities:activity_create")
+        post_data = {
+            "title": "新設タイトルテスト",
+            "occurred_at": timezone.now().strftime("%Y-%m-%d %H:%M"),
+            "activity_type": ActivityType.VISIT,
+            "direction": Direction.OUTGOING,
+            "company_id": str(self.company.pk),
+            "memo": "タイトルテスト用メモ",
+        }
+        res = self.client.post(url, data=post_data)
+        self.assertEqual(res.status_code, 302)
+        act = Activity.objects.filter(memo="タイトルテスト用メモ").first()
+        self.assertIsNotNone(act)
+        self.assertEqual(act.title, "新設タイトルテスト")
+
+        # 編集画面での更新
+        update_url = reverse("activities:activity_update", kwargs={"pk": act.pk})
+        post_data["title"] = "更新後タイトル"
+        res_update = self.client.post(update_url, data=post_data)
+        self.assertEqual(res_update.status_code, 302)
+        act.refresh_from_db()
+        self.assertEqual(act.title, "更新後タイトル")
+
+    def test_activity_list_search_by_title(self):
+        """一覧画面のキーワード検索（qパラメータ）でタイトルによる絞り込みができること。"""
+        Activity.objects.create(
+            title="ターゲット件名ABC",
+            occurred_at=timezone.now(),
+            activity_type=ActivityType.EMAIL,
+            user=self.user,
+            memo="別の内容",
+        )
+        Activity.objects.create(
+            title="別件タイトルXYZ",
+            occurred_at=timezone.now(),
+            activity_type=ActivityType.EMAIL,
+            user=self.user,
+            memo="関係ない内容",
+        )
+        list_url = reverse("activities:activity_list")
+        res = self.client.get(f"{list_url}?q=ターゲット件名ABC&mode=all")
+        self.assertEqual(res.status_code, 200)
+        self.assertContains(res, "ターゲット件名ABC")
+        self.assertNotContains(res, "別件タイトルXYZ")
+
+    def test_activity_list_and_detail_display_title(self):
+        """一覧画面および詳細画面でタイトルが正しく表示されること。"""
+        act = Activity.objects.create(
+            title="UI表示確認用タイトル",
+            occurred_at=timezone.now(),
+            activity_type=ActivityType.WEB_MEETING,
+            direction=Direction.INCOMING,
+            user=self.user,
+            memo="表示確認メモ",
+        )
+        # 一覧画面
+        res_list = self.client.get(f"{reverse('activities:activity_list')}?mode=all")
+        self.assertEqual(res_list.status_code, 200)
+        self.assertContains(res_list, "UI表示確認用タイトル")
+        self.assertContains(res_list, f"/activities/{act.id}/")
+
+        # 詳細画面
+        res_detail = self.client.get(reverse("activities:activity_detail", kwargs={"pk": act.pk}))
+        self.assertEqual(res_detail.status_code, 200)
+        self.assertContains(res_detail, "タイトル:")
+        self.assertContains(res_detail, "UI表示確認用タイトル")
+
+
 
 
 
