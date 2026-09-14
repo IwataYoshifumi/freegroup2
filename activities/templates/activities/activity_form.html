@@ -65,6 +65,15 @@
           {% if form.title.errors %}<div class="app-form__error">{{ form.title.errors }}</div>{% endif %}
         </div>
 
+        {# 場所・会議URL: 1行・全幅 #}
+        <div class="app-form__group app-form__group--full">
+          <label class="app-form__label" for="{{ form.place.id_for_label }}">
+            {{ form.place.label }}{% if form.place.field.required %} <span style="color:var(--app-color-danger, #ef4444);">*</span>{% endif %}
+          </label>
+          {{ form.place }}
+          {% if form.place.errors %}<div class="app-form__error">{{ form.place.errors }}</div>{% endif %}
+        </div>
+
         {# 活動日時 & 実施者 #}
         <div class="app-form__group">
           <label class="app-form__label" for="{{ form.occurred_at.id_for_label }}">
@@ -125,15 +134,6 @@
           </label>
           {{ form.campaign }}
           {% if form.campaign.errors %}<div class="app-form__error">{{ form.campaign.errors }}</div>{% endif %}
-        </div>
-
-        {# 場所・会議URL: 1行・全幅 #}
-        <div class="app-form__group app-form__group--full">
-          <label class="app-form__label" for="{{ form.place.id_for_label }}">
-            {{ form.place.label }}{% if form.place.field.required %} <span style="color:var(--app-color-danger, #ef4444);">*</span>{% endif %}
-          </label>
-          {{ form.place }}
-          {% if form.place.errors %}<div class="app-form__error">{{ form.place.errors }}</div>{% endif %}
         </div>
 
         {# 活動内容メモ: 1行・全幅 #}
