@@ -1102,18 +1102,28 @@ class CompanyDetailContactPhoneTests(TestCase):
 
     def test_company_detail_displays_contact_without_phone_shows_dash(self):
         """電話番号が未設定の場合、ハイフン '-' が表示されること。"""
+        import re
+
         Contact.objects.create(
             person=self.person3,
             company=self.company,
             last_name="佐藤",
             first_name="三郎",
+            title="課長",
+            department="営業部",
+            email="sato@example.com",
             org_phone="",
             mobile_phone="",
         )
         url = reverse("companies:company_detail", kwargs={"pk": self.company.pk})
         resp = self.client.get(url)
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "-")
+        self.assertContains(resp, "課長")
+        self.assertContains(resp, "営業部")
+        # 他列（役職・部署）の default="-" と重複誤判定しないよう、電話番号セルにハイフン「-」が出力されることを検証
+        html = resp.content.decode("utf-8")
+        pattern = r"<td>課長</td>\s*<td>営業部</td>\s*<td>sato@example\.com</td>\s*<td>\s*-\s*</td>"
+        self.assertRegex(html, pattern)
 
 
 

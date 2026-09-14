@@ -2788,6 +2788,48 @@ class DealDetailActivityTitleTests(TestCase):
         self.assertContains(response, f"/activities/{self.activity.id}/")
 
 
+class SafeDealModelFormMixinTests(TestCase):
+    """SafeDealModelFormMixin のエラー付け替え処理（_post_clean）検証。"""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="deal_mixin_user", password="password")
+        self.company = Company.objects.create(organization="防護ネットテスト会社")
+        self.deal = Deal.objects.create(
+            name="防護ネット検証案件",
+            company=self.company,
+            owner=self.user,
+            stage=Stage.INITIAL_MEETING,
+        )
+
+    def test_deal_update_form_closed_at_future_date_remapped_without_crash(self):
+        """DealUpdateForm（closed_at を含まないフォーム）で closed_at に未来日が直接セットされている場合、
+        ValueError でクラッシュせず正常にバリデーションエラーとなり、stage またはノンフィールドエラーに付け替えられること。
+        """
+        from deals.forms import DealUpdateForm
+
+        # 案件の closed_at に未来日（Model.clean() バリデーション違反）を直接セット
+        tomorrow = timezone.localdate() + timedelta(days=1)
+        self.deal.closed_at = tomorrow
+
+        form_data = {
+            "name": "更新後案件名",
+            "company": str(self.company.pk),
+            "stage": Stage.INITIAL_MEETING,
+        }
+        form = DealUpdateForm(data=form_data, instance=self.deal)
+
+        # クラッシュ（ValueError）せず、is_valid() が False となること
+        self.assertFalse(form.is_valid())
+
+        # エラーが stage またはノンフィールドエラーに付け替えられていることを検証
+        stage_or_all_errors = form.errors.get("stage", []) + form.non_field_errors()
+        self.assertTrue(
+            any("成約確定日に未来日は指定できません。" in str(msg) for msg in stage_or_all_errors),
+            f"Expected error message not found in stage/non-field errors: {form.errors}",
+        )
+
+
+
 
 
 
