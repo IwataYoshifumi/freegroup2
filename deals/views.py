@@ -1,4 +1,5 @@
 import uuid
+from decimal import Decimal
 
 from django.contrib import messages
 from django.contrib.auth import get_user_model
@@ -9,6 +10,7 @@ from django.db.models import OuterRef, Q, Subquery
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils import timezone
 from django.views import View
 from django.views.generic import CreateView, DetailView, FormView, ListView, UpdateView
 
@@ -52,6 +54,35 @@ def _is_wizard_request(request):
     return "wizard=1" in next_url
 
 
+KANBAN_COLUMNS_CONFIG = [
+    {
+        "key": "initial_meeting",
+        "title": "初回商談",
+        "stages": [Stage.INITIAL_MEETING],
+    },
+    {
+        "key": "needs_analysis",
+        "title": "ヒアリング・課題整理",
+        "stages": [Stage.NEEDS_ANALYSIS],
+    },
+    {
+        "key": "quotation",
+        "title": "提案・見積提示",
+        "stages": [Stage.QUOTATION],
+    },
+    {
+        "key": "under_review",
+        "title": "社内稟議・検討中",
+        "stages": [Stage.UNDER_REVIEW, Stage.INTERNAL_APPROVAL],
+    },
+    {
+        "key": "negotiation",
+        "title": "最終交渉",
+        "stages": [Stage.NEGOTIATION],
+    },
+]
+
+
 class DealListView(LoginRequiredMixin, ListView):
     """案件一覧画面（仕様書 v1.5 §2.5, §7.1, §9.1）。"""
 
@@ -59,6 +90,11 @@ class DealListView(LoginRequiredMixin, ListView):
     template_name = "deals/deal_list.html"
     context_object_name = "deals"
     paginate_by = 20
+
+    def get_paginate_by(self, queryset):
+        if self.request.GET.get("view") == "kanban":
+            return None
+        return self.paginate_by
 
     def get_queryset(self):
         last_activity = (
@@ -97,13 +133,50 @@ class DealListView(LoginRequiredMixin, ListView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         back = BackNavigator(self.request)
-        back.push_current(title="案件一覧", keys=["q", "stage", "status", "page"])
+        back.push_current(title="案件一覧", keys=["q", "stage", "status", "page", "view"])
         context["back"] = back
         context["stages"] = Stage.choices
         context["current_stage"] = self.request.GET.get("stage", "")
         context["current_status"] = self.request.GET.get("status", "active")
         context["current_q"] = self.request.GET.get("q", "")
         context["active_menu"] = "deals:deal_list"
+
+        current_view = self.request.GET.get("view", "list")
+        if current_view not in ["list", "kanban"]:
+            current_view = "list"
+        context["current_view"] = current_view
+        context["today"] = timezone.localdate()
+
+        # 一覧 ⇔ カンバン切り替え用URLの生成（既存パラメータ維持）
+        params_list = self.request.GET.copy()
+        if "page" in params_list:
+            del params_list["page"]
+        params_list["view"] = "list"
+        context["list_url"] = f"?{params_list.urlencode()}"
+
+        params_kanban = self.request.GET.copy()
+        if "page" in params_kanban:
+            del params_kanban["page"]
+        params_kanban["view"] = "kanban"
+        context["kanban_url"] = f"?{params_kanban.urlencode()}"
+
+        # カンバン表示時のステージ別集計とグループ化
+        if current_view == "kanban":
+            all_deals = list(self.get_queryset())
+            kanban_columns = []
+            for col_cfg in KANBAN_COLUMNS_CONFIG:
+                matching_deals = [d for d in all_deals if d.stage in col_cfg["stages"]]
+                total_amount = sum((d.amount for d in matching_deals if d.amount is not None), Decimal(0))
+                kanban_columns.append({
+                    "key": col_cfg["key"],
+                    "title": col_cfg["title"],
+                    "stages": col_cfg["stages"],
+                    "deals": matching_deals,
+                    "count": len(matching_deals),
+                    "total_amount": total_amount,
+                })
+            context["kanban_columns"] = kanban_columns
+
         return context
 
 
@@ -302,6 +375,11 @@ class DealUpdateView(LoginRequiredMixin, PermissionRequiredMixin, UpdateView):
             raise PermissionDenied
         return obj
 
+    def get_success_url(self):
+        url = reverse("deals:deal_detail", kwargs={"pk": self.object.pk})
+        back = BackNavigator(self.request)
+        return back.append_url(url)
+
     @transaction.atomic
     def form_valid(self, form):
         deal = form.save(commit=False)
@@ -318,12 +396,10 @@ class DealUpdateView(LoginRequiredMixin, PermissionRequiredMixin, UpdateView):
             messages.success(self.request, f"案件「{deal.name}」を更新しました。")
         if is_wizard:
             url = reverse("deals:deal_persons_manage", kwargs={"pk": deal.pk}) + "?wizard=1"
-            raw_back = self.request.POST.get(BackNavigator.PARAM_NAME) or self.request.GET.get(BackNavigator.PARAM_NAME)
-            if raw_back:
-                from urllib.parse import quote
-                url += f"&{BackNavigator.PARAM_NAME}={quote(raw_back)}"
-            return redirect(url)
-        return redirect("deals:deal_detail", pk=deal.pk)
+            back = BackNavigator(self.request)
+            return redirect(back.append_url(url))
+        self.object = deal
+        return redirect(self.get_success_url())
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -394,7 +470,9 @@ class DealCloseView(LoginRequiredMixin, PermissionRequiredMixin, FormView):
             self.request,
             f"案件「{self.deal.name}」を「{self.deal.get_stage_display()}」に更新しました。",
         )
-        return redirect("deals:deal_detail", pk=self.deal.pk)
+        url = reverse("deals:deal_detail", kwargs={"pk": self.deal.pk})
+        back = BackNavigator(self.request)
+        return redirect(back.append_url(url))
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -433,7 +511,9 @@ class DealReassignOwnerView(LoginRequiredMixin, FormView):
             self.request,
             f"案件「{self.deal.name}」の担当者を「{new_owner}」に変更しました。",
         )
-        return redirect("deals:deal_detail", pk=self.deal.pk)
+        url = reverse("deals:deal_detail", kwargs={"pk": self.deal.pk})
+        back = BackNavigator(self.request)
+        return redirect(back.append_url(url))
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -500,7 +580,9 @@ class DealReassignPrimaryPersonView(LoginRequiredMixin, FormView):
             self.request,
             f"案件「{self.deal.name}」の相手方主担当者を「{new_person}」に変更しました。",
         )
-        return redirect("deals:deal_detail", pk=self.deal.pk)
+        url = reverse("deals:deal_detail", kwargs={"pk": self.deal.pk})
+        back = BackNavigator(self.request)
+        return redirect(back.append_url(url))
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -537,7 +619,9 @@ class DealArchiveView(LoginRequiredMixin, PermissionRequiredMixin, View):
     def post(self, request, *args, **kwargs):
         archive_deal(self.deal, user=request.user)
         messages.success(request, f"案件「{self.deal.name}」をアーカイブしました。")
-        return redirect("deals:deal_list")
+        url = reverse("deals:deal_list")
+        back = BackNavigator(request)
+        return redirect(back.append_url(url))
 
 
 class DealAddPersonView(LoginRequiredMixin, View):

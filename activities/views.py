@@ -40,6 +40,85 @@ def _is_wizard_request(request):
     return "wizard=1" in next_url
 
 
+# ----------------------------------------------------------------------
+# 活動一覧の多段ソート（HIG 第6章、パーソン一覧準拠）
+# ----------------------------------------------------------------------
+ACTIVITY_LIST_SORT_FIELD_MAP = {
+    "occurred_at": "occurred_at",
+    "activity_type": "activity_type",
+    "direction": "direction",
+    "created_at": "created_at",
+    "updated_at": "updated_at",
+}
+ACTIVITY_LIST_SORT_CHOICES = [
+    ("occurred_at", "実施日時"),
+    ("activity_type", "活動種別"),
+    ("direction", "方向"),
+    ("created_at", "登録日時"),
+    ("updated_at", "更新日時"),
+]
+ACTIVITY_LIST_SORT_MAX_KEYS = 2
+PER_PAGE_CHOICES = [20, 50, 100]
+
+
+def _parse_activity_sort(params):
+    raw = (params.get("sort") or "").strip()
+    if raw == "date_desc":
+        return [("occurred_at", "desc")]
+    if raw == "date_asc":
+        return [("occurred_at", "asc")]
+
+    tokens = []
+    seen = set()
+    for chunk in raw.split(","):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        if chunk.startswith("-"):
+            direction = "desc"
+            key = chunk[1:]
+        else:
+            direction = "asc"
+            key = chunk
+        if key not in ACTIVITY_LIST_SORT_FIELD_MAP or key in seen:
+            continue
+        seen.add(key)
+        tokens.append((key, direction))
+        if len(tokens) >= ACTIVITY_LIST_SORT_MAX_KEYS:
+            break
+    return tokens
+
+
+def _apply_activity_list_sort(qs, params):
+    tokens = _parse_activity_sort(params)
+    if not tokens:
+        return qs.order_by("-occurred_at", "-id")
+    order = []
+    for key, direction in tokens:
+        prefix = "-" if direction == "desc" else ""
+        order.append(prefix + ACTIVITY_LIST_SORT_FIELD_MAP[key])
+    order.append("-id")
+    return qs.order_by(*order)
+
+
+def _activity_sort_context(params):
+    tokens = _parse_activity_sort(params)
+    rows = [{"key": k, "dir": d} for (k, d) in tokens]
+    while len(rows) < ACTIVITY_LIST_SORT_MAX_KEYS:
+        rows.append({"key": "", "dir": "asc"})
+
+    raw = (params.get("sort") or "").strip()
+    return {
+        "sort_rows": rows,
+        "sort_is_active": bool(tokens and raw),
+        "sort_value": ",".join(
+            ("" if d == "asc" else "-") + k for (k, d) in tokens
+        ) if tokens else "",
+        "per_page_choices": PER_PAGE_CHOICES,
+        "sort_choices": ACTIVITY_LIST_SORT_CHOICES,
+    }
+
+
 class ActivityListView(LoginRequiredMixin, ListView):
     """活動一覧画面（仕様書 v1.5 第3章, §7.3）。"""
 
@@ -53,6 +132,38 @@ class ActivityListView(LoginRequiredMixin, ListView):
         if per_page in ("20", "50", "100"):
             return int(per_page)
         return self.paginate_by
+
+    def _get_selected_user_ids(self):
+        """実施者（user_ids）の選択リストを取得する。"""
+        has_filter = ("user_ids" in self.request.GET) or ("user_id" in self.request.GET)
+        if not has_filter:
+            if not self.request.GET or not self.request.GET.get("mode"):
+                return [str(self.request.user.id)]
+            return []
+
+        user_ids_list = self.request.GET.getlist("user_ids")
+        selected = []
+        for u in user_ids_list:
+            for part in u.split(","):
+                p = part.strip()
+                if p and p not in selected:
+                    selected.append(p)
+        if not selected and "user_id" in self.request.GET:
+            u = self.request.GET.get("user_id", "").strip()
+            if u:
+                selected.append(u)
+        return selected
+
+    def _get_selected_attendee_ids(self):
+        """同席者（attendee_user_ids）の選択リストを取得する。"""
+        attendee_list = self.request.GET.getlist("attendee_user_ids")
+        selected = []
+        for a in attendee_list:
+            for part in a.split(","):
+                p = part.strip()
+                if p and p not in selected:
+                    selected.append(p)
+        return selected
 
     def get_queryset(self):
         qs = visible_activities_for(self.request.user)
@@ -89,17 +200,19 @@ class ActivityListView(LoginRequiredMixin, ListView):
             today = timezone.localdate()
             qs = qs.filter(occurred_at__date=today)
 
-        # 実施者（ユーザー）絞り込み
-        if "user_id" in self.request.GET:
-            current_user_id = self.request.GET.get("user_id", "").strip()
-        elif not self.request.GET or not self.request.GET.get("mode"):
-            current_user_id = str(self.request.user.id)
-        else:
-            current_user_id = ""
-
-        if current_user_id:
+        # 実施者（複数対応）
+        selected_user_ids = self._get_selected_user_ids()
+        if selected_user_ids:
             try:
-                qs = qs.filter(user_id=current_user_id)
+                qs = qs.filter(user_id__in=selected_user_ids)
+            except Exception:
+                pass
+
+        # 同席者（複数対応）
+        selected_attendee_ids = self._get_selected_attendee_ids()
+        if selected_attendee_ids:
+            try:
+                qs = qs.filter(activity_users__user_id__in=selected_attendee_ids).distinct()
             except Exception:
                 pass
 
@@ -131,15 +244,11 @@ class ActivityListView(LoginRequiredMixin, ListView):
                 | Q(activity_users__user__first_name__icontains=q)
             ).distinct()
 
-        sort = self.request.GET.get("sort", "date_desc")
-        if sort == "date_asc":
-            order_fields = ["occurred_at", "id"]
-        else:
-            order_fields = ["-occurred_at", "-id"]
+        qs = _apply_activity_list_sort(qs, self.request.GET)
 
         return qs.select_related("deal", "campaign", "user").prefetch_related(
             "activity_persons__person__primary_contact"
-        ).order_by(*order_fields)
+        )
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -157,6 +266,8 @@ class ActivityListView(LoginRequiredMixin, ListView):
                 "q",
                 "status",
                 "user_id",
+                "user_ids",
+                "attendee_user_ids",
                 "sort",
                 "per_page",
                 "page",
@@ -174,26 +285,39 @@ class ActivityListView(LoginRequiredMixin, ListView):
         context["current_mode"] = self.request.GET.get("mode", "daily" if not self.request.GET else "")
         context["current_q"] = self.request.GET.get("q", "")
 
-        # ユーザー一覧および選択状態
-        if "user_id" in self.request.GET:
-            current_user_id = self.request.GET.get("user_id", "").strip()
-        elif not self.request.GET or not self.request.GET.get("mode"):
-            current_user_id = str(self.request.user.id)
-        else:
-            current_user_id = ""
-        context["current_user_id"] = current_user_id
-        context["users"] = get_user_model().objects.filter(is_active=True).order_by("username")
+        # ユーザー一覧および複数選択状態
+        selected_user_ids = self._get_selected_user_ids()
+        selected_attendee_ids = self._get_selected_attendee_ids()
+        all_users = list(get_user_model().objects.filter(is_active=True).order_by("username"))
 
-        # ソートおよび表示件数
-        sort = self.request.GET.get("sort", "date_desc")
-        if sort not in ("date_desc", "date_asc"):
-            sort = "date_desc"
-        context["current_sort"] = sort
+        context["selected_user_ids"] = selected_user_ids
+        context["selected_user_ids_str"] = ",".join(selected_user_ids)
+        context["selected_users"] = [u for u in all_users if str(u.id) in selected_user_ids]
+        context["current_user_id"] = selected_user_ids[0] if selected_user_ids else ""
+
+        context["selected_attendee_ids"] = selected_attendee_ids
+        context["selected_attendee_ids_str"] = ",".join(selected_attendee_ids)
+        context["selected_attendee_users"] = [u for u in all_users if str(u.id) in selected_attendee_ids]
+
+        context["all_users"] = all_users
+        context["users"] = all_users
+
+        # ソートおよび表示件数（パーソン一覧準拠）
+        sort_ctx = _activity_sort_context(self.request.GET)
+        context.update(sort_ctx)
+        context["current_sort"] = self.request.GET.get("sort", "date_desc")
 
         per_page = self.request.GET.get("per_page", "20")
         if per_page not in ("20", "50", "100"):
             per_page = "20"
         context["current_per_page"] = per_page
+        context["per_page"] = int(per_page)
+
+        # ページネーション用クエリパラメータ
+        params = self.request.GET.copy()
+        if "page" in params:
+            params.pop("page")
+        context["query_params"] = params.urlencode()
 
         context["active_menu"] = "activities:activity_list"
         return context

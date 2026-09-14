@@ -4,7 +4,7 @@
 {% block title %}案件一覧 — FreeGroup2{% endblock %}
 
 {% block content %}
-<div class="deal-list-container" style="max-width: 1200px; margin-left: 0; margin-right: auto; width: 100%;">
+<div class="deal-list-container" style="max-width: 100%; margin-left: 0; margin-right: auto; width: 100%;">
   {% url 'deals:deal_create' as create_url %}
   <div class="app-page-header">
     <div>
@@ -22,8 +22,9 @@
     {% endif %}
   </div>
 
-  <section class="app-card" style="margin-bottom:16px;">
+  <section class="app-card" style="max-width: 960px; margin-left: 0; margin-right: auto; margin-bottom: 16px;">
     <form method="get" class="app-filter-form" style="display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end;">
+      <input type="hidden" name="view" value="{{ current_view }}">
       <div class="app-form__group" style="margin-bottom:0;">
         <label class="app-form__label" for="filter-q">キーワード検索</label>
         <input type="text" id="filter-q" name="q" value="{{ current_q }}" class="app-input" placeholder="案件名・会社名・パーソン名">
@@ -47,83 +48,93 @@
       </div>
       <div style="display:flex; gap:8px;">
         <button type="submit" class="app-btn app-btn--primary app-btn--sm">絞り込み</button>
-        <a href="{% url 'deals:deal_list' %}" class="app-btn app-btn--secondary app-btn--sm">リセット</a>
+        <a href="{% url 'deals:deal_list' %}?view={{ current_view }}" class="app-btn app-btn--secondary app-btn--sm">リセット</a>
+      </div>
+      <div style="margin-left:auto; display:flex; align-items:center;">
+        <div class="app-btn-group" style="display:inline-flex; border:1px solid var(--app-border, #cbd5e1); border-radius:6px; overflow:hidden;">
+          <a href="{{ list_url }}" class="app-btn app-btn--sm {% if current_view == 'list' %}app-btn--primary{% else %}app-btn--ghost{% endif %}" style="border-radius:0; border:none; text-decoration:none;">一覧</a>
+          <a href="{{ kanban_url }}" class="app-btn app-btn--sm {% if current_view == 'kanban' %}app-btn--primary{% else %}app-btn--ghost{% endif %}" style="border-radius:0; border:none; text-decoration:none;">パイプライン</a>
+        </div>
       </div>
     </form>
   </section>
 
-  <section class="app-card">
-    <div class="app-table-wrapper">
-      <table class="app-table app-table--nowrap">
-        <thead>
-          <tr>
-            <th style="width:80px; min-width:80px; white-space:nowrap; text-align:center;">操作</th>
-            <th>案件名</th>
-            <th>会社名</th>
-            <th>相手方主担当</th>
-            <th>ステージ</th>
-            <th style="text-align: right;">確度</th>
-            <th style="text-align: right; font-variant-numeric: tabular-nums;">金額</th>
-            <th>社内担当</th>
-            <th>最終接触日</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for deal in deals %}
-            {% url 'deals:deal_detail' pk=deal.id as detail_url %}
+  {% if current_view == "kanban" %}
+    {% include "deals/_deal_kanban.html" %}
+  {% else %}
+    <section class="app-card">
+      <div class="app-table-wrapper">
+        <table class="app-table app-table--nowrap">
+          <thead>
             <tr>
-              <td style="white-space:nowrap; text-align:center;">
-                <a href="{% append_back_url detail_url back %}" class="app-btn app-btn--ghost app-btn--sm" style="display:inline-block; white-space:nowrap;" title="詳細">詳細</a>
-              </td>
-              <td>
-                <a href="{% append_back_url detail_url back %}" style="font-weight: 600; color: var(--app-text, #0f172a); text-decoration: none;">{{ deal.name }}</a>
-              </td>
-              <td>
-                {% if deal.company %}
-                  {{ deal.company.organization }}
-                {% else %}-{% endif %}
-              </td>
-              <td>
-                {% if deal.primary_person %}
-                  {{ deal.primary_person }}
-                {% else %}-{% endif %}
-              </td>
-              <td>
-                <span class="app-badge app-badge--neutral">{{ deal.get_stage_display }}</span>
-              </td>
-              <td style="text-align: right;">
-                {% if deal.probability is not None %}{{ deal.probability }}%{% else %}-{% endif %}
-              </td>
-              <td style="text-align: right; font-variant-numeric: tabular-nums;">
-                {% if deal.amount is not None %}¥{{ deal.amount|floatformat:"0g" }}{% else %}-{% endif %}
-              </td>
-              <td>{{ deal.owner|default:"-" }}</td>
-              <td>
-                {% if deal.last_contact_date %}
-                  {{ deal.last_contact_date|date:"Y-m-d H:i" }}
-                {% else %}-{% endif %}
-              </td>
+              <th style="width:80px; min-width:80px; white-space:nowrap; text-align:center;">操作</th>
+              <th>案件名</th>
+              <th>会社名</th>
+              <th>相手方主担当</th>
+              <th>ステージ</th>
+              <th style="text-align: right;">確度</th>
+              <th style="text-align: right; font-variant-numeric: tabular-nums;">金額</th>
+              <th>社内担当</th>
+              <th>最終接触日</th>
             </tr>
-          {% empty %}
-            <tr>
-              <td colspan="9" class="app-muted" style="text-align:center; padding:24px;">該当する案件がありません。</td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-
-    {% if is_paginated %}
-      <div class="app-pagination" style="display:flex; justify-content:center; gap:8px; margin-top:16px;">
-        {% if page_obj.has_previous %}
-          <a href="?page={{ page_obj.previous_page_number }}{% if current_q %}&q={{ current_q }}{% endif %}{% if current_stage %}&stage={{ current_stage }}{% endif %}{% if current_status %}&status={{ current_status }}{% endif %}" class="app-btn app-btn--secondary app-btn--sm">前へ</a>
-        {% endif %}
-        <span style="align-self:center; font-size:14px;">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span>
-        {% if page_obj.has_next %}
-          <a href="?page={{ page_obj.next_page_number }}{% if current_q %}&q={{ current_q }}{% endif %}{% if current_stage %}&stage={{ current_stage }}{% endif %}{% if current_status %}&status={{ current_status }}{% endif %}" class="app-btn app-btn--secondary app-btn--sm">次へ</a>
-        {% endif %}
+          </thead>
+          <tbody>
+            {% for deal in deals %}
+              {% url 'deals:deal_detail' pk=deal.id as detail_url %}
+              <tr>
+                <td style="white-space:nowrap; text-align:center;">
+                  <a href="{% append_back_url detail_url back %}" class="app-btn app-btn--ghost app-btn--sm" style="display:inline-block; white-space:nowrap;" title="詳細">詳細</a>
+                </td>
+                <td>
+                  <a href="{% append_back_url detail_url back %}" style="font-weight: 600; color: var(--app-text, #0f172a); text-decoration: none;">{{ deal.name }}</a>
+                </td>
+                <td>
+                  {% if deal.company %}
+                    {{ deal.company.organization }}
+                  {% else %}-{% endif %}
+                </td>
+                <td>
+                  {% if deal.primary_person %}
+                    {{ deal.primary_person }}
+                  {% else %}-{% endif %}
+                </td>
+                <td>
+                  <span class="app-badge" style="{{ deal.stage_badge_style }} font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 9999px;">{{ deal.get_stage_display }}</span>
+                </td>
+                <td style="text-align: right;">
+                  {% if deal.probability is not None %}{{ deal.probability }}%{% else %}-{% endif %}
+                </td>
+                <td style="text-align: right; font-variant-numeric: tabular-nums;">
+                  {% if deal.amount is not None %}¥{{ deal.amount|floatformat:"0g" }}{% else %}-{% endif %}
+                </td>
+                <td>{{ deal.owner|default:"-" }}</td>
+                <td>
+                  {% if deal.last_contact_date %}
+                    {{ deal.last_contact_date|date:"Y-m-d H:i" }}
+                  {% else %}-{% endif %}
+                </td>
+              </tr>
+            {% empty %}
+              <tr>
+                <td colspan="9" class="app-muted" style="text-align:center; padding:24px;">該当する案件がありません。</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
       </div>
-    {% endif %}
-  </section>
+
+      {% if is_paginated %}
+        <div class="app-pagination" style="display:flex; justify-content:center; gap:8px; margin-top:16px;">
+          {% if page_obj.has_previous %}
+            <a href="?page={{ page_obj.previous_page_number }}{% if current_q %}&q={{ current_q }}{% endif %}{% if current_stage %}&stage={{ current_stage }}{% endif %}{% if current_status %}&status={{ current_status }}{% endif %}" class="app-btn app-btn--secondary app-btn--sm">前へ</a>
+          {% endif %}
+          <span style="align-self:center; font-size:14px;">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span>
+          {% if page_obj.has_next %}
+            <a href="?page={{ page_obj.next_page_number }}{% if current_q %}&q={{ current_q }}{% endif %}{% if current_stage %}&stage={{ current_stage }}{% endif %}{% if current_status %}&status={{ current_status }}{% endif %}" class="app-btn app-btn--secondary app-btn--sm">次へ</a>
+          {% endif %}
+        </div>
+      {% endif %}
+    </section>
+  {% endif %}
 </div>
 {% endblock %}

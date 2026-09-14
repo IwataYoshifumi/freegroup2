@@ -16,16 +16,15 @@
     </div>
   </div>
 
-  <div class="app-action-area" style="justify-content:flex-start; margin-bottom:16px; gap:8px; align-items:center;">
-    {% if perms.activities.add_activity %}
+  {# ① 上部アクションエリア：日報・全期間ボタンを撤去し、左寄せで活動新規作成のみ #}
+  {% if perms.activities.add_activity %}
+    <div class="app-action-area" style="justify-content:flex-start; margin-bottom:16px;">
       <a href="{% append_back_url create_url back %}" class="app-btn app-btn--primary">活動新規作成</a>
-    {% endif %}
-    <a href="{% url 'activities:activity_list' %}?mode=daily" class="app-btn {% if current_mode == 'daily' %}app-btn--secondary{% else %}app-btn--ghost{% endif %}">本日の日報</a>
-    <a href="{% url 'activities:activity_list' %}?mode=all" class="app-btn {% if current_mode != 'daily' and not current_date %}app-btn--secondary{% else %}app-btn--ghost{% endif %}">全期間一覧</a>
-  </div>
+    </div>
+  {% endif %}
 
   <section class="app-card" style="margin-bottom:16px;">
-    <form method="get" class="app-filter-form" style="display:flex; flex-direction:column; gap:16px;">
+    <form method="get" class="app-filter-form js-activity-filter-form" style="display:flex; flex-direction:column; gap:16px;">
       {# ブロック1：実施期間 #}
       <div class="app-form__group js-date-range" style="margin-bottom:0;">
         <label class="app-form__label" style="margin-bottom:6px; font-weight:600;">実施期間</label>
@@ -53,19 +52,54 @@
         <input type="text" id="filter-q" name="q" value="{{ current_q }}" class="app-input" style="width:100%; box-sizing:border-box;" placeholder="内容・場所・案件名・会社名・担当者名...">
       </div>
 
-      {# ブロック3：絞り込み条件（横並び） #}
-      <div style="display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end;">
-        <div class="app-form__group" style="margin-bottom:0; flex:1; min-width:160px;">
-          <label class="app-form__label" for="filter-user" style="font-weight:600;">実施者</label>
-          <select id="filter-user" name="user_id" class="app-select app-input">
-            <option value="">（すべて）</option>
-            {% for u in users %}
-              <option value="{{ u.id }}" {% if current_user_id == u.id|stringformat:"s" %}selected{% endif %}>
+      {# ブロック3：実施者 ＆ 同席者（モーダル複数選択） #}
+      <div style="display:flex; flex-wrap:wrap; gap:16px;">
+        {# 実施者（user） #}
+        <div class="app-form__group" style="margin-bottom:0; flex:1; min-width:260px;">
+          <label class="app-form__label" style="font-weight:600;">実施者</label>
+          <input type="hidden" name="user_ids" id="id_user_ids" value="{{ selected_user_ids_str }}">
+          <input type="hidden" name="user_id" id="id_user_id_compat" value="{{ current_user_id }}">
+          <div id="user-chips-container" style="display:flex; flex-wrap:wrap; gap:6px; align-items:center; min-height:36px; padding:4px 8px; border:1px solid var(--app-border, #cbd5e1); border-radius:6px; background:#fff;">
+            {% for u in selected_users %}
+              <span class="app-badge app-badge--neutral js-user-chip" data-user-id="{{ u.id }}" style="display:inline-flex; align-items:center; gap:4px; padding:3px 8px; font-size:12px; border-radius:9999px; background:#f1f5f9; color:#334155;">
                 {{ u.display_name|default:u.username }}
-              </option>
+                <button type="button" class="js-remove-user-chip" data-user-id="{{ u.id }}" style="background:none; border:none; padding:0; cursor:pointer; font-size:14px; line-height:1; color:#94a3b8;" title="削除">&times;</button>
+              </span>
+            {% empty %}
+              <span class="app-muted js-no-user-label" style="font-size:13px;">（未指定：すべて）</span>
             {% endfor %}
-          </select>
+          </div>
+          <div style="margin-top:6px;">
+            <button type="button" class="app-btn app-btn--secondary app-btn--sm" data-action="open-modal" data-target="userSelectModal">
+              ユーザーを選択 / 変更
+            </button>
+          </div>
         </div>
+
+        {# 同席者（ActivityUser） #}
+        <div class="app-form__group" style="margin-bottom:0; flex:1; min-width:260px;">
+          <label class="app-form__label" style="font-weight:600;">同席者</label>
+          <input type="hidden" name="attendee_user_ids" id="id_attendee_user_ids" value="{{ selected_attendee_ids_str }}">
+          <div id="attendee-chips-container" style="display:flex; flex-wrap:wrap; gap:6px; align-items:center; min-height:36px; padding:4px 8px; border:1px solid var(--app-border, #cbd5e1); border-radius:6px; background:#fff;">
+            {% for u in selected_attendee_users %}
+              <span class="app-badge app-badge--neutral js-attendee-chip" data-user-id="{{ u.id }}" style="display:inline-flex; align-items:center; gap:4px; padding:3px 8px; font-size:12px; border-radius:9999px; background:#f1f5f9; color:#334155;">
+                {{ u.display_name|default:u.username }}
+                <button type="button" class="js-remove-attendee-chip" data-user-id="{{ u.id }}" style="background:none; border:none; padding:0; cursor:pointer; font-size:14px; line-height:1; color:#94a3b8;" title="削除">&times;</button>
+              </span>
+            {% empty %}
+              <span class="app-muted js-no-attendee-label" style="font-size:13px;">（未指定：すべて）</span>
+            {% endfor %}
+          </div>
+          <div style="margin-top:6px;">
+            <button type="button" class="app-btn app-btn--secondary app-btn--sm" data-action="open-modal" data-target="attendeeSelectModal">
+              同席者を選択 / 変更
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {# ブロック4：種別 ＆ 方向 ＆ 状態（ボタングループ） #}
+      <div style="display:flex; flex-wrap:wrap; gap:16px; align-items:flex-end;">
         <div class="app-form__group" style="margin-bottom:0; flex:1; min-width:140px;">
           <label class="app-form__label" for="filter-type" style="font-weight:600;">活動種別</label>
           <select id="filter-type" name="activity_type" class="app-select app-input">
@@ -84,36 +118,73 @@
             {% endfor %}
           </select>
         </div>
-        <div class="app-form__group" style="margin-bottom:0; flex:1; min-width:140px;">
-          <label class="app-form__label" for="filter-status" style="font-weight:600;">状態</label>
-          <select id="filter-status" name="status" class="app-select app-input">
-            <option value="active" {% if current_status == "active" %}selected{% endif %}>有効な活動</option>
-            <option value="archived" {% if current_status == "archived" %}selected{% endif %}>アーカイブ済み</option>
-            <option value="all" {% if current_status == "all" %}selected{% endif %}>全件</option>
-          </select>
+        <div class="app-form__group" style="margin-bottom:0; min-width:200px;">
+          <label class="app-form__label" style="font-weight:600;">状態</label>
+          <input type="hidden" name="status" id="filter-status-input" value="{{ current_status }}">
+          <div class="app-btn-group" style="display:inline-flex; border:1px solid var(--app-border, #cbd5e1); border-radius:6px; overflow:hidden;">
+            <button type="button" class="app-btn app-btn--sm js-status-btn {% if current_status == 'active' %}app-btn--primary{% else %}app-btn--ghost{% endif %}" data-status="active" style="border-radius:0; border:none;">有効</button>
+            <button type="button" class="app-btn app-btn--sm js-status-btn {% if current_status == 'archived' %}app-btn--primary{% else %}app-btn--ghost{% endif %}" data-status="archived" style="border-radius:0; border:none;">アーカイブ</button>
+            <button type="button" class="app-btn app-btn--sm js-status-btn {% if current_status == 'all' %}app-btn--primary{% else %}app-btn--ghost{% endif %}" data-status="all" style="border-radius:0; border:none;">全件</button>
+          </div>
         </div>
       </div>
 
-      {# ブロック4：ソート ＆ 表示件数（横並び） #}
-      <div style="display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end;">
-        <div class="app-form__group" style="margin-bottom:0; width:180px;">
-          <label class="app-form__label" for="filter-sort" style="font-weight:600;">並び順</label>
-          <select id="filter-sort" name="sort" class="app-select app-input">
-            <option value="date_desc" {% if current_sort == "date_desc" %}selected{% endif %}>実施日時（新しい順）</option>
-            <option value="date_asc" {% if current_sort == "date_asc" %}selected{% endif %}>実施日時（古い順）</option>
-          </select>
-        </div>
-        <div class="app-form__group" style="margin-bottom:0; width:120px;">
-          <label class="app-form__label" for="filter-per-page" style="font-weight:600;">表示件数</label>
-          <select id="filter-per-page" name="per_page" class="app-select app-input">
-            <option value="20" {% if current_per_page == "20" %}selected{% endif %}>20件</option>
-            <option value="50" {% if current_per_page == "50" %}selected{% endif %}>50件</option>
-            <option value="100" {% if current_per_page == "100" %}selected{% endif %}>100件</option>
-          </select>
+      {# ブロック5：ソート ＆ 表示件数（パーソン一覧準拠の折りたたみブロック） #}
+      <div class="app-collapsible app-person-filter-collapsible js-activity-sort-control{% if sort_is_active or per_page and per_page != 20 %} is-open{% endif %}" style="width:100%; box-sizing:border-box;">
+        <button type="button" class="app-collapsible__header" data-action="toggle-collapsible"
+                aria-expanded="{% if sort_is_active or per_page and per_page != 20 %}true{% else %}false{% endif %}">
+          <span>ソート・表示件数</span>
+          <span class="app-collapsible__icon">{% if sort_is_active or per_page and per_page != 20 %}▾{% else %}▸{% endif %}</span>
+        </button>
+        <div class="app-collapsible-body" style="margin-top:12px;">
+          <div class="app-person-filter-box" style="display:flex; flex-direction:column; gap:12px;">
+            <input type="hidden" name="sort" class="js-activity-sort-value"
+                   value="{{ sort_value }}"{% if not sort_is_active %} disabled{% endif %}>
+            {% for row in sort_rows %}
+              <div class="js-activity-sort-row" style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                <span class="app-form__label" style="min-width:5em; margin:0; white-space:nowrap; font-size:0.9em;">第{{ forloop.counter }}キー</span>
+                <select class="app-input js-activity-sort-key" style="min-width:140px; max-width:180px;">
+                  <option value="">指定なし</option>
+                  {% for val, lbl in sort_choices %}
+                    <option value="{{ val }}"{% if row.key == val %} selected{% endif %}>{{ lbl }}</option>
+                  {% endfor %}
+                </select>
+                <ul class="app-radio-toggle" style="flex-shrink:0; margin:0; list-style:none; display:inline-flex; border:1px solid var(--app-border, #cbd5e1); border-radius:6px; overflow:hidden; padding:0;">
+                  <li style="margin:0;">
+                    <label style="display:inline-block; padding:4px 12px; cursor:pointer; font-size:12px; background:{% if row.dir != 'desc' %}var(--app-primary, #0284c7){% else %}transparent{% endif %}; color:{% if row.dir != 'desc' %}#fff{% else %}inherit{% endif %};">
+                      <input type="radio" name="_asortdir{{ forloop.counter }}"
+                             class="js-activity-sort-dir" value="asc"
+                             style="display:none;"
+                             {% if row.dir != "desc" %}checked{% endif %}>
+                      昇順
+                    </label>
+                  </li>
+                  <li style="margin:0;">
+                    <label style="display:inline-block; padding:4px 12px; cursor:pointer; font-size:12px; background:{% if row.dir == 'desc' %}var(--app-primary, #0284c7){% else %}transparent{% endif %}; color:{% if row.dir == 'desc' %}#fff{% else %}inherit{% endif %};">
+                      <input type="radio" name="_asortdir{{ forloop.counter }}"
+                             class="js-activity-sort-dir" value="desc"
+                             style="display:none;"
+                             {% if row.dir == "desc" %}checked{% endif %}>
+                      降順
+                    </label>
+                  </li>
+                </ul>
+              </div>
+            {% endfor %}
+
+            <div style="display:flex; align-items:center; gap:8px; flex-wrap:nowrap; margin-top:4px;">
+              <span class="app-form__label" style="min-width:5em; margin:0; white-space:nowrap; font-size:0.9em;">表示件数</span>
+              <select name="per_page" class="app-input" style="max-width:120px;">
+                {% for n in per_page_choices %}
+                  <option value="{{ n }}"{% if n == per_page %} selected{% endif %}>{{ n }} 件</option>
+                {% endfor %}
+              </select>
+            </div>
+          </div>
         </div>
       </div>
 
-      {# ブロック5：アクション（最下部・右寄せ） #}
+      {# ブロック6：アクション（最下部・右寄せ） #}
       <div style="display:flex; gap:8px; justify-content:flex-end; padding-top:4px;">
         <button type="submit" class="app-btn app-btn--primary">検索</button>
         <a href="{% url 'activities:activity_list' %}" class="app-btn app-btn--ghost">リセット</a>
@@ -174,73 +245,428 @@
     {% if is_paginated %}
       <div class="app-pagination" style="display:flex; justify-content:center; gap:8px; margin-top:16px;">
         {% if page_obj.has_previous %}
-          <a href="?page={{ page_obj.previous_page_number }}{% if current_q %}&q={{ current_q }}{% endif %}{% if occurred_after %}&occurred_after={{ occurred_after }}{% endif %}{% if occurred_before %}&occurred_before={{ occurred_before }}{% endif %}{% if current_date %}&date={{ current_date }}{% endif %}{% if current_user_id %}&user_id={{ current_user_id }}{% endif %}{% if current_activity_type %}&activity_type={{ current_activity_type }}{% endif %}{% if current_direction %}&direction={{ current_direction }}{% endif %}{% if current_status %}&status={{ current_status }}{% endif %}{% if current_sort %}&sort={{ current_sort }}{% endif %}{% if current_per_page %}&per_page={{ current_per_page }}{% endif %}{% if current_mode %}&mode={{ current_mode }}{% endif %}" class="app-btn app-btn--secondary app-btn--sm">前へ</a>
+          <a href="?page={{ page_obj.previous_page_number }}{% if query_params %}&{{ query_params }}{% endif %}" class="app-btn app-btn--secondary app-btn--sm">前へ</a>
         {% endif %}
         <span style="align-self:center; font-size:14px;">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span>
         {% if page_obj.has_next %}
-          <a href="?page={{ page_obj.next_page_number }}{% if current_q %}&q={{ current_q }}{% endif %}{% if occurred_after %}&occurred_after={{ occurred_after }}{% endif %}{% if occurred_before %}&occurred_before={{ occurred_before }}{% endif %}{% if current_date %}&date={{ current_date }}{% endif %}{% if current_user_id %}&user_id={{ current_user_id }}{% endif %}{% if current_activity_type %}&activity_type={{ current_activity_type }}{% endif %}{% if current_direction %}&direction={{ current_direction }}{% endif %}{% if current_status %}&status={{ current_status }}{% endif %}{% if current_sort %}&sort={{ current_sort }}{% endif %}{% if current_per_page %}&per_page={{ current_per_page }}{% endif %}{% if current_mode %}&mode={{ current_mode }}{% endif %}" class="app-btn app-btn--secondary app-btn--sm">次へ</a>
+          <a href="?page={{ page_obj.next_page_number }}{% if query_params %}&{{ query_params }}{% endif %}" class="app-btn app-btn--secondary app-btn--sm">次へ</a>
         {% endif %}
       </div>
     {% endif %}
   </section>
 </div>
 
+{# ============================================================ #}
+{# 実施者 選択モーダル                                          #}
+{# ============================================================ #}
+<div id="userSelectModal" class="app-modal" hidden aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="userSelectModalTitle">
+  <div class="app-modal__backdrop" data-action="close-modal"></div>
+  <div class="app-modal__panel" style="width: min(640px, 95vw); max-height: 85vh;">
+    <div class="app-modal__header">
+      <h2 id="userSelectModalTitle" style="font-size:16px; font-weight:700; margin:0;">実施者を選択</h2>
+      <button type="button" class="app-btn--icon" data-action="close-modal" aria-label="閉じる" style="border:none; background:transparent; font-size:18px; cursor:pointer; color:var(--app-muted);">&times;</button>
+    </div>
+    <div class="app-modal__body" style="padding:16px; display:flex; flex-direction:column; gap:12px; overflow:hidden;">
+      <input type="text" id="user-modal-search" class="app-input" placeholder="氏名・ユーザー名・部署で検索..." autocomplete="off">
+      <div style="flex:1; overflow-y:auto; border:1px solid var(--app-border, #cbd5e1); border-radius:6px; max-height:360px;">
+        <table class="app-table" style="min-width:100%; font-size:13px; border-collapse:collapse;">
+          <thead style="position:sticky; top:0; background:#f8fafc; z-index:1;">
+            <tr>
+              <th style="width:40px; text-align:center;">
+                <input type="checkbox" id="user-modal-select-all" title="全選択/全解除">
+              </th>
+              <th>氏名</th>
+              <th>ユーザー名</th>
+              <th>部署</th>
+            </tr>
+          </thead>
+          <tbody id="user-modal-tbody">
+            {% for u in all_users %}
+              <tr class="js-user-modal-row" data-search="{{ u.get_full_name|default:'' }} {{ u.username }} {{ u.department.name|default:'' }}">
+                <td style="text-align:center;">
+                  <input type="checkbox" class="js-modal-user-cb" value="{{ u.id }}" data-name="{{ u.display_name|default:u.username }}">
+                </td>
+                <td>{{ u.get_full_name|default:"-" }}</td>
+                <td>{{ u.username }}</td>
+                <td>{{ u.department.name|default:"-" }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="app-modal__footer" style="padding:12px 16px; border-top:1px solid var(--app-border, #cbd5e1); display:flex; justify-content:space-between; align-items:center;">
+      <button type="button" class="app-btn app-btn--ghost app-btn--sm" id="btn-clear-modal-users">全選択解除</button>
+      <div style="display:flex; gap:8px;">
+        <button type="button" class="app-btn app-btn--secondary app-btn--sm" data-action="close-modal">閉じる</button>
+        <button type="button" class="app-btn app-btn--primary app-btn--sm" id="btn-apply-modal-users">選択したユーザーを適用</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# ============================================================ #}
+{# 同席者 選択モーダル                                          #}
+{# ============================================================ #}
+<div id="attendeeSelectModal" class="app-modal" hidden aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="attendeeSelectModalTitle">
+  <div class="app-modal__backdrop" data-action="close-modal"></div>
+  <div class="app-modal__panel" style="width: min(640px, 95vw); max-height: 85vh;">
+    <div class="app-modal__header">
+      <h2 id="attendeeSelectModalTitle" style="font-size:16px; font-weight:700; margin:0;">同席者を選択</h2>
+      <button type="button" class="app-btn--icon" data-action="close-modal" aria-label="閉じる" style="border:none; background:transparent; font-size:18px; cursor:pointer; color:var(--app-muted);">&times;</button>
+    </div>
+    <div class="app-modal__body" style="padding:16px; display:flex; flex-direction:column; gap:12px; overflow:hidden;">
+      <input type="text" id="attendee-modal-search" class="app-input" placeholder="氏名・ユーザー名・部署で検索..." autocomplete="off">
+      <div style="flex:1; overflow-y:auto; border:1px solid var(--app-border, #cbd5e1); border-radius:6px; max-height:360px;">
+        <table class="app-table" style="min-width:100%; font-size:13px; border-collapse:collapse;">
+          <thead style="position:sticky; top:0; background:#f8fafc; z-index:1;">
+            <tr>
+              <th style="width:40px; text-align:center;">
+                <input type="checkbox" id="attendee-modal-select-all" title="全選択/全解除">
+              </th>
+              <th>氏名</th>
+              <th>ユーザー名</th>
+              <th>部署</th>
+            </tr>
+          </thead>
+          <tbody id="attendee-modal-tbody">
+            {% for u in all_users %}
+              <tr class="js-attendee-modal-row" data-search="{{ u.get_full_name|default:'' }} {{ u.username }} {{ u.department.name|default:'' }}">
+                <td style="text-align:center;">
+                  <input type="checkbox" class="js-modal-attendee-cb" value="{{ u.id }}" data-name="{{ u.display_name|default:u.username }}">
+                </td>
+                <td>{{ u.get_full_name|default:"-" }}</td>
+                <td>{{ u.username }}</td>
+                <td>{{ u.department.name|default:"-" }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="app-modal__footer" style="padding:12px 16px; border-top:1px solid var(--app-border, #cbd5e1); display:flex; justify-content:space-between; align-items:center;">
+      <button type="button" class="app-btn app-btn--ghost app-btn--sm" id="btn-clear-modal-attendees">全選択解除</button>
+      <div style="display:flex; gap:8px;">
+        <button type="button" class="app-btn app-btn--secondary app-btn--sm" data-action="close-modal">閉じる</button>
+        <button type="button" class="app-btn app-btn--primary app-btn--sm" id="btn-apply-modal-attendees">選択したユーザーを適用</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
   (function () {
     function init() {
+      // 1. 日付範囲クイック設定
       var wrap = document.querySelector('.js-date-range');
-      if (!wrap) return;
-      var fromEl = wrap.querySelector('.js-date-from');
-      var toEl = wrap.querySelector('.js-date-to');
-      if (!fromEl || !toEl) return;
-
-      function fmt(d) {
-        return d.getFullYear() + '-' +
-          String(d.getMonth() + 1).padStart(2, '0') + '-' +
-          String(d.getDate()).padStart(2, '0');
+      if (wrap) {
+        var fromEl = wrap.querySelector('.js-date-from');
+        var toEl = wrap.querySelector('.js-date-to');
+        function fmt(d) {
+          return d.getFullYear() + '-' +
+            String(d.getMonth() + 1).padStart(2, '0') + '-' +
+            String(d.getDate()).padStart(2, '0');
+        }
+        function setRange(from, to) {
+          if (fromEl) fromEl.value = fmt(from);
+          if (toEl) toEl.value = fmt(to);
+        }
+        Array.prototype.slice.call(wrap.querySelectorAll('.js-date-quick')).forEach(function (btn) {
+          btn.addEventListener('click', function () {
+            var now = new Date();
+            var y = now.getFullYear(), m = now.getMonth(), d = now.getDate();
+            switch (btn.getAttribute('data-range')) {
+              case 'today':
+                setRange(new Date(y, m, d), new Date(y, m, d));
+                break;
+              case 'week': {
+                var offset = (now.getDay() + 6) % 7;
+                var mon = new Date(y, m, d - offset);
+                setRange(mon, new Date(mon.getFullYear(), mon.getMonth(), mon.getDate() + 6));
+                break;
+              }
+              case 'lastweek': {
+                var offsetL = (now.getDay() + 6) % 7;
+                var lastMon = new Date(y, m, d - offsetL - 7);
+                setRange(lastMon, new Date(lastMon.getFullYear(), lastMon.getMonth(), lastMon.getDate() + 6));
+                break;
+              }
+              case 'month':
+                setRange(new Date(y, m, 1), new Date(y, m + 1, 0));
+                break;
+              case 'lastmonth':
+                setRange(new Date(y, m - 1, 1), new Date(y, m, 0));
+                break;
+            }
+          });
+        });
+        var clearBtn = wrap.querySelector('.js-date-clear');
+        if (clearBtn) {
+          clearBtn.addEventListener('click', function () {
+            if (fromEl) fromEl.value = '';
+            if (toEl) toEl.value = '';
+          });
+        }
       }
-      function setRange(from, to) {
-        fromEl.value = fmt(from);
-        toEl.value = fmt(to);
-      }
 
-      Array.prototype.slice.call(wrap.querySelectorAll('.js-date-quick')).forEach(function (btn) {
+      // 2. ステータスボタングループ
+      var statusInput = document.getElementById('filter-status-input');
+      var statusButtons = document.querySelectorAll('.js-status-btn');
+      statusButtons.forEach(function (btn) {
         btn.addEventListener('click', function () {
-          var now = new Date();
-          var y = now.getFullYear(), m = now.getMonth(), d = now.getDate();
-          switch (btn.getAttribute('data-range')) {
-            case 'today':
-              setRange(new Date(y, m, d), new Date(y, m, d));
-              break;
-            case 'week': {
-              var offset = (now.getDay() + 6) % 7;   // 月曜起点（Mon=0 … Sun=6）
-              var mon = new Date(y, m, d - offset);
-              setRange(mon, new Date(mon.getFullYear(), mon.getMonth(), mon.getDate() + 6));
-              break;
-            }
-            case 'lastweek': {
-              var offsetL = (now.getDay() + 6) % 7;
-              var lastMon = new Date(y, m, d - offsetL - 7);
-              setRange(lastMon, new Date(lastMon.getFullYear(), lastMon.getMonth(), lastMon.getDate() + 6));
-              break;
-            }
-            case 'month':
-              setRange(new Date(y, m, 1), new Date(y, m + 1, 0));
-              break;
-            case 'lastmonth':
-              setRange(new Date(y, m - 1, 1), new Date(y, m, 0));
-              break;
-          }
+          var val = this.getAttribute('data-status');
+          if (statusInput) statusInput.value = val;
+          statusButtons.forEach(function (b) {
+            b.classList.remove('app-btn--primary');
+            b.classList.add('app-btn--ghost');
+          });
+          this.classList.remove('app-btn--ghost');
+          this.classList.add('app-btn--primary');
         });
       });
 
-      var clearBtn = wrap.querySelector('.js-date-clear');
-      if (clearBtn) {
-        clearBtn.addEventListener('click', function () {
-          fromEl.value = '';
-          toEl.value = '';
+      // 3. ソートラジオのトグル表示
+      document.querySelectorAll('.js-activity-sort-row').forEach(function (row) {
+        var radios = row.querySelectorAll('.js-activity-sort-dir');
+        radios.forEach(function (radio) {
+          radio.addEventListener('change', function () {
+            radios.forEach(function (r) {
+              var lbl = r.closest('label');
+              if (lbl) {
+                lbl.style.background = r.checked ? 'var(--app-primary, #0284c7)' : 'transparent';
+                lbl.style.color = r.checked ? '#fff' : 'inherit';
+              }
+            });
+          });
+        });
+      });
+
+      // 4. ソートコントロール submit 処理（パーソン一覧準拠）
+      var ctrl = document.querySelector('.js-activity-sort-control');
+      if (ctrl) {
+        var form = ctrl.closest('form');
+        var hiddenSort = ctrl.querySelector('.js-activity-sort-value');
+        if (form && hiddenSort) {
+          form.addEventListener('submit', function () {
+            var parts = [];
+            var seen = {};
+            ctrl.querySelectorAll('.js-activity-sort-row').forEach(function (row) {
+              var sel = row.querySelector('.js-activity-sort-key');
+              var key = sel ? sel.value : '';
+              if (!key || seen[key]) return;
+              seen[key] = true;
+              var dirEl = row.querySelector('.js-activity-sort-dir:checked');
+              var dir = dirEl ? dirEl.value : 'asc';
+              parts.push((dir === 'desc' ? '-' : '') + key);
+            });
+            if (parts.length) {
+              hiddenSort.value = parts.join(',');
+              hiddenSort.disabled = false;
+            } else {
+              hiddenSort.value = '';
+              hiddenSort.disabled = true;
+            }
+            ctrl.querySelectorAll('.js-activity-sort-dir').forEach(function (r) { r.disabled = true; });
+          });
+        }
+      }
+
+      // 5. ユーザー（実施者）モーダル & チップ制御
+      setupUserSelectionModal({
+        openBtnSelector: '[data-action="open-modal"][data-target="userSelectModal"]',
+        modalId: 'userSelectModal',
+        hiddenInputId: 'id_user_ids',
+        compatInputId: 'id_user_id_compat',
+        chipsContainerId: 'user-chips-container',
+        chipClass: 'js-user-chip',
+        removeBtnClass: 'js-remove-user-chip',
+        noLabelClass: 'js-no-user-label',
+        noLabelText: '（未指定：すべて）',
+        searchInputId: 'user-modal-search',
+        selectAllId: 'user-modal-select-all',
+        rowSelector: '.js-user-modal-row',
+        cbClass: 'js-modal-user-cb',
+        clearBtnId: 'btn-clear-modal-users',
+        applyBtnId: 'btn-apply-modal-users'
+      });
+
+      // 6. 同席者モーダル & チップ制御
+      setupUserSelectionModal({
+        openBtnSelector: '[data-action="open-modal"][data-target="attendeeSelectModal"]',
+        modalId: 'attendeeSelectModal',
+        hiddenInputId: 'id_attendee_user_ids',
+        chipsContainerId: 'attendee-chips-container',
+        chipClass: 'js-attendee-chip',
+        removeBtnClass: 'js-remove-attendee-chip',
+        noLabelClass: 'js-no-attendee-label',
+        noLabelText: '（未指定：すべて）',
+        searchInputId: 'attendee-modal-search',
+        selectAllId: 'attendee-modal-select-all',
+        rowSelector: '.js-attendee-modal-row',
+        cbClass: 'js-modal-attendee-cb',
+        clearBtnId: 'btn-clear-modal-attendees',
+        applyBtnId: 'btn-apply-modal-attendees'
+      });
+    }
+
+    function setupUserSelectionModal(opts) {
+      var hiddenInput = document.getElementById(opts.hiddenInputId);
+      var compatInput = opts.compatInputId ? document.getElementById(opts.compatInputId) : null;
+      var chipsContainer = document.getElementById(opts.chipsContainerId);
+      var modal = document.getElementById(opts.modalId);
+      if (!hiddenInput || !chipsContainer || !modal) return;
+
+      var searchInput = document.getElementById(opts.searchInputId);
+      var selectAllCb = document.getElementById(opts.selectAllId);
+      var clearBtn = document.getElementById(opts.clearBtnId);
+      var applyBtn = document.getElementById(opts.applyBtnId);
+      var rows = modal.querySelectorAll(opts.rowSelector);
+      var checkboxes = modal.querySelectorAll('.' + opts.cbClass);
+
+      function syncModalFromHidden() {
+        var currentIds = hiddenInput.value ? hiddenInput.value.split(',').map(function (s) { return s.trim(); }).filter(Boolean) : [];
+        checkboxes.forEach(function (cb) {
+          cb.checked = currentIds.indexOf(cb.value) !== -1;
+        });
+        if (selectAllCb) {
+          var visibleCbs = Array.prototype.slice.call(checkboxes).filter(function (cb) {
+            return cb.closest('tr').style.display !== 'none';
+          });
+          selectAllCb.checked = visibleCbs.length > 0 && visibleCbs.every(function (cb) { return cb.checked; });
+        }
+      }
+
+      // モーダルオープンボタン押下時
+      document.querySelectorAll(opts.openBtnSelector).forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          if (searchInput) {
+            searchInput.value = '';
+            rows.forEach(function (r) { r.style.display = ''; });
+          }
+          syncModalFromHidden();
+        });
+      });
+
+      // リアルタイム検索
+      if (searchInput) {
+        searchInput.addEventListener('input', function () {
+          var q = this.value.toLowerCase().trim();
+          rows.forEach(function (r) {
+            var searchData = (r.getAttribute('data-search') || '').toLowerCase();
+            r.style.display = (searchData.indexOf(q) !== -1) ? '' : 'none';
+          });
+          if (selectAllCb) {
+            var visibleCbs = Array.prototype.slice.call(checkboxes).filter(function (cb) {
+              return cb.closest('tr').style.display !== 'none';
+            });
+            selectAllCb.checked = visibleCbs.length > 0 && visibleCbs.every(function (cb) { return cb.checked; });
+          }
         });
       }
+
+      // 全選択/全解除
+      if (selectAllCb) {
+        selectAllCb.addEventListener('change', function () {
+          var checked = this.checked;
+          rows.forEach(function (r) {
+            if (r.style.display !== 'none') {
+              var cb = r.querySelector('.' + opts.cbClass);
+              if (cb) cb.checked = checked;
+            }
+          });
+        });
+      }
+
+      // 全選択解除ボタン
+      if (clearBtn) {
+        clearBtn.addEventListener('click', function () {
+          checkboxes.forEach(function (cb) { cb.checked = false; });
+          if (selectAllCb) selectAllCb.checked = false;
+        });
+      }
+
+      // 適用ボタン
+      if (applyBtn) {
+        applyBtn.addEventListener('click', function () {
+          var selected = [];
+          checkboxes.forEach(function (cb) {
+            if (cb.checked) {
+              selected.push({ id: cb.value, name: cb.getAttribute('data-name') });
+            }
+          });
+
+          // hidden input 更新
+          var idList = selected.map(function (item) { return item.id; });
+          hiddenInput.value = idList.join(',');
+          if (compatInput) compatInput.value = idList.length ? idList[0] : '';
+
+          // チップ表示更新
+          renderChips(selected);
+
+          // モーダルを閉じる
+          var closeBtn = modal.querySelector('[data-action="close-modal"]');
+          if (closeBtn) {
+            closeBtn.click();
+          } else {
+            modal.hidden = true;
+          }
+        });
+      }
+
+      function renderChips(selectedList) {
+        chipsContainer.innerHTML = '';
+        if (!selectedList.length) {
+          var span = document.createElement('span');
+          span.className = 'app-muted ' + opts.noLabelClass;
+          span.style.fontSize = '13px';
+          span.textContent = opts.noLabelText;
+          chipsContainer.appendChild(span);
+          return;
+        }
+
+        selectedList.forEach(function (item) {
+          var chip = document.createElement('span');
+          chip.className = 'app-badge app-badge--neutral ' + opts.chipClass;
+          chip.setAttribute('data-user-id', item.id);
+          chip.style.cssText = 'display:inline-flex; align-items:center; gap:4px; padding:3px 8px; font-size:12px; border-radius:9999px; background:#f1f5f9; color:#334155;';
+          chip.textContent = item.name + ' ';
+
+          var btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = opts.removeBtnClass;
+          btn.setAttribute('data-user-id', item.id);
+          btn.style.cssText = 'background:none; border:none; padding:0; cursor:pointer; font-size:14px; line-height:1; color:#94a3b8;';
+          btn.title = '削除';
+          btn.innerHTML = '&times;';
+
+          chip.appendChild(btn);
+          chipsContainer.appendChild(chip);
+        });
+      }
+
+      // チップ削除ボタンの委任ハンドラ
+      chipsContainer.addEventListener('click', function (e) {
+        var btn = e.target.closest('.' + opts.removeBtnClass);
+        if (!btn) return;
+        var userId = btn.getAttribute('data-user-id');
+        var currentIds = hiddenInput.value ? hiddenInput.value.split(',').map(function (s) { return s.trim(); }).filter(Boolean) : [];
+        currentIds = currentIds.filter(function (id) { return id !== userId; });
+        hiddenInput.value = currentIds.join(',');
+        if (compatInput) compatInput.value = currentIds.length ? currentIds[0] : '';
+
+        // チップ自体を削除
+        var chip = btn.closest('.' + opts.chipClass);
+        if (chip) chip.remove();
+
+        // 空になったら未指定ラベルを表示
+        if (!chipsContainer.querySelectorAll('.' + opts.chipClass).length) {
+          var span = document.createElement('span');
+          span.className = 'app-muted ' + opts.noLabelClass;
+          span.style.fontSize = '13px';
+          span.textContent = opts.noLabelText;
+          chipsContainer.appendChild(span);
+        }
+      });
     }
 
     if (document.readyState === 'loading') {

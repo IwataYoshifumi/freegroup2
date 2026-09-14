@@ -461,10 +461,13 @@ class DealViewTests(TestCase):
         self.assertContains(response, "基幹システム導入")
         self.assertContains(response, "テスト株式会社")
         # HIG準拠レイアウト・表示（コンテナ幅、金額3桁カンマ区切り、確度%表示、ステージバッジ）
-        self.assertContains(response, "max-width: 1200px;")
+        self.assertContains(response, "max-width: 100%;")
         self.assertContains(response, "¥5,000,000")
         self.assertContains(response, "80%")
-        self.assertContains(response, '<span class="app-badge app-badge--neutral">見積提示</span>')
+        self.assertContains(
+            response,
+            '<span class="app-badge" style="background-color: #ede9fe; color: #6d28d9; border: 1px solid #ddd6fe; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 9999px;">見積提示</span>',
+        )
         self.assertContains(response, 'text-align: right; font-variant-numeric: tabular-nums;')
 
     def test_deal_detail_view_permissions(self):
@@ -2198,3 +2201,424 @@ class DealDetailAttachmentModalTests(TestCase):
         self.assertIn('id="attachment-dropzone"', modal_html)
         self.assertIn('id="attachment-upload-btn"', modal_html)
         self.assertIn('data-action="close-modal"', modal_html)
+
+
+class DealKanbanViewTests(TestCase):
+    """案件一覧画面のパイプライン（カンバン）表示およびステージ別集計の検証。"""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="kanban_user", password="password")
+        self.client.login(username="kanban_user", password="password")
+        self.company = Company.objects.create(organization="テスト株式会社", created_by=self.user)
+
+        # 各ステージの案件を作成
+        # 1. 初回商談: 2件 (¥1,000,000 + ¥2,500,000 = ¥3,500,000)
+        self.d1 = Deal.objects.create(
+            name="商談A",
+            company=self.company,
+            owner=self.user,
+            created_by=self.user,
+            stage=Stage.INITIAL_MEETING,
+            amount=Decimal("1000000"),
+            probability=20,
+            expected_close_date=timezone.localdate() + timedelta(days=10),
+        )
+        self.d2 = Deal.objects.create(
+            name="商談B",
+            company=self.company,
+            owner=self.user,
+            created_by=self.user,
+            stage=Stage.INITIAL_MEETING,
+            amount=Decimal("2500000"),
+            probability=30,
+            expected_close_date=timezone.localdate() - timedelta(days=1),  # 期限超過
+        )
+        # 2. ヒアリング・課題整理: 1件 (¥1,500,000)
+        self.d_needs = Deal.objects.create(
+            name="ヒアリングX",
+            company=self.company,
+            owner=self.user,
+            created_by=self.user,
+            stage=Stage.NEEDS_ANALYSIS,
+            amount=Decimal("1500000"),
+            probability=40,
+        )
+        # 3. 提案・見積提示: 1件 (amount is None -> ¥0)
+        self.d3 = Deal.objects.create(
+            name="見積C",
+            company=self.company,
+            owner=self.user,
+            created_by=self.user,
+            stage=Stage.QUOTATION,
+            amount=None,
+            probability=50,
+        )
+        # 4. 社内稟議・検討中: 2件 (UNDER_REVIEW: ¥3,000,000 + INTERNAL_APPROVAL: ¥2,000,000 = ¥5,000,000)
+        self.d4 = Deal.objects.create(
+            name="稟議D",
+            company=self.company,
+            owner=self.user,
+            created_by=self.user,
+            stage=Stage.UNDER_REVIEW,
+            amount=Decimal("3000000"),
+            probability=70,
+        )
+        self.d5 = Deal.objects.create(
+            name="検討E",
+            company=self.company,
+            owner=self.user,
+            created_by=self.user,
+            stage=Stage.INTERNAL_APPROVAL,
+            amount=Decimal("2000000"),
+            probability=80,
+        )
+        # 5. 最終交渉: 0件 (count=0, total_amount=0)
+
+    def test_default_view_is_list(self):
+        """view 未指定時は list モードになり、テーブルが表示されること。"""
+        url = reverse("deals:deal_list")
+        res = self.client.get(url)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.context["current_view"], "list")
+        html = res.content.decode("utf-8")
+        self.assertIn("app-table", html)
+        self.assertNotIn("deal-kanban-board", html)
+
+    def test_kanban_view_context_and_aggregation(self):
+        """?view=kanban 指定時にカンバン表示となり、各ステージ（全5列）の件数・合計金額が集計されること。"""
+        url = reverse("deals:deal_list") + "?view=kanban"
+        res = self.client.get(url)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.context["current_view"], "kanban")
+
+        columns = res.context["kanban_columns"]
+        self.assertEqual(len(columns), 5)
+
+        # カラム0: 初回商談
+        col0 = columns[0]
+        self.assertEqual(col0["key"], "initial_meeting")
+        self.assertEqual(col0["title"], "初回商談")
+        self.assertEqual(col0["count"], 2)
+        self.assertEqual(col0["total_amount"], Decimal("3500000"))
+
+        # カラム1: ヒアリング・課題整理
+        col1 = columns[1]
+        self.assertEqual(col1["key"], "needs_analysis")
+        self.assertEqual(col1["title"], "ヒアリング・課題整理")
+        self.assertEqual(col1["count"], 1)
+        self.assertEqual(col1["total_amount"], Decimal("1500000"))
+
+        # カラム2: 提案・見積提示
+        col2 = columns[2]
+        self.assertEqual(col2["key"], "quotation")
+        self.assertEqual(col2["title"], "提案・見積提示")
+        self.assertEqual(col2["count"], 1)
+        self.assertEqual(col2["total_amount"], Decimal("0"))
+
+        # カラム3: 社内稟議・検討中
+        col3 = columns[3]
+        self.assertEqual(col3["key"], "under_review")
+        self.assertEqual(col3["title"], "社内稟議・検討中")
+        self.assertEqual(col3["count"], 2)
+        self.assertEqual(col3["total_amount"], Decimal("5000000"))
+
+        # カラム4: 最終交渉
+        col4 = columns[4]
+        self.assertEqual(col4["key"], "negotiation")
+        self.assertEqual(col4["title"], "最終交渉")
+        self.assertEqual(col4["count"], 0)
+        self.assertEqual(col4["total_amount"], Decimal("0"))
+
+    def test_kanban_html_elements_and_overdue_highlight(self):
+        """カンバン表示のHTML要素および期限超過ハイライト、切り替えボタングループの描画を検証。"""
+        url = reverse("deals:deal_list") + "?view=kanban"
+        res = self.client.get(url)
+        self.assertEqual(res.status_code, 200)
+        html = res.content.decode("utf-8")
+
+        # カンバンコンテナおよびカード
+        self.assertIn("deal-kanban-board", html)
+        self.assertIn("deal-kanban-column", html)
+        self.assertIn("deal-kanban-card", html)
+
+        # 会社名リンク、案件名、金額、確度
+        self.assertIn("テスト株式会社", html)
+        self.assertIn("商談A", html)
+        self.assertIn("¥1,000,000", html)
+        self.assertIn("20%", html)
+        self.assertIn("ヒアリング・課題整理", html)
+        self.assertIn("ヒアリングX", html)
+        self.assertIn("¥1,500,000", html)
+
+        # 期限超過のスタイル適用（商談Bの予定日）
+        self.assertIn("color: var(--app-color-danger, #ef4444)", html)
+
+        # 切り替えボタンが検索フォーム（app-filter-form）内に存在し、アクティブ状態であること
+        self.assertIn("app-filter-form", html)
+        self.assertIn("パイプライン", html)
+        self.assertIn("一覧", html)
+        self.assertIn("app-btn--primary", html)
+        form_start = html.find('class="app-filter-form"')
+        form_end = html.find('</form>', form_start)
+        filter_form_part = html[form_start:form_end]
+        self.assertIn("app-btn-group", filter_form_part)
+        self.assertIn("パイプライン", filter_form_part)
+
+
+
+    def test_query_parameters_preserved_in_switch_urls(self):
+        """検索条件が付与された状態で切り替えURLにクエリが維持されること。"""
+        url = reverse("deals:deal_list") + "?view=list&q=商談&stage=initial_meeting"
+        res = self.client.get(url)
+        self.assertEqual(res.status_code, 200)
+
+        # kanban_url に q と stage が維持され、view=kanban になっていること
+        kanban_url = res.context["kanban_url"]
+        self.assertIn("view=kanban", kanban_url)
+        self.assertIn("q=%E5%95%86%E8%AB%87", kanban_url)
+        self.assertIn("stage=initial_meeting", kanban_url)
+
+
+class DealUpdateBackNavigatorTests(TestCase):
+    """案件編集および操作ViewにおけるBackNavigator（back_stack）引き継ぎ検証。"""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="deal_edit_user", password="password")
+        perm_change_deal = Permission.objects.get(codename="change_deal")
+        self.user.user_permissions.add(perm_change_deal)
+        self.client.login(username="deal_edit_user", password="password")
+
+        self.company = Company.objects.create(organization="テスト企業", created_by=self.user)
+        self.deal = Deal.objects.create(
+            name="編集対象案件",
+            company=self.company,
+            owner=self.user,
+            created_by=self.user,
+            stage=Stage.INITIAL_MEETING,
+        )
+
+    def test_deal_update_preserves_back_stack_on_post(self):
+        """DealUpdateView への POST 保存時、リダイレクト先に back_stack が引き継がれること。"""
+        # 案件詳細にアクセスしてバックスタックを生成
+        detail_url = reverse("deals:deal_detail", kwargs={"pk": self.deal.pk})
+        res_detail = self.client.get(detail_url)
+        self.assertEqual(res_detail.status_code, 200)
+        back = res_detail.context["back"]
+        encoded_stack = back._encode_stack()
+        self.assertTrue(encoded_stack)
+
+        # 案件編集URLにback_stack付きでPOST
+        update_url = reverse("deals:deal_update", kwargs={"pk": self.deal.pk})
+        post_data = {
+            "name": "編集済み案件名",
+            "company": self.company.pk,
+            "stage": Stage.INITIAL_MEETING,
+            BackNavigator.PARAM_NAME: encoded_stack,
+        }
+        res_post = self.client.post(update_url, data=post_data)
+        self.assertEqual(res_post.status_code, 302)
+
+        # リダイレクト先URLに BackNavigator.PARAM_NAME が付与されていること
+        redirect_url = res_post.url
+        self.assertIn(f"{BackNavigator.PARAM_NAME}=", redirect_url)
+
+        # リダイレクト先（詳細画面）へアクセスした際、戻るボタンが存在すること
+        res_follow = self.client.get(redirect_url)
+        self.assertEqual(res_follow.status_code, 200)
+        self.assertTrue(res_follow.context["back"].has_back)
+
+    def test_deal_close_preserves_back_stack_on_post(self):
+        """DealCloseView への POST 完了時、リダイレクト先に back_stack が引き継がれること。"""
+        detail_url = reverse("deals:deal_detail", kwargs={"pk": self.deal.pk})
+        res_detail = self.client.get(detail_url)
+        encoded_stack = res_detail.context["back"]._encode_stack()
+
+        close_url = reverse("deals:deal_close", kwargs={"pk": self.deal.pk})
+        post_data = {
+            "stage": Stage.WON,
+            "closed_at": timezone.localdate(),
+            BackNavigator.PARAM_NAME: encoded_stack,
+        }
+        res_post = self.client.post(close_url, data=post_data)
+        self.assertEqual(res_post.status_code, 302)
+        self.assertIn(f"{BackNavigator.PARAM_NAME}=", res_post.url)
+
+    def test_deal_reassign_owner_preserves_back_stack_on_post(self):
+        """DealReassignOwnerView への POST 完了時、リダイレクト先に back_stack が引き継がれること。"""
+        new_user = User.objects.create_user(username="new_owner_user", password="password")
+        detail_url = reverse("deals:deal_detail", kwargs={"pk": self.deal.pk})
+        res_detail = self.client.get(detail_url)
+        encoded_stack = res_detail.context["back"]._encode_stack()
+
+        reassign_url = reverse("deals:deal_reassign_owner", kwargs={"pk": self.deal.pk})
+        post_data = {
+            "new_owner": new_user.pk,
+            BackNavigator.PARAM_NAME: encoded_stack,
+        }
+        res_post = self.client.post(reassign_url, data=post_data)
+        self.assertEqual(res_post.status_code, 302)
+        self.assertIn(f"{BackNavigator.PARAM_NAME}=", res_post.url)
+
+
+class DealFormStageValidationTests(TestCase):
+    """DealCreateForm / DealUpdateForm のステージ選択肢適正化およびエラーハンドリングの検証。"""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="stage_user", password="password")
+        perm_change_deal = Permission.objects.get(codename="change_deal")
+        perm_add_deal = Permission.objects.get(codename="add_deal")
+        self.user.user_permissions.add(perm_change_deal, perm_add_deal)
+        self.client.login(username="stage_user", password="password")
+        self.company = Company.objects.create(organization="ステージテスト企業", created_by=self.user)
+        self.deal = Deal.objects.create(
+            name="アクティブ案件",
+            company=self.company,
+            owner=self.user,
+            created_by=self.user,
+            stage=Stage.INITIAL_MEETING,
+        )
+
+    def test_deal_create_form_stage_choices_only_active(self):
+        """DealCreateForm の stage 選択肢に won / lost が含まれず、アクティブステージ6種のみであること。"""
+        from deals.forms import DealCreateForm
+        form = DealCreateForm()
+        choice_codes = [c[0] for c in form.fields["stage"].choices]
+        self.assertNotIn(Stage.WON, choice_codes)
+        self.assertNotIn(Stage.LOST, choice_codes)
+        self.assertEqual(len(choice_codes), 6)
+        self.assertIn(Stage.INITIAL_MEETING, choice_codes)
+        self.assertIn(Stage.NEEDS_ANALYSIS, choice_codes)
+        self.assertIn(Stage.QUOTATION, choice_codes)
+        self.assertIn(Stage.UNDER_REVIEW, choice_codes)
+        self.assertIn(Stage.INTERNAL_APPROVAL, choice_codes)
+        self.assertIn(Stage.NEGOTIATION, choice_codes)
+
+    def test_deal_update_form_stage_choices_only_active_for_active_deal(self):
+        """アクティブな案件の DealUpdateForm の stage 選択肢に won / lost が含まれないこと。"""
+        from deals.forms import DealUpdateForm
+        form = DealUpdateForm(instance=self.deal)
+        choice_codes = [c[0] for c in form.fields["stage"].choices]
+        self.assertNotIn(Stage.WON, choice_codes)
+        self.assertNotIn(Stage.LOST, choice_codes)
+        self.assertEqual(len(choice_codes), 6)
+
+    def test_deal_update_form_stage_choices_includes_won_for_closed_deal(self):
+        """既に受注クローズ済みの案件では DealUpdateForm の stage 選択肢に won が残ること。"""
+        from deals.forms import DealUpdateForm
+        closed_deal = Deal.objects.create(
+            name="受注済み案件",
+            company=self.company,
+            owner=self.user,
+            created_by=self.user,
+            stage=Stage.WON,
+            closed_at=timezone.localdate(),
+        )
+        form = DealUpdateForm(instance=closed_deal)
+        choice_codes = [c[0] for c in form.fields["stage"].choices]
+        self.assertIn(Stage.WON, choice_codes)
+
+    def test_deal_update_post_won_does_not_crash_and_returns_form_error(self):
+        """DealUpdateView へ stage=won を POST した場合に ValueError でクラッシュせずフォームエラーとなること。"""
+        url = reverse("deals:deal_update", kwargs={"pk": self.deal.pk})
+        post_data = {
+            "name": "不正更新案件",
+            "company": self.company.pk,
+            "stage": Stage.WON,  # クローズ画面を通さず直接 won を指定
+        }
+        res = self.client.post(url, data=post_data)
+        # 500 エラーにならず、200 OK（再描画・エラー表示）が返ること
+        self.assertEqual(res.status_code, 200)
+        self.assertFalse(res.context["form"].is_valid())
+        self.assertIn("stage", res.context["form"].errors)
+        # DB上のステージが変更されていないこと
+        self.deal.refresh_from_db()
+        self.assertEqual(self.deal.stage, Stage.INITIAL_MEETING)
+
+    def test_deal_create_post_won_does_not_crash_and_returns_form_error(self):
+        """DealCreateView へ stage=won を POST した場合に ValueError でクラッシュせずフォームエラーとなること。"""
+        url = reverse("deals:deal_create")
+        post_data = {
+            "name": "新規不正案件",
+            "company": self.company.pk,
+            "owner": self.user.pk,
+            "stage": Stage.WON,
+        }
+        res = self.client.post(url, data=post_data)
+        self.assertEqual(res.status_code, 200)
+        self.assertFalse(res.context["form"].is_valid())
+        self.assertIn("stage", res.context["form"].errors)
+
+
+class DealStageBadgeStyleTests(TestCase):
+    """案件ステージごとのバッジスタイルおよび表示テスト。"""
+
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(
+            username="badge_test_user",
+            password="password",
+        )
+        perm_view = Permission.objects.get(codename="view_deal")
+        perm_view_all = Permission.objects.get(codename="view_all_deals")
+        self.user.user_permissions.add(perm_view, perm_view_all)
+        self.company = Company.objects.create(
+            organization="バッジテスト株式会社",
+            created_by=self.user,
+        )
+
+    def test_stage_badge_style_mapping(self):
+        """各ステージおよび未知の値で期待通りのインラインスタイルが返されること。"""
+        deal = Deal(name="テスト案件", company=self.company)
+
+        expected_styles = {
+            Stage.INITIAL_MEETING: "background-color: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd;",
+            Stage.NEEDS_ANALYSIS: "background-color: #cffafe; color: #0e7490; border: 1px solid #a5f3fc;",
+            Stage.QUOTATION: "background-color: #ede9fe; color: #6d28d9; border: 1px solid #ddd6fe;",
+            Stage.UNDER_REVIEW: "background-color: #fef3c7; color: #b45309; border: 1px solid #fde68a;",
+            Stage.INTERNAL_APPROVAL: "background-color: #fef9c3; color: #a16207; border: 1px solid #fde047;",
+            Stage.NEGOTIATION: "background-color: #ffedd5; color: #c2410c; border: 1px solid #fed7aa;",
+            Stage.WON: "background-color: #dcfce7; color: #15803d; border: 1px solid #86efac;",
+            Stage.LOST: "background-color: #f1f5f9; color: #64748b; border: 1px solid #e2e8f0;",
+        }
+
+        for stage, expected_style in expected_styles.items():
+            deal.stage = stage
+            self.assertEqual(deal.stage_badge_style, expected_style)
+
+        # 未知/その他/未設定
+        deal.stage = "unknown_stage"
+        self.assertEqual(
+            deal.stage_badge_style,
+            "background-color: #f1f5f9; color: #475569; border: 1px solid #cbd5e1;",
+        )
+
+    def test_stage_badge_rendered_in_list_and_detail(self):
+        """一覧画面および詳細画面でステージバッジが正しく描画されること。"""
+        deal = Deal.objects.create(
+            name="商談中案件",
+            company=self.company,
+            owner=self.user,
+            created_by=self.user,
+            stage=Stage.NEGOTIATION,
+        )
+
+        self.client.login(username="badge_test_user", password="password")
+
+        # 一覧画面での描画検証
+        list_url = reverse("deals:deal_list")
+        res_list = self.client.get(list_url)
+        self.assertEqual(res_list.status_code, 200)
+        expected_badge_html = (
+            f'<span class="app-badge" style="{deal.stage_badge_style} '
+            'font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 9999px;">交渉</span>'
+        )
+        self.assertContains(res_list, expected_badge_html)
+
+        # 詳細画面での描画検証
+        detail_url = reverse("deals:deal_detail", kwargs={"pk": deal.pk})
+        res_detail = self.client.get(detail_url)
+        self.assertEqual(res_detail.status_code, 200)
+        self.assertContains(res_detail, expected_badge_html)
+
+
+
+

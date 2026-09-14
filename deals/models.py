@@ -20,6 +20,19 @@ class Stage(models.TextChoices):
     WON = "won", _("受注")
     LOST = "lost", _("失注")
 
+    @classmethod
+    def active_choices(cls):
+        """アクティブステージ（クローズ除外の6種）の選択肢タプルリストを返す。"""
+        return [
+            (cls.INITIAL_MEETING.value, cls.INITIAL_MEETING.label),
+            (cls.NEEDS_ANALYSIS.value, cls.NEEDS_ANALYSIS.label),
+            (cls.QUOTATION.value, cls.QUOTATION.label),
+            (cls.UNDER_REVIEW.value, cls.UNDER_REVIEW.label),
+            (cls.INTERNAL_APPROVAL.value, cls.INTERNAL_APPROVAL.label),
+            (cls.NEGOTIATION.value, cls.NEGOTIATION.label),
+        ]
+
+
 
 class DealType(models.TextChoices):
     """案件の性質（仕様書 v1.5 §2.9.1）。"""
@@ -166,12 +179,21 @@ class Deal(models.Model):
     def clean(self):
         super().clean()
         if self.stage == Stage.WON and not self.closed_at:
-            raise ValidationError({"closed_at": "受注時は成約確定日が必須です。"})
+            raise ValidationError({
+                "stage": "受注への変更は「案件クローズ」から成約確定日を指定して行ってください。",
+                "closed_at": "受注時は成約確定日が必須です。",
+            })
         if self.stage == Stage.LOST:
             if not self.closed_at:
-                raise ValidationError({"closed_at": "失注時は成約確定日が必須です。"})
+                raise ValidationError({
+                    "stage": "失注への変更は「案件クローズ」から成約確定日を指定して行ってください。",
+                    "closed_at": "失注時は成約確定日が必須です。",
+                })
             if not self.lost_reason:
-                raise ValidationError({"lost_reason": "失注時は失注理由が必須です。"})
+                raise ValidationError({
+                    "stage": "失注時は失注理由の指定が必要です（案件クローズから登録してください）。",
+                    "lost_reason": "失注時は失注理由が必須です。",
+                })
         if self.closed_at and self.closed_at > timezone.localdate():
             raise ValidationError({"closed_at": "成約確定日に未来日は指定できません。"})
         if self.source_campaign_id and self.lead_source != LeadSource.CAMPAIGN:
@@ -180,6 +202,23 @@ class Deal(models.Model):
                     "lead_source": "発生源キャンペーンを指定する場合、案件発生源は「メールキャンペーン」にしてください。"
                 }
             )
+
+    STAGE_BADGE_STYLES = {
+        Stage.INITIAL_MEETING: "background-color: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd;",
+        Stage.NEEDS_ANALYSIS: "background-color: #cffafe; color: #0e7490; border: 1px solid #a5f3fc;",
+        Stage.QUOTATION: "background-color: #ede9fe; color: #6d28d9; border: 1px solid #ddd6fe;",
+        Stage.UNDER_REVIEW: "background-color: #fef3c7; color: #b45309; border: 1px solid #fde68a;",
+        Stage.INTERNAL_APPROVAL: "background-color: #fef9c3; color: #a16207; border: 1px solid #fde047;",
+        Stage.NEGOTIATION: "background-color: #ffedd5; color: #c2410c; border: 1px solid #fed7aa;",
+        Stage.WON: "background-color: #dcfce7; color: #15803d; border: 1px solid #86efac;",
+        Stage.LOST: "background-color: #f1f5f9; color: #64748b; border: 1px solid #e2e8f0;",
+    }
+    DEFAULT_STAGE_BADGE_STYLE = "background-color: #f1f5f9; color: #475569; border: 1px solid #cbd5e1;"
+
+    @property
+    def stage_badge_style(self):
+        """現在の stage に応じたバッジ用インラインスタイル文字列を返す。"""
+        return self.STAGE_BADGE_STYLES.get(self.stage, self.DEFAULT_STAGE_BADGE_STYLE)
 
     @property
     def expected_value(self):

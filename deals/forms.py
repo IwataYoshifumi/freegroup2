@@ -33,7 +33,68 @@ class DealAmountCleanMixin:
         return amount
 
 
-class DealForm(DealAmountCleanMixin, forms.ModelForm):
+class SafeDealModelFormMixin:
+    """Deal用ModelFormの安全処理Mixin。
+    1. stage 選択肢をアクティブステージに限定する（クローズ済みの場合は既存ステージを維持）。
+    2. Model.clean() がフォームに存在しないフィールド（closed_at, lost_reason等）のエラーを
+       返した際に ValueError でクラッシュするのを防ぎ、stage またはノンフィールドエラーへ安全にマッピングする。
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if "stage" in self.fields:
+            active_choices = Stage.active_choices()
+            instance = getattr(self, "instance", None)
+            if instance and instance.pk and instance.stage in [Stage.WON, Stage.LOST]:
+                # すでにクローズ済みの案件の場合は、既存ステージを選択肢に含める
+                self.fields["stage"].choices = [
+                    (instance.stage, instance.get_stage_display())
+                ] + [c for c in active_choices if c[0] != instance.stage]
+            else:
+                self.fields["stage"].choices = active_choices
+
+    def clean_stage(self):
+        stage = self.cleaned_data.get("stage")
+        instance = getattr(self, "instance", None)
+        # クローズ済みでステージを変更していない場合は許可
+        if instance and instance.pk and instance.stage in [Stage.WON, Stage.LOST] and stage == instance.stage:
+            return stage
+        if stage in [Stage.WON, Stage.LOST]:
+            raise ValidationError("受注・失注への変更は「案件クローズ」画面から行ってください。")
+        return stage
+
+    def _post_clean(self):
+        opts = self._meta
+        from django.forms.models import construct_instance
+        try:
+            self.instance = construct_instance(self, self.instance, opts.fields, opts.exclude)
+        except ValidationError as e:
+            self._update_errors(e)
+
+        exclude = self._get_validation_exclusions()
+        try:
+            self.instance.full_clean(exclude=exclude, validate_unique=False)
+        except ValidationError as e:
+            # フォームに含まれないフィールドのエラーを安全にハンドリング
+            cleaned_errors = {}
+            for field, messages in e.message_dict.items():
+                if field in self.fields:
+                    cleaned_errors.setdefault(field, []).extend(messages)
+                else:
+                    # フォームにないフィールド（closed_at, lost_reason 等）のエラーは stage またはノンフィールドエラーへ
+                    if field in ["closed_at", "lost_reason"] and "stage" in self.fields:
+                        cleaned_errors.setdefault("stage", []).extend(messages)
+                    else:
+                        for msg in messages:
+                            self.add_error(None, msg)
+            if cleaned_errors:
+                self._update_errors(ValidationError(cleaned_errors))
+
+        if getattr(self, "_validate_unique", True):
+            self.validate_unique()
+
+
+class DealForm(SafeDealModelFormMixin, DealAmountCleanMixin, forms.ModelForm):
     """案件新規作成用フォーム（仕様書 v1.5 §2.1, §0.16）。"""
 
     amount = CommaDecimalField(
@@ -110,7 +171,7 @@ class DealForm(DealAmountCleanMixin, forms.ModelForm):
         return cleaned_data
 
 
-class DealCreateForm(DealAmountCleanMixin, forms.ModelForm):
+class DealCreateForm(SafeDealModelFormMixin, DealAmountCleanMixin, forms.ModelForm):
     """案件新規起票専用フォーム（スリム化：10項目）。"""
 
     amount = CommaDecimalField(
@@ -172,7 +233,7 @@ class DealCreateForm(DealAmountCleanMixin, forms.ModelForm):
         return cleaned_data
 
 
-class DealUpdateForm(DealAmountCleanMixin, forms.ModelForm):
+class DealUpdateForm(SafeDealModelFormMixin, DealAmountCleanMixin, forms.ModelForm):
     """案件通常編集用フォーム（仕様書 v1.5 §2.6, §0.15）。
     ※ owner, primary_person, is_archived は除外。
     """

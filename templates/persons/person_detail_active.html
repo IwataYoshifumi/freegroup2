@@ -374,7 +374,7 @@
                 {% url 'deals:deal_detail' pk=deal.id as deal_detail_url %}
                 <a href="{% append_back_url deal_detail_url back %}" style="font-weight:600;">{{ deal.name }}</a>
               </td>
-              <td><span class="app-status-badge">{{ deal.get_stage_display }}</span></td>
+              <td><span class="app-badge" style="{{ deal.stage_badge_style }} font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 9999px;">{{ deal.get_stage_display }}</span></td>
               <td>{% if deal.amount is not None %}¥{{ deal.amount|floatformat:0 }}{% else %}-{% endif %}</td>
               <td>{{ deal.primary_person|default:"-" }}</td>
               <td>{{ deal.owner|default:"-" }}</td>

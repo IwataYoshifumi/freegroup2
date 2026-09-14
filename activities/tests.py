@@ -354,13 +354,26 @@ class ActivityViewTests(TestCase):
         self.assertContains(response, '<span class="app-badge app-badge--neutral">訪問</span>')
         self.assertContains(response, '<span class="app-badge app-badge--info">発信</span>')
         self.assertContains(response, 'white-space:nowrap;')
+        # 不要ボタン撤去（日報/全期間ボタンの完全撤去）および新規作成ボタン配置
+        self.assertNotContains(response, "本日の日報")
+        self.assertNotContains(response, "全期間一覧")
+        self.assertContains(response, "活動新規作成")
         # 期間検索フォーム要素（occurred_after, occurred_before, クイックプリセット）
         self.assertContains(response, 'name="occurred_after"')
         self.assertContains(response, 'name="occurred_before"')
         self.assertContains(response, 'js-date-quick')
         self.assertContains(response, 'js-date-clear')
-        # 実施者、ソート、表示件数フォーム要素、プレースホルダー
-        self.assertContains(response, 'name="user_id"')
+        # 実施者・同席者の複数選択 hidden input およびモーダル
+        self.assertContains(response, 'name="user_ids"')
+        self.assertContains(response, 'name="attendee_user_ids"')
+        self.assertContains(response, 'id="userSelectModal"')
+        self.assertContains(response, 'id="attendeeSelectModal"')
+        self.assertContains(response, 'data-target="userSelectModal"')
+        self.assertContains(response, 'data-target="attendeeSelectModal"')
+        # 状態ボタングループ
+        self.assertContains(response, 'name="status"')
+        self.assertContains(response, 'js-status-btn')
+        # ソート、表示件数フォーム要素、プレースホルダー
         self.assertContains(response, 'name="sort"')
         self.assertContains(response, 'name="per_page"')
         self.assertContains(response, 'placeholder="内容・場所・案件名・会社名・担当者名..."')
@@ -617,6 +630,136 @@ class ActivityViewTests(TestCase):
         self.assertNotContains(res_none, "パーソン会社所属の活動メモ")
         self.assertNotContains(res_none, "田中さんの活動メモ")
         self.assertNotContains(res_none, "山本さん同席の活動メモ")
+
+    def test_activity_list_multi_user_filter(self):
+        """実施者（user_ids）複数指定による絞り込みの検証。"""
+        self.client.login(username="act_owner", password="password")
+        url = reverse("activities:activity_list")
+
+        user_a = self.user  # act_owner
+        user_b = self.attendee  # act_attendee
+        user_c = User.objects.create_user(username="user_c", password="password")
+
+        act_a = self.activity  # user_a
+        act_b = Activity.objects.create(
+            deal=self.deal,
+            activity_type=ActivityType.WEB_MEETING,
+            occurred_at=timezone.now(),
+            user=user_b,
+            memo="Bさんの活動",
+        )
+        act_c = Activity.objects.create(
+            deal=self.deal,
+            activity_type=ActivityType.PHONE,
+            occurred_at=timezone.now(),
+            user=user_c,
+            memo="Cさんの活動",
+        )
+
+        # 複数指定（カンマ区切り: user_a, user_b）
+        res = self.client.get(f"{url}?mode=all&user_ids={user_a.id},{user_b.id}")
+        self.assertEqual(res.status_code, 200)
+        self.assertContains(res, "初回訪問議事録")
+        self.assertContains(res, "Bさんの活動")
+        self.assertNotContains(res, "Cさんの活動")
+
+        # 複数指定（getlist 形式: user_ids=A & user_ids=C）
+        res_list = self.client.get(f"{url}?mode=all&user_ids={user_a.id}&user_ids={user_c.id}")
+        self.assertEqual(res_list.status_code, 200)
+        self.assertContains(res_list, "初回訪問議事録")
+        self.assertNotContains(res_list, "Bさんの活動")
+        self.assertContains(res_list, "Cさんの活動")
+
+    def test_activity_list_attendee_user_filter(self):
+        """同席者（attendee_user_ids）指定による絞り込みの検証。"""
+        self.client.login(username="act_owner", password="password")
+        url = reverse("activities:activity_list")
+
+        attendee_x = User.objects.create_user(username="attendee_x", password="password")
+        act_with_x = Activity.objects.create(
+            deal=self.deal,
+            activity_type=ActivityType.VISIT,
+            occurred_at=timezone.now(),
+            user=self.user,
+            memo="Xさん同席の訪問",
+        )
+        ActivityUser.objects.create(activity=act_with_x, user=attendee_x, role=UserRole.SUPPORT)
+
+        # 同席者 attendee_x で絞り込み
+        res = self.client.get(f"{url}?mode=all&user_id=&attendee_user_ids={attendee_x.id}")
+        self.assertEqual(res.status_code, 200)
+        self.assertContains(res, "Xさん同席の訪問")
+        # 別の同席者（self.attendee）の活動は除外
+        self.assertNotContains(res, "初回訪問議事録")
+
+    def test_activity_list_status_filter_and_button_group(self):
+        """ボタングループ形式のステータス（active, archived, all）切り替え検証。"""
+        self.client.login(username="act_owner", password="password")
+        url = reverse("activities:activity_list")
+
+        act_archived = Activity.objects.create(
+            deal=self.deal,
+            activity_type=ActivityType.PHONE,
+            occurred_at=timezone.now(),
+            user=self.user,
+            memo="アーカイブされた活動",
+            is_archived=True,
+        )
+
+        # 1. status=active (デフォルト): 有効のみ
+        res_active = self.client.get(f"{url}?mode=all&user_id=&status=active")
+        self.assertEqual(res_active.status_code, 200)
+        self.assertContains(res_active, "初回訪問議事録")
+        self.assertNotContains(res_active, "アーカイブされた活動")
+
+        # 2. status=archived: アーカイブのみ
+        res_archived = self.client.get(f"{url}?mode=all&user_id=&status=archived")
+        self.assertEqual(res_archived.status_code, 200)
+        self.assertNotContains(res_archived, "初回訪問議事録")
+        self.assertContains(res_archived, "アーカイブされた活動")
+
+        # 3. status=all: 両方表示
+        res_all = self.client.get(f"{url}?mode=all&user_id=&status=all")
+        self.assertEqual(res_all.status_code, 200)
+        self.assertContains(res_all, "初回訪問議事録")
+        self.assertContains(res_all, "アーカイブされた活動")
+
+    def test_activity_list_multi_sort(self):
+        """パーソン一覧準拠の多段ソート（?sort=key,-key）の検証。"""
+        self.client.login(username="act_owner", password="password")
+        url = reverse("activities:activity_list")
+
+        base_time = timezone.now()
+        act_email_old = Activity.objects.create(
+            deal=self.deal,
+            activity_type=ActivityType.EMAIL,
+            occurred_at=base_time - timezone.timedelta(days=2),
+            user=self.user,
+            memo="メール古い",
+        )
+        act_email_new = Activity.objects.create(
+            deal=self.deal,
+            activity_type=ActivityType.EMAIL,
+            occurred_at=base_time - timezone.timedelta(days=1),
+            user=self.user,
+            memo="メール新しい",
+        )
+        act_phone = Activity.objects.create(
+            deal=self.deal,
+            activity_type=ActivityType.PHONE,
+            occurred_at=base_time,
+            user=self.user,
+            memo="電話最新",
+        )
+
+        # 多段ソート: activity_type 昇順, occurred_at 降順
+        # activity_type: email ("email") < phone ("phone") < visit ("visit")
+        res = self.client.get(f"{url}?mode=all&user_id=&sort=activity_type,-occurred_at")
+        self.assertEqual(res.status_code, 200)
+        acts = list(res.context["activities"])
+        # email 2件が先に来て、その中で新しいものが先
+        self.assertEqual(acts[0], act_email_new)
+        self.assertEqual(acts[1], act_email_old)
 
     def test_activity_detail_view_permissions(self):
         # 実施者

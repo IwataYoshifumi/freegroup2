@@ -1,0 +1,76 @@
+{% load back_tags %}
+
+<div class="deal-kanban-board" style="display: flex; gap: 16px; overflow-x: auto; padding-bottom: 16px; align-items: flex-start;">
+  {% for col in kanban_columns %}
+    <div class="deal-kanban-column" style="flex: 1 1 0; min-width: 260px; max-width: 360px; background: var(--app-bg-subtle, #f8fafc); border: 1px solid var(--app-border, #e2e8f0); border-radius: 8px; padding: 12px; box-sizing: border-box;">
+      <!-- 列ヘッダー -->
+      <div class="deal-kanban-column-header" style="background: #f1f5f9; border-radius: 6px; padding: 10px; margin-bottom: 12px; border: 1px solid #e2e8f0;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <h3 style="margin: 0; font-size: 15px; font-weight: 700; color: #0f172a;">{{ col.title }}</h3>
+          <span class="app-badge app-badge--neutral" style="font-size: 11px; font-weight: 600; padding: 2px 6px;">{{ col.count }}件</span>
+        </div>
+        <div style="margin-top: 4px; font-size: 12px; color: var(--app-text-muted, #64748b); font-variant-numeric: tabular-nums; font-weight: 500;">
+          合計: ¥{{ col.total_amount|floatformat:"0g" }}
+        </div>
+      </div>
+
+      <!-- 案件カードリスト -->
+      <div class="deal-kanban-card-list">
+        {% for deal in col.deals %}
+          {% url 'deals:deal_detail' pk=deal.id as detail_url %}
+          <div class="deal-kanban-card" style="background: #ffffff; border: 1px solid #cbd5e1; border-radius: 6px; padding: 12px; margin-bottom: 10px; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);">
+            <!-- 1行目: 会社名（クリックで案件詳細へ） -->
+            <div>
+              <a href="{% append_back_url detail_url back %}" style="display: block; font-size: 14px; font-weight: 700; color: #0f172a; text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="{% if deal.company %}{{ deal.company.organization }}{% else %}{{ deal.name }}{% endif %}">
+                {% if deal.company %}
+                  {{ deal.company.organization }}
+                {% else %}
+                  {{ deal.name }}
+                {% endif %}
+              </a>
+            </div>
+
+            <!-- 2行目: 案件名（1行省略） -->
+            <div style="font-size: 12px; color: var(--app-text-muted, #64748b); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 4px;" title="{{ deal.name }}">
+              {{ deal.name }}
+            </div>
+
+            <!-- 3行目: 金額と確度 -->
+            <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 8px;">
+              <span style="font-size: 15px; font-weight: 700; color: #0f172a; font-variant-numeric: tabular-nums;">
+                {% if deal.amount is not None %}
+                  ¥{{ deal.amount|floatformat:"0g" }}
+                {% else %}
+                  ¥0
+                {% endif %}
+              </span>
+              {% if deal.probability is not None %}
+                <span style="font-size: 12px; font-weight: 600; color: var(--app-color-primary, #0284c7);">
+                  {{ deal.probability }}%
+                </span>
+              {% endif %}
+            </div>
+
+            <!-- 4行目: フッター（社内担当者、受注予定日） -->
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px; padding-top: 6px; border-top: 1px dashed var(--app-border, #e2e8f0); font-size: 11px; color: var(--app-text-muted, #64748b);">
+              <span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 140px;" title="{{ deal.owner|default:'担当未設定' }}">
+                {{ deal.owner|default:"-" }}
+              </span>
+              {% if deal.expected_close_date %}
+                <span style="white-space: nowrap; {% if deal.expected_close_date < today %}color: var(--app-color-danger, #ef4444); font-weight: 600;{% endif %}" title="受注予定日: {{ deal.expected_close_date|date:'Y-m-d' }}">
+                  {{ deal.expected_close_date|date:"Y-m-d" }}
+                </span>
+              {% else %}
+                <span style="color: var(--app-text-muted, #94a3b8);">-</span>
+              {% endif %}
+            </div>
+          </div>
+        {% empty %}
+          <div style="text-align: center; padding: 24px 8px; color: var(--app-text-muted, #94a3b8); font-size: 12px;">
+            案件なし
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+  {% endfor %}
+</div>
