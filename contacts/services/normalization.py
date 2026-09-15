@@ -196,8 +196,9 @@ GENERIC_EMAIL_DOMAINS = frozenset({
     "ocn.ne.jp",
     "biglobe.ne.jp",
     "so-net.ne.jp",
+    "interlink.or.jp",
 
-    # --- 日本のケーブルテレビ局 ---------------------------------------
+    # --- 日本のケーブルテレビ局・地域プロバイダ（東海エリア含む） -----
     "jcom.home.ne.jp",
     "cts.ne.jp",
     "c-able.ne.jp",
@@ -208,6 +209,17 @@ GENERIC_EMAIL_DOMAINS = frozenset({
     "ztv.co.jp",
     "mx.scn.tv",
     "catv296.ne.jp",
+    "aitai.ne.jp",        # ひまわりネットワーク（豊田・みよし・長久手）
+    "katch.ne.jp",        # キャッチネットワーク（刈谷・安城・西尾等）
+    "starcat.ne.jp",      # スターキャット（名古屋市・近郊）
+    "ccnw.ne.jp",         # シーシーエヌ（岐阜）
+    "ogaki-tv.ne.jp",     # 大垣ケーブルテレビ（西濃）
+    "medias.ne.jp",       # 知多メディアス（東海・大府・知多等）
+    "cac-net.ne.jp",      # 知多半島ケーブルネットワーク（CAC）
+    "skymarinet.ne.jp",   # 三河湾ネットワーク（蒲郡・幸田）
+    "gctv.ne.jp",         # グリーンシティケーブルテレビ（守山・尾張旭・瀬戸）
+    "icc-media.co.jp",    # アイ・シー・シー（一宮）
+    "ch-mics.jp",         # ミクスネットワーク（岡崎）
 })
 
 # 後方互換用エイリアス
@@ -215,7 +227,7 @@ _GENERIC_EMAIL_DOMAINS = GENERIC_EMAIL_DOMAINS
 
 # 末尾一致で判定するドメイン（サブドメイン必須ISP・レンタルサーバー等）
 GENERIC_EMAIL_DOMAIN_SUFFIXES = (
-    # --- サブドメイン必須で発行される老舗ISP --------------------------
+    # --- サブドメイン必須で発行される老舗ISP・地域CATV ----------------
     ".ocn.ne.jp",
     ".biglobe.ne.jp",
     ".so-net.ne.jp",
@@ -239,6 +251,21 @@ GENERIC_EMAIL_DOMAIN_SUFFIXES = (
     ".enjoy.ne.jp",
     ".megaegg.ne.jp",
     ".commufa.jp",
+    ".aitai.ne.jp",
+    ".katch.ne.jp",
+    ".starcat.ne.jp",
+    ".ccnw.ne.jp",
+    ".ogaki-tv.ne.jp",
+    ".medias.ne.jp",
+    ".cac-net.ne.jp",
+    ".skymarinet.ne.jp",
+    ".gctv.ne.jp",
+    ".icc-media.co.jp",
+    ".ch-mics.jp",
+    ".tnc.ne.jp",
+    ".asahi-net.or.jp",
+    ".sannet.ne.jp",
+    ".interlink.or.jp",
 
     # --- 国内レンタルサーバー -----------------------------------------
     ".sakura.ne.jp",

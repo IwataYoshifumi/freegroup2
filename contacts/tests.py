@@ -4233,3 +4233,46 @@ class ContactFormOwnerGuardTests(TestCase):
         )
         self.assertEqual(resp.status_code, 302)
 
+
+class GenericEmailDomainsTests(TestCase):
+    """東海エリア等主要CATV/ISPドメインの汎用メールドメイン判定テスト。"""
+
+    def test_tokai_catv_and_isp_domains_identified_as_generic(self):
+        from contacts.services.normalization import is_generic_email_domain
+
+        test_domains = [
+            "aitai.ne.jp",
+            "katch.ne.jp",
+            "starcat.ne.jp",
+            "ccnw.ne.jp",
+            "ogaki-tv.ne.jp",
+            "medias.ne.jp",
+            "cac-net.ne.jp",
+            "skymarinet.ne.jp",
+            "gctv.ne.jp",
+            "icc-media.co.jp",
+            "ch-mics.jp",
+            "tnc.ne.jp",
+            "asahi-net.or.jp",
+            "sannet.ne.jp",
+            "interlink.or.jp",
+        ]
+        for dom in test_domains:
+            with self.subTest(domain=dom):
+                # 完全一致
+                self.assertTrue(is_generic_email_domain(dom))
+                # サブドメイン形式
+                self.assertTrue(is_generic_email_domain(f"sub.{dom}"))
+                self.assertTrue(is_generic_email_domain(f"hm7.{dom}"))
+                # メールアドレス形式
+                self.assertTrue(is_generic_email_domain(f"user@{dom}"))
+                self.assertTrue(is_generic_email_domain(f"user@mail.{dom}"))
+
+    def test_unique_company_domain_not_generic(self):
+        from contacts.services.normalization import is_generic_email_domain
+
+        self.assertFalse(is_generic_email_domain("noba.co.jp"))
+        self.assertFalse(is_generic_email_domain("toyota.co.jp"))
+        self.assertFalse(is_generic_email_domain("user@my-unique-company.com"))
+
+

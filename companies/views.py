@@ -1,3 +1,4 @@
+import copy
 from collections import defaultdict
 
 from django.contrib import messages
@@ -13,7 +14,7 @@ from actionlogs.models import ActionLog
 from back_navigator.back_navigator import BackNavigator
 from companies.forms import CompanyForm, CompanyMergeConfirmForm
 from companies.models import Company, CompanyDuplicateCandidate
-from companies.services import execute_company_merge, mark_as_different_company
+from companies.services import execute_company_merge, mark_as_different_company, normalize_website
 from contacts.services.normalization import normalize_organization, normalize_phone_value
 
 
@@ -151,7 +152,11 @@ class CompanyArchiveView(LoginRequiredMixin, PermissionRequiredMixin, View):
 
 
 def _build_duplicate_groups():
-    """pending 状態の候補ペアから、連結している会社群をグルーピングして返す。"""
+    """pending 状態の候補ペアから、ランクごとに独立して連結している会社群をグルーピングして返す。
+
+    異なるランク（exact_match, possible_high, possible_mid, possible_low）のエッジが
+    同じ連結成分にマージされないよう、ランク別に独立して Union-Find を実行する。
+    """
     pending_candidates = list(
         CompanyDuplicateCandidate.objects.filter(
             review_status=CompanyDuplicateCandidate.ReviewStatus.PENDING
@@ -160,52 +165,12 @@ def _build_duplicate_groups():
     if not pending_candidates:
         return []
 
-    # 1. Union-Find で連結成分を算出
-    parent = {}
-
-    def find(i):
-        path = []
-        while parent.get(i, i) != i:
-            path.append(i)
-            i = parent[i]
-        for node in path:
-            parent[node] = i
-        return i
-
-    def union(i, j):
-        root_i = find(i)
-        root_j = find(j)
-        if root_i != root_j:
-            parent[root_i] = root_j
-
-    company_ids = set()
-    for cand in pending_candidates:
-        cid_a = cand.company_a_id
-        cid_b = cand.company_b_id
-        company_ids.add(cid_a)
-        company_ids.add(cid_b)
-        if cid_a not in parent:
-            parent[cid_a] = cid_a
-        if cid_b not in parent:
-            parent[cid_b] = cid_b
-        union(cid_a, cid_b)
-
-    groups_dict = defaultdict(list)
-    for cid in company_ids:
-        groups_dict[find(cid)].append(cid)
-
-    # 2. 会社情報の一括取得とコンタクト件数注釈（N+1防止）
-    companies_qs = (
-        Company.objects.filter(id__in=company_ids)
-        .annotate(contacts_count=Count("contacts", distinct=True))
-    )
-    company_map = {c.id: c for c in companies_qs}
-
-    group_candidates_map = defaultdict(list)
-    for cand in pending_candidates:
-        root = find(cand.company_a_id)
-        group_candidates_map[root].append(cand)
-
+    RANK_ORDER = [
+        CompanyDuplicateCandidate.Rank.EXACT_MATCH,
+        CompanyDuplicateCandidate.Rank.POSSIBLE_HIGH,
+        CompanyDuplicateCandidate.Rank.POSSIBLE_MID,
+        CompanyDuplicateCandidate.Rank.POSSIBLE_LOW,
+    ]
     RANK_PRIORITY = {
         CompanyDuplicateCandidate.Rank.EXACT_MATCH: 4,
         CompanyDuplicateCandidate.Rank.POSSIBLE_HIGH: 3,
@@ -213,6 +178,21 @@ def _build_duplicate_groups():
         CompanyDuplicateCandidate.Rank.POSSIBLE_LOW: 1,
     }
     rank_choices = dict(CompanyDuplicateCandidate.Rank.choices)
+
+    # 全候補ペアをランク別に分類
+    cands_by_rank = defaultdict(list)
+    all_company_ids = set()
+    for cand in pending_candidates:
+        cands_by_rank[cand.rank].append(cand)
+        all_company_ids.add(cand.company_a_id)
+        all_company_ids.add(cand.company_b_id)
+
+    # 会社情報の一括取得とコンタクト件数注釈（N+1防止）
+    companies_qs = (
+        Company.objects.filter(id__in=all_company_ids)
+        .annotate(contacts_count=Count("contacts", distinct=True))
+    )
+    company_map = {c.id: c for c in companies_qs}
 
     def company_sort_key(c):
         richness = 0
@@ -229,130 +209,184 @@ def _build_duplicate_groups():
         return (-richness, created_ts)
 
     result_groups = []
-    for idx, (root, cids) in enumerate(groups_dict.items(), start=1):
-        comps = [company_map[cid] for cid in cids if cid in company_map]
-        if not comps:
+    group_idx = 1
+
+    # 各ランクごとに独立して Union-Find を実行
+    for rank in RANK_ORDER:
+        cands_in_rank = cands_by_rank.get(rank, [])
+        if not cands_in_rank:
             continue
-        comps.sort(key=company_sort_key)
-        cand_pairs = group_candidates_map.get(root, [])
 
-        best_prio = 0
-        best_rank = CompanyDuplicateCandidate.Rank.POSSIBLE_LOW
-        max_score = 0
-        for cand in cand_pairs:
-            prio = RANK_PRIORITY.get(cand.rank, 0)
-            if prio > best_prio:
-                best_prio = prio
-                best_rank = cand.rank
-            if cand.score > max_score:
-                max_score = cand.score
+        parent = {}
 
-        # 一致項目ラベル判定（全社共通項目）
-        match_labels = []
-        if len(comps) >= 2:
-            raw_orgs = [
-                c.organization.strip()
-                for c in comps
-                if c.organization and c.organization.strip()
-            ]
-            norm_orgs = [
-                normalize_organization(c.organization)
-                for c in comps
-                if c.organization and normalize_organization(c.organization)
-            ]
-            name_match = (
-                (len(raw_orgs) == len(comps) and len(set(raw_orgs)) == 1)
-                or (len(norm_orgs) == len(comps) and len(set(norm_orgs)) == 1)
-            )
-            if name_match:
-                match_labels.append("社名一致")
+        def find(i):
+            path = []
+            while parent.get(i, i) != i:
+                path.append(i)
+                i = parent[i]
+            for node in path:
+                parent[node] = i
+            return i
 
-            domains = [
-                c.domain.strip().lower()
-                for c in comps
-                if c.domain and c.domain.strip()
-            ]
-            if len(domains) == len(comps) and len(set(domains)) == 1:
-                match_labels.append("ドメイン一致")
+        def union(i, j):
+            root_i = find(i)
+            root_j = find(j)
+            if root_i != root_j:
+                parent[root_i] = root_j
 
-            raw_phones = [
-                c.phone.strip()
-                for c in comps
-                if c.phone and c.phone.strip()
-            ]
-            norm_phones = [
-                normalize_phone_value(c.phone)
-                for c in comps
-                if c.phone and normalize_phone_value(c.phone)
-            ]
-            phone_match = (
-                (len(raw_phones) == len(comps) and len(set(raw_phones)) == 1)
-                or (len(norm_phones) == len(comps) and len(set(norm_phones)) == 1)
-            )
-            if phone_match:
-                match_labels.append("電話一致")
+        rank_company_ids = set()
+        for cand in cands_in_rank:
+            cid_a = cand.company_a_id
+            cid_b = cand.company_b_id
+            rank_company_ids.add(cid_a)
+            rank_company_ids.add(cid_b)
+            if cid_a not in parent:
+                parent[cid_a] = cid_a
+            if cid_b not in parent:
+                parent[cid_b] = cid_b
+            union(cid_a, cid_b)
 
-            addrs = [
-                c.address.replace(" ", "").replace("　", "").strip()
-                for c in comps
-                if c.address and c.address.strip()
-            ]
-            if len(addrs) == len(comps) and len(set(addrs)) == 1:
-                match_labels.append("住所一致")
+        rank_groups_dict = defaultdict(list)
+        for cid in rank_company_ids:
+            rank_groups_dict[find(cid)].append(cid)
 
-        # 先頭行（1行目）を基準とした各行の差分判定
-        base_comp = comps[0]
-        base_org = (base_comp.organization or "").strip()
-        base_domain = (base_comp.domain or "").strip().lower()
-        base_phone = (base_comp.phone or "").strip()
-        base_addr = (
-            base_comp.address.replace(" ", "").replace("　", "").strip()
-            if base_comp.address
-            else ""
-        )
+        rank_group_candidates_map = defaultdict(list)
+        for cand in cands_in_rank:
+            root = find(cand.company_a_id)
+            rank_group_candidates_map[root].append(cand)
 
-        for i, comp in enumerate(comps):
-            if i == 0:
-                comp.diff_org = False
-                comp.diff_domain = False
-                comp.diff_phone = False
-                comp.diff_address = False
-            else:
-                comp_org = (comp.organization or "").strip()
-                comp.diff_org = bool(comp_org) and (comp_org != base_org)
+        rank_groups = []
+        for root, cids in rank_groups_dict.items():
+            # 他のランクグループでの属性設定（diff_xxx等）と干渉しないよう shallow copy
+            comps = [copy.copy(company_map[cid]) for cid in cids if cid in company_map]
+            if not comps:
+                continue
+            comps.sort(key=company_sort_key)
+            cand_pairs = rank_group_candidates_map.get(root, [])
 
-                comp_domain = (comp.domain or "").strip().lower()
-                comp.diff_domain = bool(comp_domain) and (comp_domain != base_domain)
+            max_score = max((cand.score for cand in cand_pairs), default=0)
 
-                comp_phone = (comp.phone or "").strip()
-                comp.diff_phone = bool(comp_phone) and (comp_phone != base_phone)
-
-                comp_addr = (
-                    comp.address.replace(" ", "").replace("　", "").strip()
-                    if comp.address
-                    else ""
+            # 一致項目ラベル判定（全社共通項目）
+            match_labels = []
+            if len(comps) >= 2:
+                raw_orgs = [
+                    c.organization.strip()
+                    for c in comps
+                    if c.organization and c.organization.strip()
+                ]
+                norm_orgs = [
+                    normalize_organization(c.organization)
+                    for c in comps
+                    if c.organization and normalize_organization(c.organization)
+                ]
+                name_match = (
+                    (len(raw_orgs) == len(comps) and len(set(raw_orgs)) == 1)
+                    or (len(norm_orgs) == len(comps) and len(set(norm_orgs)) == 1)
                 )
-                comp.diff_address = bool(comp_addr) and (comp_addr != base_addr)
+                if name_match:
+                    match_labels.append("社名一致")
 
-        group_obj = {
-            "id": f"grp_{idx}",
-            "name": comps[0].organization,
-            "rank": best_rank,
-            "rank_display": rank_choices.get(best_rank, best_rank),
-            "max_score": max_score,
-            "company_count": len(comps),
-            "companies": comps,
-            "match_labels": match_labels,
-            "candidate_ids": [str(c.id) for c in cand_pairs],
-            "candidate_ids_str": ",".join(str(c.id) for c in cand_pairs),
-            "all_company_ids_str": ",".join(str(c.id) for c in comps),
-        }
-        result_groups.append(group_obj)
+                domains = [
+                    c.domain.strip().lower()
+                    for c in comps
+                    if c.domain and c.domain.strip()
+                ]
+                if len(domains) == len(comps) and len(set(domains)) == 1:
+                    match_labels.append("ドメイン一致")
 
-    result_groups.sort(
-        key=lambda g: (RANK_PRIORITY.get(g["rank"], 0), g["max_score"]),
-        reverse=True,
-    )
+                raw_phones = [
+                    c.phone.strip()
+                    for c in comps
+                    if c.phone and c.phone.strip()
+                ]
+                norm_phones = [
+                    normalize_phone_value(c.phone)
+                    for c in comps
+                    if c.phone and normalize_phone_value(c.phone)
+                ]
+                phone_match = (
+                    (len(raw_phones) == len(comps) and len(set(raw_phones)) == 1)
+                    or (len(norm_phones) == len(comps) and len(set(norm_phones)) == 1)
+                )
+                if phone_match:
+                    match_labels.append("電話一致")
+
+                norm_webs = [
+                    normalize_website(c.website)
+                    for c in comps
+                    if c.website and normalize_website(c.website)
+                ]
+                web_match = len(norm_webs) == len(comps) and len(set(norm_webs)) == 1
+                if web_match:
+                    match_labels.append("URL一致")
+
+                addrs = [
+                    c.address.replace(" ", "").replace("　", "").strip()
+                    for c in comps
+                    if c.address and c.address.strip()
+                ]
+                if len(addrs) == len(comps) and len(set(addrs)) == 1:
+                    match_labels.append("住所一致")
+
+            # 先頭行（1行目）を基準とした各行の差分判定
+            base_comp = comps[0]
+            base_org = (base_comp.organization or "").strip()
+            base_domain = (base_comp.domain or "").strip().lower()
+            base_phone = (base_comp.phone or "").strip()
+            base_web = normalize_website(base_comp.website)
+            base_addr = (
+                base_comp.address.replace(" ", "").replace("　", "").strip()
+                if base_comp.address
+                else ""
+            )
+
+            for i, comp in enumerate(comps):
+                if i == 0:
+                    comp.diff_org = False
+                    comp.diff_domain = False
+                    comp.diff_phone = False
+                    comp.diff_website = False
+                    comp.diff_address = False
+                else:
+                    comp_org = (comp.organization or "").strip()
+                    comp.diff_org = bool(comp_org) and (comp_org != base_org)
+
+                    comp_domain = (comp.domain or "").strip().lower()
+                    comp.diff_domain = bool(comp_domain) and (comp_domain != base_domain)
+
+                    comp_phone = (comp.phone or "").strip()
+                    comp.diff_phone = bool(comp_phone) and (comp_phone != base_phone)
+
+                    comp_web = normalize_website(comp.website)
+                    comp.diff_website = bool(comp_web) and (comp_web != base_web)
+
+                    comp_addr = (
+                        comp.address.replace(" ", "").replace("　", "").strip()
+                        if comp.address
+                        else ""
+                    )
+                    comp.diff_address = bool(comp_addr) and (comp_addr != base_addr)
+
+            group_obj = {
+                "id": f"grp_{group_idx}",
+                "name": comps[0].organization,
+                "rank": rank,
+                "rank_display": rank_choices.get(rank, rank),
+                "max_score": max_score,
+                "company_count": len(comps),
+                "companies": comps,
+                "match_labels": match_labels,
+                "candidate_ids": [str(c.id) for c in cand_pairs],
+                "candidate_ids_str": ",".join(str(c.id) for c in cand_pairs),
+                "all_company_ids_str": ",".join(str(c.id) for c in comps),
+            }
+            rank_groups.append(group_obj)
+            group_idx += 1
+
+        # 同一ランク内は max_score 降順でソート
+        rank_groups.sort(key=lambda g: g["max_score"], reverse=True)
+        result_groups.extend(rank_groups)
+
     return result_groups
 
 

@@ -973,3 +973,41 @@ class ContactSaveSalutationCfcTests(TestCase):
             salutation_name_is_manual=False,
         )
         self.assertEqual(self._salutation_cfc_count(c), 0)
+
+
+class IsGenericEmailDomainTests(SimpleTestCase):
+    """汎用メールドメイン判定（is_generic_email_domain）の単体テスト。"""
+
+    def test_tokai_catv_and_isp_domains_identified_as_generic(self):
+        """aitai.ne.jp やそのサブドメイン（hm.aitai.ne.jp 等）および主要CATVドメインが汎用判定されること。"""
+        domains = [
+            "aitai.ne.jp",
+            "katch.ne.jp",
+            "starcat.ne.jp",
+            "ccnw.ne.jp",
+            "ogaki-tv.ne.jp",
+            "medias.ne.jp",
+            "cac-net.ne.jp",
+            "skymarinet.ne.jp",
+            "gctv.ne.jp",
+            "icc-media.co.jp",
+            "ch-mics.jp",
+            "tnc.ne.jp",
+            "asahi-net.or.jp",
+            "sannet.ne.jp",
+            "interlink.or.jp",
+        ]
+        for dom in domains:
+            with self.subTest(domain=dom):
+                self.assertTrue(is_generic_email_domain(dom))
+                self.assertTrue(is_generic_email_domain(f"sub.{dom}"))
+                self.assertTrue(is_generic_email_domain(f"hm.{dom}"))
+                self.assertTrue(is_generic_email_domain(f"user@{dom}"))
+                self.assertTrue(is_generic_email_domain(f"user@hm.{dom}"))
+
+    def test_corporate_unique_domains_not_generic(self):
+        """企業の独自ドメインは汎用ドメインとみなされないこと。"""
+        self.assertFalse(is_generic_email_domain("noba.co.jp"))
+        self.assertFalse(is_generic_email_domain("toyota.co.jp"))
+        self.assertFalse(is_generic_email_domain("user@example-company.com"))
+

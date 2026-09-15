@@ -15,16 +15,41 @@ from contacts.services.normalization import (
 )
 
 
-def normalize_website(url: str) -> str:
-    """URLを比較用に正規化する。ドメイン＋パスの最初のセグメントを返す（仕様書 §6.5.1）。"""
+INDEX_FILENAMES = {"index.html", "index.htm", "index.php"}
+
+
+def _normalize_url_string(url: str) -> str:
+    """URL文字列の前処理（前後空白除去・小文字化・スキーム補完）を行う。
+    空文字列の場合は '' を返す（仕様書 §6.5.1）。
+    """
     if not url:
         return ""
     normalized = url.strip().lower()
     if "://" not in normalized:
         normalized = f"//{normalized}"
-    parsed = urlparse(normalized, scheme="https")
-    netloc = parsed.netloc.removeprefix("www.")
-    segments = [p for p in parsed.path.split("/") if p]
+    return normalized
+
+
+def _extract_netloc(url: str) -> str:
+    """URLからドメイン部分（netloc、www.除去済み）だけを取り出す純関数。
+    url_mismatch判定で使う。空文字列の場合は '' を返す（仕様書 §6.5.1）。
+    """
+    if not url:
+        return ""
+    parsed = urlparse(_normalize_url_string(url), scheme="https")
+    return parsed.netloc.removeprefix("www.")
+
+
+def normalize_website(url: str) -> str:
+    """URLを比較用に正規化する。ドメイン＋パスの最初のセグメントを返す（仕様書 §6.5.1）。"""
+    netloc = _extract_netloc(url)
+    if not netloc:
+        return ""
+    parsed = urlparse(_normalize_url_string(url), scheme="https")
+    segments = [
+        p for p in parsed.path.split("/")
+        if p and p not in INDEX_FILENAMES
+    ]
     first_segment = segments[0] if segments else ""
     return f"{netloc}/{first_segment}" if first_segment else netloc
 
@@ -59,6 +84,7 @@ class CompanyMatchResult:
     name_match: bool
     domain_match: bool
     url_match: bool
+    url_mismatch: bool = False
     phone_match: bool = False
     address_match: bool = False
     rank: str = ""
@@ -94,8 +120,8 @@ def calculate_company_match(
         and not is_generic_email_domain(dom_b)
     )
 
-    norm_phone_a = normalize_phone_value(phone_a)
-    norm_phone_b = normalize_phone_value(phone_b)
+    norm_phone_a = normalize_phone_value(phone_a) if phone_a else ""
+    norm_phone_b = normalize_phone_value(phone_b) if phone_b else ""
     phone_match = bool(norm_phone_a) and norm_phone_a == norm_phone_b
 
     address_match = _check_address_match(addr_a, addr_b)
@@ -103,6 +129,10 @@ def calculate_company_match(
     norm_web_a = normalize_website(web_a)
     norm_web_b = normalize_website(web_b)
     url_match = bool(norm_web_a) and norm_web_a == norm_web_b
+
+    netloc_a = _extract_netloc(web_a)
+    netloc_b = _extract_netloc(web_b)
+    url_mismatch = bool(netloc_a) and bool(netloc_b) and netloc_a != netloc_b
 
     score = 0
     if name_match:
@@ -121,6 +151,7 @@ def calculate_company_match(
         name_match=name_match,
         domain_match=domain_match,
         url_match=url_match,
+        url_mismatch=url_mismatch,
         phone_match=phone_match,
         address_match=address_match,
     )
@@ -129,6 +160,7 @@ def calculate_company_match(
         name_match=name_match,
         domain_match=domain_match,
         url_match=url_match,
+        url_mismatch=url_mismatch,
         phone_match=phone_match,
         address_match=address_match,
         rank=rank or "",
@@ -140,34 +172,34 @@ def determine_company_rank(
     name_match: bool,
     domain_match: bool,
     url_match: bool = False,
+    url_mismatch: bool = False,
     phone_match: bool = False,
     address_match: bool = False,
 ) -> str | None:
-    """重複検出ランク判定（仕様書 v1.5 §6.5.2）。"""
-    # 候補外（None）：100点未満、および会社名単独一致（追加のドメイン・URL・電話・住所一致が一切ない）ケース
-    has_additional_match = domain_match or url_match or phone_match or address_match
-    if name_match and not has_additional_match:
-        return None
-    if score < 100:
+    """重複検出ランク判定（仕様書 v1.15 §6.5.2）。"""
+    # 第1ガード（最優先）: 双方のWebサイトドメイン（netloc）が食い違う場合は無条件で足切り
+    if url_mismatch:
         return None
 
     # exact_match（完全一致）: 会社名一致 AND (ドメイン一致 OR URL一致) かつ スコア 220点 以上
     if name_match and (domain_match or url_match) and score >= 220:
         return CompanyDuplicateCandidate.Rank.EXACT_MATCH
 
-    # possible_high（重複可能性大）: スコア 200点 以上
-    if score >= 200:
+    # possible_high（重複可能性大）: 会社名一致 AND (ドメイン一致 OR URL一致) かつ スコア 200点 以上
+    if name_match and (domain_match or url_match) and score >= 200:
         return CompanyDuplicateCandidate.Rank.POSSIBLE_HIGH
 
-    # possible_mid（重複可能性中）: スコア 140点 以上
-    if score >= 140:
+    # possible_mid（重複可能性中）: (会社名一致 OR ドメイン一致 OR URL一致) かつ スコア 140点 以上
+    if (name_match or domain_match or url_match) and score >= 140:
         return CompanyDuplicateCandidate.Rank.POSSIBLE_MID
 
-    # possible_low（重複可能性小）: いずれか1つ以上の一致があり かつ スコア 100点 以上
-    has_any_match = name_match or domain_match or url_match or phone_match or address_match
-    if has_any_match and score >= 100:
+    # 第2ガード（単独一致の完全排除）＆ possible_low（重複可能性小）
+    # (会社名一致 OR ドメイン一致) AND (電話一致 OR 住所一致) かつ スコア 120点 以上
+    has_backing = phone_match or address_match
+    if (name_match or domain_match) and has_backing and score >= 120:
         return CompanyDuplicateCandidate.Rank.POSSIBLE_LOW
 
+    # 上記以外（単独一致、120点未満等）はすべて候補外（None）
     return None
 
 

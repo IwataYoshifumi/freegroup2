@@ -637,7 +637,7 @@ class CompanyViewTests(TestCase):
             company_a=comp_b,
             company_b=comp_c,
             score=95,
-            rank=CompanyDuplicateCandidate.Rank.POSSIBLE_MID,
+            rank=CompanyDuplicateCandidate.Rank.POSSIBLE_HIGH,
         )
 
         resp = self.client.get(reverse("companies:company_candidate_list"))
@@ -1124,6 +1124,362 @@ class CompanyDetailContactPhoneTests(TestCase):
         html = resp.content.decode("utf-8")
         pattern = r"<td>課長</td>\s*<td>営業部</td>\s*<td>sato@example\.com</td>\s*<td>\s*-\s*</td>"
         self.assertRegex(html, pattern)
+
+
+class CompanyDuplicateDomainMatchTests(TestCase):
+    """CATV・地域ISP等の汎用ドメインによる重複マッチング防止および候補一覧メッセージ表示テスト。"""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="cand_user", password="password")
+        self.client.login(username="cand_user", password="password")
+
+    def test_catv_isp_domain_not_counted_in_domain_match(self):
+        """aitai.ne.jp 等の地域ISP/CATVドメイン同士では domain_match が False となり 100点加点されないこと。"""
+        from companies.services import calculate_company_match
+
+        # 異なる会社名、同一のCATVドメイン（サブドメイン付き含む）
+        result1 = calculate_company_match(
+            "ニッコウ電気", "hm7.aitai.ne.jp", "", "", "",
+            "東海工務店", "hm7.aitai.ne.jp", "", "", "",
+        )
+        self.assertFalse(result1.domain_match)
+        self.assertEqual(result1.score, 0)
+        self.assertEqual(result1.rank, "")
+
+        # キャッチネットワーク（katch.ne.jp）
+        result2 = calculate_company_match(
+            "三河商事", "katch.ne.jp", "", "", "",
+            "安城製作所", "katch.ne.jp", "", "", "",
+        )
+        self.assertFalse(result2.domain_match)
+        self.assertEqual(result2.score, 0)
+
+        # 独自ドメインの場合は domain_match=True（100点加点）
+        result3 = calculate_company_match(
+            "野場電工", "noba.co.jp", "", "", "",
+            "株式会社野場電工", "noba.co.jp", "", "", "",
+        )
+        self.assertTrue(result3.domain_match)
+        self.assertGreaterEqual(result3.score, 100)
+
+    def test_company_candidate_list_messages_rendered_once(self):
+        """重複会社候補一覧において、メッセージが二重表示されず1度だけ描画されること。"""
+        from django.contrib.auth.models import Permission
+
+        self.user.user_permissions.add(Permission.objects.get(codename="merge_company"))
+        self.user = User.objects.get(pk=self.user.pk)
+        self.client.force_login(self.user)
+
+        # 統合対象未選択でPOSTし、エラーメッセージを伴って candidate_list にリダイレクト・追従
+        resp = self.client.post(reverse("companies:company_merge"), data={}, follow=True)
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode("utf-8")
+
+        # メッセージ本文が二重表示されず、1回だけ出現することを検証
+        self.assertIn("存続会社が選択されていません。", html)
+        self.assertEqual(html.count("存続会社が選択されていません。"), 1)
+
+    def test_company_candidate_list_shows_website_column_and_url_match_label(self):
+        """重複候補一覧にHP列とwebsiteリンクが表示され、URL一致ラベルが正しく付与されること。"""
+        from django.contrib.auth.models import Permission
+        from companies.models import Company, CompanyDuplicateCandidate
+
+        self.user.user_permissions.add(Permission.objects.get(codename="merge_company"))
+        self.user = User.objects.get(pk=self.user.pk)
+        self.client.force_login(self.user)
+
+        c1 = Company.objects.create(
+            organization="テスト株式会社A",
+            domain="test-corp.jp",
+            website="https://example.com/corporate",
+        )
+        c2 = Company.objects.create(
+            organization="テスト株式会社A",
+            domain="test-corp.jp",
+            website="http://www.example.com/corporate/",
+        )
+        CompanyDuplicateCandidate.objects.create(
+            company_a=c1,
+            company_b=c2,
+            score=200,
+            rank=CompanyDuplicateCandidate.Rank.EXACT_MATCH,
+            review_status=CompanyDuplicateCandidate.ReviewStatus.PENDING,
+        )
+
+        resp = self.client.get(reverse("companies:company_candidate_list"))
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode("utf-8")
+
+        # 1. ヘッダーにHP列が存在すること
+        self.assertIn("<th>HP</th>", html)
+        # 2. 一致ラベルに「URL一致」が含まれること
+        self.assertIn("URL一致", html)
+        # 3. リンクとして描画されていること
+        self.assertIn('href="https://example.com/corporate"', html)
+        self.assertIn('href="http://www.example.com/corporate/"', html)
+
+    def test_company_candidate_list_website_diff_highlight_and_empty(self):
+        """異なるwebsiteを持つ候補会社のセルがハイライトされ、未設定時はハイフン表示されること。"""
+        from django.contrib.auth.models import Permission
+        from companies.models import Company, CompanyDuplicateCandidate
+
+        self.user.user_permissions.add(Permission.objects.get(codename="merge_company"))
+        self.user = User.objects.get(pk=self.user.pk)
+        self.client.force_login(self.user)
+
+        c1 = Company.objects.create(
+            organization="テスト差分株式会社",
+            domain="diff-test.jp",
+            website="https://company-a.example.com",
+        )
+        c2 = Company.objects.create(
+            organization="テスト差分株式会社",
+            domain="diff-test.jp",
+            website="https://company-b.example.com",
+        )
+        c3 = Company.objects.create(
+            organization="テスト差分株式会社",
+            domain="diff-test.jp",
+            website="",
+        )
+        CompanyDuplicateCandidate.objects.create(
+            company_a=c1,
+            company_b=c2,
+            score=100,
+            rank=CompanyDuplicateCandidate.Rank.POSSIBLE_LOW,
+            review_status=CompanyDuplicateCandidate.ReviewStatus.PENDING,
+        )
+        CompanyDuplicateCandidate.objects.create(
+            company_a=c1,
+            company_b=c3,
+            score=100,
+            rank=CompanyDuplicateCandidate.Rank.POSSIBLE_LOW,
+            review_status=CompanyDuplicateCandidate.ReviewStatus.PENDING,
+        )
+
+        resp = self.client.get(reverse("companies:company_candidate_list"))
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode("utf-8")
+
+        # c2 の行の website セルに背景色ハイライトが付与されていること
+        self.assertIn('background-color: #fffbeb;" title="https://company-b.example.com"', html)
+        # c3 の website は未設定のため "-" が表示されること
+        self.assertIn('<span class="app-muted">-</span>', html)
+
+    def test_rank_separated_duplicate_groups(self):
+        """社名・ドメイン一致（possible_high）とドメイン一致のみ（possible_low）が分離してグルーピングされること。"""
+        from companies.views import _build_duplicate_groups
+        from companies.models import Company, CompanyDuplicateCandidate
+
+        # 会社A, B: 同一社名・同一ドメイン（possible_high）
+        comp_a = Company.objects.create(organization="共通株式会社", domain="shared-domain.co.jp")
+        comp_b = Company.objects.create(organization="共通株式会社", domain="shared-domain.co.jp")
+        # 会社C: 別社名・同一ドメイン（possible_low）
+        comp_c = Company.objects.create(organization="別会社株式会社", domain="shared-domain.co.jp")
+
+        cand_high = CompanyDuplicateCandidate.objects.create(
+            company_a=comp_a,
+            company_b=comp_b,
+            score=200,
+            rank=CompanyDuplicateCandidate.Rank.POSSIBLE_HIGH,
+            review_status=CompanyDuplicateCandidate.ReviewStatus.PENDING,
+        )
+        cand_low = CompanyDuplicateCandidate.objects.create(
+            company_a=comp_a,
+            company_b=comp_c,
+            score=100,
+            rank=CompanyDuplicateCandidate.Rank.POSSIBLE_LOW,
+            review_status=CompanyDuplicateCandidate.ReviewStatus.PENDING,
+        )
+
+        groups = _build_duplicate_groups()
+
+        # comp_a, comp_b を含むグループを取得
+        high_groups = [g for g in groups if g["rank"] == CompanyDuplicateCandidate.Rank.POSSIBLE_HIGH and any(c.id in (comp_a.id, comp_b.id) for c in g["companies"])]
+        self.assertEqual(len(high_groups), 1)
+        high_group = high_groups[0]
+        # possible_high グループには comp_c（別会社）が混入せず、comp_a, comp_b の2社のみであること
+        high_comp_ids = {c.id for c in high_group["companies"]}
+        self.assertEqual(high_comp_ids, {comp_a.id, comp_b.id})
+        self.assertNotIn(comp_c.id, high_comp_ids)
+        self.assertEqual(high_group["max_score"], 200)
+
+        # comp_c を含む low グループを取得
+        low_groups = [g for g in groups if g["rank"] == CompanyDuplicateCandidate.Rank.POSSIBLE_LOW and any(c.id == comp_c.id for c in g["companies"])]
+        self.assertEqual(len(low_groups), 1)
+        low_group = low_groups[0]
+        self.assertEqual(low_group["max_score"], 100)
+
+    def test_noba_and_nox_separated_into_different_rank_groups(self):
+        """ノックス電子（possible_low）が野場電工（possible_high）の同一マージカードに巻き込まれないこと。"""
+        from companies.views import _build_duplicate_groups
+        from companies.models import Company, CompanyDuplicateCandidate
+
+        noba1 = Company.objects.create(organization="野場電工株式会社", domain="noba.co.jp")
+        noba2 = Company.objects.create(organization="野場電工株式会社", domain="noba.co.jp")
+        nox = Company.objects.create(
+            organization="ノックス電子株式会社",
+            domain="noba.co.jp",
+            website="https://nox-elec.co.jp/",
+        )
+
+        # 野場電工同士の possible_high ペア
+        CompanyDuplicateCandidate.objects.create(
+            company_a=noba1,
+            company_b=noba2,
+            score=200,
+            rank=CompanyDuplicateCandidate.Rank.POSSIBLE_HIGH,
+            review_status=CompanyDuplicateCandidate.ReviewStatus.PENDING,
+        )
+        # 野場電工とノックス電子の possible_low ペア
+        CompanyDuplicateCandidate.objects.create(
+            company_a=noba1,
+            company_b=nox,
+            score=100,
+            rank=CompanyDuplicateCandidate.Rank.POSSIBLE_LOW,
+            review_status=CompanyDuplicateCandidate.ReviewStatus.PENDING,
+        )
+
+        groups = _build_duplicate_groups()
+
+        # 野場電工の possible_high グループを検証
+        noba_high_groups = [
+            g for g in groups
+            if g["rank"] == CompanyDuplicateCandidate.Rank.POSSIBLE_HIGH
+            and any(c.id == noba1.id for c in g["companies"])
+        ]
+        self.assertEqual(len(noba_high_groups), 1)
+        high_group = noba_high_groups[0]
+        high_cids = {c.id for c in high_group["companies"]}
+        # ノックス電子が含まれていないことを検証
+        self.assertNotIn(nox.id, high_cids)
+        self.assertEqual(high_cids, {noba1.id, noba2.id})
+        self.assertEqual(high_group["company_count"], 2)
+
+
+class CompanyDuplicateRankingV115Tests(TestCase):
+    """仕様書 v1.15 準拠の会社重複スコア・ランク判定単体テスト。"""
+
+    def test_domain_only_match_is_culled(self):
+        """社名が異なり、ドメインのみ一致（100点）のペアが None（候補外）になること。"""
+        from companies.services import calculate_company_match, determine_company_rank
+
+        result = calculate_company_match(
+            "ニッコウ電気株式会社", "shared-factory.jp", "", "", "",
+            "三河商事株式会社", "shared-factory.jp", "", "", "",
+        )
+        self.assertFalse(result.name_match)
+        self.assertTrue(result.domain_match)
+        self.assertEqual(result.score, 100)
+        self.assertFalse(result.url_mismatch)
+        # ランクは None（空文字列）となること
+        self.assertEqual(result.rank, "")
+        self.assertIsNone(
+            determine_company_rank(
+                score=result.score,
+                name_match=result.name_match,
+                domain_match=result.domain_match,
+                url_match=result.url_match,
+                url_mismatch=result.url_mismatch,
+                phone_match=result.phone_match,
+                address_match=result.address_match,
+            )
+        )
+
+    def test_possible_low_with_backing(self):
+        """ドメイン一致＋電話一致（120点）または社名一致＋電話/住所一致（120点）が possible_low になること。"""
+        from companies.models import CompanyDuplicateCandidate
+        from companies.services import calculate_company_match
+
+        # 1. ドメイン一致（100点）+ 電話一致（20点）= 120点
+        res_dom_phone = calculate_company_match(
+            "社名変更前株式会社", "renamed-company.co.jp", "03-1111-2222", "", "",
+            "社名変更後株式会社", "renamed-company.co.jp", "0311112222", "", "",
+        )
+        self.assertFalse(res_dom_phone.name_match)
+        self.assertTrue(res_dom_phone.domain_match)
+        self.assertTrue(res_dom_phone.phone_match)
+        self.assertEqual(res_dom_phone.score, 120)
+        self.assertEqual(res_dom_phone.rank, CompanyDuplicateCandidate.Rank.POSSIBLE_LOW)
+
+        # 2. 社名一致（100点）+ 電話一致（20点）= 120点
+        res_name_phone = calculate_company_match(
+            "株式会社テスト工業", "", "052-123-4567", "", "",
+            "（株）テスト工業", "", "0521234567", "", "",
+        )
+        self.assertTrue(res_name_phone.name_match)
+        self.assertFalse(res_name_phone.domain_match)
+        self.assertTrue(res_name_phone.phone_match)
+        self.assertEqual(res_name_phone.score, 120)
+        self.assertEqual(res_name_phone.rank, CompanyDuplicateCandidate.Rank.POSSIBLE_LOW)
+
+        # 3. 社名一致（100点）+ 住所前方一致（20点）= 120点
+        res_name_addr = calculate_company_match(
+            "三河電工株式会社", "", "", "愛知県豊田市西町2-18-2", "",
+            "三河電工株式会社", "", "", "愛知県豊田市西町2-18-2 豊田ビル3F", "",
+        )
+        self.assertTrue(res_name_addr.name_match)
+        self.assertTrue(res_name_addr.address_match)
+        self.assertEqual(res_name_addr.score, 120)
+        self.assertEqual(res_name_addr.rank, CompanyDuplicateCandidate.Rank.POSSIBLE_LOW)
+
+    def test_url_mismatch_culls_even_with_name_and_domain_match(self):
+        """双方が異なるWebサイトドメインを持つ場合、社名やドメインが一致していても None になること。"""
+        from companies.services import calculate_company_match
+
+        result = calculate_company_match(
+            "株式会社田中製作所", "shared-isp.jp", "", "", "https://tanaka-tokyo.co.jp/",
+            "株式会社田中製作所", "shared-isp.jp", "", "", "https://tanaka-osaka.co.jp/",
+        )
+        self.assertTrue(result.name_match)
+        self.assertTrue(result.domain_match)
+        self.assertTrue(result.url_mismatch)
+        # スコアは200点だが url_mismatch により足切りされて None（空文字列）
+        self.assertEqual(result.score, 200)
+        self.assertEqual(result.rank, "")
+
+    def test_url_different_paths_same_domain_does_not_trigger_url_mismatch(self):
+        """トップページと /products/ のような同一ドメイン内下層ページ違いでは url_mismatch が誤発動しないこと。"""
+        from companies.models import CompanyDuplicateCandidate
+        from companies.services import calculate_company_match
+
+        result = calculate_company_match(
+            "株式会社エグザンプル", "example.co.jp", "", "", "https://example.co.jp/",
+            "株式会社エグザンプル", "example.co.jp", "", "", "https://example.co.jp/products/details",
+        )
+        self.assertTrue(result.name_match)
+        self.assertTrue(result.domain_match)
+        self.assertFalse(result.url_match)
+        self.assertFalse(result.url_mismatch)
+        self.assertEqual(result.score, 200)
+        # url_mismatch が誤発動せず、社名+ドメイン一致（200点）により possible_high になること
+        self.assertEqual(result.rank, CompanyDuplicateCandidate.Rank.POSSIBLE_HIGH)
+
+    def test_url_normalization_helpers(self):
+        """_normalize_url_string, _extract_netloc, normalize_website の仕様書準拠テスト。"""
+        from companies.services import _extract_netloc, _normalize_url_string, normalize_website
+
+        # 1. _normalize_url_string
+        self.assertEqual(_normalize_url_string(""), "")
+        self.assertEqual(_normalize_url_string(None), "")
+        self.assertEqual(_normalize_url_string("  Example.COM/Path  "), "//example.com/path")
+        self.assertEqual(_normalize_url_string("HTTP://EXAMPLE.COM"), "http://example.com")
+
+        # 2. _extract_netloc
+        self.assertEqual(_extract_netloc(""), "")
+        self.assertEqual(_extract_netloc("https://www.example.co.jp/about"), "example.co.jp")
+        self.assertEqual(_extract_netloc("http://example.com:8080/"), "example.com:8080")
+
+        # 3. normalize_website（トップページファイル名除外とパス第1セグメント保持、小文字化）
+        self.assertEqual(normalize_website("https://www.example.co.jp/index.html"), "example.co.jp")
+        self.assertEqual(normalize_website("https://www.example.co.jp/index.php"), "example.co.jp")
+        self.assertEqual(normalize_website("https://example.com/companyA/"), "example.com/companya")
+        self.assertEqual(normalize_website("https://example.com/companyA/products"), "example.com/companya")
+
+
+
+
+
 
 
 
