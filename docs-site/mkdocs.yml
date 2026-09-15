@@ -29,6 +29,10 @@ nav:
     - 会社管理: usage/companies.md
     - 案件管理: usage/deals.md
     - 活動記録: usage/activities.md
+    - メーリングリスト管理: usage/mailing-lists.md
+    - キャンペーン管理: usage/campaigns.md
+    - 配信停止とブロックリスト: usage/unsubscribe.md
+    - メール配信のシステム設定: usage/mailing-config.md
     - ユーザー管理: usage/users.md
   - 管理者ガイド:
     - バックアップ: admin/backup.md
