@@ -54,7 +54,7 @@ python manage.py reconcile_card_images --apply
 
 管理コマンドではありませんが、障害調査でよく使う運用ヒントとして紹介します。`.env` の `LOG_LEVEL` でサーバー側のログ詳細度を切り替えられます。
 
-- **通常運用**：`LOG_LEVEL=INFO`（既定）。アクセスログと WARNING 以上のみ出力します。
+- **通常運用**：`LOG_LEVEL=INFO`（既定）。アクセスログや各アプリの通常運用ログ（INFO以上）を出力します。DBクエリの詳細ログのみDEBUG時以外は抑制されます。
 - **一時デバッグ**：`LOG_LEVEL=DEBUG` に変更して再起動すると、詳細なログが出力されます（Docker 運用なら `docker compose logs -f web` で確認）。
 - **問題解決後**：`LOG_LEVEL` を `INFO` に戻す（または行を削除する）のを忘れないでください。
 
