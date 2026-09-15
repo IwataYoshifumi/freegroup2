@@ -49,3 +49,13 @@ python manage.py reconcile_card_images --apply
 ```
 
 `/path/to/project` は実際のプロジェクトのパスに置き換えてください。`--apply` はファイルを移動する操作を伴うため、事前に [バックアップ](backup.md) を取っておくと安心です。
+
+## LOG_LEVEL — ログ詳細度の一時変更
+
+管理コマンドではありませんが、障害調査でよく使う運用ヒントとして紹介します。`.env` の `LOG_LEVEL` でサーバー側のログ詳細度を切り替えられます。
+
+- **通常運用**：`LOG_LEVEL=INFO`（既定）。アクセスログと WARNING 以上のみ出力します。
+- **一時デバッグ**：`LOG_LEVEL=DEBUG` に変更して再起動すると、詳細なログが出力されます（Docker 運用なら `docker compose logs -f web` で確認）。
+- **問題解決後**：`LOG_LEVEL` を `INFO` に戻す（または行を削除する）のを忘れないでください。
+
+`DEBUG=True`（Django のデバッグモード）とは別物です。`DEBUG=True` はブラウザにトレースバックを表示してしまい本番では使用禁止ですが、`LOG_LEVEL=DEBUG` はサーバー側のログに書き出すだけなので、本番環境でも一時的な調査目的であれば安全に使えます。
