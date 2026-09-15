@@ -37,6 +37,7 @@ nav:
   - FAQ: faq.md
   - リリース情報:
     - 一覧: releases/index.md
+    - v1.8.0: releases/v1.8.0.md
     - v1.6.1: releases/v1.6.1.md
   - ライセンス: license.md
 
