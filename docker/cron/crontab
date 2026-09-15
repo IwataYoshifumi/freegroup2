@@ -14,4 +14,6 @@
 */5 * * * * root cd /app && /usr/local/bin/python manage.py check_duplicates >> /proc/1/fd/1 2>&1
 * * * * * root cd /app && /usr/local/bin/python manage.py send_scheduled_campaigns >> /proc/1/fd/1 2>&1
 */5 * * * * root cd /app && /usr/local/bin/python manage.py poll_bounce_inbox >> /proc/1/fd/1 2>&1
+*/10 * * * * root cd /app && /usr/local/bin/python manage.py link_companies >> /proc/1/fd/1 2>&1
+
 
