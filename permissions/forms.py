@@ -115,6 +115,15 @@ class AccessListForm(forms.ModelForm):
             })
 
         cleaned_data["entries"] = valid_entries
+
+        # 管理者最低1件の必須バリデーション
+        has_admin = any(
+            entry.get("permission_level") == ACLEntry.PermissionLevel.ADMIN
+            for entry in valid_entries
+        )
+        if not has_admin:
+            raise forms.ValidationError("アクセスリストには最低1つの「管理者」を設定してください。")
+
         return cleaned_data
 
     def save(self, commit=True, user=None):

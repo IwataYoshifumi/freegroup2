@@ -106,6 +106,7 @@
   {{ departments_data|json_script:"departments-data" }}
   {{ user_groups_data|json_script:"user-groups-data" }}
   {{ initial_entries|json_script:"initial-entries-data" }}
+  {{ request.user.pk|json_script:"current-user-id" }}
 
   <script>
     (function() {
@@ -113,6 +114,7 @@
       const departmentsData = JSON.parse(document.getElementById('departments-data').textContent);
       const userGroupsData = JSON.parse(document.getElementById('user-groups-data').textContent);
       const initialEntries = JSON.parse(document.getElementById('initial-entries-data').textContent);
+      const currentUserId = String(JSON.parse(document.getElementById('current-user-id').textContent));
 
       const tbody = document.getElementById('entries-tbody');
       const emptyRow = document.getElementById('entries-empty-row');
@@ -263,18 +265,25 @@
           createRow(entry);
         });
       } else {
-        // 新規作成時はデフォルト1行を挿入
-        createRow();
+        // 新規作成時はデフォルト1行を挿入（自身を管理者として初期選択）
+        createRow({
+          permission_level: 'admin',
+          target_type: 'user',
+          target_id: currentUserId
+        });
       }
 
       btnAddRow.addEventListener('click', function() {
         createRow();
       });
 
-      // フォーム送信時に行データをシリアライズ
-      form.addEventListener('submit', function() {
+      // フォーム送信時に行データをシリアライズおよび管理者検証
+      form.addEventListener('submit', function(e) {
         const rows = tbody.querySelectorAll('.entry-row');
         const entries = [];
+        let hasAdmin = false;
+        let isUserDirectAdmin = false;
+
         rows.forEach(function(row, index) {
           const perm = row.querySelector('.select-perm').value;
           const ttype = row.querySelector('.select-type').value;
@@ -288,8 +297,31 @@
               target_type: ttype,
               target_id: tid
             });
+            if (perm === 'admin') {
+              hasAdmin = true;
+              if (ttype === 'user' && String(tid) === currentUserId) {
+                isUserDirectAdmin = true;
+              }
+            }
           }
         });
+
+        // 1. 管理者最低1件の必須バリデーション
+        if (entries.length === 0 || !hasAdmin) {
+          alert('アクセスリストには最低1つの「管理者」を設定してください。');
+          e.preventDefault();
+          return false;
+        }
+
+        // 2. 自身が管理者でなくなる場合の警告・確認ダイアログ
+        if (!isUserDirectAdmin) {
+          const confirmed = confirm('ご自身が『管理者』に含まれていません。このまま保存すると、今後このアクセスリストの変更・管理ができなくなる可能性がありますが、保存してよろしいですか？');
+          if (!confirmed) {
+            e.preventDefault();
+            return false;
+          }
+        }
+
         document.getElementById('id_entries_json').value = JSON.stringify(entries);
       });
     })();

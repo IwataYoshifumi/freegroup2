@@ -41,7 +41,7 @@ from contacts.forms import ContactCreateForm
 from contacts.models import Contact
 from deals.forms import DealForm, DealListForm
 from deals.models import Deal, DealList, DealUser, Stage
-from permissions.forms import ACLEntryForm
+from permissions.forms import ACLEntryForm, AccessListForm
 from permissions.models import AccessList, ACLEntry, AccessListUserRole
 from permissions.services import AccessListService
 from persons.forms import PersonListForm
@@ -171,10 +171,21 @@ class AccessListAndACLEntryViewTests(Step4BaseTestCase):
 
     def test_access_list_create_update_delete(self):
         self.client.login(username="step4_admin", password="password")
+        # 管理者エントリ（step4_admin）を entries_json に含める（管理者必須バリデーション対応）
+        admin_entry = json.dumps([
+            {
+                "id": "",
+                "order": 1,
+                "permission_level": "admin",
+                "target_type": "user",
+                "target_id": str(self.admin.pk),
+            }
+        ])
+
         # 2. Create
         resp = self.client.post(
             reverse("permissions:access_list_create"),
-            {"name": "新規ACL", "description": "テスト説明"},
+            {"name": "新規ACL", "description": "テスト説明", "entries_json": admin_entry},
         )
         self.assertEqual(resp.status_code, 302)
         new_acl = AccessList.objects.get(name="新規ACL")
@@ -185,7 +196,7 @@ class AccessListAndACLEntryViewTests(Step4BaseTestCase):
         # 4. Update
         resp = self.client.post(
             reverse("permissions:access_list_update", kwargs={"pk": new_acl.pk}),
-            {"name": "更新ACL", "description": "更新説明"},
+            {"name": "更新ACL", "description": "更新説明", "entries_json": admin_entry},
         )
         self.assertEqual(resp.status_code, 302)
         new_acl.refresh_from_db()
@@ -199,6 +210,7 @@ class AccessListAndACLEntryViewTests(Step4BaseTestCase):
         self.assertEqual(resp.status_code, 302)
         self.assertFalse(AccessList.objects.filter(pk=new_acl.pk).exists())
         self.assertTrue(ActionLog.objects.filter(action=ACCESS_LIST_DELETED).exists())
+
 
     def test_access_list_delete_protected_by_deallist_or_personlist(self):
         self.client.login(username="step4_admin", password="password")
@@ -686,5 +698,128 @@ class SidebarNavigationTests(Step4BaseTestCase):
         resp_pl = self.client.get(reverse("persons:person_list_list"))
         self.assertEqual(resp_pl.status_code, 200)
         self.assertContains(resp_pl, f'href="{reverse("persons:person_list_list")}" class="is-active"')
+
+
+class AccessListFormValidationAndAlertTests(Step4BaseTestCase):
+    """アクセスリストの管理者必須バリデーションおよび自己除外警告の検証。"""
+
+    def test_form_validation_fails_without_admin_entry(self):
+        """管理者エントリが0件の場合、ValidationErrorとなり保存できないこと。"""
+        # 1. エントリが空の場合
+        form_empty = AccessListForm(
+            data={"name": "管理者なしACL", "entries_json": json.dumps([])}
+        )
+        self.assertFalse(form_empty.is_valid())
+        self.assertIn("アクセスリストには最低1つの「管理者」を設定してください。", form_empty.non_field_errors())
+
+        # 2. 編集者・閲覧者のみで管理者がいない場合
+        entries = [
+            {
+                "order": 1,
+                "permission_level": "editor",
+                "target_type": "user",
+                "target_id": str(self.user_editor.pk),
+            },
+            {
+                "order": 2,
+                "permission_level": "viewer",
+                "target_type": "user",
+                "target_id": str(self.user_viewer.pk),
+            },
+        ]
+        form_no_admin = AccessListForm(
+            data={"name": "管理者なしACL2", "entries_json": json.dumps(entries)}
+        )
+        self.assertFalse(form_no_admin.is_valid())
+        self.assertIn("アクセスリストには最低1つの「管理者」を設定してください。", form_no_admin.non_field_errors())
+
+        # direct clean() raises ValidationError
+        with self.assertRaises(ValidationError) as ctx:
+            form_no_admin.clean()
+        self.assertIn("アクセスリストには最低1つの「管理者」を設定してください。", str(ctx.exception))
+
+    def test_form_validation_succeeds_with_admin_entry(self):
+        """管理者エントリが存在する場合、正常に保存できること。"""
+        entries = [
+            {
+                "order": 1,
+                "permission_level": "admin",
+                "target_type": "user",
+                "target_id": str(self.admin.pk),
+            },
+            {
+                "order": 2,
+                "permission_level": "viewer",
+                "target_type": "user",
+                "target_id": str(self.user_viewer.pk),
+            },
+        ]
+        form = AccessListForm(
+            data={"name": "管理者ありACL", "entries_json": json.dumps(entries)}
+        )
+        self.assertTrue(form.is_valid())
+        saved_acl = form.save(commit=True, user=self.admin)
+        self.assertEqual(saved_acl.name, "管理者ありACL")
+        self.assertEqual(saved_acl.entries.count(), 2)
+
+        # キャッシュの検証
+        role_admin = AccessListUserRole.objects.get(access_list=saved_acl, user=self.admin)
+        self.assertEqual(role_admin.role, ACLEntry.PermissionLevel.ADMIN)
+        role_viewer = AccessListUserRole.objects.get(access_list=saved_acl, user=self.user_viewer)
+        self.assertEqual(role_viewer.role, ACLEntry.PermissionLevel.VIEWER)
+
+    def test_view_warning_message_when_user_excludes_self_from_admin(self):
+        """自身を管理者から除外して保存した際、messages.warning が通知されること。"""
+        self.client.login(username="step4_admin", password="password")
+
+        # 別のユーザー（user_editor）だけを管理者にして自分を外す
+        entries = [
+            {
+                "order": 1,
+                "permission_level": "admin",
+                "target_type": "user",
+                "target_id": str(self.user_editor.pk),
+            },
+        ]
+        resp = self.client.post(
+            reverse("permissions:access_list_create"),
+            data={"name": "自己除外ACL", "entries_json": json.dumps(entries)},
+            follow=True,
+        )
+        self.assertEqual(resp.status_code, 200)
+
+        # warning メッセージが表示されること
+        messages_list = list(resp.context["messages"])
+        self.assertTrue(any(
+            m.level_tag == "warning" and "注意: あなたはこのアクセスリストの管理者ではなくなりました。" in m.message
+            for m in messages_list
+        ))
+
+    def test_view_success_message_when_user_remains_admin(self):
+        """自身が管理者のまま保存した際、messages.success が通知されること。"""
+        self.client.login(username="step4_admin", password="password")
+
+        entries = [
+            {
+                "order": 1,
+                "permission_level": "admin",
+                "target_type": "user",
+                "target_id": str(self.admin.pk),
+            },
+        ]
+        resp = self.client.post(
+            reverse("permissions:access_list_create"),
+            data={"name": "自己管理者ACL", "entries_json": json.dumps(entries)},
+            follow=True,
+        )
+        self.assertEqual(resp.status_code, 200)
+
+        # success メッセージが表示されること
+        messages_list = list(resp.context["messages"])
+        self.assertTrue(any(
+            m.level_tag == "success" and "作成しました" in m.message
+            for m in messages_list
+        ))
+
 
 

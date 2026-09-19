@@ -133,7 +133,11 @@ class AccessListCreateView(LoginRequiredMixin, PermissionRequiredMixin, CreateVi
     def form_valid(self, form):
         form.instance.created_by = self.request.user
         self.object = form.save(user=self.request.user)
-        messages.success(self.request, f"アクセスリスト「{self.object.name}」を作成しました。")
+        user_role = AccessListUserRole.objects.filter(access_list=self.object, user=self.request.user).first()
+        if user_role and user_role.role == ACLEntry.PermissionLevel.ADMIN:
+            messages.success(self.request, f"アクセスリスト「{self.object.name}」を作成しました。")
+        else:
+            messages.warning(self.request, "設定を保存しました。注意: あなたはこのアクセスリストの管理者ではなくなりました。")
         return redirect(self.get_success_url())
 
     def form_invalid(self, form):
@@ -211,7 +215,11 @@ class AccessListUpdateView(LoginRequiredMixin, PermissionRequiredMixin, UpdateVi
 
     def form_valid(self, form):
         self.object = form.save(user=self.request.user)
-        messages.success(self.request, f"アクセスリスト「{self.object.name}」を更新しました。")
+        user_role = AccessListUserRole.objects.filter(access_list=self.object, user=self.request.user).first()
+        if user_role and user_role.role == ACLEntry.PermissionLevel.ADMIN:
+            messages.success(self.request, f"アクセスリスト「{self.object.name}」を更新しました。")
+        else:
+            messages.warning(self.request, "設定を保存しました。注意: あなたはこのアクセスリストの管理者ではなくなりました。")
         return redirect(self.get_success_url())
 
     def form_invalid(self, form):
