@@ -85,6 +85,11 @@ class AccessListService:
     @classmethod
     def get_ancestor_ids(cls, department):
         """department自身および祖先チェーンのIDリスト（文字列）を返す (§6.2)。"""
+        Department = apps.get_model("accounts", "Department")
+        if not isinstance(department, Department):
+            department = Department.objects.filter(pk=department).first()
+        if not department:
+            return []
         ancestor_ids = [str(department.pk)]
         curr = department.parent
         visited = {department.pk}
@@ -102,6 +107,8 @@ class AccessListService:
         Department = apps.get_model("accounts", "Department")
         dept_ct = ContentType.objects.get_for_model(Department)
         ancestor_ids = cls.get_ancestor_ids(department)
+        if not ancestor_ids:
+            return set()
         return set(
             ACLEntry.objects.filter(
                 target_content_type=dept_ct,
@@ -121,10 +128,11 @@ class AccessListService:
         """指定UserGroupを対象とするACLEntryを持つAccessList ID集合を返す。"""
         UserGroup = apps.get_model("accounts", "UserGroup")
         ug_ct = ContentType.objects.get_for_model(UserGroup)
+        ug_pk = getattr(user_group, "pk", user_group)
         return set(
             ACLEntry.objects.filter(
                 target_content_type=ug_ct,
-                target_object_id=str(user_group.pk),
+                target_object_id=str(ug_pk),
             ).values_list("access_list_id", flat=True).distinct()
         )
 
@@ -140,10 +148,11 @@ class AccessListService:
         """特定ユーザーが直接指定されたACLEntryを持つAccessList ID集合を返す。"""
         User = get_user_model()
         user_ct = ContentType.objects.get_for_model(User)
+        user_pk = getattr(user, "pk", user)
         return set(
             ACLEntry.objects.filter(
                 target_content_type=user_ct,
-                target_object_id=str(user.pk),
+                target_object_id=str(user_pk),
             ).values_list("access_list_id", flat=True).distinct()
         )
 
@@ -160,6 +169,12 @@ class AccessListService:
 
         対象AccessListをsetで集約してから重複排除して1回ずつ再計算する。
         """
+        User = get_user_model()
+        if not isinstance(user, User):
+            user = User.objects.filter(pk=user).first()
+        if not user:
+            return
+
         target_acl_ids = set()
         target_acl_ids.update(cls.get_acl_ids_for_user(user))
         if getattr(user, "department_id", None) and user.department:

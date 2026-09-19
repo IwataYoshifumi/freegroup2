@@ -1,10 +1,12 @@
-import uuid
+from io import StringIO
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import AnonymousUser, Permission
 from django.contrib.contenttypes.models import ContentType
+from django.core.management import call_command
 from django.test import TestCase
+from django.utils import timezone
 
 from accounts.models import Department, UserGroup
 from contacts.models import Contact
@@ -302,18 +304,16 @@ class AtomicTransactionProtectionTests(TestCase):
         self.access_list = AccessList.objects.create(
             name="トランザクションACL", created_by=self.admin
         )
-        # 初期ロールを作成
-        AccessListUserRole.objects.create(
-            access_list=self.access_list,
-            user=self.user,
-            role=AccessListUserRole.Role.VIEWER,
-        )
-        ACLEntry.objects.create(
+        self.entry = ACLEntry.objects.create(
             access_list=self.access_list,
             order=10,
             permission_level=ACLEntry.PermissionLevel.ADMIN,
             target=self.user,
         )
+        # ACLEntry 作成シグナルによって ADMIN が再計算された後、テスト用に VIEWER に更新
+        AccessListUserRole.objects.filter(
+            access_list=self.access_list, user=self.user
+        ).update(role=AccessListUserRole.Role.VIEWER)
 
     def test_atomic_rollback_on_error(self):
         # bulk_create で例外を発生させてロールバックをシミュレート
@@ -606,3 +606,464 @@ class UnauthenticatedUserTests(TestCase):
         self.assertFalse(
             AccessListService.can_merge_person(anon, self.person, self.person)
         )
+
+
+# ==============================================================================
+# Step 3: シグナル・管理コマンド検証テスト (§7, §7.8)
+# ==============================================================================
+
+class ACLEntrySignalTests(TestCase):
+    """ACLEntry 作成・変更・削除時の自動再計算シグナル検証 (§7.1)。"""
+
+    def setUp(self):
+        self.admin = User.objects.create_user(username="acl_sig_admin")
+        self.user = User.objects.create_user(username="acl_sig_user")
+        self.access_list = AccessList.objects.create(
+            name="シグナル検証ACL", created_by=self.admin
+        )
+
+    def test_acl_entry_create_triggers_rebuild(self):
+        # ACLEntry 作成でシグナルが発火し、キャッシュが生成されること
+        entry = ACLEntry.objects.create(
+            access_list=self.access_list,
+            order=10,
+            permission_level=ACLEntry.PermissionLevel.ADMIN,
+            target=self.user,
+        )
+        role = AccessListUserRole.objects.filter(
+            access_list=self.access_list, user=self.user
+        ).first()
+        self.assertIsNotNone(role)
+        self.assertEqual(role.role, AccessListUserRole.Role.ADMIN)
+
+    def test_acl_entry_update_triggers_rebuild(self):
+        entry = ACLEntry.objects.create(
+            access_list=self.access_list,
+            order=10,
+            permission_level=ACLEntry.PermissionLevel.ADMIN,
+            target=self.user,
+        )
+        # 権限レベルを EDITOR に更新
+        entry.permission_level = ACLEntry.PermissionLevel.EDITOR
+        entry.save()
+
+        role = AccessListUserRole.objects.filter(
+            access_list=self.access_list, user=self.user
+        ).first()
+        self.assertIsNotNone(role)
+        self.assertEqual(role.role, AccessListUserRole.Role.EDITOR)
+
+    def test_acl_entry_delete_triggers_rebuild(self):
+        entry = ACLEntry.objects.create(
+            access_list=self.access_list,
+            order=10,
+            permission_level=ACLEntry.PermissionLevel.ADMIN,
+            target=self.user,
+        )
+        self.assertTrue(
+            AccessListUserRole.objects.filter(
+                access_list=self.access_list, user=self.user
+            ).exists()
+        )
+
+        # 削除でシグナルが発火し、キャッシュからロールが消去されること
+        entry.delete()
+        self.assertFalse(
+            AccessListUserRole.objects.filter(
+                access_list=self.access_list, user=self.user
+            ).exists()
+        )
+
+
+class DepartmentSignalTests(TestCase):
+    """部門（Department）変更・削除監視および GFK 孤児対策検証 (§7.2, §7.6)。"""
+
+    def setUp(self):
+        self.admin = User.objects.create_user(username="dept_sig_admin")
+        self.user = User.objects.create_user(username="dept_sig_user")
+
+        self.dept_p1 = Department.objects.create(name="親部署1")
+        self.dept_p2 = Department.objects.create(name="親部署2")
+        self.dept_child = Department.objects.create(
+            name="子部署", parent=self.dept_p1
+        )
+        self.user.department = self.dept_child
+        self.user.save()
+
+        self.acl_p1 = AccessList.objects.create(name="P1用ACL", created_by=self.admin)
+        self.acl_p2 = AccessList.objects.create(name="P2用ACL", created_by=self.admin)
+
+        ACLEntry.objects.create(
+            access_list=self.acl_p1,
+            order=10,
+            permission_level=ACLEntry.PermissionLevel.VIEWER,
+            target=self.dept_p1,
+        )
+        ACLEntry.objects.create(
+            access_list=self.acl_p2,
+            order=10,
+            permission_level=ACLEntry.PermissionLevel.ADMIN,
+            target=self.dept_p2,
+        )
+
+    def test_department_reparenting_triggers_rebuild(self):
+        # 初期状態: 子部署の親は P1 なので、P1用ACL に VIEWER を持つ
+        self.assertTrue(
+            AccessListUserRole.objects.filter(
+                access_list=self.acl_p1, user=self.user, role=AccessListUserRole.Role.VIEWER
+            ).exists()
+        )
+        self.assertFalse(
+            AccessListUserRole.objects.filter(
+                access_list=self.acl_p2, user=self.user
+            ).exists()
+        )
+
+        # 親部署を P2 に変更
+        self.dept_child.parent = self.dept_p2
+        self.dept_child.save()
+
+        # 旧親 P1 の ACL から除外され、新親 P2 の ACL (ADMIN) に波及していること
+        self.assertFalse(
+            AccessListUserRole.objects.filter(
+                access_list=self.acl_p1, user=self.user
+            ).exists()
+        )
+        self.assertTrue(
+            AccessListUserRole.objects.filter(
+                access_list=self.acl_p2, user=self.user, role=AccessListUserRole.Role.ADMIN
+            ).exists()
+        )
+
+    def test_department_delete_cleans_orphan_acl_entries(self):
+        acl = AccessList.objects.create(name="単一部署ACL", created_by=self.admin)
+        dept = Department.objects.create(name="一時部署")
+        self.user.department = dept
+        self.user.save()
+
+        entry = ACLEntry.objects.create(
+            access_list=acl,
+            order=10,
+            permission_level=ACLEntry.PermissionLevel.VIEWER,
+            target=dept,
+        )
+        dept_ct = ContentType.objects.get_for_model(Department)
+
+        self.assertTrue(
+            AccessListUserRole.objects.filter(access_list=acl, user=self.user).exists()
+        )
+
+        # 部署削除
+        dept.delete()
+
+        # GFK 孤児となった ACLEntry が削除されていること
+        self.assertFalse(
+            ACLEntry.objects.filter(
+                target_content_type=dept_ct, target_object_id=str(dept.pk)
+            ).exists()
+        )
+        # キャッシュからも除外されていること
+        self.assertFalse(
+            AccessListUserRole.objects.filter(access_list=acl, user=self.user).exists()
+        )
+
+
+class UserGroupSignalTests(TestCase):
+    """UserGroup メンバー変更（m2m）および GFK 孤児対策検証 (§7.3, §7.5, §7.6)。"""
+
+    def setUp(self):
+        self.admin = User.objects.create_user(username="ug_sig_admin")
+        self.user = User.objects.create_user(username="ug_sig_user")
+        self.access_list = AccessList.objects.create(
+            name="グループACL", created_by=self.admin
+        )
+        self.user_group = UserGroup.objects.create(
+            name="特別PJグループ", created_by=self.admin
+        )
+        ACLEntry.objects.create(
+            access_list=self.access_list,
+            order=10,
+            permission_level=ACLEntry.PermissionLevel.EDITOR,
+            target=self.user_group,
+        )
+
+    def test_user_group_m2m_forward_add_remove_clear(self):
+        # 1. 順方向 add (group.members.add)
+        self.user_group.members.add(self.user)
+        self.assertTrue(
+            AccessListUserRole.objects.filter(
+                access_list=self.access_list,
+                user=self.user,
+                role=AccessListUserRole.Role.EDITOR,
+            ).exists()
+        )
+
+        # 2. 順方向 remove (group.members.remove)
+        self.user_group.members.remove(self.user)
+        self.assertFalse(
+            AccessListUserRole.objects.filter(
+                access_list=self.access_list, user=self.user
+            ).exists()
+        )
+
+        # 3. 順方向 clear (group.members.clear)
+        self.user_group.members.add(self.user)
+        self.user_group.members.clear()
+        self.assertFalse(
+            AccessListUserRole.objects.filter(
+                access_list=self.access_list, user=self.user
+            ).exists()
+        )
+
+    def test_user_group_m2m_reverse_add_remove_clear(self):
+        # 1. 逆参照 add (user.user_groups.add)
+        self.user.user_groups.add(self.user_group)
+        self.assertTrue(
+            AccessListUserRole.objects.filter(
+                access_list=self.access_list,
+                user=self.user,
+                role=AccessListUserRole.Role.EDITOR,
+            ).exists()
+        )
+
+        # 2. 逆参照 remove (user.user_groups.remove)
+        self.user.user_groups.remove(self.user_group)
+        self.assertFalse(
+            AccessListUserRole.objects.filter(
+                access_list=self.access_list, user=self.user
+            ).exists()
+        )
+
+        # 3. 逆参照 clear (user.user_groups.clear)
+        self.user.user_groups.add(self.user_group)
+        self.user.user_groups.clear()
+        self.assertFalse(
+            AccessListUserRole.objects.filter(
+                access_list=self.access_list, user=self.user
+            ).exists()
+        )
+
+    def test_user_group_delete_cleans_orphan_acl_entries(self):
+        self.user_group.members.add(self.user)
+        ug_ct = ContentType.objects.get_for_model(UserGroup)
+        self.assertTrue(
+            AccessListUserRole.objects.filter(
+                access_list=self.access_list, user=self.user
+            ).exists()
+        )
+
+        # グループ削除
+        self.user_group.delete()
+
+        # GFK 孤児 ACLEntry が削除されていること
+        self.assertFalse(
+            ACLEntry.objects.filter(
+                target_content_type=ug_ct, target_object_id=str(self.user_group.pk)
+            ).exists()
+        )
+        # キャッシュが再計算され、ロールが削除されていること
+        self.assertFalse(
+            AccessListUserRole.objects.filter(
+                access_list=self.access_list, user=self.user
+            ).exists()
+        )
+
+
+class UserStatusSignalTests(TestCase):
+    """ユーザー状態変更・部署異動・ログインガード・GFK孤児対策検証 (§7.4, §7.6)。"""
+
+    def setUp(self):
+        self.admin = User.objects.create_user(username="u_sig_admin")
+        self.user = User.objects.create_user(username="u_sig_user")
+
+        self.dept_a = Department.objects.create(name="営業1部")
+        self.dept_b = Department.objects.create(name="営業2部")
+        self.user.department = self.dept_a
+        self.user.save()
+
+        self.acl_a = AccessList.objects.create(name="ACL_A", created_by=self.admin)
+        self.acl_b = AccessList.objects.create(name="ACL_B", created_by=self.admin)
+
+        ACLEntry.objects.create(
+            access_list=self.acl_a,
+            order=10,
+            permission_level=ACLEntry.PermissionLevel.VIEWER,
+            target=self.dept_a,
+        )
+        ACLEntry.objects.create(
+            access_list=self.acl_b,
+            order=10,
+            permission_level=ACLEntry.PermissionLevel.EDITOR,
+            target=self.dept_b,
+        )
+
+    def test_user_retirement_and_reactivation_signals(self):
+        # 初期状態: 営業1部所属のため ACL_A に VIEWER を持つ
+        self.assertTrue(
+            AccessListUserRole.objects.filter(
+                access_list=self.acl_a, user=self.user
+            ).exists()
+        )
+
+        # 1. 退職 (is_active=False)
+        self.user.is_active = False
+        self.user.save()
+
+        # キャッシュから即時剥奪されていること
+        self.assertFalse(
+            AccessListUserRole.objects.filter(
+                access_list=self.acl_a, user=self.user
+            ).exists()
+        )
+
+        # 2. 復職 (is_active=True)
+        self.user.is_active = True
+        self.user.save()
+
+        # キャッシュにロールが復元されていること
+        self.assertTrue(
+            AccessListUserRole.objects.filter(
+                access_list=self.acl_a, user=self.user, role=AccessListUserRole.Role.VIEWER
+            ).exists()
+        )
+
+    def test_user_department_transfer_signals(self):
+        # 初期状態: ACL_A のみ保持
+        self.assertTrue(
+            AccessListUserRole.objects.filter(
+                access_list=self.acl_a, user=self.user
+            ).exists()
+        )
+        self.assertFalse(
+            AccessListUserRole.objects.filter(
+                access_list=self.acl_b, user=self.user
+            ).exists()
+        )
+
+        # 異動: 営業1部から営業2部へ
+        self.user.department = self.dept_b
+        self.user.save()
+
+        # 旧部署の ACL_A から除外され、新部署の ACL_B (EDITOR) に即座に反映されること
+        self.assertFalse(
+            AccessListUserRole.objects.filter(
+                access_list=self.acl_a, user=self.user
+            ).exists()
+        )
+        self.assertTrue(
+            AccessListUserRole.objects.filter(
+                access_list=self.acl_b, user=self.user, role=AccessListUserRole.Role.EDITOR
+            ).exists()
+        )
+
+    def test_login_last_login_update_skips_rebuild_guard(self):
+        """【最重要ガード】ログイン時の last_login 更新で再計算がスキップされること。"""
+        with patch.object(
+            AccessListService, "rebuild_for_user_status_change"
+        ) as mock_status_change, patch.object(
+            AccessListService, "rebuild_for_department"
+        ) as mock_dept:
+            self.user.last_login = timezone.now()
+            self.user.save(update_fields=["last_login"])
+
+            mock_status_change.assert_not_called()
+            mock_dept.assert_not_called()
+
+    def test_user_delete_cleans_orphan_acl_entries(self):
+        # ユーザー直接指定の ACLEntry
+        direct_acl = AccessList.objects.create(name="個別ACL", created_by=self.admin)
+        ACLEntry.objects.create(
+            access_list=direct_acl,
+            order=10,
+            permission_level=ACLEntry.PermissionLevel.ADMIN,
+            target=self.user,
+        )
+        user_ct = ContentType.objects.get_for_model(User)
+
+        self.assertTrue(
+            AccessListUserRole.objects.filter(
+                access_list=direct_acl, user=self.user
+            ).exists()
+        )
+
+        user_pk = str(self.user.pk)
+        # ユーザー削除
+        self.user.delete()
+
+        # GFK 孤児 ACLEntry が削除されていること
+        self.assertFalse(
+            ACLEntry.objects.filter(
+                target_content_type=user_ct, target_object_id=user_pk
+            ).exists()
+        )
+        # キャッシュも削除されていること
+        self.assertFalse(
+            AccessListUserRole.objects.filter(
+                access_list=direct_acl, user_id=user_pk
+            ).exists()
+        )
+
+
+class RebuildAllAccessListsCommandTests(TestCase):
+    """自己修復管理コマンド rebuild_all_access_lists の実行検証 (§6.3, §7.8)。"""
+
+    def setUp(self):
+        self.admin = User.objects.create_user(username="cmd_admin")
+        self.user1 = User.objects.create_user(username="cmd_user1")
+        self.user2 = User.objects.create_user(username="cmd_user2")
+
+        self.acl1 = AccessList.objects.create(name="バッチ検証ACL1", created_by=self.admin)
+        self.acl2 = AccessList.objects.create(name="バッチ検証ACL2", created_by=self.admin)
+
+        ACLEntry.objects.create(
+            access_list=self.acl1,
+            order=10,
+            permission_level=ACLEntry.PermissionLevel.VIEWER,
+            target=self.user1,
+        )
+        ACLEntry.objects.create(
+            access_list=self.acl2,
+            order=10,
+            permission_level=ACLEntry.PermissionLevel.EDITOR,
+            target=self.user2,
+        )
+
+    def test_rebuild_all_access_lists_command_executes_successfully(self):
+        # キャッシュを意図的に全削除して壊れた状態をシミュレート
+        AccessListUserRole.objects.all().delete()
+        self.assertEqual(AccessListUserRole.objects.count(), 0)
+
+        # 管理コマンド実行
+        out = StringIO()
+        call_command("rebuild_all_access_lists", stdout=out)
+        output = out.getvalue()
+
+        self.assertIn("再構築完了", output)
+        self.assertIn("すべての AccessList の再構築が正常に完了しました", output)
+
+        # 全ての AccessListUserRole が完全修復されたこと
+        role1 = AccessListUserRole.objects.filter(
+            access_list=self.acl1, user=self.user1
+        ).first()
+        self.assertIsNotNone(role1)
+        self.assertEqual(role1.role, AccessListUserRole.Role.VIEWER)
+
+        role2 = AccessListUserRole.objects.filter(
+            access_list=self.acl2, user=self.user2
+        ).first()
+        self.assertIsNotNone(role2)
+        self.assertEqual(role2.role, AccessListUserRole.Role.EDITOR)
+
+    def test_rebuild_all_access_lists_dry_run(self):
+        # キャッシュ全削除
+        AccessListUserRole.objects.all().delete()
+
+        # ドライラン実行
+        out = StringIO()
+        call_command("rebuild_all_access_lists", dry_run=True, stdout=out)
+        output = out.getvalue()
+
+        self.assertIn("ドライランモード", output)
+        # 再計算されず、ロール数は0のままであること
+        self.assertEqual(AccessListUserRole.objects.count(), 0)
+
