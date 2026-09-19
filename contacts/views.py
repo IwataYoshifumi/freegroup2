@@ -366,6 +366,17 @@ class ContactDetailView(LoginRequiredMixin, PermissionRequiredMixin, DetailView)
             "person", "business_card", "previous_person"
         )
 
+    def get_object(self, queryset=None):
+        obj = super().get_object(queryset)
+        user = self.request.user
+        from permissions.services import AccessListService
+        accessible_ids = AccessListService.accessible_person_list_ids(user)
+        if obj.person_id and obj.person.person_list_id in accessible_ids:
+            return obj
+        if user.is_authenticated and obj.created_by_id == user.id:
+            return obj
+        raise PermissionDenied("このコンタクトを閲覧する権限がありません。")
+
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         contact = self.object
@@ -971,7 +982,7 @@ class ContactCreateView(LoginRequiredMixin, PermissionRequiredMixin, View):
         business_card, err = self._resolve_business_card(request)
         if err is not None:
             return err
-        form = ContactCreateForm()
+        form = ContactCreateForm(user=request.user)
         sns_formset = build_contact_sns_formset(instance=None, prefix="sns")
         return render(
             request,
@@ -984,7 +995,7 @@ class ContactCreateView(LoginRequiredMixin, PermissionRequiredMixin, View):
         if err is not None:
             return err
 
-        form = ContactCreateForm(request.POST)
+        form = ContactCreateForm(request.POST, user=request.user)
         sns_formset = build_contact_sns_formset(
             data=request.POST, instance=None, prefix="sns"
         )

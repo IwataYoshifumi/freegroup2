@@ -428,9 +428,14 @@ class DuplicateCandidateGroupListView(
         if not selected_ranks or not selected_progress:
             return DuplicateCandidate.objects.none()
 
+        from permissions.services import AccessListService
+        accessible_pl_ids = set(AccessListService.accessible_person_list_ids(self.request.user))
+
         qs = DuplicateCandidate.objects.filter(
             group_id__isnull=False,
             rank__in=selected_ranks,
+            person_a__person_list_id__in=accessible_pl_ids,
+            person_b__person_list_id__in=accessible_pl_ids,
         )
 
         if self._is_user_filter_on():
@@ -670,8 +675,12 @@ class DuplicateCandidateGroupDetailView(
     template_name = "duplicates/duplicate_group_detail.html"
 
     def get(self, request, group_id):
+        from permissions.services import AccessListService
+        accessible_pl_ids = set(AccessListService.accessible_person_list_ids(request.user))
         candidates = DuplicateCandidate.objects.filter(
-            group_id=group_id
+            group_id=group_id,
+            person_a__person_list_id__in=accessible_pl_ids,
+            person_b__person_list_id__in=accessible_pl_ids,
         ).select_related(
             "person_a__primary_contact",
             "person_b__primary_contact",
@@ -985,7 +994,7 @@ class DuplicateCandidateGroupUpdateView(
         }
         return render(request, self.template_name, context)
 
-    def _get_pending_candidate(self, group_id, pair_id):
+    def _get_pending_candidate(self, group_id, pair_id, user=None):
         """指定 group_id・pair_id・pending な DC を取得（POST 検証用）。
 
         [性質] 準関数（DB 読み取りのみ）
@@ -994,13 +1003,19 @@ class DuplicateCandidateGroupUpdateView(
         """
         if not pair_id:
             return None
+        from permissions.services import AccessListService
+        accessible_pl_ids = set(AccessListService.accessible_person_list_ids(user)) if user else None
+        filter_kwargs = {
+            "pk": pair_id,
+            "group_id": group_id,
+            "review_status": DuplicateCandidate.ReviewStatus.PENDING,
+        }
+        if accessible_pl_ids is not None:
+            filter_kwargs["person_a__person_list_id__in"] = accessible_pl_ids
+            filter_kwargs["person_b__person_list_id__in"] = accessible_pl_ids
         try:
             return (
-                DuplicateCandidate.objects.filter(
-                    pk=pair_id,
-                    group_id=group_id,
-                    review_status=DuplicateCandidate.ReviewStatus.PENDING,
-                )
+                DuplicateCandidate.objects.filter(**filter_kwargs)
                 .select_related(
                     "person_a__primary_contact",
                     "person_b__primary_contact",
@@ -1053,10 +1068,15 @@ class DuplicateCandidateGroupUpdateView(
         session_key = self._session_key(group_id)
         reviewed_pair_ids = request.session.get(session_key, [])
 
+        from permissions.services import AccessListService
+        accessible_pl_ids = set(AccessListService.accessible_person_list_ids(request.user))
+
         candidate = (
             DuplicateCandidate.objects.filter(
                 group_id=group_id,
                 review_status=DuplicateCandidate.ReviewStatus.PENDING,
+                person_a__person_list_id__in=accessible_pl_ids,
+                person_b__person_list_id__in=accessible_pl_ids,
             )
             .exclude(pk__in=reviewed_pair_ids)
             .order_by("-score", "created_at")
@@ -1096,7 +1116,7 @@ class DuplicateCandidateGroupUpdateView(
 
     def post(self, request, group_id):
         pair_id = request.POST.get("pair_id")
-        candidate = self._get_pending_candidate(group_id, pair_id)
+        candidate = self._get_pending_candidate(group_id, pair_id, user=request.user)
         if candidate is None:
             messages.error(request, self._CONFLICT_MESSAGE)
             return redirect(

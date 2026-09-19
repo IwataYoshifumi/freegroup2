@@ -496,11 +496,14 @@ def _check_merge_permission(user, surviving_person, merged_person):
         )
 
     from accounts.services import can_merge_person
+    from permissions.services import AccessListService
 
     if not can_merge_person(user, surviving_person):
         raise PermissionDenied("surviving_person をマージする権限がありません")
     if not can_merge_person(user, merged_person):
         raise PermissionDenied("merged_person をマージする権限がありません")
+    if not AccessListService.can_merge_person(user, surviving_person, merged_person):
+        raise PermissionDenied("マージ対象のパーソンリストに対する編集権限が不足しています。")
 
 
 def _can_undo_merge(user, merge_log):

@@ -47,6 +47,16 @@ def _grant_contact_perms(user):
         )
     )
 
+    from persons.models import get_or_create_default_person_list
+    from permissions.models import AccessListUserRole
+
+    pl = get_or_create_default_person_list()
+    AccessListUserRole.objects.update_or_create(
+        access_list=pl.access_list,
+        user=user,
+        defaults={"role": AccessListUserRole.Role.EDITOR},
+    )
+
 
 def _empty_sns_management_form(prefix="sns"):
     """ContactSns InlineFormSet の空 management_form（View POST テスト用、Phase F1 §11.6.7）。"""
@@ -210,10 +220,13 @@ class SalutationIsManualViewTests(TestCase):
         v1.7 コミット3/3：手動/自動は changed_data ではなく hidden フラグ
         （salutation_name_is_manual）で明示送信する（鉛筆 UI が立てる）。
         """
+        from persons.models import get_or_create_default_person_list
+
         data = {f: "" for f in Contact.UPDATABLE_FIELDS}
         data["full_name"] = "手動太郎"
         data["salutation_name"] = "手動 会長"  # 自動生成（手動太郎 様）と異なる明示値
         data["salutation_name_is_manual"] = "true"  # 鉛筆 UI 相当（手動化フラグ）
+        data["person_list"] = get_or_create_default_person_list().id
         data.update(_empty_sns_management_form())
         resp = self.client.post(reverse("contacts:contact_create"), data=data)
         self.assertEqual(resp.status_code, 302)

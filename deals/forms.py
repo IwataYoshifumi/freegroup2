@@ -111,7 +111,7 @@ class DealForm(SafeDealModelFormMixin, DealAmountCleanMixin, forms.ModelForm):
 
     deal_list = forms.ModelChoiceField(
         queryset=DealList.objects.all(),
-        required=False,
+        required=True,
         label="案件リスト",
         widget=forms.Select(attrs={"class": "app-select app-input"}),
     )
@@ -183,23 +183,14 @@ class DealForm(SafeDealModelFormMixin, DealAmountCleanMixin, forms.ModelForm):
                 self.fields["deal_list"].help_text = (
                     "編集可能な案件リストがありません。管理者に権限付与を依頼してください。"
                 )
-        elif not self.instance.pk:
-            default_dl = get_or_create_default_deal_list()
-            self.fields["deal_list"].initial = default_dl
 
     def clean_deal_list(self):
         deal_list = self.cleaned_data.get("deal_list")
-        if self.user is not None:
-            if not deal_list:
-                raise ValidationError("編集可能な案件リストがありません。管理者に権限付与を依頼してください。")
-            if (
-                self.user.is_authenticated
-                and not self.user.is_superuser
-                and deal_list.id not in AccessListService.editable_deal_list_ids(self.user)
-            ):
+        if not deal_list:
+            raise ValidationError("案件リストを選択してください。")
+        if self.user is not None and self.user.is_authenticated and not self.user.is_superuser:
+            if deal_list.id not in AccessListService.editable_deal_list_ids(self.user):
                 raise ValidationError("選択された案件リストへの編集権限がありません。")
-        elif not deal_list:
-            deal_list = get_or_create_default_deal_list()
         return deal_list
 
     def clean(self):
@@ -227,7 +218,7 @@ class DealCreateForm(SafeDealModelFormMixin, DealAmountCleanMixin, forms.ModelFo
 
     deal_list = forms.ModelChoiceField(
         queryset=DealList.objects.all(),
-        required=False,
+        required=True,
         label="案件リスト",
         widget=forms.Select(attrs={"class": "app-select app-input"}),
     )
@@ -295,23 +286,14 @@ class DealCreateForm(SafeDealModelFormMixin, DealAmountCleanMixin, forms.ModelFo
                 self.fields["deal_list"].help_text = (
                     "編集可能な案件リストがありません。管理者に権限付与を依頼してください。"
                 )
-        elif not self.instance.pk:
-            default_dl = get_or_create_default_deal_list()
-            self.fields["deal_list"].initial = default_dl
 
     def clean_deal_list(self):
         deal_list = self.cleaned_data.get("deal_list")
-        if self.user is not None:
-            if not deal_list:
-                raise ValidationError("編集可能な案件リストがありません。管理者に権限付与を依頼してください。")
-            if (
-                self.user.is_authenticated
-                and not self.user.is_superuser
-                and deal_list.id not in AccessListService.editable_deal_list_ids(self.user)
-            ):
+        if not deal_list:
+            raise ValidationError("案件リストを選択してください。")
+        if self.user is not None and self.user.is_authenticated and not self.user.is_superuser:
+            if deal_list.id not in AccessListService.editable_deal_list_ids(self.user):
                 raise ValidationError("選択された案件リストへの編集権限がありません。")
-        elif not deal_list:
-            deal_list = get_or_create_default_deal_list()
         return deal_list
 
     def clean(self):

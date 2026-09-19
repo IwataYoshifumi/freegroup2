@@ -1446,8 +1446,8 @@ class PersonTagUIReadonlyTests(TestCase):
         from tags.models import Tag, TagAssignment, TagCategory
 
         self.user = User.objects.create_user(username="tag_ui_user", password="x")
+        _grant_view_person(self.user)
         self.user.user_permissions.add(
-            Permission.objects.get(codename="view_person"),
             Permission.objects.get(codename="assign_tag"),
         )
         self.client = Client()
@@ -2026,11 +2026,10 @@ class SalesActionButtonsGuardedTests(TestCase):
             self.sales_user.save()
             for g in sales_role.default_groups.all():
                 self.sales_user.groups.add(g)
-        else:
-            _grant_view_person(self.sales_user)
-            self.sales_user.user_permissions.add(
-                Permission.objects.get(codename="change_contact", content_type__app_label="contacts"),
-            )
+        _grant_view_person(self.sales_user)
+        self.sales_user.user_permissions.add(
+            Permission.objects.get(codename="change_contact", content_type__app_label="contacts"),
+        )
 
         self.other_user = get_user_model().objects.create_user(
             username="other_sales_user", password="password"

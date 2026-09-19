@@ -569,15 +569,32 @@ class ContactCreateForm(ContactBaseForm):
         from permissions.services import AccessListService
 
         if user:
+            self.fields["person_list"].required = True
             editable_ids = AccessListService.editable_person_list_ids(user)
             self.fields["person_list"].queryset = PersonList.objects.filter(id__in=editable_ids)
             if not editable_ids.exists():
                 self.fields["person_list"].empty_label = "選択可能なパーソンリストがありません（編集権限が必要です）"
+                self.fields["person_list"].help_text = "編集可能なパーソンリストがありません。管理者に権限付与を依頼してください。"
         else:
+            self.fields["person_list"].required = False
             self.fields["person_list"].queryset = PersonList.objects.all()
 
         if not self.fields["person_list"].initial and self.fields["person_list"].queryset.exists():
             self.fields["person_list"].initial = self.fields["person_list"].queryset.first()
+
+    def clean_person_list(self):
+        person_list = self.cleaned_data.get("person_list")
+        if self.user is not None:
+            if not person_list:
+                raise ValidationError("パーソンリストを選択してください。")
+            from permissions.services import AccessListService
+            if self.user.is_authenticated and not self.user.is_superuser:
+                if person_list.id not in AccessListService.editable_person_list_ids(self.user):
+                    raise ValidationError("選択されたパーソンリストへの編集権限がありません。")
+        elif not person_list:
+            from persons.models import get_or_create_default_person_list
+            person_list = get_or_create_default_person_list()
+        return person_list
 
     def clean(self):
         cleaned = super().clean()
@@ -585,10 +602,6 @@ class ContactCreateForm(ContactBaseForm):
         self._require_salutation_name(cleaned)
         # full_name 必須化（v1.7、手動作成経路の空保存防止。Create のみ。Update/AddRole/OCR は対象外）。
         self._require_full_name(cleaned)
-        person_list = cleaned.get("person_list")
-        if not person_list:
-            from persons.models import get_or_create_default_person_list
-            cleaned["person_list"] = get_or_create_default_person_list()
         return cleaned
 
 

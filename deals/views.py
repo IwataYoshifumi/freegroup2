@@ -255,6 +255,12 @@ class DealCreateView(LoginRequiredMixin, PermissionRequiredMixin, CreateView):
     template_name = "deals/deal_form.html"
     permission_required = "deals.add_deal"
 
+    def get_form_kwargs(self):
+        """フォームに user を渡す（AccessList設計方針 v1.6 §4.5・§9.1 対応）。"""
+        kwargs = super().get_form_kwargs()
+        kwargs["user"] = self.request.user
+        return kwargs
+
     def get_initial(self):
         initial = super().get_initial()
         initial["owner"] = self.request.user

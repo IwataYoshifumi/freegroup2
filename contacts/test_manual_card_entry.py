@@ -42,8 +42,11 @@ class ManualCardEntryTests(TestCase):
 
     def _create_data(self, **overrides):
         """ContactCreateForm 用 POST data（UPDATABLE_FIELDS 全埋め + salutation 必須 + sns 空）。"""
+        from persons.models import get_or_create_default_person_list
+
         data = {f: "" for f in Contact.UPDATABLE_FIELDS}
         data["salutation_name"] = "手動 様"
+        data["person_list"] = get_or_create_default_person_list().id
         data.update(_empty_sns_management_form())
         data.update(overrides)
         return data

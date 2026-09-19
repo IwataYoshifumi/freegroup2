@@ -20,11 +20,16 @@ def can_view_activity(user, activity: Activity) -> bool:
 
 
 def can_edit_activity(user, activity: Activity) -> bool:
-    """活動記録の編集権限判定（仕様書 §7.3）。change_activity 権限を AND 条件に含む。"""
+    """活動記録の編集権限判定（仕様書 §7.3 / v1.6 §8.2）。change_activity 権限を AND 条件に含む。"""
+    if not user or not user.is_authenticated:
+        return False
     if user.has_perm("activities.edit_all_activities"):
         return True
     if not user.has_perm("activities.change_activity"):
         return False
+    if activity.deal_id is not None:
+        from permissions.services import AccessListService
+        return AccessListService.can_edit_deal(user, activity.deal)
     if activity.user_id == user.id or activity.created_by_id == user.id:
         return True
     return activity.activity_users.filter(user=user).exists()

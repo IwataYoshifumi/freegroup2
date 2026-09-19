@@ -50,6 +50,16 @@ def _grant_contact_perms(user):
         )
     )
 
+    from persons.models import get_or_create_default_person_list
+    from permissions.models import AccessListUserRole
+
+    pl = get_or_create_default_person_list()
+    AccessListUserRole.objects.update_or_create(
+        access_list=pl.access_list,
+        user=user,
+        defaults={"role": AccessListUserRole.Role.EDITOR},
+    )
+
 
 def _empty_sns_management_form(prefix="sns"):
     """ContactSns InlineFormSet の空 management_form（POST テスト用、Phase F1 §11.6.7）。"""
@@ -3033,7 +3043,10 @@ class ContactCreateViewTests(TestCase):
         self.url = reverse("contacts:contact_create")
 
     def _base_post_data(self):
+        from persons.models import get_or_create_default_person_list
+
         data = {f: "" for f in Contact.UPDATABLE_FIELDS}
+        data["person_list"] = get_or_create_default_person_list().id
         data.update(_empty_sns_management_form())
         return data
 
@@ -3875,9 +3888,12 @@ class ContactCreateSnsTests(TestCase):
         self.url = reverse("contacts:contact_create")
 
     def test_create_with_sns(self):
+        from persons.models import get_or_create_default_person_list
+
         data = {f: "" for f in Contact.UPDATABLE_FIELDS}
         data["full_name"] = "新規太郎"
         data["salutation_name"] = "新規太郎 様"
+        data["person_list"] = get_or_create_default_person_list().id
         data.update(_sns_management_form(1, initial=0))
         data["sns-0-sns_type"] = "youtube"
         data["sns-0-sns_id"] = "ch-1"

@@ -18,6 +18,7 @@ PersonAddAdditionalRoleView は書込系で LoginRequiredMixin のみ（権限�
 
 from django.contrib.auth.mixins import LoginRequiredMixin, PermissionRequiredMixin
 from django.db import transaction
+from django.core.exceptions import PermissionDenied
 from django.http import Http404, HttpResponseRedirect
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -255,6 +256,17 @@ class PersonDetailView(LoginRequiredMixin, PermissionRequiredMixin, DetailView):
 
     def get_queryset(self):
         return Person.objects.select_related("primary_contact", "merged_into")
+
+    def get_object(self, queryset=None):
+        obj = super().get_object(queryset)
+        user = self.request.user
+        from permissions.services import AccessListService
+        accessible_ids = AccessListService.accessible_person_list_ids(user)
+        if obj.person_list_id in accessible_ids:
+            return obj
+        if user.is_authenticated and obj.contact_set.filter(created_by=user).exists():
+            return obj
+        raise PermissionDenied("このパーソンを閲覧する権限がありません。")
 
     def get(self, request, *args, **kwargs):
         self.object = self.get_object()

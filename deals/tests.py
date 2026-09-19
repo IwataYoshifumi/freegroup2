@@ -30,11 +30,14 @@ class DealModelValidationTests(TestCase):
         self.user2 = User.objects.create_user(username="user2", password="password")
         self.primary_person = Person.objects.create()
         self.person2 = Person.objects.create()
+        from deals.models import get_or_create_default_deal_list
+        self.deal_list = get_or_create_default_deal_list()
 
     def test_closed_at_future_date_raises_validation_error(self):
         tomorrow = timezone.localdate() + timedelta(days=1)
         deal = Deal(
             name="Future Closed Deal",
+            deal_list=self.deal_list,
             primary_person=self.primary_person,
             owner=self.owner,
             closed_at=tomorrow,
@@ -47,6 +50,7 @@ class DealModelValidationTests(TestCase):
         today = timezone.localdate()
         deal = Deal(
             name="Today Closed Deal",
+            deal_list=self.deal_list,
             primary_person=self.primary_person,
             owner=self.owner,
             closed_at=today,
@@ -315,9 +319,17 @@ class DealPermissionTests(TestCase):
         self.member.user_permissions.add(change_deal_perm)
         self.privileged_user.user_permissions.add(change_deal_perm, view_all_perm, edit_all_perm)
 
+        from deals.models import DealList
+        from permissions.models import AccessList, AccessListUserRole
+        self.access_list = AccessList.objects.create(name="認可テスト用ACL", created_by=self.owner)
+        self.deal_list = DealList.objects.create(name="認可テスト用リスト", access_list=self.access_list, created_by=self.owner)
+        AccessListUserRole.objects.create(access_list=self.access_list, user=self.owner, role=AccessListUserRole.Role.EDITOR)
+        AccessListUserRole.objects.create(access_list=self.access_list, user=self.member, role=AccessListUserRole.Role.EDITOR)
+
         self.person = Person.objects.create()
         self.deal = Deal.objects.create(
             name="認可テスト案件",
+            deal_list=self.deal_list,
             primary_person=self.person,
             owner=self.owner,
         )
@@ -395,9 +407,13 @@ class DealPermissionTests(TestCase):
         self.assertFalse(can_reassign_deal_owner(self.outsider, self.deal))
 
     def test_visible_deals_for(self):
+        from deals.models import DealList
+        from permissions.models import AccessList
         from deals.permissions import visible_deals_for
 
-        deal2 = Deal.objects.create(name="部外者案件", primary_person=self.person, owner=self.outsider)
+        outsider_acl = AccessList.objects.create(name="部外者用ACL", created_by=self.outsider)
+        outsider_list = DealList.objects.create(name="部外者用リスト", access_list=outsider_acl, created_by=self.outsider)
+        deal2 = Deal.objects.create(name="部外者案件", deal_list=outsider_list, primary_person=self.person, owner=self.outsider)
 
         # privileged_user は全件（2件）
         self.assertEqual(visible_deals_for(self.privileged_user).count(), 2)
@@ -449,6 +465,17 @@ class DealViewTests(TestCase):
             probability=80,
         )
         DealUser.objects.create(deal=self.deal, user=self.editor, role=UserRole.SUPPORT)
+        from permissions.models import AccessListUserRole
+        AccessListUserRole.objects.get_or_create(
+            access_list=self.deal.deal_list.access_list,
+            user=self.owner,
+            defaults={"role": AccessListUserRole.Role.EDITOR},
+        )
+        AccessListUserRole.objects.get_or_create(
+            access_list=self.deal.deal_list.access_list,
+            user=self.editor,
+            defaults={"role": AccessListUserRole.Role.EDITOR},
+        )
 
     def test_deal_list_view_anonymous_redirect(self):
         url = reverse("deals:deal_list")
@@ -496,6 +523,7 @@ class DealViewTests(TestCase):
 
         post_data = {
             "name": "新規クラウド移行案件",
+            "deal_list": str(self.deal.deal_list.id),
             "company": str(self.company.id),
             "stage": Stage.INITIAL_MEETING,
             "probability": 50,
@@ -535,6 +563,7 @@ class DealViewTests(TestCase):
 
         post_data = {
             "name": "キャンペーン経由案件",
+            "deal_list": str(self.deal.deal_list.id),
             "company": str(self.company.id),
             "stage": Stage.INITIAL_MEETING,
             "probability": 40,
@@ -579,6 +608,7 @@ class DealViewTests(TestCase):
 
         post_data = {
             "name": "クリック受信者からの案件",
+            "deal_list": str(self.deal.deal_list.id),
             "company": str(self.company.id),
             "stage": Stage.INITIAL_MEETING,
             "probability": 50,
@@ -871,7 +901,7 @@ class DealViewTests(TestCase):
 
         # 150件以上のパーソンを作成（一部は deal.company に所属、残りは他社または会社なし）
         other_company = Company.objects.create(organization="別会社")
-        bulk_persons = [Person() for _ in range(160)]
+        bulk_persons = [Person(person_list=self.person.person_list) for _ in range(160)]
         Person.objects.bulk_create(bulk_persons)
 
         created_persons = list(Person.objects.filter(id__in=[p.id for p in bulk_persons]))
@@ -1172,6 +1202,7 @@ class DealViewTests(TestCase):
         url = reverse("deals:deal_create")
         post_data = {
             "name": "カンマ付き金額案件",
+            "deal_list": str(self.deal.deal_list.id),
             "company": str(self.company.id),
             "stage": Stage.INITIAL_MEETING,
             "probability": 50,
@@ -1208,6 +1239,7 @@ class DealViewTests(TestCase):
         # DealCreateForm
         create_form = DealCreateForm(data={
             "name": "フォームテスト案件",
+            "deal_list": str(self.deal.deal_list.id),
             "company": str(self.company.id),
             "stage": Stage.INITIAL_MEETING,
             "amount": "99,999,999",
@@ -1779,6 +1811,14 @@ class DealCreateInitialParamTests(TestCase):
         )
         self.person.primary_contact = self.contact
         self.person.save(update_fields=["primary_contact"])
+        from deals.models import get_or_create_default_deal_list
+        from permissions.models import AccessListUserRole
+        self.deal_list = get_or_create_default_deal_list()
+        AccessListUserRole.objects.update_or_create(
+            access_list=self.deal_list.access_list,
+            user=self.user,
+            defaults={"role": AccessListUserRole.Role.EDITOR},
+        )
 
     def test_get_deal_create_with_company_param(self):
         url = f"{reverse('deals:deal_create')}?company={self.company.id}"
@@ -1808,6 +1848,7 @@ class DealCreateInitialParamTests(TestCase):
         url = f"{reverse('deals:deal_create')}?person={self.person.id}"
         post_data = {
             "name": "パーソン起点案件",
+            "deal_list": str(self.deal_list.id),
             "company": str(self.company.id),
             "stage": Stage.INITIAL_MEETING,
             "probability": 50,
@@ -1842,6 +1883,14 @@ class DealWizardTests(TestCase):
             last_name="山田",
         )
         self.client.login(username="wizard_user", password="password")
+        from deals.models import get_or_create_default_deal_list
+        from permissions.models import AccessListUserRole
+        self.deal_list = get_or_create_default_deal_list()
+        AccessListUserRole.objects.update_or_create(
+            access_list=self.deal_list.access_list,
+            user=self.user,
+            defaults={"role": AccessListUserRole.Role.EDITOR},
+        )
 
     def test_deal_wizard_4step_flow_and_titles(self):
         """案件新規作成ウィザードの 4ステップ（Step 1 ➔ Step 2 ➔ Step 3 ➔ Step 4 ➔ 詳細）遷移および各画面のタイトル表記・ボタン・BackNavigator検証。"""
@@ -1865,6 +1914,7 @@ class DealWizardTests(TestCase):
         # Step 1 POST -> Step 2 へリダイレクト
         post_data = {
             "name": "ウィザード4ステップ案件",
+            "deal_list": str(self.deal_list.id),
             "company": str(self.company.id),
             "stage": Stage.INITIAL_MEETING,
             "probability": 50,
@@ -2629,6 +2679,14 @@ class SalesRoleDealCreatePermissionTests(TestCase):
         self.sales_user = User.objects.create_user(username="sales_rep", password="password")
         apply_role(self.sales_user, self.sales_role)
         self.company = Company.objects.create(organization="テスト商事")
+        from deals.models import get_or_create_default_deal_list
+        from permissions.models import AccessListUserRole
+        self.deal_list = get_or_create_default_deal_list()
+        AccessListUserRole.objects.update_or_create(
+            access_list=self.deal_list.access_list,
+            user=self.sales_user,
+            defaults={"role": AccessListUserRole.Role.EDITOR},
+        )
 
     def test_sales_role_user_can_access_deal_create_view(self):
         """営業ロールを持つユーザーが GET /deals/create/ にアクセスした際、403 Forbidden にならず 200 OK で表示されること。"""
@@ -2644,6 +2702,7 @@ class SalesRoleDealCreatePermissionTests(TestCase):
         url = reverse("deals:deal_create")
         post_data = {
             "name": "営業担当起票案件",
+            "deal_list": str(self.deal_list.id),
             "company": str(self.company.pk),
             "stage": Stage.INITIAL_MEETING,
             "probability": 20,
@@ -2671,6 +2730,14 @@ class DealWizardBackNavigationTests(TestCase):
         )
         self.client.login(username="wizard_deal_user", password="password")
         self.company = Company.objects.create(organization="案件ウィザード会社")
+        from deals.models import get_or_create_default_deal_list
+        from permissions.models import AccessListUserRole
+        self.deal_list = get_or_create_default_deal_list()
+        AccessListUserRole.objects.update_or_create(
+            access_list=self.deal_list.access_list,
+            user=self.user,
+            defaults={"role": AccessListUserRole.Role.EDITOR},
+        )
 
     def test_step1_to_step2_back_link_points_to_step1_edit(self):
         """Step 1（新規作成）から Step 2（社外関係者設定）へ遷移した際、Step 2 画面の戻るリンク先が Step 1（編集画面 ?wizard=1 付き）を指していること。"""
@@ -2681,6 +2748,7 @@ class DealWizardBackNavigationTests(TestCase):
 
         post_data = {
             "name": "ウィザードテスト案件",
+            "deal_list": str(self.deal_list.id),
             "company": str(self.company.pk),
             "stage": Stage.INITIAL_MEETING,
             "probability": 20,

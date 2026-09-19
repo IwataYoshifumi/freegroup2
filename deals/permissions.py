@@ -20,14 +20,17 @@ def can_view_deal(user, deal: Deal) -> bool:
 
 
 def can_edit_deal(user, deal: Deal) -> bool:
-    """案件の編集権限判定（仕様書 §7.1）。change_deal 権限を AND 条件に含む。"""
+    """案件の編集権限判定（仕様書 §7.1 / AccessList設計方針 v1.6 §5.3, §6.2）。change_deal 権限を AND 条件に含む。"""
+    if not user or not user.is_authenticated:
+        return False
     if user.has_perm("deals.edit_all_deals"):
         return True
     if not user.has_perm("deals.change_deal"):
         return False
-    if deal.owner_id == user.id:
-        return True
-    return deal.deal_users.filter(user=user, can_edit=True).exists()
+    if deal.deal_users.filter(user=user, can_edit=False).exists():
+        return False
+    from permissions.services import AccessListService
+    return AccessListService.can_edit_deal(user, deal)
 
 
 def can_approve_deal(user, deal: Deal) -> bool:

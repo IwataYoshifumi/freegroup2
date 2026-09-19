@@ -124,14 +124,6 @@ class DealQuerySet(models.QuerySet):
             models.Q(owner=user) | models.Q(deal_users__user=user) | models.Q(deal_list_id__in=accessible_ids)
         ).distinct()
 
-    def bulk_create(self, objs, **kwargs):
-        default_dl = None
-        for obj in objs:
-            if not getattr(obj, "deal_list_id", None):
-                if default_dl is None:
-                    default_dl = get_or_create_default_deal_list()
-                obj.deal_list = default_dl
-        return super().bulk_create(objs, **kwargs)
 
 
 def get_or_create_default_deal_list():
@@ -264,15 +256,8 @@ class Deal(models.Model):
             ("edit_all_deals", "Can edit all deals"),
         ]
 
-    def full_clean(self, exclude=None, validate_unique=True):
-        if not getattr(self, "deal_list_id", None):
-            self.deal_list = get_or_create_default_deal_list()
-        super().full_clean(exclude=exclude, validate_unique=validate_unique)
-
     def clean(self):
         super().clean()
-        if not getattr(self, "deal_list_id", None):
-            self.deal_list = get_or_create_default_deal_list()
         if self.stage == Stage.WON and not self.closed_at:
             raise ValidationError({
                 "stage": "受注への変更は「案件クローズ」から成約確定日を指定して行ってください。",
@@ -298,10 +283,6 @@ class Deal(models.Model):
                 }
             )
 
-    def save(self, *args, **kwargs):
-        if not getattr(self, "deal_list_id", None):
-            self.deal_list = get_or_create_default_deal_list()
-        super().save(*args, **kwargs)
 
     STAGE_BADGE_STYLES = {
         Stage.INITIAL_MEETING: "background-color: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd;",

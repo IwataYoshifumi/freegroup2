@@ -8,17 +8,12 @@ mailings.services.permissions（can_view_campaign / visible_campaigns_for）の�
 
 
 def can_edit_contact(user, contact):
-    """単一 Contact の編集可否判定の正本（Phase 7 段2-B）。
-
-    [性質] 純関数（DB 操作なし。user.has_perm と contact の属性参照のみ）
-    [入力] user: CustomUser、contact: Contact
-    [出力] bool（編集可なら True）
-
-    contacts.edit_all_contacts を持つ（横断権限：admin / 営業マネージャ等）か、
-    作成者本人（created_by）または管理者本人（managed_by）なら True。
-    can_view_campaign（mailings）と同じく has_perm 経由で判定するため、
-    スーパーユーザーは横断権限を自動的に満たす。
-    """
-    if user.has_perm("contacts.edit_all_contacts"):
+    """単一 Contact の編集可否判定の正本（仕様書 v1.6 §5.3 / Phase 7 段2-B）。"""
+    if not user or not user.is_authenticated:
+        return False
+    if user.is_superuser or user.has_perm("contacts.edit_all_contacts"):
         return True
-    return contact.created_by_id == user.id or contact.managed_by_id == user.id
+    if contact.managed_by_id == user.id or contact.created_by_id == user.id:
+        return True
+    from permissions.services import AccessListService
+    return AccessListService.can_edit_contact(user, contact)

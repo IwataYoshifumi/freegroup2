@@ -54,14 +54,6 @@ class PersonQuerySet(models.QuerySet):
         accessible_ids = AccessListService.accessible_person_list_ids(user)
         return self.filter(status="active", person_list_id__in=accessible_ids)
 
-    def bulk_create(self, objs, **kwargs):
-        default_pl = None
-        for obj in objs:
-            if not getattr(obj, "person_list_id", None):
-                if default_pl is None:
-                    default_pl = get_or_create_default_person_list()
-                obj.person_list = default_pl
-        return super().bulk_create(objs, **kwargs)
 
 
 def get_or_create_default_person_list():
@@ -154,15 +146,6 @@ class Person(models.Model):
             ("edit_all_persons", "全てのパーソンを編集できる"),
         ]
 
-    def full_clean(self, exclude=None, validate_unique=True):
-        if not getattr(self, "person_list_id", None):
-            self.person_list = get_or_create_default_person_list()
-        super().full_clean(exclude=exclude, validate_unique=validate_unique)
-
-    def save(self, *args, **kwargs):
-        if not getattr(self, "person_list_id", None):
-            self.person_list = get_or_create_default_person_list()
-        super().save(*args, **kwargs)
 
     @property
     def display_name(self):

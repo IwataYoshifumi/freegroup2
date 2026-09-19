@@ -17,9 +17,12 @@ class DealAdmin(admin.ModelAdmin):
     )
 
     def get_readonly_fields(self, request, obj=None):
-        if obj is None:
-            return []
-        return ["owner", "primary_person", "is_archived"]
+        readonly = []
+        if obj is not None:
+            readonly = ["owner", "primary_person", "is_archived"]
+        if request and hasattr(request, "user") and not (request.user.is_superuser or request.user.has_perm("deals.change_deallist")):
+            readonly.append("deal_list")
+        return readonly
 
 
 @admin.register(DealPerson)
