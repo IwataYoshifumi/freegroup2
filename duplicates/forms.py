@@ -100,6 +100,11 @@ class MergeForm(ContactBaseForm):
         required=False,
         label="サバイブ側選択",
     )
+    selected_person_list = forms.ModelChoiceField(
+        queryset=None,
+        required=False,
+        label="リスト所属",
+    )
 
     def __init__(
         self,
@@ -133,7 +138,19 @@ class MergeForm(ContactBaseForm):
         merged_initial.update(kwargs.pop("initial", {}) or {})
         kwargs["initial"] = merged_initial
         kwargs.pop("instance", None)
+        user = kwargs.pop("user", None)
         super().__init__(*args, **kwargs)
+
+        from persons.models import PersonList
+        from permissions.services import AccessListService
+        if user is not None:
+            self.fields["selected_person_list"].queryset = PersonList.objects.filter(
+                id__in=AccessListService.editable_person_list_ids(user)
+            )
+        else:
+            self.fields["selected_person_list"].queryset = PersonList.objects.all()
+        if surviving_person and getattr(surviving_person, "person_list_id", None):
+            self.fields["selected_person_list"].initial = surviving_person.person_list_id
 
         self._compute_field_diff()
         self._add_dynamic_confirm_checkboxes()

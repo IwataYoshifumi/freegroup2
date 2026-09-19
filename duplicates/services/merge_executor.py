@@ -320,6 +320,25 @@ def Execute_Merge_Only(candidate, surviving_person, merged_person, form, user):
         # 手順 6: merged_person 配下 Contact を surviving_person に付け替え
         merged_person.transfer_contacts_to(surviving_person, merge_reason)
 
+        # AccessList設計方針 v1.6 §10.1: PersonList の統合
+        selected_person_list = getattr(form, "cleaned_data", {}).get("selected_person_list")
+        if selected_person_list and selected_person_list != surviving_person.person_list:
+            surviving_person.person_list = selected_person_list
+            surviving_person.save(update_fields=["person_list", "updated_at"])
+            from actionlogs.models import ActionLog
+            from actionlogs.constants import PERSON_LIST_CHANGED
+            ActionLog.record(
+                user,
+                PERSON_LIST_CHANGED,
+                content_object=surviving_person,
+                object_repr=surviving_person.display_name,
+                data={
+                    "person_list_id": str(selected_person_list.id),
+                    "person_list_name": selected_person_list.name,
+                },
+                note="PersonマージによるPersonList選択・変更",
+            )
+
         # 手順 8 (v1.5.0): User 紐付け引き継ぎ（仕様書 §13.2 手順 8 / §13.6）
         # merged が User 紐付きで surviving が未紐付きの場合のみ surviving に張り替える。
         # 両方紐付き / 両方未紐付き / surviving のみ紐付き は no-op。

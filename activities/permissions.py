@@ -40,7 +40,10 @@ def can_archive_activity(user, activity: Activity) -> bool:
 
 
 def visible_activities_for(user):
-    """ユーザーが閲覧可能な活動記録 QuerySet を返す（仕様書 §7.3）。"""
+    """ユーザーが閲覧可能な活動記録 QuerySet を返す（仕様書 §7.3 / v1.6 §8.2）。"""
+    if not user or not user.is_authenticated:
+        return Activity.objects.none()
+
     if user.has_perm("activities.view_all_activities"):
         return Activity.objects.all()
 
@@ -50,7 +53,13 @@ def visible_activities_for(user):
     if user.has_perm("deals.view_all_deals"):
         q |= models.Q(deal__isnull=False)
     else:
-        q |= models.Q(deal__owner=user) | models.Q(deal__deal_users__user=user)
+        from permissions.services import AccessListService
+        accessible_deal_lists = AccessListService.accessible_deal_list_ids(user)
+        q |= (
+            models.Q(deal__owner=user)
+            | models.Q(deal__deal_users__user=user)
+            | models.Q(deal__deal_list_id__in=accessible_deal_lists)
+        )
 
     # Campaign 経由の認可委譲
     if user.has_perm("mailings.view_all_campaigns"):

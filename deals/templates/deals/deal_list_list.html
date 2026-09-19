@@ -1,0 +1,65 @@
+{% extends "deals/app_base.html" %}
+
+{% block title %}案件リスト管理 — FreeGroup2{% endblock %}
+
+{% block content %}
+  <div class="app-page-header">
+        <div>
+          <h1>案件リスト管理</h1>
+        </div>
+      </div>
+
+      <div class="app-action-area" style="justify-content:flex-start; margin-bottom:16px;">
+        {% if can_add %}
+          <a href="{% url 'deal_lists:deal_list_create' %}" class="app-btn app-btn--primary">
+            <i class="bi bi-plus-lg"></i> 案件リストを作成
+          </a>
+        {% endif %}
+      </div>
+
+      <section class="app-card" style="max-width:1000px;">
+        <div class="app-table-wrapper">
+          <table class="app-table app-table--nowrap">
+            <thead>
+              <tr>
+                <th class="app-table__col--action">操作</th>
+                <th>名前</th>
+                <th>アクセスリスト</th>
+                <th>編集範囲</th>
+                <th>案件数</th>
+                <th>作成者</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for item in deal_lists %}
+                <tr>
+                  <td class="app-table__col--action">
+                    <a href="{% url 'deal_lists:deal_list_detail' pk=item.pk %}" class="app-icon-btn" title="詳細" aria-label="詳細">
+                      <i class="bi bi-eye-fill"></i>
+                    </a>
+                    <a href="{% url 'deal_lists:deal_list_update' pk=item.pk %}" class="app-icon-btn" title="編集" aria-label="編集">
+                      <i class="bi bi-pencil-fill"></i>
+                    </a>
+                  </td>
+                  <td>
+                    <a href="{% url 'deal_lists:deal_list_detail' pk=item.pk %}" style="font-weight:600; text-decoration:underline;">
+                      {{ item.name }}
+                    </a>
+                  </td>
+                  <td>{{ item.access_list.name }}</td>
+                  <td>{{ item.get_edit_scope_display }}</td>
+                  <td>{{ item.deals.count }} 件</td>
+                  <td>{{ item.created_by.username|default:"-" }}</td>
+                </tr>
+              {% empty %}
+                <tr>
+                  <td colspan="6" style="text-align:center; padding:24px; color:var(--app-muted);">
+                    案件リストがありません。
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+{% endblock %}

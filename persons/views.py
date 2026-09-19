@@ -176,6 +176,9 @@ class PersonListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
         # v1.6 Phase 1b: 検索ロジックを persons.services.person_search に切り出し（論点 A-1）。
         # HIG 第6章：?sort=key,-key,... があればサーバー側で全件多段ソート、無ければ既定並びを維持。
         qs = search_persons(self.request.GET)
+        from permissions.services import AccessListService
+        accessible_ids = AccessListService.accessible_person_list_ids(self.request.user)
+        qs = qs.filter(person_list_id__in=accessible_ids)
         # 氏名セルの「要確認」バッジ用（primary_contact の未確認 low/mid が 1 件でもあれば True）。
         # primary_contact NULL の Person は OuterRef が NULL となり False（バッジ非表示）。
         qs = qs.annotate(

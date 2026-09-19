@@ -69,3 +69,22 @@ class UserSignatureForm(forms.ModelForm):
             ),
         }
 
+
+class UserGroupForm(forms.ModelForm):
+    """ユーザーグループ新規作成・編集用フォーム（仕様書 v1.6 §2.3.2）。"""
+
+    class Meta:
+        from .models import UserGroup
+
+        model = UserGroup
+        fields = ["name", "description"]
+        labels = {
+            "name": "グループ名",
+            "description": "説明",
+        }
+        widgets = {
+            "name": forms.TextInput(attrs={"class": "app-input", "placeholder": "グループ名を入力"}),
+            "description": forms.Textarea(attrs={"class": "app-textarea app-input", "rows": 4, "placeholder": "説明を入力（任意）"}),
+        }
+
+

@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+
+{% block title %}{% if object %}パーソンリスト編集{% else %}パーソンリスト新規作成{% endif %} — FreeGroup2{% endblock %}
+
+{% block app_content %}
+  <div class="app-main-area">
+    <main class="app-main">
+      {% include "core/includes/messages.html" %}
+
+      <div class="app-page-header">
+        <div>
+          <h1>{% if object %}パーソンリスト編集{% else %}パーソンリスト新規作成{% endif %}</h1>
+        </div>
+      </div>
+
+      <section class="app-card" style="max-width:700px;">
+        <form method="post" novalidate>
+          {% csrf_token %}
+          {% if form.non_field_errors %}
+            <div class="app-alert app-alert--danger" style="margin-bottom:16px;">
+              {{ form.non_field_errors }}
+            </div>
+          {% endif %}
+
+          <div class="app-form-group" style="margin-bottom:16px;">
+            <label for="{{ form.name.id_for_label }}" class="app-label">
+              {{ form.name.label }} <span style="color:var(--app-danger, #e53e3e);">*</span>
+            </label>
+            {{ form.name }}
+            {% if form.name.errors %}
+              <div class="app-field-error" style="color:var(--app-danger, #e53e3e); font-size:12px; margin-top:4px;">
+                {{ form.name.errors.0 }}
+              </div>
+            {% endif %}
+          </div>
+
+          <div class="app-form-group" style="margin-bottom:16px;">
+            <label for="{{ form.description.id_for_label }}" class="app-label">
+              {{ form.description.label }}
+            </label>
+            {{ form.description }}
+            {% if form.description.errors %}
+              <div class="app-field-error" style="color:var(--app-danger, #e53e3e); font-size:12px; margin-top:4px;">
+                {{ form.description.errors.0 }}
+              </div>
+            {% endif %}
+          </div>
+
+          <div class="app-form-group" style="margin-bottom:16px;">
+            <label for="{{ form.access_list.id_for_label }}" class="app-label">
+              {{ form.access_list.label }} <span style="color:var(--app-danger, #e53e3e);">*</span>
+            </label>
+            {{ form.access_list }}
+            {% if form.access_list.help_text %}
+              <p style="font-size:12px; color:var(--app-warning, #d97706); margin-top:4px;">
+                {{ form.access_list.help_text }}
+              </p>
+            {% endif %}
+            {% if form.access_list.errors %}
+              <div class="app-field-error" style="color:var(--app-danger, #e53e3e); font-size:12px; margin-top:4px;">
+                {{ form.access_list.errors.0 }}
+              </div>
+            {% endif %}
+          </div>
+
+          <div class="app-form-group" style="margin-bottom:24px;">
+            <label for="{{ form.edit_scope.id_for_label }}" class="app-label">
+              {{ form.edit_scope.label }} <span style="color:var(--app-danger, #e53e3e);">*</span>
+            </label>
+            {{ form.edit_scope }}
+            <p style="font-size:12px; color:var(--app-muted); margin-top:4px;">
+              ※ パーソン全体の編集可能範囲（作成者のみ／リスト編集者全員）を設定します。
+            </p>
+            {% if form.edit_scope.errors %}
+              <div class="app-field-error" style="color:var(--app-danger, #e53e3e); font-size:12px; margin-top:4px;">
+                {{ form.edit_scope.errors.0 }}
+              </div>
+            {% endif %}
+          </div>
+
+          <div class="app-btn-group" style="display:flex; gap:12px; align-items:center;">
+            <button type="submit" class="app-btn app-btn--primary">
+              {% if object %}変更を保存{% else %}作成する{% endif %}
+            </button>
+            <a href="{% if object %}{% url 'person_lists:person_list_detail' pk=object.pk %}{% else %}{% url 'person_lists:person_list_list' %}{% endif %}" class="app-btn app-btn--secondary">
+              キャンセル
+            </a>
+          </div>
+        </form>
+      </section>
+    </main>
+  </div>
+{% endblock %}

@@ -4,12 +4,19 @@ from deals.models import Deal
 
 
 def can_view_deal(user, deal: Deal) -> bool:
-    """案件の閲覧権限判定（仕様書 §7.1）。"""
-    if user.has_perm("deals.view_all_deals"):
+    """案件の閲覧権限判定（仕様書 §7.1 / AccessList設計方針 v1.6 §8.1）。"""
+    if not user or not user.is_authenticated:
+        return False
+    if user.has_perm("deals.view_all_deals") or user.is_superuser:
         return True
     if deal.owner_id == user.id:
         return True
-    return deal.deal_users.filter(user=user).exists()
+    if deal.deal_users.filter(user=user).exists():
+        return True
+    from permissions.services import AccessListService
+    if deal.deal_list_id in AccessListService.accessible_deal_list_ids(user):
+        return True
+    return False
 
 
 def can_edit_deal(user, deal: Deal) -> bool:
@@ -61,9 +68,5 @@ def can_reassign_deal_primary_person(user, deal: Deal) -> bool:
 
 
 def visible_deals_for(user):
-    """ユーザーが閲覧可能な案件 QuerySet を返す（仕様書 §7.1）。"""
-    if user.has_perm("deals.view_all_deals"):
-        return Deal.objects.all()
-    return Deal.objects.filter(
-        models.Q(owner=user) | models.Q(deal_users__user=user)
-    ).distinct()
+    """ユーザーが閲覧可能な案件 QuerySet を返す（仕様書 §7.1 / AccessList設計方針 v1.6 §8.1）。"""
+    return Deal.objects.visible_for(user)

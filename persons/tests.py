@@ -16,14 +16,19 @@ User = get_user_model()
 
 
 def _grant_view_person(user):
-    """Phase 7 段3-1：PersonListView / PersonDetailView は persons.view_person を要求する
-    （URL一覧表 rev20 No.7 / No.8 ★1）。これらの View を叩く既存テストの正常系を保つため、
-    テストユーザーに閲覧権限を付与する補正ヘルパー。"""
+    """Phase 7 段3-1 / AccessList Step 4：PersonListView / PersonDetailView は persons.view_person を要求し、
+    データ認可として persons.view_all_persons（またはAccessList権限）を要求する。
+    これらの View を叩く既存テストの正常系を保つため、テストユーザーに閲覧権限を付与する補正ヘルパー。"""
     from django.contrib.auth.models import Permission
 
     user.user_permissions.add(
         Permission.objects.get(
             codename="view_person", content_type__app_label="persons"
+        )
+    )
+    user.user_permissions.add(
+        Permission.objects.get(
+            codename="view_all_persons", content_type__app_label="persons"
         )
     )
 

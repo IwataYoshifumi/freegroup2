@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+
+{% block title %}{% if is_new %}エントリ追加{% else %}エントリ編集{% endif %} — {{ access_list.name }} — FreeGroup2{% endblock %}
+
+{% block app_content %}
+  <div class="app-main-area">
+    <main class="app-main">
+      {% include "core/includes/messages.html" %}
+
+      <div class="app-page-header">
+        <div>
+          <a href="{% url 'permissions:access_list_detail' pk=access_list.pk %}" class="app-back-link" style="color:var(--app-muted); text-decoration:none; font-size:13px; display:inline-flex; align-items:center; gap:4px; margin-bottom:8px;">
+            <i class="bi bi-chevron-left"></i> {{ access_list.name }} に戻る
+          </a>
+          <h1>{% if is_new %}ACLEntry 追加{% else %}ACLEntry 編集{% endif %}</h1>
+        </div>
+      </div>
+
+      <section class="app-card" style="max-width:700px;">
+        <form method="post" novalidate>
+          {% csrf_token %}
+          {% if form.non_field_errors %}
+            <div class="app-alert app-alert--danger" style="margin-bottom:16px;">
+              {{ form.non_field_errors }}
+            </div>
+          {% endif %}
+
+          <div class="app-form-group" style="margin-bottom:16px;">
+            <label for="{{ form.target_type.id_for_label }}" class="app-label">
+              {{ form.target_type.label }} <span style="color:var(--app-danger, #e53e3e);">*</span>
+            </label>
+            {{ form.target_type }}
+            {% if form.target_type.errors %}
+              <div class="app-field-error" style="color:var(--app-danger, #e53e3e); font-size:12px; margin-top:4px;">
+                {{ form.target_type.errors.0 }}
+              </div>
+            {% endif %}
+          </div>
+
+          {# ユーザー選択 #}
+          <div class="app-form-group target-field" id="group-user_target" style="margin-bottom:16px;">
+            <label for="{{ form.user_target.id_for_label }}" class="app-label">
+              {{ form.user_target.label }} <span style="color:var(--app-danger, #e53e3e);">*</span>
+            </label>
+            {{ form.user_target }}
+            {% if form.user_target.errors %}
+              <div class="app-field-error" style="color:var(--app-danger, #e53e3e); font-size:12px; margin-top:4px;">
+                {{ form.user_target.errors.0 }}
+              </div>
+            {% endif %}
+          </div>
+
+          {# 部署選択 #}
+          <div class="app-form-group target-field" id="group-department_target" style="margin-bottom:16px; display:none;">
+            <label for="{{ form.department_target.id_for_label }}" class="app-label">
+              {{ form.department_target.label }} <span style="color:var(--app-danger, #e53e3e);">*</span>
+            </label>
+            {{ form.department_target }}
+            <p style="font-size:12px; color:var(--app-muted); margin-top:4px;">
+              ※ 指定した部署の配下部署に所属するユーザーにも階層継承されます。
+            </p>
+            {% if form.department_target.errors %}
+              <div class="app-field-error" style="color:var(--app-danger, #e53e3e); font-size:12px; margin-top:4px;">
+                {{ form.department_target.errors.0 }}
+              </div>
+            {% endif %}
+          </div>
+
+          {# ユーザーグループ選択 #}
+          <div class="app-form-group target-field" id="group-user_group_target" style="margin-bottom:16px; display:none;">
+            <label for="{{ form.user_group_target.id_for_label }}" class="app-label">
+              {{ form.user_group_target.label }} <span style="color:var(--app-danger, #e53e3e);">*</span>
+            </label>
+            {{ form.user_group_target }}
+            {% if form.user_group_target.errors %}
+              <div class="app-field-error" style="color:var(--app-danger, #e53e3e); font-size:12px; margin-top:4px;">
+                {{ form.user_group_target.errors.0 }}
+              </div>
+            {% endif %}
+          </div>
+
+          {# 権限レベル #}
+          <div class="app-form-group" style="margin-bottom:16px;">
+            <label for="{{ form.permission_level.id_for_label }}" class="app-label">
+              {{ form.permission_level.label }} <span style="color:var(--app-danger, #e53e3e);">*</span>
+            </label>
+            {{ form.permission_level }}
+            {% if form.permission_level.errors %}
+              <div class="app-field-error" style="color:var(--app-danger, #e53e3e); font-size:12px; margin-top:4px;">
+                {{ form.permission_level.errors.0 }}
+              </div>
+            {% endif %}
+          </div>
+
+          {# 並び順 #}
+          <div class="app-form-group" style="margin-bottom:24px;">
+            <label for="{{ form.order.id_for_label }}" class="app-label">
+              {{ form.order.label }} <span style="color:var(--app-danger, #e53e3e);">*</span>
+            </label>
+            {{ form.order }}
+            <p style="font-size:12px; color:var(--app-muted); margin-top:4px;">
+              ※ 評価順（昇順）。数字が小さいエントリが優先されます（先勝ちルール）。
+            </p>
+            {% if form.order.errors %}
+              <div class="app-field-error" style="color:var(--app-danger, #e53e3e); font-size:12px; margin-top:4px;">
+                {{ form.order.errors.0 }}
+              </div>
+            {% endif %}
+          </div>
+
+          <div class="app-btn-group" style="display:flex; gap:12px; align-items:center;">
+            <button type="submit" class="app-btn app-btn--primary">
+              {% if is_new %}追加する{% else %}保存する{% endif %}
+            </button>
+            <a href="{% url 'permissions:access_list_detail' pk=access_list.pk %}" class="app-btn app-btn--secondary">
+              キャンセル
+            </a>
+          </div>
+        </form>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    document.addEventListener("DOMContentLoaded", function() {
+      const typeSelect = document.getElementById("id_target_type");
+      const userGroup = document.getElementById("group-user_target");
+      const deptGroup = document.getElementById("group-department_target");
+      const ugGroup = document.getElementById("group-user_group_target");
+
+      function updateVisibility() {
+        const val = typeSelect.value;
+        userGroup.style.display = val === "user" ? "block" : "none";
+        deptGroup.style.display = val === "department" ? "block" : "none";
+        ugGroup.style.display = val === "user_group" ? "block" : "none";
+      }
+
+      if (typeSelect) {
+        typeSelect.addEventListener("change", updateVisibility);
+        updateVisibility();
+      }
+    });
+  </script>
+{% endblock %}

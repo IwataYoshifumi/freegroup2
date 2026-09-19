@@ -8,7 +8,7 @@
 
 from django.urls import path
 
-from . import views
+from . import person_list_views, views
 
 
 app_name = "persons"
@@ -16,6 +16,8 @@ app_name = "persons"
 
 urlpatterns = [
     path("", views.PersonListView.as_view(), name="person_list"),
+    path("person-lists/", person_list_views.PersonListListView.as_view(), name="person_list_list"),
+    path("person-lists/<uuid:pk>/", person_list_views.PersonListDetailView.as_view(), name="person_list_detail"),
     path("<uuid:pk>/", views.PersonDetailView.as_view(), name="person_detail"),
     path(
         "<uuid:pk>/add-additional-role/",

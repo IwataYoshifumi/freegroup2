@@ -106,12 +106,52 @@ class DealList(models.Model):
 
     class Meta:
         ordering = ["name"]
-        permissions = [
-            ("edit_all_deals", "全ての案件を編集できる"),
-        ]
 
     def __str__(self):
         return self.name
+
+
+class DealQuerySet(models.QuerySet):
+    """案件用カスタム QuerySet（仕様書 v1.6 §8.1）。"""
+
+    def visible_for(self, user):
+        """ユーザーが閲覧可能な案件に絞り込む（特権バイパス・OR条件内包）。"""
+        if not user or not user.is_authenticated:
+            return self.none()
+        from permissions.services import AccessListService
+        accessible_ids = AccessListService.accessible_deal_list_ids(user)
+        return self.filter(
+            models.Q(owner=user) | models.Q(deal_users__user=user) | models.Q(deal_list_id__in=accessible_ids)
+        ).distinct()
+
+    def bulk_create(self, objs, **kwargs):
+        default_dl = None
+        for obj in objs:
+            if not getattr(obj, "deal_list_id", None):
+                if default_dl is None:
+                    default_dl = get_or_create_default_deal_list()
+                obj.deal_list = default_dl
+        return super().bulk_create(objs, **kwargs)
+
+
+def get_or_create_default_deal_list():
+    """デフォルト案件リストを取得または作成する。"""
+    dl = DealList.objects.first()
+    if dl:
+        return dl
+    from django.contrib.auth import get_user_model
+    from permissions.models import AccessList
+
+    User = get_user_model()
+    admin_user = User.objects.filter(is_superuser=True).first() or User.objects.first()
+    if not admin_user:
+        admin_user = User.objects.create_user(username="system_default_admin")
+    acl = AccessList.objects.first()
+    if not acl:
+        acl = AccessList.objects.create(name="デフォルトアクセスリスト", created_by=admin_user)
+    return DealList.objects.create(
+        name="デフォルト案件リスト", access_list=acl, created_by=admin_user
+    )
 
 
 class Deal(models.Model):
@@ -120,6 +160,8 @@ class Deal(models.Model):
     Stage = Stage
     DealType = DealType
     LeadSource = LeadSource
+
+    objects = DealQuerySet.as_manager()
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=255)
@@ -222,8 +264,15 @@ class Deal(models.Model):
             ("edit_all_deals", "Can edit all deals"),
         ]
 
+    def full_clean(self, exclude=None, validate_unique=True):
+        if not getattr(self, "deal_list_id", None):
+            self.deal_list = get_or_create_default_deal_list()
+        super().full_clean(exclude=exclude, validate_unique=validate_unique)
+
     def clean(self):
         super().clean()
+        if not getattr(self, "deal_list_id", None):
+            self.deal_list = get_or_create_default_deal_list()
         if self.stage == Stage.WON and not self.closed_at:
             raise ValidationError({
                 "stage": "受注への変更は「案件クローズ」から成約確定日を指定して行ってください。",
@@ -248,6 +297,11 @@ class Deal(models.Model):
                     "lead_source": "発生源キャンペーンを指定する場合、案件発生源は「メールキャンペーン」にしてください。"
                 }
             )
+
+    def save(self, *args, **kwargs):
+        if not getattr(self, "deal_list_id", None):
+            self.deal_list = get_or_create_default_deal_list()
+        super().save(*args, **kwargs)
 
     STAGE_BADGE_STYLES = {
         Stage.INITIAL_MEETING: "background-color: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd;",

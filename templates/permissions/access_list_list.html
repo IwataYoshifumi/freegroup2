@@ -1,0 +1,65 @@
+{% extends "accounts/app_base.html" %}
+
+{% block title %}アクセスリスト管理 — FreeGroup2{% endblock %}
+
+{% block content %}
+  <div class="app-page-header">
+        <div>
+          <h1>アクセスリスト管理</h1>
+        </div>
+      </div>
+
+      <div class="app-action-area" style="justify-content:flex-start; margin-bottom:16px;">
+        {% if can_add %}
+          <a href="{% url 'permissions:access_list_create' %}" class="app-btn app-btn--primary">
+            <i class="bi bi-plus-lg"></i> アクセスリストを作成
+          </a>
+        {% endif %}
+      </div>
+
+      <section class="app-card" style="max-width:1000px;">
+        <div class="app-table-wrapper">
+          <table class="app-table app-table--nowrap">
+            <thead>
+              <tr>
+                <th class="app-table__col--action">操作</th>
+                <th>名前</th>
+                <th>説明</th>
+                <th>エントリ数</th>
+                <th>作成者</th>
+                <th>作成日時</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for item in access_lists %}
+                <tr>
+                  <td class="app-table__col--action">
+                    <a href="{% url 'permissions:access_list_detail' pk=item.pk %}" class="app-icon-btn" title="詳細" aria-label="詳細">
+                      <i class="bi bi-eye-fill"></i>
+                    </a>
+                    <a href="{% url 'permissions:access_list_update' pk=item.pk %}" class="app-icon-btn" title="編集" aria-label="編集">
+                      <i class="bi bi-pencil-fill"></i>
+                    </a>
+                  </td>
+                  <td>
+                    <a href="{% url 'permissions:access_list_detail' pk=item.pk %}" style="font-weight:600; text-decoration:underline;">
+                      {{ item.name }}
+                    </a>
+                  </td>
+                  <td>{{ item.description|default:"-"|truncatechars:40 }}</td>
+                  <td>{{ item.entries.count }} 件</td>
+                  <td>{{ item.created_by.username|default:"-" }}</td>
+                  <td>{{ item.created_at|date:"Y-m-d H:i" }}</td>
+                </tr>
+              {% empty %}
+                <tr>
+                  <td colspan="6" style="text-align:center; padding:24px; color:var(--app-muted);">
+                    アクセスリストがありません。
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+{% endblock %}

@@ -548,14 +548,36 @@ class ContactCreateForm(ContactBaseForm):
     [性質] presentation 層クラス（DB 操作なし・副作用なし、§11.6.3 設計原則）
     """
 
-    def __init__(self, *args, **kwargs):
+    person_list = forms.ModelChoiceField(
+        queryset=None,
+        required=False,
+        label="パーソンリスト",
+        widget=forms.Select(attrs={"class": "app-select app-input"}),
+    )
+
+    def __init__(self, *args, user=None, **kwargs):
         # 新規 Contact 生成用なので instance は持たせない（View 側で
         # get_update_contact() の戻り値を加工して save する責務分離、§11.4.4）。
         kwargs.pop("instance", None)
         super().__init__(*args, **kwargs)
+        self.user = user
         self._apply_widget_classes()
         # 新規作成は国デフォルト（未バインド表示用 initial）。
         self.fields["country"].initial = getattr(settings, "DEFAULT_CONTACT_COUNTRY", "JP")
+
+        from persons.models import PersonList
+        from permissions.services import AccessListService
+
+        if user:
+            editable_ids = AccessListService.editable_person_list_ids(user)
+            self.fields["person_list"].queryset = PersonList.objects.filter(id__in=editable_ids)
+            if not editable_ids.exists():
+                self.fields["person_list"].empty_label = "選択可能なパーソンリストがありません（編集権限が必要です）"
+        else:
+            self.fields["person_list"].queryset = PersonList.objects.all()
+
+        if not self.fields["person_list"].initial and self.fields["person_list"].queryset.exists():
+            self.fields["person_list"].initial = self.fields["person_list"].queryset.first()
 
     def clean(self):
         cleaned = super().clean()
@@ -563,6 +585,10 @@ class ContactCreateForm(ContactBaseForm):
         self._require_salutation_name(cleaned)
         # full_name 必須化（v1.7、手動作成経路の空保存防止。Create のみ。Update/AddRole/OCR は対象外）。
         self._require_full_name(cleaned)
+        person_list = cleaned.get("person_list")
+        if not person_list:
+            from persons.models import get_or_create_default_person_list
+            cleaned["person_list"] = get_or_create_default_person_list()
         return cleaned
 
 

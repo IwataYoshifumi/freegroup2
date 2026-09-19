@@ -38,12 +38,50 @@ class PersonList(models.Model):
 
     class Meta:
         ordering = ["name"]
-        permissions = [
-            ("edit_all_persons", "全てのパーソンを編集できる"),
-        ]
 
     def __str__(self):
         return self.name
+
+
+class PersonQuerySet(models.QuerySet):
+    """パーソン用カスタム QuerySet（仕様書 v1.6 §8.3.1）。"""
+
+    def visible_for(self, user):
+        """ユーザーが閲覧可能なパーソンに絞り込む（特権バイパス内包）。"""
+        if not user or not user.is_authenticated:
+            return self.none()
+        from permissions.services import AccessListService
+        accessible_ids = AccessListService.accessible_person_list_ids(user)
+        return self.filter(status="active", person_list_id__in=accessible_ids)
+
+    def bulk_create(self, objs, **kwargs):
+        default_pl = None
+        for obj in objs:
+            if not getattr(obj, "person_list_id", None):
+                if default_pl is None:
+                    default_pl = get_or_create_default_person_list()
+                obj.person_list = default_pl
+        return super().bulk_create(objs, **kwargs)
+
+
+def get_or_create_default_person_list():
+    """デフォルトパーソンリストを取得または作成する。"""
+    pl = PersonList.objects.first()
+    if pl:
+        return pl
+    from django.contrib.auth import get_user_model
+    from permissions.models import AccessList
+
+    User = get_user_model()
+    admin_user = User.objects.filter(is_superuser=True).first() or User.objects.first()
+    if not admin_user:
+        admin_user = User.objects.create_user(username="system_default_admin")
+    acl = AccessList.objects.first()
+    if not acl:
+        acl = AccessList.objects.create(name="デフォルトアクセスリスト", created_by=admin_user)
+    return PersonList.objects.create(
+        name="デフォルトパーソンリスト", access_list=acl, created_by=admin_user
+    )
 
 
 class Person(models.Model):
@@ -59,6 +97,8 @@ class Person(models.Model):
         ACTIVE = "active", _("通常")
         MERGED = "merged", _("マージ済み")
         ARCHIVED = "archived", _("アーカイブ")
+
+    objects = PersonQuerySet.as_manager()
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     person_list = models.ForeignKey(
@@ -110,7 +150,19 @@ class Person(models.Model):
             ("undo_merge", "マージ復元を実行できる"),
             ("merge_person", "Person マージを実行できる"),
             ("link_user", "User-Person 紐付けを設定できる"),
+            ("view_all_persons", "全てのパーソンを閲覧できる"),
+            ("edit_all_persons", "全てのパーソンを編集できる"),
         ]
+
+    def full_clean(self, exclude=None, validate_unique=True):
+        if not getattr(self, "person_list_id", None):
+            self.person_list = get_or_create_default_person_list()
+        super().full_clean(exclude=exclude, validate_unique=validate_unique)
+
+    def save(self, *args, **kwargs):
+        if not getattr(self, "person_list_id", None):
+            self.person_list = get_or_create_default_person_list()
+        super().save(*args, **kwargs)
 
     @property
     def display_name(self):

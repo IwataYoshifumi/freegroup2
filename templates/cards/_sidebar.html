@@ -42,8 +42,11 @@
   </details>
   {% endif %}
 
-  <details class="app-sidebar-group" {% if active_menu == 'contacts:contact_import' or is_export_mode %}open{% endif %}>
+  <details class="app-sidebar-group" {% if active_menu == 'contacts:contact_import' or is_export_mode or active_menu == 'persons:person_list_list' or active_menu == 'person_lists:person_list_list' %}open{% endif %}>
     <summary class="app-sidebar__section-title">その他</summary>
+    {% if perms.persons.view_personlist or perms.persons.add_personlist %}
+      <a href="{% url 'persons:person_list_list' %}" {% if active_menu == 'persons:person_list_list' or active_menu == 'person_lists:person_list_list' %}class="is-active"{% endif %}>パーソンリスト</a>
+    {% endif %}
     {% if perms.contacts.import_contact %}
       <a href="{% url 'contacts:contact_import' %}" {% if active_menu == 'contacts:contact_import' %}class="is-active"{% endif %}>インポート</a>
     {% endif %}

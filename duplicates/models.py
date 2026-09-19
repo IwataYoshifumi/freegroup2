@@ -435,6 +435,7 @@ class PersonMergeLog(models.Model):
         return cls.objects.create(
             surviving_person=surviving_person,
             merged_person=merged_person,
+            person_list_before_merge=getattr(merged_person, "person_list", None),
             executed_by=user,
             executed_at=timezone.now(),
         )

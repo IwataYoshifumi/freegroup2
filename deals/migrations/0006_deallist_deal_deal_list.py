@@ -29,7 +29,6 @@ class Migration(migrations.Migration):
             ],
             options={
                 'ordering': ['name'],
-                'permissions': [('edit_all_deals', '全ての案件を編集できる')],
             },
         ),
         migrations.AddField(

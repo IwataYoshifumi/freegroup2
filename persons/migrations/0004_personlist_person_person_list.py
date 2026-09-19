@@ -29,7 +29,6 @@ class Migration(migrations.Migration):
             ],
             options={
                 'ordering': ['name'],
-                'permissions': [('edit_all_persons', '全てのパーソンを編集できる')],
             },
         ),
         migrations.AddField(

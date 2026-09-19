@@ -1,0 +1,351 @@
+{% extends "accounts/app_base.html" %}
+
+{% block title %}{{ access_list.name }} — アクセスリスト詳細 — FreeGroup2{% endblock %}
+
+{% block content %}
+  <div class="app-page-header">
+    <div>
+      <a href="{% url 'permissions:access_list_list' %}" class="app-back-link" style="color:var(--app-muted); text-decoration:none; font-size:13px; display:inline-flex; align-items:center; gap:4px; margin-bottom:8px;">
+        <i class="bi bi-chevron-left"></i> 一覧に戻る
+      </a>
+      <h1>{{ access_list.name }}</h1>
+    </div>
+  </div>
+
+  {# 1. 上部アクションエリア #}
+  <div class="app-action-area" style="display:flex; justify-content:flex-start; gap:12px; margin-bottom:24px;">
+    {% if can_edit %}
+      <a href="{% url 'permissions:access_list_update' pk=access_list.pk %}" class="app-btn app-btn--primary">
+        <i class="bi bi-pencil-fill"></i> 編集
+      </a>
+    {% endif %}
+    {% if can_delete %}
+      <form method="post" action="{% url 'permissions:access_list_delete' pk=access_list.pk %}" onsubmit="return confirm('アクセスリスト「{{ access_list.name }}」を削除してよろしいですか？');" style="display:inline;">
+        {% csrf_token %}
+        <button type="submit" class="app-btn app-btn--danger">
+          <i class="bi bi-trash-fill"></i> 削除
+        </button>
+      </form>
+    {% endif %}
+    <a href="{% url 'permissions:access_list_list' %}" class="app-btn app-btn--secondary">
+      一覧に戻る
+    </a>
+  </div>
+
+  {# 2. 基本情報カード #}
+  <section class="app-card" style="max-width:1040px; margin-bottom:24px;">
+    <h2 style="font-size:16px; margin-bottom:14px; font-weight:600;">基本情報</h2>
+    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:16px;">
+      <div>
+        <div style="color:var(--app-muted); font-size:12px;">説明 / 備考</div>
+        <div style="font-size:14px; margin-top:4px;">{{ access_list.description|default:"（説明なし）"|linebreaksbr }}</div>
+      </div>
+      <div>
+        <div style="color:var(--app-muted); font-size:12px;">作成者</div>
+        <div style="font-size:14px; margin-top:4px;">
+          {% if access_list.created_by %}
+            {{ access_list.created_by.display_name }} ({{ access_list.created_by.username }})
+          {% else %}
+            -
+          {% endif %}
+        </div>
+      </div>
+      <div>
+        <div style="color:var(--app-muted); font-size:12px;">作成日時 / 更新日時</div>
+        <div style="font-size:14px; margin-top:4px;">
+          {{ access_list.created_at|date:"Y-m-d H:i" }} / {{ access_list.updated_at|date:"Y-m-d H:i" }}
+        </div>
+      </div>
+    </div>
+  </section>
+
+  {# 3. 設定エントリ一覧（定義テーブル） #}
+  <section class="app-card" style="max-width:1040px; margin-bottom:24px;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+      <h2 style="font-size:16px; font-weight:600; margin:0;">
+        設定エントリ（定義ルール一覧）
+      </h2>
+      {% if can_edit %}
+        <a href="{% url 'permissions:access_list_update' pk=access_list.pk %}" class="app-btn app-btn--sm app-btn--secondary">
+          <i class="bi bi-pencil-fill"></i> ロール設定を編集
+        </a>
+      {% endif %}
+    </div>
+    <p style="font-size:12px; color:var(--app-muted); margin-bottom:16px;">
+      ※ 上から順に評価され、最初に一致したルールでユーザーの確定権限レベルが確定します（先勝ち評価ルール）。
+    </p>
+
+    <div class="app-table-wrapper">
+      <table class="app-table app-table--nowrap">
+        <thead>
+          <tr>
+            <th style="width:60px; text-align:center;">順序</th>
+            <th style="width:140px;">権限レベル</th>
+            <th style="width:160px;">種別</th>
+            <th>対象名</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for entry in entries %}
+            <tr>
+              <td style="font-weight:600; text-align:center;">{{ entry.order }}</td>
+              <td>
+                {% if entry.permission_level == "admin" %}
+                  <span class="app-badge" style="background:#dcfce7; color:#15803d; font-weight:600;">管理者</span>
+                {% elif entry.permission_level == "editor" %}
+                  <span class="app-badge" style="background:#e0e7ff; color:#4338ca; font-weight:600;">編集者</span>
+                {% elif entry.permission_level == "viewer" %}
+                  <span class="app-badge" style="background:#f1f5f9; color:#475569; font-weight:600;">閲覧者</span>
+                {% elif entry.permission_level == "none" %}
+                  <span class="app-badge" style="background:#fee2e2; color:#b91c1c; font-weight:600;">未設定（拒否）</span>
+                {% else %}
+                  {{ entry.get_permission_level_display }}
+                {% endif %}
+              </td>
+              <td>
+                {% if entry.target_content_type.model == "customuser" %}
+                  <span class="app-badge" style="background:#e0f2fe; color:#0369a1;">ユーザー</span>
+                {% elif entry.target_content_type.model == "department" %}
+                  <span class="app-badge" style="background:#fef3c7; color:#b45309;">部署（配下含む）</span>
+                {% elif entry.target_content_type.model == "usergroup" %}
+                  <span class="app-badge" style="background:#f3e8ff; color:#7e22ce;">ユーザーグループ</span>
+                {% else %}
+                  {{ entry.target_content_type.name }}
+                {% endif %}
+              </td>
+              <td style="font-weight:600;">
+                {{ entry.target|default:"(削除済み対象)" }}
+              </td>
+            </tr>
+          {% empty %}
+            <tr>
+              <td colspan="4" style="text-align:center; padding:24px; color:var(--app-muted);">
+                エントリが設定されていません。「編集」からロール設定を追加してください。
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  {# 4. 確定権限ユーザー一覧（ロール別グループ化表示） #}
+  <section class="app-card" style="max-width:1040px; margin-bottom:24px;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+      <h2 style="font-size:16px; font-weight:600; margin:0;">
+        確定権限ユーザー（評価結果キャッシュ: 合計 {{ total_role_users_count }} 名）
+      </h2>
+    </div>
+    <p style="font-size:12px; color:var(--app-muted); margin-bottom:16px;">
+      定義エントリに基づき評価・キャッシュされた各ロールの有効ユーザー一覧です。
+    </p>
+
+    {# 4-1. 管理者グループ #}
+    <details open class="app-role-group" style="margin-bottom:16px; border:1px solid var(--app-border, #e2e8f0); border-radius:6px; overflow:hidden;">
+      <summary style="background:var(--app-bg-subtle, #f8fafc); padding:10px 16px; font-weight:600; cursor:pointer; display:flex; align-items:center; justify-content:space-between;">
+        <span>
+          <span class="app-badge" style="background:#dcfce7; color:#15803d; font-weight:600; margin-right:8px;">管理者</span>
+          権限ユーザー
+        </span>
+        <span style="font-size:13px; color:var(--app-muted);">{{ admin_roles|length }} 名</span>
+      </summary>
+      <div style="padding:12px 16px;">
+        {% if admin_roles %}
+          <div class="app-table-wrapper">
+            <table class="app-table app-table--nowrap">
+              <thead>
+                <tr>
+                  <th>氏名 / ユーザー名</th>
+                  <th>所属部署</th>
+                  <th>メールアドレス</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for ur in admin_roles %}
+                  <tr>
+                    <td style="font-weight:600;">
+                      {{ ur.user.display_name }}
+                      {% if ur.user.display_name != ur.user.username %}
+                        <span style="font-weight:normal; color:var(--app-muted); font-size:12px;">({{ ur.user.username }})</span>
+                      {% endif %}
+                    </td>
+                    <td>{{ ur.user.department.name|default:"-" }}</td>
+                    <td>{{ ur.user.email|default:"-" }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <div style="color:var(--app-muted); font-size:13px; padding:8px 0;">該当するユーザーはいません。</div>
+        {% endif %}
+      </div>
+    </details>
+
+    {# 4-2. 編集者グループ #}
+    <details open class="app-role-group" style="margin-bottom:16px; border:1px solid var(--app-border, #e2e8f0); border-radius:6px; overflow:hidden;">
+      <summary style="background:var(--app-bg-subtle, #f8fafc); padding:10px 16px; font-weight:600; cursor:pointer; display:flex; align-items:center; justify-content:space-between;">
+        <span>
+          <span class="app-badge" style="background:#e0e7ff; color:#4338ca; font-weight:600; margin-right:8px;">編集者</span>
+          権限ユーザー
+        </span>
+        <span style="font-size:13px; color:var(--app-muted);">{{ editor_roles|length }} 名</span>
+      </summary>
+      <div style="padding:12px 16px;">
+        {% if editor_roles %}
+          <div class="app-table-wrapper">
+            <table class="app-table app-table--nowrap">
+              <thead>
+                <tr>
+                  <th>氏名 / ユーザー名</th>
+                  <th>所属部署</th>
+                  <th>メールアドレス</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for ur in editor_roles %}
+                  <tr>
+                    <td style="font-weight:600;">
+                      {{ ur.user.display_name }}
+                      {% if ur.user.display_name != ur.user.username %}
+                        <span style="font-weight:normal; color:var(--app-muted); font-size:12px;">({{ ur.user.username }})</span>
+                      {% endif %}
+                    </td>
+                    <td>{{ ur.user.department.name|default:"-" }}</td>
+                    <td>{{ ur.user.email|default:"-" }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <div style="color:var(--app-muted); font-size:13px; padding:8px 0;">該当するユーザーはいません。</div>
+        {% endif %}
+      </div>
+    </details>
+
+    {# 4-3. 閲覧者グループ #}
+    <details open class="app-role-group" style="margin-bottom:8px; border:1px solid var(--app-border, #e2e8f0); border-radius:6px; overflow:hidden;">
+      <summary style="background:var(--app-bg-subtle, #f8fafc); padding:10px 16px; font-weight:600; cursor:pointer; display:flex; align-items:center; justify-content:space-between;">
+        <span>
+          <span class="app-badge" style="background:#f1f5f9; color:#475569; font-weight:600; margin-right:8px;">閲覧者</span>
+          権限ユーザー
+        </span>
+        <span style="font-size:13px; color:var(--app-muted);">{{ viewer_roles|length }} 名</span>
+      </summary>
+      <div style="padding:12px 16px;">
+        {% if viewer_roles %}
+          <div class="app-table-wrapper">
+            <table class="app-table app-table--nowrap">
+              <thead>
+                <tr>
+                  <th>氏名 / ユーザー名</th>
+                  <th>所属部署</th>
+                  <th>メールアドレス</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for ur in viewer_roles %}
+                  <tr>
+                    <td style="font-weight:600;">
+                      {{ ur.user.display_name }}
+                      {% if ur.user.display_name != ur.user.username %}
+                        <span style="font-weight:normal; color:var(--app-muted); font-size:12px;">({{ ur.user.username }})</span>
+                      {% endif %}
+                    </td>
+                    <td>{{ ur.user.department.name|default:"-" }}</td>
+                    <td>{{ ur.user.email|default:"-" }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <div style="color:var(--app-muted); font-size:13px; padding:8px 0;">該当するユーザーはいません。</div>
+        {% endif %}
+      </div>
+    </details>
+  </section>
+
+  {# 5. アクセスリスト設定先一覧（参照先リストの表示） #}
+  <section class="app-card" style="max-width:1040px; margin-bottom:24px;">
+    <h2 style="font-size:16px; font-weight:600; margin-bottom:12px;">
+      アクセスリスト設定先一覧（参照先リスト）
+    </h2>
+    <p style="font-size:12px; color:var(--app-muted); margin-bottom:16px;">
+      このアクセスリストが適用されている案件リストおよびパーソンリストです。
+    </p>
+
+    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(320px, 1fr)); gap:20px;">
+      {# 案件リスト #}
+      <div>
+        <h3 style="font-size:14px; font-weight:600; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
+          <i class="bi bi-briefcase"></i> 案件リスト ({{ deal_lists_count }} 件)
+        </h3>
+        {% if deal_lists %}
+          <div class="app-table-wrapper">
+            <table class="app-table app-table--nowrap">
+              <thead>
+                <tr>
+                  <th>リスト名</th>
+                  <th>編集スコープ</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for dl in deal_lists %}
+                  <tr>
+                    <td>
+                      <a href="{% url 'deal_lists:deal_list_detail' pk=dl.pk %}" style="font-weight:600; text-decoration:underline;">
+                        {{ dl.name }}
+                      </a>
+                    </td>
+                    <td>{{ dl.get_edit_scope_display }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <div style="color:var(--app-muted); font-size:13px; padding:12px; background:var(--app-bg-subtle, #f8fafc); border-radius:4px;">
+            設定されている案件リストはありません。
+          </div>
+        {% endif %}
+      </div>
+
+      {# パーソンリスト #}
+      <div>
+        <h3 style="font-size:14px; font-weight:600; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
+          <i class="bi bi-people"></i> パーソンリスト ({{ person_lists_count }} 件)
+        </h3>
+        {% if person_lists %}
+          <div class="app-table-wrapper">
+            <table class="app-table app-table--nowrap">
+              <thead>
+                <tr>
+                  <th>リスト名</th>
+                  <th>編集スコープ</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for pl in person_lists %}
+                  <tr>
+                    <td>
+                      <a href="{% url 'person_lists:person_list_detail' pk=pl.pk %}" style="font-weight:600; text-decoration:underline;">
+                        {{ pl.name }}
+                      </a>
+                    </td>
+                    <td>{{ pl.get_edit_scope_display }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <div style="color:var(--app-muted); font-size:13px; padding:12px; background:var(--app-bg-subtle, #f8fafc); border-radius:4px;">
+            設定されているパーソンリストはありません。
+          </div>
+        {% endif %}
+      </div>
+    </div>
+  </section>
+{% endblock %}

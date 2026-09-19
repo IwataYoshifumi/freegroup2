@@ -21,6 +21,10 @@ urlpatterns = [
     path("activities/", include("activities.urls", namespace="activities")),
     path("companies/", include("companies.urls", namespace="companies")),
     path("attachments/", include("attachments.urls", namespace="attachments")),
+    path("access-lists/", include("permissions.urls", namespace="permissions")),
+    path("user-groups/", include("accounts.user_group_urls", namespace="user_groups")),
+    path("deal-lists/", include("deals.deal_list_urls", namespace="deal_lists")),
+    path("person-lists/", include("persons.person_list_urls", namespace="person_lists")),
     # 仕様書 v1.6 §5.1 / §5.2.1：mailings アプリは通常 URL（`/mailings/` 配下）と
     # 極短 URL（プレフィックスなしの `/t/<token>/` 等）を 1 つの URLconf に統合し、
     # 空 prefix で include する。各 path 側で必要に応じて "mailings/" プレフィックスを

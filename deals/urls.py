@@ -1,5 +1,6 @@
 from django.urls import path
 
+from deals import deal_list_views
 from deals.views import (
     CompanySearchView,
     DealAddPersonView,
@@ -24,6 +25,8 @@ app_name = "deals"
 
 urlpatterns = [
     path("", DealListView.as_view(), name="deal_list"),
+    path("deal-lists/", deal_list_views.DealListListView.as_view(), name="deal_list_list"),
+    path("deal-lists/<uuid:pk>/", deal_list_views.DealListDetailView.as_view(), name="deal_list_detail"),
     path("company-search/", CompanySearchView.as_view(), name="company_search"),
     path("create/", DealCreateView.as_view(), name="deal_create"),
     path("<uuid:pk>/", DealDetailView.as_view(), name="deal_detail"),

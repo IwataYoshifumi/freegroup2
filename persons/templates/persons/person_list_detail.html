@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+
+{% block title %}{{ person_list.name }} — パーソンリスト詳細 — FreeGroup2{% endblock %}
+
+{% block app_content %}
+  <div class="app-main-area">
+    <main class="app-main">
+      {% include "core/includes/messages.html" %}
+
+      <div class="app-page-header">
+        <div>
+          <a href="{% url 'person_lists:person_list_list' %}" class="app-back-link" style="color:var(--app-muted); text-decoration:none; font-size:13px; display:inline-flex; align-items:center; gap:4px; margin-bottom:8px;">
+            <i class="bi bi-chevron-left"></i> 一覧に戻る
+          </a>
+          <h1>{{ person_list.name }}</h1>
+        </div>
+      </div>
+
+      {# アクションボタン #}
+      <div class="app-action-area" style="display:flex; justify-content:flex-start; gap:12px; margin-bottom:24px;">
+        {% if can_edit %}
+          <a href="{% url 'person_lists:person_list_update' pk=person_list.pk %}" class="app-btn app-btn--secondary">
+            <i class="bi bi-pencil-fill"></i> 設定を編集
+          </a>
+        {% endif %}
+        {% if can_delete %}
+          <form method="post" action="{% url 'person_lists:person_list_delete' pk=person_list.pk %}" onsubmit="return confirm('パーソンリスト「{{ person_list.name }}」を削除してよろしいですか？');" style="display:inline;">
+            {% csrf_token %}
+            <button type="submit" class="app-btn app-btn--danger">
+              <i class="bi bi-trash-fill"></i> 削除
+            </button>
+          </form>
+        {% endif %}
+      </div>
+
+      {# 基本情報カード #}
+      <section class="app-card" style="max-width:1000px; margin-bottom:24px;">
+        <h2 style="font-size:16px; margin-bottom:12px; font-weight:600;">リスト設定情報</h2>
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:16px;">
+          <div>
+            <div style="color:var(--app-muted); font-size:12px;">説明</div>
+            <div style="font-size:14px; margin-top:4px;">{{ person_list.description|default:"（説明なし）"|linebreaksbr }}</div>
+          </div>
+          <div>
+            <div style="color:var(--app-muted); font-size:12px;">アクセスリスト</div>
+            <div style="font-size:14px; margin-top:4px;">
+              <a href="{% url 'permissions:access_list_detail' pk=person_list.access_list.pk %}" style="color:var(--app-primary, #2563eb); text-decoration:underline;">
+                {{ person_list.access_list.name }}
+              </a>
+            </div>
+          </div>
+          <div>
+            <div style="color:var(--app-muted); font-size:12px;">編集範囲設定</div>
+            <div style="font-size:14px; margin-top:4px;">
+              <span class="app-badge" style="background:#e0f2fe; color:#0369a1; font-weight:600;">
+                {{ person_list.get_edit_scope_display }}
+              </span>
+            </div>
+          </div>
+          <div>
+            <div style="color:var(--app-muted); font-size:12px;">作成者</div>
+            <div style="font-size:14px; margin-top:4px;">{{ person_list.created_by.username|default:"-" }}</div>
+          </div>
+        </div>
+      </section>
+
+      {# 登録パーソンプレビュー #}
+      <section class="app-card" style="max-width:1000px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+          <h2 style="font-size:16px; font-weight:600; margin:0;">
+            所属パーソン一覧（{{ persons_count }} 件）
+          </h2>
+          <a href="{% url 'persons:person_list' %}" class="app-btn app-btn--sm app-btn--secondary">
+            パーソン一覧へ
+          </a>
+        </div>
+
+        <div class="app-table-wrapper">
+          <table class="app-table app-table--nowrap">
+            <thead>
+              <tr>
+                <th>氏名</th>
+                <th>会社名</th>
+                <th>役職</th>
+                <th>メールアドレス</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for person in persons %}
+                <tr>
+                  <td style="font-weight:600;">
+                    <a href="{% url 'persons:person_detail' pk=person.pk %}" style="text-decoration:underline;">
+                      {{ person.primary_contact.last_name|default:"" }} {{ person.primary_contact.first_name|default:"" }}
+                    </a>
+                  </td>
+                  <td>{{ person.primary_contact.company.organization|default:"-" }}</td>
+                  <td>{{ person.primary_contact.position|default:"-" }}</td>
+                  <td>{{ person.primary_contact.email|default:"-" }}</td>
+                </tr>
+              {% empty %}
+                <tr>
+                  <td colspan="4" style="text-align:center; padding:24px; color:var(--app-muted);">
+                    このリストに登録されたパーソンはありません。
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+{% endblock %}

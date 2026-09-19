@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+
+{% block title %}{{ deal_list.name }} — 案件リスト詳細 — FreeGroup2{% endblock %}
+
+{% block app_content %}
+  <div class="app-main-area">
+    <main class="app-main">
+      {% include "core/includes/messages.html" %}
+
+      <div class="app-page-header">
+        <div>
+          <a href="{% url 'deal_lists:deal_list_list' %}" class="app-back-link" style="color:var(--app-muted); text-decoration:none; font-size:13px; display:inline-flex; align-items:center; gap:4px; margin-bottom:8px;">
+            <i class="bi bi-chevron-left"></i> 一覧に戻る
+          </a>
+          <h1>{{ deal_list.name }}</h1>
+        </div>
+      </div>
+
+      {# アクションボタン #}
+      <div class="app-action-area" style="display:flex; justify-content:flex-start; gap:12px; margin-bottom:24px;">
+        {% if can_edit %}
+          <a href="{% url 'deal_lists:deal_list_update' pk=deal_list.pk %}" class="app-btn app-btn--secondary">
+            <i class="bi bi-pencil-fill"></i> 設定を編集
+          </a>
+        {% endif %}
+        {% if can_delete %}
+          <form method="post" action="{% url 'deal_lists:deal_list_delete' pk=deal_list.pk %}" onsubmit="return confirm('案件リスト「{{ deal_list.name }}」を削除してよろしいですか？');" style="display:inline;">
+            {% csrf_token %}
+            <button type="submit" class="app-btn app-btn--danger">
+              <i class="bi bi-trash-fill"></i> 削除
+            </button>
+          </form>
+        {% endif %}
+      </div>
+
+      {# 基本情報カード #}
+      <section class="app-card" style="max-width:1000px; margin-bottom:24px;">
+        <h2 style="font-size:16px; margin-bottom:12px; font-weight:600;">リスト設定情報</h2>
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:16px;">
+          <div>
+            <div style="color:var(--app-muted); font-size:12px;">説明</div>
+            <div style="font-size:14px; margin-top:4px;">{{ deal_list.description|default:"（説明なし）"|linebreaksbr }}</div>
+          </div>
+          <div>
+            <div style="color:var(--app-muted); font-size:12px;">アクセスリスト</div>
+            <div style="font-size:14px; margin-top:4px;">
+              <a href="{% url 'permissions:access_list_detail' pk=deal_list.access_list.pk %}" style="color:var(--app-primary, #2563eb); text-decoration:underline;">
+                {{ deal_list.access_list.name }}
+              </a>
+            </div>
+          </div>
+          <div>
+            <div style="color:var(--app-muted); font-size:12px;">編集範囲設定</div>
+            <div style="font-size:14px; margin-top:4px;">
+              <span class="app-badge" style="background:#e0f2fe; color:#0369a1; font-weight:600;">
+                {{ deal_list.get_edit_scope_display }}
+              </span>
+            </div>
+          </div>
+          <div>
+            <div style="color:var(--app-muted); font-size:12px;">作成者</div>
+            <div style="font-size:14px; margin-top:4px;">{{ deal_list.created_by.username|default:"-" }}</div>
+          </div>
+        </div>
+      </section>
+
+      {# 登録案件プレビュー #}
+      <section class="app-card" style="max-width:1000px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+          <h2 style="font-size:16px; font-weight:600; margin:0;">
+            所属案件一覧（{{ deals_count }} 件）
+          </h2>
+          <a href="{% url 'deals:deal_list' %}" class="app-btn app-btn--sm app-btn--secondary">
+            案件管理画面へ
+          </a>
+        </div>
+
+        <div class="app-table-wrapper">
+          <table class="app-table app-table--nowrap">
+            <thead>
+              <tr>
+                <th>案件名</th>
+                <th>ステージ</th>
+                <th>担当者</th>
+                <th>会社名</th>
+                <th>成約目標日</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for deal in deals %}
+                <tr>
+                  <td style="font-weight:600;">
+                    <a href="{% url 'deals:deal_detail' pk=deal.pk %}" style="text-decoration:underline;">
+                      {{ deal.name }}
+                    </a>
+                  </td>
+                  <td>{{ deal.get_stage_display }}</td>
+                  <td>{{ deal.owner.username|default:"-" }}</td>
+                  <td>{{ deal.company.organization|default:"-" }}</td>
+                  <td>{{ deal.expected_close_date|default:"-" }}</td>
+                </tr>
+              {% empty %}
+                <tr>
+                  <td colspan="5" style="text-align:center; padding:24px; color:var(--app-muted);">
+                    このリストに登録された案件はありません。
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+{% endblock %}

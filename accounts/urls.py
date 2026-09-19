@@ -1,7 +1,7 @@
 from django.contrib.auth import views as auth_views
 from django.urls import path
 
-from . import views
+from . import user_group_views, views
 
 app_name = "accounts"
 
@@ -33,4 +33,5 @@ urlpatterns = [
     path("groups/", views.GroupListView.as_view(), name="group_list"),
     path("groups/<int:pk>/", views.GroupDetailView.as_view(), name="group_detail"),
     path("permissions/", views.PermissionListView.as_view(), name="permission_list"),
+    path("user-groups/", user_group_views.UserGroupListView.as_view(), name="user_group_list"),
 ]

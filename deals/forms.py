@@ -5,7 +5,19 @@ from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 
-from deals.models import Deal, DealPerson, DealUser, LeadSource, PersonRole, Stage, UserRole
+from deals.models import (
+    Deal,
+    DealList,
+    DealPerson,
+    DealUser,
+    LeadSource,
+    PersonRole,
+    Stage,
+    UserRole,
+    get_or_create_default_deal_list,
+)
+from permissions.models import AccessList
+from permissions.services import AccessListService
 from persons.models import Person
 
 User = get_user_model()
@@ -95,8 +107,14 @@ class SafeDealModelFormMixin:
 
 
 class DealForm(SafeDealModelFormMixin, DealAmountCleanMixin, forms.ModelForm):
-    """案件新規作成用フォーム（仕様書 v1.5 §2.1, §0.16）。"""
+    """案件新規作成用フォーム（仕様書 v1.5 §2.1, §0.16, v1.6 §8.3）。"""
 
+    deal_list = forms.ModelChoiceField(
+        queryset=DealList.objects.all(),
+        required=False,
+        label="案件リスト",
+        widget=forms.Select(attrs={"class": "app-select app-input"}),
+    )
     amount = CommaDecimalField(
         required=False,
         max_digits=12,
@@ -110,6 +128,7 @@ class DealForm(SafeDealModelFormMixin, DealAmountCleanMixin, forms.ModelForm):
         model = Deal
         fields = [
             "name",
+            "deal_list",
             "primary_person",
             "company",
             "owner",
@@ -124,6 +143,7 @@ class DealForm(SafeDealModelFormMixin, DealAmountCleanMixin, forms.ModelForm):
         ]
         labels = {
             "name": "案件名",
+            "deal_list": "案件リスト",
             "primary_person": "相手方主担当（パーソン）",
             "company": "会社名",
             "owner": "社内担当者",
@@ -138,6 +158,7 @@ class DealForm(SafeDealModelFormMixin, DealAmountCleanMixin, forms.ModelForm):
         }
         widgets = {
             "name": forms.TextInput(attrs={"class": "app-input", "placeholder": "案件名を入力"}),
+            "deal_list": forms.Select(attrs={"class": "app-select app-input"}),
             "primary_person": forms.Select(attrs={"class": "app-select app-input"}),
             "company": forms.Select(attrs={"class": "app-select app-input"}),
             "owner": forms.Select(attrs={"class": "app-select app-input"}),
@@ -150,6 +171,36 @@ class DealForm(SafeDealModelFormMixin, DealAmountCleanMixin, forms.ModelForm):
             "source_campaign": forms.Select(attrs={"class": "app-select app-input"}),
             "memo": forms.Textarea(attrs={"class": "app-textarea app-input", "rows": 4}),
         }
+
+    def __init__(self, *args, user=None, **kwargs):
+        self.user = user
+        super().__init__(*args, **kwargs)
+
+        if user is not None:
+            editable_ids = list(AccessListService.editable_deal_list_ids(user))
+            self.fields["deal_list"].queryset = DealList.objects.filter(id__in=editable_ids)
+            if not editable_ids:
+                self.fields["deal_list"].help_text = (
+                    "編集可能な案件リストがありません。管理者に権限付与を依頼してください。"
+                )
+        elif not self.instance.pk:
+            default_dl = get_or_create_default_deal_list()
+            self.fields["deal_list"].initial = default_dl
+
+    def clean_deal_list(self):
+        deal_list = self.cleaned_data.get("deal_list")
+        if self.user is not None:
+            if not deal_list:
+                raise ValidationError("編集可能な案件リストがありません。管理者に権限付与を依頼してください。")
+            if (
+                self.user.is_authenticated
+                and not self.user.is_superuser
+                and deal_list.id not in AccessListService.editable_deal_list_ids(self.user)
+            ):
+                raise ValidationError("選択された案件リストへの編集権限がありません。")
+        elif not deal_list:
+            deal_list = get_or_create_default_deal_list()
+        return deal_list
 
     def clean(self):
         cleaned_data = super().clean()
@@ -172,8 +223,14 @@ class DealForm(SafeDealModelFormMixin, DealAmountCleanMixin, forms.ModelForm):
 
 
 class DealCreateForm(SafeDealModelFormMixin, DealAmountCleanMixin, forms.ModelForm):
-    """案件新規起票専用フォーム（スリム化：10項目）。"""
+    """案件新規起票専用フォーム（スリム化：11項目）。"""
 
+    deal_list = forms.ModelChoiceField(
+        queryset=DealList.objects.all(),
+        required=False,
+        label="案件リスト",
+        widget=forms.Select(attrs={"class": "app-select app-input"}),
+    )
     amount = CommaDecimalField(
         required=False,
         max_digits=12,
@@ -187,6 +244,7 @@ class DealCreateForm(SafeDealModelFormMixin, DealAmountCleanMixin, forms.ModelFo
         model = Deal
         fields = [
             "name",
+            "deal_list",
             "company",
             "owner",
             "stage",
@@ -200,6 +258,7 @@ class DealCreateForm(SafeDealModelFormMixin, DealAmountCleanMixin, forms.ModelFo
         ]
         labels = {
             "name": "案件名",
+            "deal_list": "案件リスト",
             "company": "会社名",
             "owner": "社内担当者",
             "stage": "ステージ",
@@ -213,6 +272,7 @@ class DealCreateForm(SafeDealModelFormMixin, DealAmountCleanMixin, forms.ModelFo
         }
         widgets = {
             "name": forms.TextInput(attrs={"class": "app-input", "placeholder": "案件名を入力"}),
+            "deal_list": forms.Select(attrs={"class": "app-select app-input"}),
             "company": forms.HiddenInput(),
             "owner": forms.Select(attrs={"class": "app-select app-input"}),
             "stage": forms.Select(attrs={"class": "app-select app-input"}),
@@ -224,6 +284,36 @@ class DealCreateForm(SafeDealModelFormMixin, DealAmountCleanMixin, forms.ModelFo
             "memo": forms.Textarea(attrs={"class": "app-textarea app-input", "rows": 4}),
         }
 
+    def __init__(self, *args, user=None, **kwargs):
+        self.user = user
+        super().__init__(*args, **kwargs)
+
+        if user is not None:
+            editable_ids = list(AccessListService.editable_deal_list_ids(user))
+            self.fields["deal_list"].queryset = DealList.objects.filter(id__in=editable_ids)
+            if not editable_ids:
+                self.fields["deal_list"].help_text = (
+                    "編集可能な案件リストがありません。管理者に権限付与を依頼してください。"
+                )
+        elif not self.instance.pk:
+            default_dl = get_or_create_default_deal_list()
+            self.fields["deal_list"].initial = default_dl
+
+    def clean_deal_list(self):
+        deal_list = self.cleaned_data.get("deal_list")
+        if self.user is not None:
+            if not deal_list:
+                raise ValidationError("編集可能な案件リストがありません。管理者に権限付与を依頼してください。")
+            if (
+                self.user.is_authenticated
+                and not self.user.is_superuser
+                and deal_list.id not in AccessListService.editable_deal_list_ids(self.user)
+            ):
+                raise ValidationError("選択された案件リストへの編集権限がありません。")
+        elif not deal_list:
+            deal_list = get_or_create_default_deal_list()
+        return deal_list
+
     def clean(self):
         cleaned_data = super().clean()
         source_campaign = cleaned_data.get("source_campaign")
@@ -231,6 +321,58 @@ class DealCreateForm(SafeDealModelFormMixin, DealAmountCleanMixin, forms.ModelFo
         if source_campaign and not lead_source:
             cleaned_data["lead_source"] = LeadSource.CAMPAIGN
         return cleaned_data
+
+
+class DealListForm(forms.ModelForm):
+    """案件リスト新規作成・編集用フォーム（仕様書 v1.6 §2.3.3, §8.3.3）。"""
+
+    class Meta:
+        model = DealList
+        fields = ["name", "description", "access_list", "edit_scope"]
+        labels = {
+            "name": "案件リスト名",
+            "description": "説明",
+            "access_list": "アクセスリスト",
+            "edit_scope": "編集範囲",
+        }
+        widgets = {
+            "name": forms.TextInput(attrs={"class": "app-input", "placeholder": "案件リスト名を入力"}),
+            "description": forms.Textarea(attrs={"class": "app-textarea app-input", "rows": 4, "placeholder": "説明を入力（任意）"}),
+            "access_list": forms.Select(attrs={"class": "app-select app-input"}),
+            "edit_scope": forms.Select(attrs={"class": "app-select app-input"}),
+        }
+
+    def __init__(self, *args, user=None, **kwargs):
+        self.user = user
+        super().__init__(*args, **kwargs)
+
+        if user is not None:
+            accessible_ids = list(AccessListService.accessible_access_list_ids(user))
+            self.fields["access_list"].queryset = AccessList.objects.filter(id__in=accessible_ids)
+
+            # v1.6 最重要ガード: Update画面での現在値保護 (§8.3.3 / §2.3.3)
+            # 現在設定されているAccessListがaccessible_idsに含まれない場合、
+            # ModelChoiceFieldによる意図しない別AccessListへの暗黙の書き換え事故を防ぐため、
+            # 当該フィールドを読み取り専用（disabled=True）として描画・保持する。
+            if self.instance and self.instance.pk and self.instance.access_list_id:
+                if self.instance.access_list_id not in accessible_ids:
+                    self.fields["access_list"].disabled = True
+                    self.fields["access_list"].required = False
+                    self.fields["access_list"].queryset = AccessList.objects.filter(
+                        id=self.instance.access_list_id
+                    )
+                    self.fields["access_list"].help_text = (
+                        "このリストのアクセスリストを変更するには、アクセスリスト管理権限を持つ人に依頼してください。"
+                    )
+
+    def clean_access_list(self):
+        if self.instance and self.instance.pk and self.fields["access_list"].disabled:
+            return self.instance.access_list
+
+        access_list = self.cleaned_data.get("access_list")
+        if not access_list:
+            raise ValidationError("アクセスリストを選択してください。")
+        return access_list
 
 
 class DealUpdateForm(SafeDealModelFormMixin, DealAmountCleanMixin, forms.ModelForm):

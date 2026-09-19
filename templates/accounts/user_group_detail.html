@@ -1,0 +1,117 @@
+{% extends "accounts/app_base.html" %}
+
+{% block title %}{{ user_group.name }} — ユーザーグループ詳細 — FreeGroup2{% endblock %}
+
+{% block content %}
+  <div class="app-page-header">
+    <div>
+      <a href="{% url 'user_groups:user_group_list' %}" class="app-back-link" style="color:var(--app-muted); text-decoration:none; font-size:13px; display:inline-flex; align-items:center; gap:4px; margin-bottom:8px;">
+        <i class="bi bi-chevron-left"></i> 一覧に戻る
+      </a>
+      <h1>{{ user_group.name }}</h1>
+    </div>
+  </div>
+
+  {# アクションボタン #}
+  <div class="app-action-area" style="display:flex; justify-content:flex-start; gap:12px; margin-bottom:24px;">
+    {% if can_edit %}
+      <a href="{% url 'user_groups:user_group_update' pk=user_group.pk %}" class="app-btn app-btn--secondary">
+        <i class="bi bi-pencil-fill"></i> グループ情報を編集
+      </a>
+    {% endif %}
+    {% if can_delete %}
+      <form method="post" action="{% url 'user_groups:user_group_delete' pk=user_group.pk %}" onsubmit="return confirm('ユーザーグループ「{{ user_group.name }}」を削除してよろしいですか？');" style="display:inline;">
+        {% csrf_token %}
+        <button type="submit" class="app-btn app-btn--danger">
+          <i class="bi bi-trash-fill"></i> 削除
+        </button>
+      </form>
+    {% endif %}
+  </div>
+
+  {# 基本情報カード #}
+  <section class="app-card" style="max-width:900px; margin-bottom:24px;">
+    <h2 style="font-size:16px; margin-bottom:12px; font-weight:600;">基本情報</h2>
+    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:16px;">
+      <div>
+        <div style="color:var(--app-muted); font-size:12px;">説明</div>
+        <div style="font-size:14px; margin-top:4px;">{{ user_group.description|default:"（説明なし）"|linebreaksbr }}</div>
+      </div>
+      <div>
+        <div style="color:var(--app-muted); font-size:12px;">作成者</div>
+        <div style="font-size:14px; margin-top:4px;">{{ user_group.created_by.username|default:"-" }}</div>
+      </div>
+      <div>
+        <div style="color:var(--app-muted); font-size:12px;">メンバー数</div>
+        <div style="font-size:14px; margin-top:4px;">{{ members.count }} 人</div>
+      </div>
+    </div>
+  </section>
+
+  {# メンバー追加エリア #}
+  {% if can_edit and available_users %}
+    <section class="app-card" style="max-width:900px; margin-bottom:24px;">
+      <h2 style="font-size:16px; margin-bottom:12px; font-weight:600;">メンバーの追加</h2>
+      <form method="post" action="{% url 'user_groups:user_group_add_member' pk=user_group.pk %}" style="display:flex; gap:12px; align-items:center;">
+        {% csrf_token %}
+        <select name="user_id" class="app-select app-input" style="max-width:320px;" required>
+          <option value="">追加するユーザーを選択...</option>
+          {% for u in available_users %}
+            <option value="{{ u.pk }}">{{ u.username }} ({{ u.email|default:"no email" }})</option>
+          {% endfor %}
+        </select>
+        <button type="submit" class="app-btn app-btn--primary">
+          <i class="bi bi-person-plus-fill"></i> グループに追加
+        </button>
+      </form>
+    </section>
+  {% endif %}
+
+  {# メンバー一覧 #}
+  <section class="app-card" style="max-width:900px;">
+    <h2 style="font-size:16px; font-weight:600; margin-bottom:12px;">
+      所属メンバー一覧（{{ members.count }} 人）
+    </h2>
+
+    <div class="app-table-wrapper">
+      <table class="app-table app-table--nowrap">
+        <thead>
+          <tr>
+            <th>ユーザー名</th>
+            <th>メールアドレス</th>
+            <th>部署</th>
+            <th class="app-table__col--action" style="width:60px;">解除</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for member in members %}
+            <tr>
+              <td style="font-weight:600;">{{ member.username }}</td>
+              <td>{{ member.email|default:"-" }}</td>
+              <td>{{ member.department.name|default:"-" }}</td>
+              <td class="app-table__col--action">
+                {% if can_edit %}
+                  <form method="post" action="{% url 'user_groups:user_group_remove_member' pk=user_group.pk %}" onsubmit="return confirm('「{{ member.username }}」をグループから解除しますか？');" style="display:inline;">
+                    {% csrf_token %}
+                    <input type="hidden" name="user_id" value="{{ member.pk }}">
+                    <button type="submit" class="app-btn-trash" title="解除" aria-label="解除">
+                      <i class="bi bi-x-circle-fill"></i>
+                    </button>
+                  </form>
+                {% else %}
+                  -
+                {% endif %}
+              </td>
+            </tr>
+          {% empty %}
+            <tr>
+              <td colspan="4" style="text-align:center; padding:24px; color:var(--app-muted);">
+                メンバーは登録されていません。
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+{% endblock %}

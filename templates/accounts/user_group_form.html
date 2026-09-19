@@ -1,0 +1,62 @@
+{% extends "accounts/app_base.html" %}
+
+{% block title %}{% if object %}ユーザーグループ編集{% else %}ユーザーグループ新規作成{% endif %} — FreeGroup2{% endblock %}
+
+{% block content %}
+  <div class="app-page-header">
+    <div>
+      <h1>{% if object %}ユーザーグループ編集{% else %}ユーザーグループ新規作成{% endif %}</h1>
+    </div>
+  </div>
+
+  <section class="app-card" style="max-width:700px;">
+    {# §4.4 / §2.3.2 運用上の注意 #}
+    <div class="app-alert app-alert--info" style="margin-bottom:20px; font-size:13px; line-height:1.6; border-left:4px solid var(--app-primary, #2563eb); background:#f0f7ff; padding:12px 16px; border-radius:4px;">
+      <i class="bi bi-info-circle-fill" style="color:var(--app-primary, #2563eb); margin-right:6px;"></i>
+      <strong>運用上の注意（仕様書 §4.4）:</strong><br>
+      ユーザーグループは部署組織とは独立した横断グループです。社員が部署異動した場合でも、ユーザーグループの所属メンバーは自動連動・自動解除されません。異動時は手動でメンバーの追加・解除を行ってください。
+    </div>
+
+    <form method="post" novalidate>
+      {% csrf_token %}
+      {% if form.non_field_errors %}
+        <div class="app-alert app-alert--danger" style="margin-bottom:16px;">
+          {{ form.non_field_errors }}
+        </div>
+      {% endif %}
+
+      <div class="app-form-group" style="margin-bottom:16px;">
+        <label for="{{ form.name.id_for_label }}" class="app-label">
+          {{ form.name.label }} <span style="color:var(--app-danger, #e53e3e);">*</span>
+        </label>
+        {{ form.name }}
+        {% if form.name.errors %}
+          <div class="app-field-error" style="color:var(--app-danger, #e53e3e); font-size:12px; margin-top:4px;">
+            {{ form.name.errors.0 }}
+          </div>
+        {% endif %}
+      </div>
+
+      <div class="app-form-group" style="margin-bottom:24px;">
+        <label for="{{ form.description.id_for_label }}" class="app-label">
+          {{ form.description.label }}
+        </label>
+        {{ form.description }}
+        {% if form.description.errors %}
+          <div class="app-field-error" style="color:var(--app-danger, #e53e3e); font-size:12px; margin-top:4px;">
+            {{ form.description.errors.0 }}
+          </div>
+        {% endif %}
+      </div>
+
+      <div class="app-btn-group" style="display:flex; gap:12px; align-items:center;">
+        <button type="submit" class="app-btn app-btn--primary">
+          {% if object %}変更を保存{% else %}作成する{% endif %}
+        </button>
+        <a href="{% if object %}{% url 'user_groups:user_group_detail' pk=object.pk %}{% else %}{% url 'user_groups:user_group_list' %}{% endif %}" class="app-btn app-btn--secondary">
+          キャンセル
+        </a>
+      </div>
+    </form>
+  </section>
+{% endblock %}

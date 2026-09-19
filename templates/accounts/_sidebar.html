@@ -9,4 +9,17 @@
     <a href="{% url 'accounts:group_list' %}" {% if active_menu == 'accounts:group_list' %}class="is-active"{% endif %}>グループ一覧</a>
     <a href="{% url 'accounts:permission_list' %}" {% if active_menu == 'accounts:permission_list' %}class="is-active"{% endif %}>パーミッション一覧</a>
   {% endif %}
+
+  {% if perms.accounts.view_department or perms.accounts.change_department or perms.accounts.view_usergroup or perms.accounts.add_usergroup or perms.permissions.view_all_access_lists %}
+    <div class="app-sidebar__section-title" style="margin-top: 1.5rem;">組織・権限管理</div>
+    {% if perms.accounts.view_department or perms.accounts.change_department %}
+      <a href="{% url 'admin:accounts_department_changelist' %}" {% if active_menu == 'admin:accounts_department_changelist' %}class="is-active"{% endif %}>部署</a>
+    {% endif %}
+    {% if perms.accounts.view_usergroup or perms.accounts.add_usergroup %}
+      <a href="{% url 'accounts:user_group_list' %}" {% if active_menu == 'accounts:user_group_list' or active_menu == 'user_groups:user_group_list' %}class="is-active"{% endif %}>ユーザーグループ</a>
+    {% endif %}
+    {% if perms.permissions.view_all_access_lists %}
+      <a href="{% url 'permissions:access_list_list' %}" {% if active_menu == 'permissions:access_list_list' %}class="is-active"{% endif %}>アクセスリスト</a>
+    {% endif %}
+  {% endif %}
 </nav>

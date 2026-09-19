@@ -1,0 +1,297 @@
+{% extends "accounts/app_base.html" %}
+
+{% block title %}{% if object %}アクセスリスト編集{% else %}アクセスリスト新規作成{% endif %} — FreeGroup2{% endblock %}
+
+{% block content %}
+  <div class="app-page-header">
+    <div>
+      <a href="{% if object %}{% url 'permissions:access_list_detail' pk=object.pk %}{% else %}{% url 'permissions:access_list_list' %}{% endif %}" class="app-back-link" style="color:var(--app-muted); text-decoration:none; font-size:13px; display:inline-flex; align-items:center; gap:4px; margin-bottom:8px;">
+        <i class="bi bi-chevron-left"></i> {% if object %}詳細に戻る{% else %}一覧に戻る{% endif %}
+      </a>
+      <h1>{% if object %}アクセスリスト編集{% else %}アクセスリスト新規作成{% endif %}</h1>
+    </div>
+  </div>
+
+  <form method="post" id="access-list-form" novalidate style="max-width: 1040px;">
+    {% csrf_token %}
+    <input type="hidden" name="entries_json" id="id_entries_json" value="">
+
+    {% if form.non_field_errors %}
+      <div class="app-alert app-alert--danger" style="margin-bottom: 16px;">
+        {{ form.non_field_errors }}
+      </div>
+    {% endif %}
+
+    {# 基本情報カード #}
+    <section class="app-card" style="margin-bottom: 24px;">
+      <h2 style="font-size: 16px; font-weight: 600; margin-bottom: 16px;">基本情報</h2>
+
+      <div class="app-form-group" style="margin-bottom: 16px;">
+        <label for="{{ form.name.id_for_label }}" class="app-label">
+          {{ form.name.label }} <span style="color:var(--app-danger, #e53e3e);">*</span>
+        </label>
+        {{ form.name }}
+        {% if form.name.errors %}
+          <div class="app-field-error" style="color:var(--app-danger, #e53e3e); font-size:12px; margin-top:4px;">
+            {{ form.name.errors.0 }}
+          </div>
+        {% endif %}
+      </div>
+
+      <div class="app-form-group">
+        <label for="{{ form.description.id_for_label }}" class="app-label">
+          {{ form.description.label }}
+        </label>
+        {{ form.description }}
+        {% if form.description.errors %}
+          <div class="app-field-error" style="color:var(--app-danger, #e53e3e); font-size:12px; margin-top:4px;">
+            {{ form.description.errors.0 }}
+          </div>
+        {% endif %}
+      </div>
+    </section>
+
+    {# ロール設定インラインテーブル #}
+    <section class="app-card" style="margin-bottom: 24px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+        <h2 style="font-size: 16px; font-weight: 600; margin: 0;">ロール設定</h2>
+        <span style="font-size: 12px; color: var(--app-muted);">
+          ※ 上から順に評価され、最初に一致したルールが適用されます（先勝ち評価ルール）。
+        </span>
+      </div>
+
+      <div class="app-table-wrapper" style="overflow-x: auto;">
+        <table class="app-table" id="entries-table" style="width: 100%;">
+          <thead>
+            <tr>
+              <th style="width: 90px; text-align: center;">順序</th>
+              <th style="width: 150px;">権限</th>
+              <th style="width: 160px;">種別</th>
+              <th>対象</th>
+              <th style="width: 70px; text-align: center;">操作</th>
+            </tr>
+          </thead>
+          <tbody id="entries-tbody">
+            {# JavaScript で動的生成 #}
+          </tbody>
+          <tfoot>
+            <tr id="entries-empty-row" style="display: none;">
+              <td colspan="5" style="text-align: center; padding: 24px; color: var(--app-muted);">
+                ロール設定がありません。「+ 行を追加」ボタンでルールを追加してください。
+              </td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      <div style="margin-top: 14px;">
+        <button type="button" id="btn-add-row" class="app-btn app-btn--secondary">
+          <i class="bi bi-plus-lg"></i> 行を追加
+        </button>
+      </div>
+    </section>
+
+    {# アクションボタン #}
+    <div class="app-btn-group" style="display: flex; gap: 12px; align-items: center;">
+      <button type="submit" class="app-btn app-btn--primary">
+        <i class="bi bi-check-lg"></i> 保存
+      </button>
+      <a href="{% if object %}{% url 'permissions:access_list_detail' pk=object.pk %}{% else %}{% url 'permissions:access_list_list' %}{% endif %}" class="app-btn app-btn--secondary">
+        キャンセル
+      </a>
+    </div>
+  </form>
+
+  {{ users_data|json_script:"users-data" }}
+  {{ departments_data|json_script:"departments-data" }}
+  {{ user_groups_data|json_script:"user-groups-data" }}
+  {{ initial_entries|json_script:"initial-entries-data" }}
+
+  <script>
+    (function() {
+      const usersData = JSON.parse(document.getElementById('users-data').textContent);
+      const departmentsData = JSON.parse(document.getElementById('departments-data').textContent);
+      const userGroupsData = JSON.parse(document.getElementById('user-groups-data').textContent);
+      const initialEntries = JSON.parse(document.getElementById('initial-entries-data').textContent);
+
+      const tbody = document.getElementById('entries-tbody');
+      const emptyRow = document.getElementById('entries-empty-row');
+      const btnAddRow = document.getElementById('btn-add-row');
+      const form = document.getElementById('access-list-form');
+
+      function populateTargetSelect(selectElem, targetType, selectedValue) {
+        selectElem.innerHTML = '<option value="">-- 対象を選択してください --</option>';
+        let items = [];
+        if (targetType === 'user') {
+          items = usersData;
+        } else if (targetType === 'department') {
+          items = departmentsData;
+        } else if (targetType === 'user_group') {
+          items = userGroupsData;
+        }
+
+        items.forEach(function(item) {
+          const opt = document.createElement('option');
+          opt.value = item.id;
+          opt.textContent = item.name;
+          if (selectedValue !== null && selectedValue !== undefined && String(item.id) === String(selectedValue)) {
+            opt.selected = true;
+          }
+          selectElem.appendChild(opt);
+        });
+      }
+
+      function updateRowOrders() {
+        const rows = tbody.querySelectorAll('.entry-row');
+        rows.forEach(function(row, index) {
+          const orderNum = index + 1;
+          const span = row.querySelector('.order-num');
+          if (span) span.textContent = orderNum;
+
+          const upBtn = row.querySelector('.btn-move-up');
+          const downBtn = row.querySelector('.btn-move-down');
+          if (upBtn) {
+            upBtn.disabled = (index === 0);
+            upBtn.style.opacity = (index === 0) ? '0.3' : '1';
+          }
+          if (downBtn) {
+            downBtn.disabled = (index === rows.length - 1);
+            downBtn.style.opacity = (index === rows.length - 1) ? '0.3' : '1';
+          }
+        });
+
+        if (emptyRow) {
+          emptyRow.style.display = (rows.length === 0) ? '' : 'none';
+        }
+      }
+
+      function createRow(data) {
+        data = data || {};
+        const tr = document.createElement('tr');
+        tr.className = 'entry-row';
+        if (data.id) {
+          tr.dataset.entryId = data.id;
+        }
+
+        tr.innerHTML = `
+          <td style="text-align: center; vertical-align: middle;">
+            <div style="display: inline-flex; align-items: center; gap: 6px;">
+              <span class="order-num" style="font-weight: 600; min-width: 18px; text-align: right;"></span>
+              <div style="display: inline-flex; flex-direction: column; gap: 2px;">
+                <button type="button" class="app-icon-btn btn-move-up" title="上へ移動" style="padding: 1px 4px; font-size: 11px; line-height: 1;">
+                  <i class="bi bi-arrow-up"></i>
+                </button>
+                <button type="button" class="app-icon-btn btn-move-down" title="下へ移動" style="padding: 1px 4px; font-size: 11px; line-height: 1;">
+                  <i class="bi bi-arrow-down"></i>
+                </button>
+              </div>
+            </div>
+          </td>
+          <td>
+            <select class="app-select app-input select-perm" style="width: 100%;">
+              <option value="admin">管理者</option>
+              <option value="editor">編集者</option>
+              <option value="viewer">閲覧者</option>
+              <option value="none">未設定</option>
+            </select>
+          </td>
+          <td>
+            <select class="app-select app-input select-type" style="width: 100%;">
+              <option value="department">部署</option>
+              <option value="user_group">ユーザーグループ</option>
+              <option value="user">ユーザー</option>
+            </select>
+          </td>
+          <td>
+            <select class="app-select app-input select-target" style="width: 100%;">
+            </select>
+          </td>
+          <td style="text-align: center; vertical-align: middle;">
+            <button type="button" class="app-btn-trash btn-delete-row" title="削除" aria-label="削除">
+              <i class="bi bi-trash-fill"></i>
+            </button>
+          </td>
+        `;
+
+        const selectPerm = tr.querySelector('.select-perm');
+        const selectType = tr.querySelector('.select-type');
+        const selectTarget = tr.querySelector('.select-target');
+        const btnUp = tr.querySelector('.btn-move-up');
+        const btnDown = tr.querySelector('.btn-move-down');
+        const btnDelete = tr.querySelector('.btn-delete-row');
+
+        if (data.permission_level) {
+          selectPerm.value = data.permission_level;
+        } else {
+          selectPerm.value = 'editor';
+        }
+
+        const initialType = data.target_type || 'department';
+        selectType.value = initialType;
+        populateTargetSelect(selectTarget, initialType, data.target_id);
+
+        selectType.addEventListener('change', function() {
+          populateTargetSelect(selectTarget, this.value, null);
+        });
+
+        btnUp.addEventListener('click', function() {
+          if (tr.previousElementSibling && tr.previousElementSibling.classList.contains('entry-row')) {
+            tbody.insertBefore(tr, tr.previousElementSibling);
+            updateRowOrders();
+          }
+        });
+
+        btnDown.addEventListener('click', function() {
+          if (tr.nextElementSibling && tr.nextElementSibling.classList.contains('entry-row')) {
+            tbody.insertBefore(tr.nextElementSibling, tr);
+            updateRowOrders();
+          }
+        });
+
+        btnDelete.addEventListener('click', function() {
+          tr.remove();
+          updateRowOrders();
+        });
+
+        tbody.appendChild(tr);
+        updateRowOrders();
+      }
+
+      // 初期エントリ行の展開
+      if (initialEntries && initialEntries.length > 0) {
+        initialEntries.forEach(function(entry) {
+          createRow(entry);
+        });
+      } else {
+        // 新規作成時はデフォルト1行を挿入
+        createRow();
+      }
+
+      btnAddRow.addEventListener('click', function() {
+        createRow();
+      });
+
+      // フォーム送信時に行データをシリアライズ
+      form.addEventListener('submit', function() {
+        const rows = tbody.querySelectorAll('.entry-row');
+        const entries = [];
+        rows.forEach(function(row, index) {
+          const perm = row.querySelector('.select-perm').value;
+          const ttype = row.querySelector('.select-type').value;
+          const tid = row.querySelector('.select-target').value;
+          const eid = row.dataset.entryId || '';
+          if (tid) {
+            entries.push({
+              id: eid,
+              order: index + 1,
+              permission_level: perm,
+              target_type: ttype,
+              target_id: tid
+            });
+          }
+        });
+        document.getElementById('id_entries_json').value = JSON.stringify(entries);
+      });
+    })();
+  </script>
+{% endblock %}
