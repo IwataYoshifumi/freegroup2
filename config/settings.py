@@ -102,6 +102,7 @@ INSTALLED_APPS = [
     "deals",
     "activities",
     "attachments",
+    "permissions",
 ]
 
 AUTH_USER_MODEL = "accounts.CustomUser"

@@ -8,6 +8,44 @@ from django.utils.translation import gettext_lazy as _
 from config.constants import DuplicateMergeReason
 
 
+class PersonList(models.Model):
+    """パーソンリスト（AccessList設計方針 v1.6 §4.6）。"""
+
+    class EditScope(models.TextChoices):
+        CREATOR_ONLY = "creator_only", _("作成者のみ")
+        ALL_EDITORS = "all_editors", _("リスト編集者全員")
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=100)
+    description = models.TextField(blank=True)
+    access_list = models.ForeignKey(
+        "permissions.AccessList",
+        on_delete=models.PROTECT,
+        related_name="person_lists",
+    )
+    edit_scope = models.CharField(
+        max_length=30,
+        choices=EditScope.choices,
+        default=EditScope.ALL_EDITORS,
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="+",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name"]
+        permissions = [
+            ("edit_all_persons", "全てのパーソンを編集できる"),
+        ]
+
+    def __str__(self):
+        return self.name
+
+
 class Person(models.Model):
     """人物DB（仕様書 v1.4.2 §4.5）。
 
@@ -23,6 +61,13 @@ class Person(models.Model):
         ARCHIVED = "archived", _("アーカイブ")
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    person_list = models.ForeignKey(
+        "persons.PersonList",
+        on_delete=models.PROTECT,
+        null=False,
+        blank=False,
+        related_name="persons",
+    )
     primary_contact = models.ForeignKey(
         "contacts.Contact",
         on_delete=models.SET_NULL,

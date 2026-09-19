@@ -75,6 +75,45 @@ class UserRole(models.TextChoices):
     OTHER = "other", _("その他")
 
 
+class DealList(models.Model):
+    """案件リスト（AccessList設計方針 v1.6 §4.5）。"""
+
+    class EditScope(models.TextChoices):
+        CREATOR_ONLY = "creator_only", _("作成者のみ")
+        CREATOR_AND_PARTICIPANTS = "creator_and_participants", _("作成者・参加者")
+        ALL_EDITORS = "all_editors", _("作成者・参加者・リスト編集者全員")
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=100)
+    description = models.TextField(blank=True)
+    access_list = models.ForeignKey(
+        "permissions.AccessList",
+        on_delete=models.PROTECT,
+        related_name="deal_lists",
+    )
+    edit_scope = models.CharField(
+        max_length=30,
+        choices=EditScope.choices,
+        default=EditScope.ALL_EDITORS,
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="+",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name"]
+        permissions = [
+            ("edit_all_deals", "全ての案件を編集できる"),
+        ]
+
+    def __str__(self):
+        return self.name
+
+
 class Deal(models.Model):
     """案件（仕様書 v1.5 第2章）。"""
 
@@ -84,6 +123,13 @@ class Deal(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=255)
+    deal_list = models.ForeignKey(
+        "deals.DealList",
+        on_delete=models.PROTECT,
+        null=False,
+        blank=False,
+        related_name="deals",
+    )
     primary_person = models.ForeignKey(
         "persons.Person",
         on_delete=models.PROTECT,

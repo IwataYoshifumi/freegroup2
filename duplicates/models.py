@@ -348,6 +348,13 @@ class PersonMergeLog(models.Model):
         on_delete=models.PROTECT,
         related_name="merge_logs_as_merged",
     )
+    person_list_before_merge = models.ForeignKey(
+        "persons.PersonList",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="+",
+    )
     duplicate_candidate = models.ForeignKey(
         DuplicateCandidate,
         on_delete=models.PROTECT,
