@@ -8,6 +8,8 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
 
+from accounts.models import Role
+from accounts.services import apply_role
 from contacts.models import Contact
 from persons.models import Person
 
@@ -117,6 +119,7 @@ class CrossAppNavDrawerTests(TestCase):
         user = User.objects.create_user(
             username="nav_user", password="d", email="n@example.com"
         )
+        apply_role(user, Role.objects.get(code="sales"))
         self.client.force_login(user)
         resp = self.client.get(reverse("home"))
         self.assertEqual(resp.status_code, 200)
