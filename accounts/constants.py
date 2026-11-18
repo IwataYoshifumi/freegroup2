@@ -23,6 +23,18 @@ class ActionLogAction:
     ROLE_UPDATE = "role_update"
     ROLE_DELETE = "role_delete"
 
+    # ログインセキュリティ強化（仕様書 v1.3.1 付録A）
+    SECURITY_SETTING_UPDATE = "security_setting_update"  # セキュリティ設定の変更
+    TWO_FACTOR_ENABLE = "two_factor_enable"  # 二段階認証の有効化
+    TWO_FACTOR_DISABLE = "two_factor_disable"  # 二段階認証の無効化
+    TWO_FACTOR_REENROLL = "two_factor_reenroll"  # 二段階認証の再登録
+    RECOVERY_CODES_REGENERATE = "recovery_codes_regenerate"  # リカバリーコードの再発行
+    TWO_FACTOR_RESET = "two_factor_reset"  # 管理者による二段階認証リセット
+    ACCOUNT_LOCK = "account_lock"  # アカウントロック発生
+    ACCOUNT_UNLOCK = "account_unlock"  # ロックの手動解除
+    IP_BLOCK = "ip_block"  # IP 遮断発生
+    LOGIN_DEVICE_REVOKE = "login_device_revoke"  # 端末の信頼取り消し・削除
+
 
 #: admin ロールの安定キー（Role.code）。本体業務 UI からの admin 任免を禁止する
 #: 両方向ガード（assign_role_to_user / ロール割り当て UI）で参照する。admin の任免は

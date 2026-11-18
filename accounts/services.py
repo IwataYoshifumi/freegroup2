@@ -577,3 +577,21 @@ def get_excluded_persons_for_user_linked(person):
         .filter(status=Person.Status.ACTIVE)
         .exclude(pk=person.pk)
     )
+
+
+def is_admin_user(user) -> bool:
+    """対象ユーザーが管理者（有効な管理者ロール保持者、またはスーパーユーザー）か判定する。
+
+    [性質] 準関数（user.is_active / user.is_superuser / user.role を参照、副作用なし）
+    [入力] user: CustomUser | AnonymousUser | None
+    [出力] bool
+
+    仕様書 v1.3.1 決定 #21（§5.5 / §6.9）に基づく単一判定関数。
+    無効ユーザー（is_active=False）や未認証ユーザーは False を返す。
+    """
+    if not user or not getattr(user, "is_active", False):
+        return False
+    if getattr(user, "is_superuser", False):
+        return True
+    role = getattr(user, "role", None)
+    return role is not None and role.code == ADMIN_ROLE_CODE

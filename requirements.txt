@@ -13,3 +13,5 @@ onnxruntime==1.26.0
 pytest
 pytest-django
 phonenumbers
+django-otp==1.7.5
+segno==1.6.6

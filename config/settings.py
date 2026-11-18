@@ -31,6 +31,15 @@ SECRET_KEY = os.getenv(
     "django-insecure-8+apke5-n!p08)eom4=c7s@x*(g-0g=3#bqnuodgt#z31#hph$",
 )
 
+# 旧秘密鍵の一覧（鍵入れ替え時のセッション維持およびリカバリーコード照合に使用）
+_secret_key_fallbacks_env = os.getenv("SECRET_KEY_FALLBACKS")
+if _secret_key_fallbacks_env:
+    SECRET_KEY_FALLBACKS = [
+        k.strip() for k in _secret_key_fallbacks_env.split(",") if k.strip()
+    ]
+else:
+    SECRET_KEY_FALLBACKS = []
+
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv("DEBUG", "True").lower() in ("1", "true", "yes", "on")
 
@@ -102,6 +111,8 @@ INSTALLED_APPS = [
     "deals",
     "activities",
     "attachments",
+    "django_otp",
+    "django_otp.plugins.otp_totp",
 ]
 
 AUTH_USER_MODEL = "accounts.CustomUser"
@@ -330,6 +341,22 @@ BOUNCE_INBOX_PASSWORD = os.getenv("BOUNCE_INBOX_PASSWORD", "")
 BOUNCE_INBOX_USE_SSL = os.getenv("BOUNCE_INBOX_USE_SSL", "True") == "True"
 
 SESSION_COOKIE_NAME = "freegroup2_session_8000"
+
+# ============================================================
+# ログインセキュリティ強化（二段階認証・接続元 IP 設定）
+# ============================================================
+# django-otp の失敗時待機を無効化し、アカウントロックは FG2 側（Step 2）に一本化する。
+# ※ django_otp.middleware.OTPMiddleware は登録しない（リカバリーコード・信頼済み端末と競合するため）。
+OTP_TOTP_THROTTLE_FACTOR = 0
+
+# 認証アプリ（TOTP）に表示される発行者名
+OTP_TOTP_ISSUER = os.getenv("OTP_TOTP_ISSUER", "FreeGroup2")
+
+# 端末識別クッキーの名前（SESSION_COOKIE_NAME と同じ流儀の接尾辞付き名）
+DEVICE_COOKIE_NAME = os.getenv("DEVICE_COOKIE_NAME", "freegroup2_device_8000")
+
+# 接続元 IP の取得元（"x_real_ip" | "remote_addr"）。Docker/nginx 構成の既定は "x_real_ip"。
+CLIENT_IP_SOURCE = os.getenv("CLIENT_IP_SOURCE", "x_real_ip")
 
 # ============================================================
 # ロギング設定
