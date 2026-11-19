@@ -7,6 +7,9 @@ class AccountsConfig(AppConfig):
     name = "accounts"
 
     def ready(self):
+        # システムチェックの登録（CLIENT_IP_SOURCE 等）
+        from .login_security import checks  # noqa: F401
+
         # v1.5.1: signals.py は django_auth_ldap を無条件 import するため、
         # AUTH_BACKEND=local 環境で python-ldap 未インストールでも起動できるよう、
         # signals の import 自体を AUTH_BACKEND in ("ldap", "both") に限定する。
