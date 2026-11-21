@@ -787,32 +787,6 @@ class PermissionListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
         return context
 
 
-class TwoFactorSetupPlaceholderView(LoginRequiredMixin, View):
-    """二段階認証登録画面の仮置きビュー（Step 4 で本実装へ差し替え、§14-20）。"""
-
-    template_name = "accounts/two_factor_placeholder.html"
-
-    def get(self, request):
-        return render(
-            request,
-            self.template_name,
-            {"page_title": "二段階認証の設定"},
-        )
-
-
-class TwoFactorRecoveryCodesPlaceholderView(LoginRequiredMixin, View):
-    """リカバリーコード表示画面の仮置きビュー（Step 4 で本実装へ差し替え、§14-20）。"""
-
-    template_name = "accounts/two_factor_placeholder.html"
-
-    def get(self, request):
-        return render(
-            request,
-            self.template_name,
-            {"page_title": "リカバリーコード"},
-        )
-
-
 class AdminLoginRedirectView(View):
     """Django 管理画面のログイン（/admin/login/）を共通ログイン画面へ誘導する（§13 / §14-8）。"""
 

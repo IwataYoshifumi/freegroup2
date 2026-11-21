@@ -178,11 +178,11 @@ class TwoFactorEnforcementMiddlewareTests(TestCase):
         self.client.force_login(self.staff_user)
         resp_setup = self.client.get(self.setup_url)
         self.assertEqual(resp_setup.status_code, 200)
-        self.assertContains(resp_setup, "準備中")
+        self.assertContains(resp_setup, "登録を開始")
 
         resp_rec = self.client.get(self.recovery_url)
         self.assertEqual(resp_rec.status_code, 200)
-        self.assertContains(resp_rec, "準備中")
+        self.assertContains(resp_rec, "再表示することはできません")
 
     def test_enforcement_level_change_applies_to_logged_in_user_on_next_request(self):
         self.client.force_login(self.general_user)

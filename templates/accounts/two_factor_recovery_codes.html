@@ -1,0 +1,44 @@
+{% extends "accounts/app_base.html" %}
+
+{% block title %}リカバリーコード — FreeGroup2{% endblock %}
+
+{% block content %}
+  <div class="app-section__header">
+    <h1>リカバリーコード</h1>
+  </div>
+
+  <div class="app-card">
+    {% if just_enrolled and recovery_codes %}
+      <div class="app-alert app-alert--warning">
+        リカバリーコードはこの画面で<strong>1 回だけ</strong>表示されます。再表示はできません。必ず安全な場所へ控えてください（各コードは 1 回限り有効です）。
+      </div>
+
+      <ol style="font-size: 1.35rem; font-family: monospace; font-weight: bold; color: #000;">
+        {% for code in recovery_codes %}
+          <li>{{ code }}</li>
+        {% endfor %}
+      </ol>
+
+      <form method="post" action="{% url 'accounts:two_factor_recovery_codes' %}">
+        {% csrf_token %}
+        <div class="app-form__group">
+          <label class="app-form__label" for="id_saved">
+            <input type="checkbox" name="saved" id="id_saved" required>
+            リカバリーコードを安全な場所に保存しました
+          </label>
+        </div>
+        <div class="app-action-area app-action-area--search">
+          <button type="submit" class="app-btn app-btn--primary">完了</button>
+        </div>
+      </form>
+    {% else %}
+      <div class="app-alert app-alert--info">
+        リカバリーコードはセキュリティ上の理由により、発行直後の 1 回のみ表示され、あとから再表示することはできません。
+      </div>
+      <p class="app-muted">端末やリカバリーコードを紛失した場合は、管理者へ二段階認証のリセットをご依頼ください。</p>
+      <div class="app-action-area app-action-area--search">
+        <a href="{% url 'home' %}" class="app-btn app-btn--primary">ホームへ戻る</a>
+      </div>
+    {% endif %}
+  </div>
+{% endblock %}

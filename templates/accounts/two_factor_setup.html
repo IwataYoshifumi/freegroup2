@@ -1,0 +1,56 @@
+{% extends "accounts/app_base.html" %}
+
+{% block title %}二段階認証の登録 — FreeGroup2{% endblock %}
+
+{% block content %}
+  <div class="app-section__header">
+    <h1>二段階認証の登録</h1>
+  </div>
+
+  {% if error_message %}
+    <div class="app-alert app-alert--danger">
+      {{ error_message }}
+    </div>
+  {% endif %}
+
+  <div class="app-card">
+    {% if already_enrolled %}
+      <p>二段階認証は登録済みです。</p>
+      <div class="app-action-area app-action-area--search">
+        <a href="{% url 'home' %}" class="app-btn app-btn--primary">ホームへ戻る</a>
+      </div>
+    {% elif device_id %}
+      <p>認証アプリ（Google Authenticator・Microsoft Authenticator 等）で下の QR コードを読み取るか、手入力用の秘密鍵を登録してください。</p>
+
+      <div style="width: 220px; max-width: 100%;">{{ qr_svg|safe }}</div>
+
+      <div class="app-form__group">
+        <div class="app-form__label">手入力用の秘密鍵</div>
+        <p><code>{{ manual_secret }}</code></p>
+      </div>
+
+      <form method="post" action="{% url 'accounts:two_factor_setup' %}">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="confirm">
+        <input type="hidden" name="device_id" value="{{ device_id }}">
+        <div class="app-form__group">
+          <label class="app-form__label" for="id_code">確認コード（6桁）</label>
+          <input type="text" name="code" id="id_code" class="app-input" inputmode="numeric" autocomplete="one-time-code" autofocus required style="font-size: 1.5rem; font-family: monospace; font-weight: bold; color: #000;">
+          <p class="app-form__help">認証アプリに表示されている最新の 6 桁コードを入力してください。</p>
+        </div>
+        <div class="app-action-area app-action-area--search">
+          <button type="submit" class="app-btn app-btn--primary">確認して登録を完了する</button>
+        </div>
+      </form>
+    {% else %}
+      <p>認証アプリ（TOTP）を使った二段階認証を登録します。下のボタンを押して登録を開始してください。</p>
+      <form method="post" action="{% url 'accounts:two_factor_setup' %}">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="start">
+        <div class="app-action-area app-action-area--search">
+          <button type="submit" class="app-btn app-btn--primary">登録を開始</button>
+        </div>
+      </form>
+    {% endif %}
+  </div>
+{% endblock %}
