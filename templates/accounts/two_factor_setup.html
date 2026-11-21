@@ -4,6 +4,7 @@
 {% block title %}{% if already_enrolled %}二段階認証の再登録{% else %}二段階認証の登録{% endif %} — FreeGroup2{% endblock %}
 
 {% block content %}
+  <div class="app-form-wrapper">
   <div class="app-page-header">
     <div>
       <h1>{% if already_enrolled %}二段階認証の再登録{% else %}二段階認証の登録{% endif %}</h1>
@@ -90,5 +91,6 @@
         </div>
       </form>
     {% endif %}
+  </div>
   </div>
 {% endblock %}
