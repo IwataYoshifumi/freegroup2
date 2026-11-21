@@ -177,3 +177,12 @@ class CustomUserAdmin(UserAdmin):
         if getattr(form.instance, "_role_changed", False):
             apply_role(form.instance, form.instance.role)
 
+
+# 仕様書 §13：django-otp が自動登録する TOTPDevice 管理画面（秘密鍵閲覧・編集可）を
+# INSTALLED_APPS の読み込み順に依存せず確実に登録解除する。
+import django_otp.plugins.otp_totp.admin  # noqa: E402, F401
+from django_otp.plugins.otp_totp.models import TOTPDevice  # noqa: E402
+
+if admin.site.is_registered(TOTPDevice):
+    admin.site.unregister(TOTPDevice)
+

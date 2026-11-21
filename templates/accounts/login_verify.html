@@ -1,0 +1,82 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>二段階認証 — FreeGroup2</title>
+  <link rel="stylesheet" href="{% static 'css/app.css' %}">
+</head>
+
+<body>
+  <div
+    style="min-height: 100vh; display: flex; align-items: center; justify-content: center; background: var(--app-bg);">
+    <div style="width: 100%; max-width: 400px; padding: var(--app-space-md);">
+      <div class="app-card">
+        <h1 class="app-topbar__system-name" style="font-size: 1.5rem; margin-bottom: var(--app-space-md);">FreeGroup2
+        </h1>
+
+        {% if error_message %}
+        <div class="app-alert app-alert--danger" style="margin-bottom: var(--app-space-md);">
+          {{ error_message }}
+        </div>
+        {% endif %}
+
+        {% if messages %}
+        {% for message in messages %}
+        <div class="app-alert app-alert--{% if message.tags == 'error' %}danger{% else %}info{% endif %}"
+          style="margin-bottom: var(--app-space-md);">
+          {{ message }}
+        </div>
+        {% endfor %}
+        {% endif %}
+
+        <form method="post" action="">
+          {% csrf_token %}
+          <input type="hidden" name="method" value="{{ method }}">
+
+          {% if method == "recovery_code" %}
+          <div class="app-form__group">
+            <label class="app-form__label" for="id_code">リカバリーコード</label>
+            <input type="text" name="code" id="id_code" class="app-input" autocomplete="off" autofocus required
+              style="font-size: 1.5rem; font-family: monospace; font-weight: bold; color: #000;">
+          </div>
+          {% else %}
+          <div class="app-form__group">
+            <label class="app-form__label" for="id_code">認証アプリのコード（6桁）</label>
+            <input type="text" name="code" id="id_code" class="app-input" inputmode="numeric"
+              autocomplete="one-time-code" autofocus required
+              style="font-size: 1.5rem; font-family: monospace; font-weight: bold; color: #000;">
+          </div>
+          {% endif %}
+
+          {% if trusted_device_days > 0 %}
+          <div class="app-form__group">
+            <label class="app-form__label" for="id_trust_device">
+              <input type="checkbox" name="trust_device" id="id_trust_device">
+              この端末を {{ trusted_device_days }} 日間信頼する
+            </label>
+          </div>
+          {% endif %}
+
+          <div class="app-action-area" style="margin-top: var(--app-space-md);">
+            <button type="submit" class="app-btn app-btn--primary">確認</button>
+            {% if method == "recovery_code" %}
+            <a href="{% url 'accounts:login_verify' %}?method=totp" class="app-btn app-btn--secondary">認証アプリのコードを使う</a>
+            {% else %}
+            <a href="{% url 'accounts:login_verify' %}?method=recovery_code"
+              class="app-btn app-btn--secondary">リカバリーコードを使う</a>
+            {% endif %}
+          </div>
+        </form>
+
+        <p class="app-muted">
+          <a href="{% url 'accounts:login' %}">ログイン画面に戻る</a>
+        </p>
+      </div>
+    </div>
+  </div>
+</body>
+
+</html>

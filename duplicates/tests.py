@@ -2697,7 +2697,8 @@ class DuplicateCandidateGroupUpdateViewContextTests(
             self._add_sns(merged_primary, "twitter", f"@b{i}")
             self._add_sns(surviving_primary, "facebook", f"fb_a_{i}")
 
-        with self.assertNumQueries(12):
+        # 強制誘導ミドルウェアによる SecuritySetting 取得 1 回を含む
+        with self.assertNumQueries(13):
             self.client.get(self._url())
 
 

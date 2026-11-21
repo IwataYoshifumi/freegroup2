@@ -5,7 +5,7 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
-from django.utils.http import url_has_allowed_host_and_scheme
+from django.utils.http import url_has_allowed_host_and_scheme, urlencode
 from django.views import View
 from django.views.generic import DetailView, ListView
 
@@ -14,6 +14,17 @@ from persons.models import Person
 
 from .constants import ADMIN_ROLE_CODE
 from .forms import RoleCreateForm, RoleUpdateForm, UserSignatureForm
+from .login_security.login_service import (
+    COMMON_LOGIN_ERROR_MESSAGE,
+    EXPIRED_PENDING_AUTH_MESSAGE,
+    LoginStepStatus,
+    apply_login_cookie,
+    load_pending_auth,
+    submit_first_factor,
+    submit_second_factor,
+)
+from .login_security.second_factor import SecondFactorMethod
+from .login_security.user_lookup import get_security_setting
 from .models import CustomUser, Role
 from .services import (
     assign_role_to_user,
@@ -28,6 +39,113 @@ from .services import (
     unlink_user_from_person,
     update_role,
 )
+
+
+class LoginView(View):
+    """独自ログインビュー（第一要素入力、仕様書 §4 順1〜5 / §14-8）。"""
+
+    template_name = "accounts/login.html"
+
+    def get(self, request):
+        next_url = request.GET.get("next", "")
+        return render(request, self.template_name, {"next": next_url})
+
+    def post(self, request):
+        username = request.POST.get("username", "")
+        password = request.POST.get("password", "")
+        next_url = request.POST.get("next", "")
+
+        result = submit_first_factor(
+            request,
+            username=username,
+            password=password,
+            next_url=next_url,
+        )
+
+        if result.is_completed:
+            response = redirect(result.redirect_url)
+            apply_login_cookie(response, request, result)
+            return response
+
+        if result.status == LoginStepStatus.SECOND_FACTOR_REQUIRED:
+            return redirect("accounts:login_verify")
+
+        return render(
+            request,
+            self.template_name,
+            {
+                "next": next_url,
+                "username": username,
+                "error_message": result.error_message or COMMON_LOGIN_ERROR_MESSAGE,
+            },
+        )
+
+
+class LoginVerifyView(View):
+    """第二要素入力ビュー（認証アプリ／リカバリーコード、仕様書 §4 順6〜11）。"""
+
+    template_name = "accounts/login_verify.html"
+
+    def _resolve_method(self, raw_method: str | None) -> str:
+        if raw_method == SecondFactorMethod.RECOVERY_CODE.value:
+            return SecondFactorMethod.RECOVERY_CODE.value
+        return SecondFactorMethod.TOTP.value
+
+    def get(self, request):
+        load_res = load_pending_auth(request)
+        if load_res.state is None:
+            if load_res.expired:
+                messages.error(request, EXPIRED_PENDING_AUTH_MESSAGE)
+            return redirect("accounts:login")
+
+        method = self._resolve_method(request.GET.get("method"))
+        cfg = get_security_setting()
+        return render(
+            request,
+            self.template_name,
+            {
+                "method": method,
+                "trusted_device_days": cfg.trusted_device_days,
+            },
+        )
+
+    def post(self, request):
+        method = self._resolve_method(request.POST.get("method"))
+        code = request.POST.get("code", "")
+        trust_device = bool(request.POST.get("trust_device"))
+
+        result = submit_second_factor(
+            request,
+            code=code,
+            method=method,
+            trust_device=trust_device,
+        )
+
+        if result.is_completed:
+            response = redirect(result.redirect_url)
+            apply_login_cookie(response, request, result)
+            return response
+
+        if result.status in (LoginStepStatus.REJECTED, LoginStepStatus.EXPIRED):
+            if result.error_message:
+                messages.error(request, result.error_message)
+            return redirect("accounts:login")
+
+        error_message = (
+            result.error_message
+            if result.status == LoginStepStatus.CODE_USED
+            else COMMON_LOGIN_ERROR_MESSAGE
+        )
+        cfg = get_security_setting()
+        return render(
+            request,
+            self.template_name,
+            {
+                "method": method,
+                "trusted_device_days": cfg.trusted_device_days,
+                "error_message": error_message,
+            },
+        )
 
 
 class ProfileView(LoginRequiredMixin, View):
@@ -667,3 +785,49 @@ class PermissionListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
         context["active_app"] = "user_mgmt"
         context["active_menu"] = "accounts:permission_list"
         return context
+
+
+class TwoFactorSetupPlaceholderView(LoginRequiredMixin, View):
+    """二段階認証登録画面の仮置きビュー（Step 4 で本実装へ差し替え、§14-20）。"""
+
+    template_name = "accounts/two_factor_placeholder.html"
+
+    def get(self, request):
+        return render(
+            request,
+            self.template_name,
+            {"page_title": "二段階認証の設定"},
+        )
+
+
+class TwoFactorRecoveryCodesPlaceholderView(LoginRequiredMixin, View):
+    """リカバリーコード表示画面の仮置きビュー（Step 4 で本実装へ差し替え、§14-20）。"""
+
+    template_name = "accounts/two_factor_placeholder.html"
+
+    def get(self, request):
+        return render(
+            request,
+            self.template_name,
+            {"page_title": "リカバリーコード"},
+        )
+
+
+class AdminLoginRedirectView(View):
+    """Django 管理画面のログイン（/admin/login/）を共通ログイン画面へ誘導する（§13 / §14-8）。"""
+
+    http_method_names = ["get", "head"]
+
+    def get(self, request):
+        candidate = (request.GET.get("next") or "").strip()
+        if candidate and url_has_allowed_host_and_scheme(
+            candidate,
+            allowed_hosts={request.get_host()},
+            require_https=request.is_secure(),
+        ):
+            target_next = candidate
+        else:
+            target_next = reverse("admin:index")
+
+        login_url = reverse("accounts:login")
+        return redirect(f"{login_url}?{urlencode({'next': target_next})}")

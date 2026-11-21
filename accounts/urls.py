@@ -6,7 +6,10 @@ from . import views
 app_name = "accounts"
 
 urlpatterns = [
-    path("login/", auth_views.LoginView.as_view(template_name="accounts/login.html"), name="login"),
+    path("login/", views.LoginView.as_view(), name="login"),
+    path("login/verify/", views.LoginVerifyView.as_view(), name="login_verify"),
+    path("two-factor/setup/", views.TwoFactorSetupPlaceholderView.as_view(), name="two_factor_setup"),
+    path("two-factor/recovery-codes/", views.TwoFactorRecoveryCodesPlaceholderView.as_view(), name="two_factor_recovery_codes"),
     path("logout/", auth_views.LogoutView.as_view(), name="logout"),
     path("profile/", views.ProfileView.as_view(), name="profile"),
     path("profile/signature/", views.SignatureUpdateView.as_view(), name="signature_update"),

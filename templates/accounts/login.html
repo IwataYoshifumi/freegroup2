@@ -12,9 +12,9 @@
       <div class="app-card">
         <h1 class="app-topbar__system-name" style="font-size: 1.5rem; margin-bottom: var(--app-space-md);">FreeGroup2</h1>
 
-        {% if form.errors %}
+        {% if error_message %}
           <div class="app-alert app-alert--danger" style="margin-bottom: var(--app-space-md);">
-            ユーザ名またはパスワードが正しくありません。
+            {{ error_message }}
           </div>
         {% endif %}
 
@@ -31,7 +31,7 @@
           <input type="hidden" name="next" value="{{ next }}">
           <div class="app-form__group">
             <label class="app-form__label" for="id_username">ユーザ名</label>
-            <input type="text" name="username" id="id_username" class="app-input" autofocus required>
+            <input type="text" name="username" id="id_username" class="app-input" value="{{ username|default:'' }}" autofocus required>
           </div>
           <div class="app-form__group">
             <label class="app-form__label" for="id_password">パスワード</label>
