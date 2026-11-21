@@ -1,10 +1,17 @@
 {% extends "accounts/app_base.html" %}
+{% load back_tags %}
 
-{% block title %}二段階認証の登録 — FreeGroup2{% endblock %}
+{% block title %}{% if already_enrolled %}二段階認証の再登録{% else %}二段階認証の登録{% endif %} — FreeGroup2{% endblock %}
 
 {% block content %}
-  <div class="app-section__header">
-    <h1>二段階認証の登録</h1>
+  <div class="app-page-header">
+    <div>
+      <h1>{% if already_enrolled %}二段階認証の再登録{% else %}二段階認証の登録{% endif %}</h1>
+    </div>
+    <div class="app-action-area">
+      {% back_all_link back %}
+      {% back_link back %}
+    </div>
   </div>
 
   {% if error_message %}
@@ -14,20 +21,19 @@
   {% endif %}
 
   <div class="app-card">
-    {% if already_enrolled %}
-      <p>二段階認証は登録済みです。</p>
-      <div class="app-action-area app-action-area--search">
-        <a href="{% url 'home' %}" class="app-btn app-btn--primary">ホームへ戻る</a>
-      </div>
-    {% elif device_id %}
-      <p>認証アプリ（Google Authenticator・Microsoft Authenticator 等）で下の QR コードを読み取るか、手入力用の秘密鍵を登録してください。</p>
+    {% if device_id %}
+      {% if qr_svg %}
+        <p>認証アプリ（Google Authenticator・Microsoft Authenticator 等）で下の QR コードを読み取るか、手入力用の秘密鍵を登録してください。</p>
 
-      <div style="width: 220px; max-width: 100%;">{{ qr_svg|safe }}</div>
+        <div style="width: 220px; max-width: 100%;">{{ qr_svg|safe }}</div>
 
-      <div class="app-form__group">
-        <div class="app-form__label">手入力用の秘密鍵</div>
-        <p><code>{{ manual_secret }}</code></p>
-      </div>
+        <div class="app-form__group">
+          <div class="app-form__label">手入力用の秘密鍵</div>
+          <p><code>{{ manual_secret }}</code></p>
+        </div>
+      {% else %}
+        <p>認証アプリに表示されている確認コードを入力してください。</p>
+      {% endif %}
 
       <form method="post" action="{% url 'accounts:two_factor_setup' %}">
         {% csrf_token %}
@@ -39,7 +45,30 @@
           <p class="app-form__help">認証アプリに表示されている最新の 6 桁コードを入力してください。</p>
         </div>
         <div class="app-action-area app-action-area--search">
+          {% if already_enrolled %}
+            <a href="{% url 'accounts:two_factor_setup' %}" class="app-btn app-btn--secondary">最初からやり直す</a>
+          {% endif %}
           <button type="submit" class="app-btn app-btn--primary">確認して登録を完了する</button>
+        </div>
+      </form>
+    {% elif already_enrolled %}
+      <div class="app-alert app-alert--info">
+        <ul>
+          <li>新しい認証アプリの確認コードを確定すると、旧登録・旧リカバリーコード・信頼済み端末の記録はすべて無効になり、操作中以外のセッションはログアウトされます。</li>
+          <li>確認コードで確定するまでは、現在の登録がそのまま有効です。</li>
+        </ul>
+      </div>
+
+      <form method="post" action="{% url 'accounts:two_factor_setup' %}">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="reenroll_start">
+        <div class="app-form__group">
+          <label class="app-form__label" for="id_code">認証アプリの6桁コード、またはリカバリーコード</label>
+          <input type="text" name="code" id="id_code" class="app-input" autocomplete="one-time-code" autofocus required style="font-size: 1.5rem; font-family: monospace; font-weight: bold; color: #000;">
+        </div>
+        <div class="app-action-area app-action-area--search">
+          <a href="{% url 'accounts:two_factor' %}" class="app-btn app-btn--secondary">二段階認証の設定へ戻る</a>
+          <button type="submit" class="app-btn app-btn--primary">再登録を開始</button>
         </div>
       </form>
     {% else %}

@@ -233,15 +233,15 @@ class TwoFactorSetupAndRecoveryCodesViewTests(TestCase):
         resp_get = self.client.get(self.setup_url)
         self.assertEqual(resp_get.status_code, 200)
         get_html = resp_get.content.decode("utf-8")
-        self.assertIn("二段階認証は登録済みです", get_html)
+        self.assertIn("再登録を開始", get_html)
+        self.assertIn('name="code"', get_html)
         self.assertNotIn("<svg", get_html)
         self.assertNotIn(secret_b32, get_html)
-        self.assertNotIn("登録を開始", get_html)
 
         resp_post = self.client.post(self.setup_url, {"action": "start"})
         self.assertEqual(resp_post.status_code, 400)
         post_html = resp_post.content.decode("utf-8")
-        self.assertIn("二段階認証は登録済みです", post_html)
+        self.assertIn("二段階認証はすでに登録済みです", post_html)
         self.assertNotIn("<svg", post_html)
         self.assertNotIn(secret_b32, post_html)
         self.assertEqual(TOTPDevice.objects.filter(user=self.user).count(), 1)
@@ -315,14 +315,16 @@ class TwoFactorSetupAndRecoveryCodesViewTests(TestCase):
         setup_styles = re.findall(r'style="([^"]*)"', setup_src)
         recovery_styles = re.findall(r'style="([^"]*)"', recovery_src)
 
-        # setup: QR サイズ と 確認コード入力欄 の 2 か所のみ
-        self.assertEqual(len(setup_styles), 2)
+        # setup: QR サイズ・確認コード入力欄・再登録開始の現在コード入力欄 の 3 か所のみ
+        self.assertEqual(len(setup_styles), 3)
         self.assertIn("width:", setup_styles[0])
         self.assertIn("monospace", setup_styles[1])
+        self.assertIn("monospace", setup_styles[2])
 
-        # recovery: リカバリーコード一覧表示 の 1 か所のみ
-        self.assertEqual(len(recovery_styles), 1)
+        # recovery: リカバリーコード一覧表示・再発行の現在コード入力欄 の 2 か所のみ
+        self.assertEqual(len(recovery_styles), 2)
         self.assertIn("monospace", recovery_styles[0])
+        self.assertIn("monospace", recovery_styles[1])
 
     def test_confirm_post_with_other_users_unconfirmed_device_id_rejected(self):
         other_device = TOTPDevice.objects.create(
@@ -376,8 +378,7 @@ class TwoFactorSetupAndRecoveryCodesViewTests(TestCase):
 
         self.assertEqual(resp.status_code, 400)
         html = resp.content.decode("utf-8")
-        self.assertIn("二段階認証はすでに登録済みです", html)
-        self.assertIn("二段階認証は登録済みです", html)
+        self.assertIn("登録情報が見つかりません", html)
         self.assertNotIn("<svg", html)
         self.assertNotIn(confirmed_secret_b32, html)
 

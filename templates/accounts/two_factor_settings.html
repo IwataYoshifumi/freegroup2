@@ -46,9 +46,22 @@
       <div class="app-action-area app-action-area--search">
         <a href="{% url 'accounts:two_factor_setup' %}" class="app-btn app-btn--primary">登録を開始</a>
       </div>
-    {% elif low_recovery_warning %}
-      <div class="app-alert app-alert--warning">
-        未使用のリカバリーコード残数が少なくなっています（残り {{ remaining_recovery_codes }} 個）。端末紛失に備えて、早めに管理または再発行をご検討ください。
+    {% else %}
+      {% if low_recovery_warning %}
+        <div class="app-alert app-alert--warning">
+          未使用のリカバリーコード残数が少なくなっています（残り {{ remaining_recovery_codes }} 個）。端末紛失に備えて、早めに再発行をご検討ください。
+        </div>
+      {% endif %}
+
+      <div class="app-action-area app-action-area--search">
+        <a href="{% url 'accounts:two_factor_setup' %}" class="app-btn app-btn--secondary">再登録</a>
+        <a href="{% url 'accounts:two_factor_recovery_codes' %}" class="app-btn app-btn--secondary">リカバリーコードの再発行</a>
+        {% if cannot_disable %}
+          <button type="button" class="app-btn app-btn--danger" disabled>無効化</button>
+          <span class="app-muted">管理者の設定により必須のため無効化できません</span>
+        {% else %}
+          <a href="{% url 'accounts:two_factor_disable' %}" class="app-btn app-btn--danger">無効化</a>
+        {% endif %}
       </div>
     {% endif %}
   </section>

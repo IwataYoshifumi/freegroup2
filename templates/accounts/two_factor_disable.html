@@ -1,0 +1,59 @@
+{% extends "accounts/app_base.html" %}
+{% load back_tags %}
+
+{% block title %}二段階認証の無効化 — FreeGroup2{% endblock %}
+
+{% block content %}
+  <div class="app-page-header">
+    <div>
+      <h1>二段階認証の無効化</h1>
+    </div>
+    <div class="app-action-area">
+      {% back_all_link back %}
+      {% back_link back %}
+    </div>
+  </div>
+
+  {% if error_message %}
+    <div class="app-alert app-alert--danger">
+      {{ error_message }}
+    </div>
+  {% endif %}
+
+  <section class="app-card">
+    {% if not enrolled %}
+      <p>二段階認証は登録されていません。</p>
+      <div class="app-action-area app-action-area--search">
+        <a href="{% url 'accounts:two_factor_setup' %}" class="app-btn app-btn--primary">登録を開始</a>
+      </div>
+    {% elif required %}
+      <div class="app-alert app-alert--warning">
+        二段階認証は、管理者の設定により必須のため、無効化できません。
+      </div>
+      <div class="app-action-area app-action-area--search">
+        <a href="{% url 'accounts:two_factor' %}" class="app-btn app-btn--secondary">二段階認証の設定へ戻る</a>
+      </div>
+    {% else %}
+      <div class="app-alert app-alert--warning">
+        二段階認証を無効化すると、次の状態になります。
+        <ul>
+          <li>登録中の認証アプリおよびリカバリーコードがすべて削除されます。</li>
+          <li>信頼済み端末の記録（二段階認証の省略期限）がすべて無効になります。</li>
+          <li>現在操作中の端末以外のログインセッションはすべてログアウトされます。</li>
+        </ul>
+      </div>
+
+      <form method="post" action="{% url 'accounts:two_factor_disable' %}">
+        {% csrf_token %}
+        <div class="app-form__group">
+          <label class="app-form__label" for="id_code">認証アプリの6桁コード、またはリカバリーコード</label>
+          <input type="text" name="code" id="id_code" class="app-input" autocomplete="one-time-code" autofocus required style="font-size: 1.5rem; font-family: monospace; font-weight: bold; color: #000;">
+        </div>
+        <div class="app-action-area app-action-area--search">
+          <a href="{% url 'accounts:two_factor' %}" class="app-btn app-btn--secondary">キャンセル</a>
+          <button type="submit" class="app-btn app-btn--danger">無効化する</button>
+        </div>
+      </form>
+    {% endif %}
+  </section>
+{% endblock %}

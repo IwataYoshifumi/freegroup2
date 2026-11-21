@@ -1,11 +1,26 @@
 {% extends "accounts/app_base.html" %}
+{% load back_tags %}
 
 {% block title %}リカバリーコード — FreeGroup2{% endblock %}
 
 {% block content %}
-  <div class="app-section__header">
-    <h1>リカバリーコード</h1>
+  <div class="app-page-header">
+    <div>
+      <h1>リカバリーコード</h1>
+    </div>
+    {% if not just_enrolled %}
+      <div class="app-action-area">
+        {% back_all_link back %}
+        {% back_link back %}
+      </div>
+    {% endif %}
   </div>
+
+  {% if error_message %}
+    <div class="app-alert app-alert--danger">
+      {{ error_message }}
+    </div>
+  {% endif %}
 
   <div class="app-card">
     {% if just_enrolled and recovery_codes %}
@@ -29,6 +44,23 @@
         </div>
         <div class="app-action-area app-action-area--search">
           <button type="submit" class="app-btn app-btn--primary">完了</button>
+        </div>
+      </form>
+    {% elif enrolled %}
+      <div class="app-alert app-alert--warning">
+        新しいリカバリーコードを 10 個再発行すると、これまで発行された旧コードはすべて無効になります。
+      </div>
+
+      <form method="post" action="{% url 'accounts:two_factor_recovery_codes' %}">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="regenerate">
+        <div class="app-form__group">
+          <label class="app-form__label" for="id_code">認証アプリの6桁コード、またはリカバリーコード</label>
+          <input type="text" name="code" id="id_code" class="app-input" autocomplete="one-time-code" autofocus required style="font-size: 1.5rem; font-family: monospace; font-weight: bold; color: #000;">
+        </div>
+        <div class="app-action-area app-action-area--search">
+          <a href="{% url 'accounts:two_factor' %}" class="app-btn app-btn--secondary">二段階認証の設定へ戻る</a>
+          <button type="submit" class="app-btn app-btn--primary">再発行する</button>
         </div>
       </form>
     {% else %}
