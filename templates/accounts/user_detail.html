@@ -19,7 +19,8 @@
       <div style="display: flex; align-items: center; gap: var(--app-space-sm);">
         {% if can_reset_two_factor %}
           {% if not is_self_detail %}
-            <a href="{% url 'accounts:two_factor_reset' user_id=object.id %}" class="app-btn app-btn--danger app-btn--sm">二段階認証をリセット</a>
+            {% url 'accounts:two_factor_reset' user_id=object.id as reset_url %}
+            <a href="{% append_back_url reset_url back %}" class="app-btn app-btn--danger app-btn--sm">二段階認証をリセット</a>
           {% endif %}
           {% if account_locked %}
             <form method="post" action="{% url 'accounts:account_unlock' user_id=object.id %}">

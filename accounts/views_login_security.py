@@ -102,7 +102,6 @@ class SecuritySettingView(LoginRequiredMixin, PermissionRequiredMixin, View):
         ctx = {
             "form": form,
             "setting": setting,
-            "back": BackNavigator(request),
             "active_app": "user_mgmt",
             "active_menu": "accounts:security_setting",
             **_build_security_status_context(setting),
@@ -355,7 +354,6 @@ class LoginAttemptListView(LoginRequiredMixin, PermissionRequiredMixin, ListView
         context["filter_date_from"] = (self.request.GET.get("date_from") or "").strip()
         context["filter_date_to"] = (self.request.GET.get("date_to") or "").strip()
         context["filter_errors"] = getattr(self, "filter_errors", [])
-        context["back"] = BackNavigator(self.request)
         context["active_app"] = "user_mgmt"
         context["active_menu"] = "accounts:login_attempt_list"
         return context

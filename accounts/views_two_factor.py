@@ -220,6 +220,7 @@ class TwoFactorSetupView(LoginRequiredMixin, View):
                         "recovery_codes": res.recovery_codes,
                         "just_enrolled": True,
                         "is_reenroll": res.is_reenroll,
+                        "back": BackNavigator(request),
                     },
                 )
 
@@ -322,6 +323,7 @@ class TwoFactorRecoveryCodesView(LoginRequiredMixin, View):
                         "enrolled": True,
                         "regenerated": True,
                         "error_message": "",
+                        "back": BackNavigator(request),
                     },
                 )
 

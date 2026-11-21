@@ -37,6 +37,7 @@
 
       <form method="post" action="{% url 'accounts:two_factor_setup' %}">
         {% csrf_token %}
+        {% hidden_back_field back %}
         <input type="hidden" name="action" value="confirm">
         <input type="hidden" name="device_id" value="{{ device_id }}">
         <div class="app-form__group">
@@ -45,8 +46,11 @@
           <p class="app-form__help">認証アプリに表示されている最新の 6 桁コードを入力してください。</p>
         </div>
         <div class="app-action-area app-action-area--search">
+          {% back_all_link back %}
+          {% back_link back %}
           {% if already_enrolled %}
-            <a href="{% url 'accounts:two_factor_setup' %}" class="app-btn app-btn--secondary">最初からやり直す</a>
+            {% url 'accounts:two_factor_setup' as two_factor_setup_url %}
+            <a href="{% append_back_url two_factor_setup_url back %}" class="app-btn app-btn--secondary">最初からやり直す</a>
           {% endif %}
           <button type="submit" class="app-btn app-btn--primary">確認して登録を完了する</button>
         </div>
@@ -61,13 +65,15 @@
 
       <form method="post" action="{% url 'accounts:two_factor_setup' %}">
         {% csrf_token %}
+        {% hidden_back_field back %}
         <input type="hidden" name="action" value="reenroll_start">
         <div class="app-form__group">
           <label class="app-form__label" for="id_code">認証アプリの6桁コード、またはリカバリーコード</label>
           <input type="text" name="code" id="id_code" class="app-input" autocomplete="one-time-code" autofocus required style="font-size: 1.5rem; font-family: monospace; font-weight: bold; color: #000;">
         </div>
         <div class="app-action-area app-action-area--search">
-          <a href="{% url 'accounts:two_factor' %}" class="app-btn app-btn--secondary">二段階認証の設定へ戻る</a>
+          {% back_all_link back %}
+          {% back_link back %}
           <button type="submit" class="app-btn app-btn--primary">再登録を開始</button>
         </div>
       </form>
@@ -75,8 +81,11 @@
       <p>認証アプリ（TOTP）を使った二段階認証を登録します。下のボタンを押して登録を開始してください。</p>
       <form method="post" action="{% url 'accounts:two_factor_setup' %}">
         {% csrf_token %}
+        {% hidden_back_field back %}
         <input type="hidden" name="action" value="start">
         <div class="app-action-area app-action-area--search">
+          {% back_all_link back %}
+          {% back_link back %}
           <button type="submit" class="app-btn app-btn--primary">登録を開始</button>
         </div>
       </form>

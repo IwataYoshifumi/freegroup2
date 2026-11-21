@@ -422,11 +422,9 @@ class UserDetailView(LoginRequiredMixin, PermissionRequiredMixin, DetailView):
 
         context["active_app"] = "user_mgmt"
         context["active_menu"] = "accounts:user_list"
-        # 戻るボタン用 BackNavigator。遷移元（人物詳細・ユーザ管理一覧の「ユーザ詳細」リンク）が
-        # append_back で積んだ back_stack を読み、戻る先を直前画面にする。スタックが無ければ
-        # back_link が自動で非表示（HIG 3.2：表示判定はテンプレに書かない）。push_current は
-        # しない＝本画面は戻り先ハブにしない。
-        context["back"] = BackNavigator(self.request)
+        back = BackNavigator(self.request)
+        back.push_current("ユーザ詳細", ["page"])
+        context["back"] = back
         return context
 
 
