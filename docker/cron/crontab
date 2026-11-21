@@ -5,6 +5,7 @@
 # process_opencv / process_ocr : cron 起動間隔 1〜5 分（仕様書の推奨レンジ内で 2 分を採用）
 # check_duplicates             : cron 起動間隔 5 分（仕様書 §12.1 推奨どおり）
 # send_scheduled_campaigns     : cron 起動間隔 1 分（仕様書 §7.2.1 の crontab 例どおり）
+# purge_login_attempts         : 1 日 1 回（UTC コンテナ上で JST 03:07、他ジョブの */2・*/5 と重ならない時刻）
 #
 # 環境変数は entrypoint.sh が /etc/environment に書き出し、Debian cron の PAM (pam_env) 経由で
 # 各ジョブに引き継がれる。
@@ -15,6 +16,7 @@
 * * * * * root cd /app && /usr/local/bin/python manage.py send_scheduled_campaigns >> /proc/1/fd/1 2>&1
 */5 * * * * root cd /app && /usr/local/bin/python manage.py poll_bounce_inbox >> /proc/1/fd/1 2>&1
 */5 * * * * root cd /app && /usr/local/bin/python manage.py link_companies >> /proc/1/fd/1 2>&1
+7 18 * * * root cd /app && /usr/local/bin/python manage.py purge_login_attempts >> /proc/1/fd/1 2>&1
 
 
 
