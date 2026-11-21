@@ -1,0 +1,120 @@
+{% extends "accounts/app_base.html" %}
+{% load back_tags %}
+
+{% block title %}ログイン試行記録一覧 — FreeGroup2{% endblock %}
+
+{% block content %}
+  <div class="app-page-header">
+    <div>
+      <h1>ログイン試行記録一覧</h1>
+    </div>
+    <div class="app-action-area">
+      {% back_all_link back %}
+      {% back_link back %}
+    </div>
+  </div>
+
+  <div class="app-alert app-alert--warning">
+    入力ユーザー名の欄には、利用者が欄を取り違えて入力したパスワードが残っている場合があります。取り扱いに注意してください。
+  </div>
+
+  {% if filter_errors %}
+    <div class="app-alert app-alert--danger">
+      <ul>
+        {% for err in filter_errors %}
+          <li>{{ err }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+  {% endif %}
+
+  <section class="app-card">
+    <form method="get" action="{% url 'accounts:login_attempt_list' %}">
+      <div class="app-form-grid">
+        <div class="app-form__group">
+          <label class="app-form__label" for="id_result">結果</label>
+          <select name="result" id="id_result" class="app-input">
+            <option value="">すべて</option>
+            {% for value, label in result_choices %}
+              <option value="{{ value }}" {% if filter_result == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="app-form__group">
+          <label class="app-form__label" for="id_username">入力ユーザー名</label>
+          <input type="text" name="username" id="id_username" class="app-input" value="{{ filter_username }}">
+        </div>
+
+        <div class="app-form__group">
+          <label class="app-form__label" for="id_ip">IP アドレス</label>
+          <input type="text" name="ip" id="id_ip" class="app-input" value="{{ filter_ip }}">
+        </div>
+
+        <div class="app-form__group">
+          <label class="app-form__label" for="id_date_from">期間（開始日・JST）</label>
+          <input type="date" name="date_from" id="id_date_from" class="app-input" value="{{ filter_date_from }}">
+        </div>
+
+        <div class="app-form__group">
+          <label class="app-form__label" for="id_date_to">期間（終了日・JST）</label>
+          <input type="date" name="date_to" id="id_date_to" class="app-input" value="{{ filter_date_to }}">
+        </div>
+      </div>
+
+      <div class="app-action-area app-action-area--search">
+        <a href="{% url 'accounts:login_attempt_list' %}" class="app-btn app-btn--secondary">リセット</a>
+        <button type="submit" class="app-btn app-btn--primary">絞り込む</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="app-card">
+    <div class="app-table-wrapper">
+      <table class="app-table app-table--nowrap">
+        <thead>
+          <tr>
+            <th>日時</th>
+            <th>入力ユーザー名</th>
+            <th>ユーザー</th>
+            <th>IP アドレス</th>
+            <th>ブラウザ・OS</th>
+            <th>結果</th>
+            <th>第二要素の方法</th>
+            <th>新しい端末</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in attempt_rows %}
+            <tr>
+              <td>{{ row.created_at|date:"Y-m-d H:i:s" }}</td>
+              <td>{{ row.username_input|default:"-" }}</td>
+              <td>{{ row.username|default:"-" }}</td>
+              <td>{{ row.ip_address|default:"-" }}</td>
+              <td>{{ row.browser_summary }}</td>
+              <td>
+                {% if row.result == "success" %}
+                  <span class="app-status-badge app-status-badge--success">{{ row.result_label }}</span>
+                {% elif row.result == "rejected_locked" or row.result == "rejected_ip_blocked" %}
+                  <span class="app-status-badge app-status-badge--error">{{ row.result_label }}</span>
+                {% else %}
+                  <span class="app-status-badge app-status-badge--warning">{{ row.result_label }}</span>
+                {% endif %}
+              </td>
+              <td>{{ row.second_factor_label }}</td>
+              <td>{{ row.is_new_device_label }}</td>
+            </tr>
+          {% empty %}
+            <tr>
+              <td colspan="8" class="app-muted">該当するログイン試行記録はありません。</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    {% if is_paginated %}
+      {% include "persons/_pagination.html" %}
+    {% endif %}
+  </section>
+{% endblock %}

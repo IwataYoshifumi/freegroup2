@@ -1,7 +1,7 @@
 from django.contrib.auth import views as auth_views
 from django.urls import path
 
-from . import views, views_two_factor
+from . import views, views_login_security, views_two_factor
 
 app_name = "accounts"
 
@@ -32,6 +32,10 @@ urlpatterns = [
     path("users/<int:user_id>/", views.UserDetailView.as_view(), name="user_detail"),
     path("users/<int:user_id>/retire/", views.RetireUserView.as_view(), name="retire_user"),
     path("users/<int:user_id>/assign-role/", views.AssignRoleView.as_view(), name="assign_role"),
+    path("users/<int:user_id>/two-factor/reset/", views_login_security.TwoFactorResetView.as_view(), name="two_factor_reset"),
+    path("users/<int:user_id>/unlock/", views_login_security.AccountUnlockView.as_view(), name="account_unlock"),
+    path("security/", views_login_security.SecuritySettingView.as_view(), name="security_setting"),
+    path("login-attempts/", views_login_security.LoginAttemptListView.as_view(), name="login_attempt_list"),
     path("roles/", views.RoleListView.as_view(), name="role_list"),
     path("roles/new/", views.RoleCreateView.as_view(), name="role_create"),
     path("roles/<int:pk>/edit/", views.RoleUpdateView.as_view(), name="role_update"),

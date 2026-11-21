@@ -1,0 +1,157 @@
+{% extends "accounts/app_base.html" %}
+{% load back_tags %}
+
+{% block title %}セキュリティ設定 — FreeGroup2{% endblock %}
+
+{% block content %}
+  <div class="app-page-header">
+    <div>
+      <h1>セキュリティ設定</h1>
+    </div>
+    <div class="app-action-area">
+      {% back_all_link back %}
+      {% back_link back %}
+    </div>
+  </div>
+
+  {% if admin_count_warning %}
+    <div class="app-alert app-alert--warning">
+      管理者が{{ admin_count }}名です。二段階認証の端末を紛失すると復旧できなくなるため、2名以上を推奨します。
+    </div>
+  {% endif %}
+
+  {% if no_admin_recipient_warning %}
+    <div class="app-alert app-alert--warning">
+      通知を受け取れる管理者がいません（有効な管理者ロール保持者またはスーパーユーザーにメールアドレスを設定してください）。
+    </div>
+  {% endif %}
+
+  {% if smtp_unconfigured_warning %}
+    <div class="app-alert app-alert--warning">
+      SMTP（既定差出人メールアドレス）が未設定のため、ログイン通知やセキュリティ警告メールを送信できません。
+    </div>
+  {% endif %}
+
+  <section class="app-card">
+    <div class="app-section__header">
+      <h2>現在の状況</h2>
+    </div>
+    <div class="app-detail-grid">
+      <div class="app-detail-item">
+        <div class="app-detail-label">二段階認証の登録済み人数 / 有効なユーザー数</div>
+        <div class="app-detail-value">{{ enrolled_user_count }} 名 / {{ active_user_count }} 名</div>
+      </div>
+      <div class="app-detail-item">
+        <div class="app-detail-label">現在ロック中のユーザー数</div>
+        <div class="app-detail-value">{{ locked_user_count }} 名</div>
+      </div>
+      <div class="app-detail-item">
+        <div class="app-detail-label">有効な管理者人数</div>
+        <div class="app-detail-value">{{ admin_count }} 名（通知先メールあり: {{ admin_recipient_count }} 名）</div>
+      </div>
+      <div class="app-detail-item">
+        <div class="app-detail-label">最終更新</div>
+        <div class="app-detail-value">
+          {{ updated_at|date:"Y-m-d H:i:s" }}（更新者: {{ updated_by.username|default:"-" }}）
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="app-card">
+    <div class="app-section__header">
+      <h2>設定変更</h2>
+    </div>
+
+    <div class="app-alert app-alert--info">
+      <ul>
+        <li>ロック失敗回数は、AD 側のロック閾値以下に設定してください。</li>
+        <li>一度もログインしていない LDAP ユーザーには、アカウントロックが効きません。IP 遮断だけが働きます。</li>
+      </ul>
+    </div>
+
+    <form method="post" action="{% url 'accounts:security_setting' %}">
+      {% csrf_token %}
+
+      {% if form.non_field_errors %}
+        <div class="app-alert app-alert--danger">
+          {{ form.non_field_errors }}
+        </div>
+      {% endif %}
+
+      <div class="app-form-grid">
+        <div class="app-form__group">
+          <label class="app-form__label" for="{{ form.two_factor_enforcement.id_for_label }}">{{ form.two_factor_enforcement.label }}</label>
+          {{ form.two_factor_enforcement }}
+          {% if form.two_factor_enforcement.errors %}
+            <div class="app-form__error">{{ form.two_factor_enforcement.errors }}</div>
+          {% endif %}
+        </div>
+
+        <div class="app-form__group">
+          <label class="app-form__label" for="{{ form.login_notification_level.id_for_label }}">{{ form.login_notification_level.label }}</label>
+          {{ form.login_notification_level }}
+          {% if form.login_notification_level.errors %}
+            <div class="app-form__error">{{ form.login_notification_level.errors }}</div>
+          {% endif %}
+        </div>
+
+        <div class="app-form__group">
+          <label class="app-form__label" for="{{ form.lockout_threshold.id_for_label }}">{{ form.lockout_threshold.label }}</label>
+          {{ form.lockout_threshold }}
+          {% if form.lockout_threshold.errors %}
+            <div class="app-form__error">{{ form.lockout_threshold.errors }}</div>
+          {% endif %}
+        </div>
+
+        <div class="app-form__group">
+          <label class="app-form__label" for="{{ form.lockout_minutes.id_for_label }}">{{ form.lockout_minutes.label }}</label>
+          {{ form.lockout_minutes }}
+          {% if form.lockout_minutes.errors %}
+            <div class="app-form__error">{{ form.lockout_minutes.errors }}</div>
+          {% endif %}
+        </div>
+
+        <div class="app-form__group">
+          <label class="app-form__label" for="{{ form.ip_block_threshold.id_for_label }}">{{ form.ip_block_threshold.label }}</label>
+          {{ form.ip_block_threshold }}
+          {% if form.ip_block_threshold.errors %}
+            <div class="app-form__error">{{ form.ip_block_threshold.errors }}</div>
+          {% endif %}
+        </div>
+
+        <div class="app-form__group">
+          <label class="app-form__label" for="{{ form.trusted_device_days.id_for_label }}">{{ form.trusted_device_days.label }}</label>
+          {{ form.trusted_device_days }}
+          {% if form.trusted_device_days.errors %}
+            <div class="app-form__error">{{ form.trusted_device_days.errors }}</div>
+          {% endif %}
+        </div>
+
+        <div class="app-form__group app-form__group--full">
+          <label class="app-form__label" for="{{ form.notify_admins_on_account_lock.id_for_label }}">
+            {{ form.notify_admins_on_account_lock }}
+            {{ form.notify_admins_on_account_lock.label }}
+          </label>
+          {% if form.notify_admins_on_account_lock.errors %}
+            <div class="app-form__error">{{ form.notify_admins_on_account_lock.errors }}</div>
+          {% endif %}
+        </div>
+
+        <div class="app-form__group app-form__group--full">
+          <label class="app-form__label" for="{{ form.notify_admins_on_ip_block.id_for_label }}">
+            {{ form.notify_admins_on_ip_block }}
+            {{ form.notify_admins_on_ip_block.label }}
+          </label>
+          {% if form.notify_admins_on_ip_block.errors %}
+            <div class="app-form__error">{{ form.notify_admins_on_ip_block.errors }}</div>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="app-action-area app-action-area--search">
+        <button type="submit" class="app-btn app-btn--primary">保存する</button>
+      </div>
+    </form>
+  </section>
+{% endblock %}

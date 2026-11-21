@@ -1,7 +1,7 @@
 from django import forms
 from django.contrib.auth.models import Group
 
-from .models import Role
+from .models import Role, SecuritySetting
 
 
 class RoleCreateForm(forms.ModelForm):
@@ -68,4 +68,51 @@ class UserSignatureForm(forms.ModelForm):
                 }
             ),
         }
+
+
+class SecuritySettingForm(forms.Form):
+    """ログインセキュリティ設定フォーム（仕様書 v1.3.1 §8.1）。"""
+
+    two_factor_enforcement = forms.ChoiceField(
+        label="二段階認証強制レベル",
+        choices=SecuritySetting.TwoFactorEnforcement.choices,
+        widget=forms.Select(attrs={"class": "app-input"}),
+    )
+    login_notification_level = forms.ChoiceField(
+        label="ログイン通知レベル",
+        choices=SecuritySetting.LoginNotificationLevel.choices,
+        widget=forms.Select(attrs={"class": "app-input"}),
+    )
+    lockout_threshold = forms.IntegerField(
+        label="ロック失敗回数（3〜10回）",
+        min_value=3,
+        max_value=10,
+        widget=forms.NumberInput(attrs={"class": "app-input", "min": 3, "max": 10}),
+    )
+    lockout_minutes = forms.IntegerField(
+        label="ロック時間（分、5〜1440分）",
+        min_value=5,
+        max_value=1440,
+        widget=forms.NumberInput(attrs={"class": "app-input", "min": 5, "max": 1440}),
+    )
+    ip_block_threshold = forms.IntegerField(
+        label="IP遮断失敗回数（10〜100回）",
+        min_value=10,
+        max_value=100,
+        widget=forms.NumberInput(attrs={"class": "app-input", "min": 10, "max": 100}),
+    )
+    trusted_device_days = forms.IntegerField(
+        label="信頼期間（日、0〜90日・0で無効）",
+        min_value=0,
+        max_value=90,
+        widget=forms.NumberInput(attrs={"class": "app-input", "min": 0, "max": 90}),
+    )
+    notify_admins_on_account_lock = forms.BooleanField(
+        label="アカウントロック発生を管理者に通知する",
+        required=False,
+    )
+    notify_admins_on_ip_block = forms.BooleanField(
+        label="IP遮断発生を管理者に通知する",
+        required=False,
+    )
 

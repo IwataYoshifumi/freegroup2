@@ -1,0 +1,110 @@
+{% extends "accounts/app_base.html" %}
+{% load back_tags %}
+
+{% block title %}二段階認証のリセット — FreeGroup2{% endblock %}
+
+{% block content %}
+  <div class="app-page-header">
+    <div>
+      <h1>二段階認証のリセット</h1>
+    </div>
+    <div class="app-action-area">
+      {% back_all_link back %}
+      {% back_link back %}
+    </div>
+  </div>
+
+  {% if error_message %}
+    <div class="app-alert app-alert--danger">
+      {{ error_message }}
+    </div>
+  {% endif %}
+
+  <section class="app-card">
+    <div class="app-section__header">
+      <h2>対象ユーザー情報</h2>
+    </div>
+    <div class="app-detail-list">
+      <div class="app-detail-item">
+        <div class="app-detail-label">ユーザー名</div>
+        <div class="app-detail-value">{{ target_user.username }}</div>
+      </div>
+      <div class="app-detail-item">
+        <div class="app-detail-label">氏名</div>
+        <div class="app-detail-value">{{ target_user.display_name }}</div>
+      </div>
+      <div class="app-detail-item">
+        <div class="app-detail-label">メールアドレス</div>
+        <div class="app-detail-value">{{ target_user.email|default:"-" }}</div>
+      </div>
+      <div class="app-detail-item">
+        <div class="app-detail-label">二段階認証の状態</div>
+        <div class="app-detail-value">
+          {% if enrolled %}
+            <span class="app-status-badge app-status-badge--success">登録済み</span>
+          {% else %}
+            <span class="app-status-badge app-status-badge--muted">未登録</span>
+          {% endif %}
+        </div>
+      </div>
+      <div class="app-detail-item">
+        <div class="app-detail-label">アカウントロック状態</div>
+        <div class="app-detail-value">
+          {% if locked %}
+            <span class="app-status-badge app-status-badge--error">ロック中</span>
+          {% else %}
+            <span class="app-status-badge app-status-badge--muted">なし</span>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </section>
+
+  {% if is_self %}
+    <section class="app-card">
+      <div class="app-alert app-alert--warning">
+        ご自身の二段階認証は、二段階認証の設定画面から再登録してください。
+      </div>
+      <div class="app-action-area app-action-area--search">
+        <a href="{% url 'accounts:two_factor' %}" class="app-btn app-btn--primary">二段階認証の設定画面へ</a>
+        <a href="{% url 'accounts:user_detail' user_id=target_user.pk %}" class="app-btn app-btn--secondary">ユーザー詳細へ戻る</a>
+      </div>
+    </section>
+  {% else %}
+    <section class="app-card">
+      <div class="app-alert app-alert--danger">
+        <strong>実行前に必ず確認してください</strong>
+        <ul>
+          <li>本人確認は、FG2 の外（電話・対面）で行ってください。</li>
+          <li>本人がすぐに登録操作を行える状態で実行してください。実行後は、本人に速やかに登録を完了してもらってください。</li>
+        </ul>
+      </div>
+
+      <div class="app-alert app-alert--info">
+        <strong>リセット時に実行される内容</strong>
+        <ul>
+          <li>対象ユーザーの認証アプリ登録・リカバリーコード・端末の信頼をすべて削除します。</li>
+          <li>アカウントロック中であればロックも解除します。</li>
+          <li>対象ユーザーの全ログインセッションを切断します。</li>
+          <li>パスワードは変更しません。</li>
+          <li>対象ユーザー本人と管理者全員へ通知メールを送信します。</li>
+        </ul>
+      </div>
+
+      <form method="post" action="{% url 'accounts:two_factor_reset' user_id=target_user.pk %}">
+        {% csrf_token %}
+        <div class="app-form__group">
+          <label class="app-form__label" for="id_reason_note">理由メモ（任意・500文字以内）</label>
+          <textarea name="reason_note" id="id_reason_note" class="app-input" rows="3" maxlength="500">{{ reason_note }}</textarea>
+          <p class="app-form__help">操作ログおよび管理者宛通知メールに記録されます（本人宛メールには記載されません）。</p>
+        </div>
+
+        <div class="app-action-area app-action-area--search">
+          {% back_link back label="キャンセル" %}
+          <a href="{% url 'accounts:user_detail' user_id=target_user.pk %}" class="app-btn app-btn--secondary">ユーザー詳細へ戻る</a>
+          <button type="submit" class="app-btn app-btn--danger">リセットする</button>
+        </div>
+      </form>
+    </section>
+  {% endif %}
+{% endblock %}
