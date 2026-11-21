@@ -1,0 +1,31 @@
+# Cloudflare Tunnel 併用環境向けの追加 Docker Compose 設定サンプル（cloudflared 固定 IP 割り当て）。
+# （仕様書: docs/specs/two-factor-login/FreeGroup2_ログインセキュリティ強化_仕様書_v1_3_1.md §5.7）
+#
+# 【用途】
+#   標準の docker-compose.yml にはネットワークや固定 IP を書かず、Cloudflare を使用する
+#   導入先だけでこのサンプルをコピー・調整し、オーバーライドファイルとして併用します。
+#   標準の docker-compose.yml（既存の default ネットワーク）にはネットワーク・サブネット定義が
+#   無いため、このファイルで default ネットワークにサブネットを付与し、cloudflared に固定 IP を
+#   割り当てます（他コンテナ db/web/nginx/cron も引き続き同一 default ネットワークに参加します）。
+#
+# 【使い方】
+#   1. 導入先の環境に合わせて `docker-compose.override.yml` 等へコピーするか、
+#      `-f docker-compose.yml -f docker-compose.cloudflare-realip.sample.yml` のように指定します。
+#   2. 既存ネットワークと競合しないサブネット（下例は 172.28.0.0/24）および
+#      cloudflared の固定 IP（下例は 172.28.0.10）を確認・調整してください。
+#   3. `nginx/extra.d/cloudflare-realip.conf` の `set_real_ip_from` に同じ固定 IP を記載します。
+#   4. 既存の default ネットワークにサブネット定義が無かった場合は、反映時に
+#      `docker compose down && docker compose up -d` 等でネットワークを再作成してください。
+
+services:
+  cloudflared:
+    networks:
+      default:
+        ipv4_address: 172.28.0.10
+
+networks:
+  default:
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.28.0.0/24
