@@ -9,6 +9,12 @@
       <h1>ユーザ一覧</h1>
     </div>
 
+    {% if admin_count_warning %}
+      <div class="app-alert app-alert--warning">
+        管理者が{{ admin_count }}名です。二段階認証の端末を紛失すると復旧できなくなるため、2名以上を推奨します
+      </div>
+    {% endif %}
+
     {# 検索フォームのカード（一覧表示カードとは分ける）。 #}
     <section class="app-card">
       {% comment %}検索フォーム：show_retired は hidden で引き継ぐ。アクションボタンは左寄せ。{% endcomment %}
@@ -58,6 +64,7 @@
               <th>部署</th>
               <th>認証</th>
               <th>状態</th>
+              <th>セキュリティ</th>
               <th>操作</th>
             </tr>
           </thead>
@@ -81,6 +88,19 @@
                 <td>{{ user.auth_source }}</td>
                 <td>{% if user.is_active %}現職{% else %}退職済{% endif %}</td>
                 <td>
+                  {% if user.has_confirmed_totp %}
+                    <span class="app-status-badge app-status-badge--success">登録済み</span>
+                  {% else %}
+                    <span class="app-status-badge app-status-badge--muted">未登録</span>
+                  {% endif %}
+                  {% if user.is_currently_locked %}
+                    <span class="app-status-badge app-status-badge--error">ロック中</span>
+                  {% endif %}
+                  {% if not user.email %}
+                    <span class="app-status-badge app-status-badge--warning">通知先なし</span>
+                  {% endif %}
+                </td>
+                <td>
                   {% if user.is_active and perms.accounts.assign_role_to_user and user.id != request.user.id and user.role.code != 'admin' %}
                     {# ロール変更は編集系＝緑（HIG 3.6）。ユーザ詳細画面の同ボタンと色を統一。 #}
                     <a href="{% url 'accounts:assign_role' user_id=user.id %}?next={{ request.get_full_path|urlencode }}"
@@ -91,7 +111,7 @@
                 </td>
               </tr>
             {% empty %}
-              <tr><td colspan="7">ユーザが見つかりません</td></tr>
+              <tr><td colspan="8">ユーザが見つかりません</td></tr>
             {% endfor %}
           </tbody>
         </table>

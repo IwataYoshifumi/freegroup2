@@ -9,4 +9,10 @@
     <a href="{% url 'accounts:group_list' %}" {% if active_menu == 'accounts:group_list' %}class="is-active"{% endif %}>グループ一覧</a>
     <a href="{% url 'accounts:permission_list' %}" {% if active_menu == 'accounts:permission_list' %}class="is-active"{% endif %}>パーミッション一覧</a>
   {% endif %}
+  {% if perms.accounts.manage_security_setting %}
+    <a href="{% url 'accounts:security_setting' %}" {% if active_menu == 'accounts:security_setting' %}class="is-active"{% endif %}>セキュリティ設定</a>
+  {% endif %}
+  {% if perms.accounts.view_loginattempt %}
+    <a href="{% url 'accounts:login_attempt_list' %}" {% if active_menu == 'accounts:login_attempt_list' %}class="is-active"{% endif %}>ログイン試行記録</a>
+  {% endif %}
 </nav>

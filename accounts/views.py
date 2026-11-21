@@ -1,13 +1,17 @@
+from zoneinfo import ZoneInfo
+
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin, PermissionRequiredMixin
 from django.contrib.auth.models import Group, Permission
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.db.models import Count, Q
+from django.db.models import Count, Exists, OuterRef, Q
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme, urlencode
 from django.views import View
 from django.views.generic import DetailView, ListView
+from django_otp.plugins.otp_totp.models import TOTPDevice
 
 from back_navigator.back_navigator import BackNavigator
 from persons.models import Person
@@ -23,9 +27,13 @@ from .login_security.login_service import (
     submit_first_factor,
     submit_second_factor,
 )
+from .login_security.notifications import summarize_user_agent
+from .login_security.policy import is_two_factor_required
 from .login_security.second_factor import SecondFactorMethod
+from .login_security.totp import has_confirmed_totp
 from .login_security.user_lookup import get_security_setting
-from .models import CustomUser, Role
+from .models import AccountLock, CustomUser, LoginAttempt, Role
+from .security_status import count_active_admins
 from .services import (
     assign_role_to_user,
     create_role,
@@ -148,15 +156,49 @@ class LoginVerifyView(View):
         )
 
 
+_PROFILE_JST = ZoneInfo("Asia/Tokyo")
+_PROFILE_SECOND_FACTOR_LABELS = {
+    LoginAttempt.SecondFactor.TOTP: "認証アプリ",
+    LoginAttempt.SecondFactor.RECOVERY_CODE: "リカバリーコード",
+    LoginAttempt.SecondFactor.TRUSTED_DEVICE: "省略（信頼済み端末）",
+    LoginAttempt.SecondFactor.NONE: "未設定",
+}
+
+
 class ProfileView(LoginRequiredMixin, View):
-    """ログインユーザ自身のプロフィール画面（仕様書 §12.8）。"""
+    """ログインユーザ自身のプロフィール画面（仕様書 §12.8 / ログインセキュリティ §10）。"""
 
     template_name = "accounts/profile.html"
 
     def get(self, request):
         back = BackNavigator(request)
         back.push_current("プロフィール", ["page"])
-        ctx = {"back": back}
+
+        recent_attempts = list(
+            LoginAttempt.objects.filter(
+                user=request.user,
+                result=LoginAttempt.Result.SUCCESS,
+            ).order_by("-created_at", "-id")[:5]
+        )
+        recent_logins = [
+            {
+                "created_at": timezone.localtime(attempt.created_at, _PROFILE_JST),
+                "ip_address": attempt.ip_address,
+                "browser_summary": summarize_user_agent(attempt.user_agent),
+                "second_factor_label": _PROFILE_SECOND_FACTOR_LABELS.get(
+                    attempt.second_factor, "-"
+                ),
+                "is_new_device_label": "はい" if attempt.is_new_device else "いいえ",
+            }
+            for attempt in recent_attempts
+        ]
+
+        ctx = {
+            "back": back,
+            "two_factor_enrolled": has_confirmed_totp(request.user),
+            "two_factor_required": is_two_factor_required(request.user),
+            "recent_logins": recent_logins,
+        }
         if request.user.person is None:
             ctx.update(self_link_alert_context(request.user))
         return render(request, self.template_name, ctx)
@@ -303,10 +345,22 @@ class UserListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
     permission_required = "accounts.retire_user"
 
     def get_queryset(self):
+        now = timezone.now()
         qs = (
             super()
             .get_queryset()
             .select_related("person", "person__primary_contact", "role", "department")
+            .annotate(
+                has_confirmed_totp=Exists(
+                    TOTPDevice.objects.filter(user_id=OuterRef("pk"), confirmed=True)
+                ),
+                is_currently_locked=Exists(
+                    AccountLock.objects.filter(
+                        user_id=OuterRef("pk"),
+                        locked_until__gt=now,
+                    )
+                ),
+            )
         )
         if self.request.GET.get("show_retired") != "1":
             qs = qs.filter(is_active=True)
@@ -327,6 +381,9 @@ class UserListView(LoginRequiredMixin, PermissionRequiredMixin, ListView):
         context["q"] = self.request.GET.get("q", "")
         context["active_app"] = "user_mgmt"
         context["active_menu"] = "accounts:user_list"
+        admin_count = count_active_admins()
+        context["admin_count"] = admin_count
+        context["admin_count_warning"] = admin_count <= 1
         # BackNavigator：ユーザ管理一覧を起点画面として push_current で積む。子画面（ユーザ詳細）の
         # 「戻る」がここへ戻る。keys は一覧の状態を成すクエリ（検索 q・退職表示 show_retired）。
         back = BackNavigator(self.request)
@@ -345,6 +402,24 @@ class UserDetailView(LoginRequiredMixin, PermissionRequiredMixin, DetailView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
+        target_user = self.object
+        now = timezone.now()
+        lock_obj = AccountLock.objects.filter(
+            user=target_user, locked_until__gt=now
+        ).first()
+
+        context["two_factor_enrolled"] = has_confirmed_totp(target_user)
+        context["account_locked"] = lock_obj is not None
+        context["locked_until"] = (
+            timezone.localtime(lock_obj.locked_until, _PROFILE_JST)
+            if lock_obj is not None
+            else None
+        )
+        context["can_reset_two_factor"] = self.request.user.has_perm(
+            "accounts.reset_two_factor"
+        )
+        context["is_self_detail"] = target_user.pk == self.request.user.pk
+
         context["active_app"] = "user_mgmt"
         context["active_menu"] = "accounts:user_list"
         # 戻るボタン用 BackNavigator。遷移元（人物詳細・ユーザ管理一覧の「ユーザ詳細」リンク）が

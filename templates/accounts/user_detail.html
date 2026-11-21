@@ -17,6 +17,17 @@
         {% endif %}
       </div>
       <div style="display: flex; align-items: center; gap: var(--app-space-sm);">
+        {% if can_reset_two_factor %}
+          {% if not is_self_detail %}
+            <a href="{% url 'accounts:two_factor_reset' user_id=object.id %}" class="app-btn app-btn--danger app-btn--sm">二段階認証をリセット</a>
+          {% endif %}
+          {% if account_locked %}
+            <form method="post" action="{% url 'accounts:account_unlock' user_id=object.id %}">
+              {% csrf_token %}
+              <button type="submit" class="app-btn app-btn--warning app-btn--sm">ロックを解除</button>
+            </form>
+          {% endif %}
+        {% endif %}
         {% if object.is_active %}
           {# 退職処理は is_active を戻せば復帰でき不可逆ではないため warning（黄）。 #}
           <a href="{% url 'accounts:retire_user' user_id=object.id %}" class="app-btn app-btn--warning app-btn--sm">退職処理</a>
@@ -66,6 +77,26 @@
         <div class="app-detail-item">
           <div class="app-detail-label">状態</div>
           <div class="app-detail-value">{% if object.is_active %}現職{% else %}退職済{% endif %}</div>
+        </div>
+        <div class="app-detail-item">
+          <div class="app-detail-label">二段階認証</div>
+          <div class="app-detail-value">
+            {% if two_factor_enrolled %}
+              <span class="app-status-badge app-status-badge--success">登録済み</span>
+            {% else %}
+              <span class="app-status-badge app-status-badge--muted">未登録</span>
+            {% endif %}
+          </div>
+        </div>
+        <div class="app-detail-item">
+          <div class="app-detail-label">ロック状態</div>
+          <div class="app-detail-value">
+            {% if account_locked %}
+              <span class="app-status-badge app-status-badge--error">ロック中（{{ locked_until|date:"Y-m-d H:i" }} まで）</span>
+            {% else %}
+              <span class="app-status-badge app-status-badge--muted">なし</span>
+            {% endif %}
+          </div>
         </div>
       </section>
 

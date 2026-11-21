@@ -7,7 +7,6 @@ from zoneinfo import ZoneInfo
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin, PermissionRequiredMixin
 from django.core.exceptions import PermissionDenied
-from django.db.models import Q
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.utils.decorators import method_decorator
@@ -16,7 +15,6 @@ from django.views.decorators.cache import never_cache
 from django.views.generic import ListView
 from django_otp.plugins.otp_totp.models import TOTPDevice
 
-from accounts.constants import ADMIN_ROLE_CODE
 from accounts.forms import SecuritySettingForm
 from accounts.login_security.lockout import is_user_locked
 from accounts.login_security.notifications import (
@@ -35,6 +33,7 @@ from accounts.login_security.user_lookup import (
     get_security_setting,
 )
 from accounts.models import AccountLock, CustomUser, LoginAttempt, SecuritySetting
+from accounts.security_status import count_active_admins
 from back_navigator.back_navigator import BackNavigator
 
 JST = ZoneInfo("Asia/Tokyo")
@@ -68,12 +67,7 @@ def _build_security_status_context(setting: SecuritySetting) -> dict[str, object
         .count()
     )
     locked_user_count = AccountLock.objects.filter(locked_until__gt=now).count()
-    admin_count = (
-        CustomUser.objects.filter(is_active=True)
-        .filter(Q(is_superuser=True) | Q(role__code=ADMIN_ROLE_CODE))
-        .distinct()
-        .count()
-    )
+    admin_count = count_active_admins()
     admin_recipient_count = len(get_admin_notification_recipients())
     email_configured = is_email_configured()
 
