@@ -431,7 +431,7 @@ class TwoFactorSettingsView(LoginRequiredMixin, View):
     def get(self, request):
         now = timezone.now()
         back = BackNavigator(request)
-        back.push_current("二段階認証の設定", [])
+        back.push_current("二段階認証の設定", ["page"])
 
         enrolled = has_confirmed_totp(request.user)
         cannot_disable = is_two_factor_required(request.user)
