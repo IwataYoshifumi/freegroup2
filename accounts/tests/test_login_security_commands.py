@@ -192,20 +192,45 @@ class ResetTwoFactorCommandTests(TestCase):
         self.assertIn("管理者: いいえ", output_text)
         self.assertFalse(TOTPDevice.objects.filter(user=self.target).exists())
 
+    def test_reset_interactive_confirm_yes_variants_execute(self):
+        for answer in ("y", "Y", "yes", "はい", " y ", "ｙ"):
+            with self.subTest(answer=answer):
+                AccountLock.objects.filter(user=self.target).delete()
+                ActionLog.objects.all().delete()
+                mail.outbox.clear()
+                self._setup_two_factor_state(self.target)
+                sess_key = _create_user_session(self.target)
+                stdout = io.StringIO()
+
+                with (
+                    patch("builtins.input", return_value=answer) as mock_input,
+                    self.captureOnCommitCallbacks(execute=True),
+                ):
+                    call_command("reset_two_factor", "cmd_target", stdout=stdout)
+
+                mock_input.assert_called_once_with("実行してよいですか？ [y/N]: ")
+                self.assertFalse(TOTPDevice.objects.filter(user=self.target).exists())
+                self.assertFalse(RecoveryCode.objects.filter(user=self.target).exists())
+                self.assertFalse(Session.objects.filter(session_key=sess_key).exists())
+                self.assertEqual(ActionLog.objects.count(), 1)
+                self.assertEqual(len(mail.outbox), 2)
+
     def test_reset_interactive_confirm_non_yes_aborts_without_changes(self):
         self._setup_two_factor_state(self.target)
         sess_key = _create_user_session(self.target)
 
-        for answer in ("いいえ", "yes", "y", ""):
+        for answer in ("いいえ", "", "n", "no", "x"):
             with self.subTest(answer=answer):
                 stdout = io.StringIO()
                 with (
-                    patch("builtins.input", return_value=answer),
+                    patch("builtins.input", return_value=answer) as mock_input,
                     self.captureOnCommitCallbacks(execute=True),
                 ):
-                    with self.assertRaises(CommandError):
+                    with self.assertRaises(CommandError) as ctx:
                         call_command("reset_two_factor", "cmd_target", stdout=stdout)
 
+                mock_input.assert_called_once_with("実行してよいですか？ [y/N]: ")
+                self.assertEqual(str(ctx.exception), "処理を中止しました。")
                 self.assertTrue(
                     TOTPDevice.objects.filter(user=self.target, confirmed=True).exists()
                 )

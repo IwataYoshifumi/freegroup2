@@ -1,5 +1,7 @@
 """管理コマンド: 指定ユーザーの二段階認証をリセットする（仕様書 v1.3.1 §6.7 / §6.8 / §12.2）。"""
 
+import unicodedata
+
 from django.core.management.base import BaseCommand, CommandError
 
 from accounts.login_security.operations import reset_two_factor_by_admin
@@ -44,10 +46,11 @@ class Command(BaseCommand):
 
         if not skip_confirm:
             try:
-                answer = input("実行してよいですか？ [はい]: ")
+                answer = input("実行してよいですか？ [y/N]: ")
             except EOFError:
                 answer = ""
-            if answer.strip() != "はい":
+            normalized = unicodedata.normalize("NFKC", answer).strip().lower()
+            if normalized not in {"y", "yes", "はい"}:
                 raise CommandError("処理を中止しました。")
 
         result = reset_two_factor_by_admin(
