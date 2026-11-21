@@ -1,0 +1,123 @@
+{% extends "accounts/app_base.html" %}
+{% load back_tags %}
+
+{% block title %}二段階認証の設定 — FreeGroup2{% endblock %}
+
+{% block content %}
+  <div class="app-page-header">
+    <div>
+      <h1>二段階認証の設定</h1>
+    </div>
+    <div class="app-action-area">
+      {% back_all_link back %}
+      {% back_link back %}
+    </div>
+  </div>
+
+  <section class="app-card">
+    <div class="app-section__header">
+      <h2>認証アプリとリカバリーコード</h2>
+    </div>
+
+    <div class="app-detail-list">
+      <div class="app-detail-item">
+        <div class="app-detail-label">二段階認証の状態</div>
+        <div class="app-detail-value">
+          {% if enrolled %}
+            <span class="app-status-badge app-status-badge--success">登録済み</span>
+          {% else %}
+            <span class="app-status-badge app-status-badge--muted">未登録</span>
+          {% endif %}
+        </div>
+      </div>
+
+      {% if enrolled %}
+        <div class="app-detail-item">
+          <div class="app-detail-label">リカバリーコード残数</div>
+          <div class="app-detail-value">
+            残り {{ remaining_recovery_codes }} 個
+          </div>
+        </div>
+      {% endif %}
+    </div>
+
+    {% if not enrolled %}
+      <p class="app-muted">認証アプリ（TOTP）を登録すると、ログイン時にパスワードに加えて 6 桁の確認コードが必要になり、セキュリティが強化されます。</p>
+      <div class="app-action-area app-action-area--search">
+        <a href="{% url 'accounts:two_factor_setup' %}" class="app-btn app-btn--primary">登録を開始</a>
+      </div>
+    {% elif low_recovery_warning %}
+      <div class="app-alert app-alert--warning">
+        未使用のリカバリーコード残数が少なくなっています（残り {{ remaining_recovery_codes }} 個）。端末紛失に備えて、早めに管理または再発行をご検討ください。
+      </div>
+    {% endif %}
+  </section>
+
+  <section class="app-card">
+    <div class="app-section__header">
+      <h2>ログイン端末一覧</h2>
+    </div>
+
+    {% if device_rows %}
+      <div class="app-table-wrapper">
+        <table class="app-table">
+          <thead>
+            <tr>
+              <th>ブラウザ・OS</th>
+              <th>最終ログイン日時</th>
+              <th>最終 IP アドレス</th>
+              <th>初回ログイン日時</th>
+              <th>信頼の状態</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in device_rows %}
+              <tr>
+                <td>
+                  {{ item.browser_summary }}
+                  {% if item.is_current %}
+                    <span class="app-status-badge app-status-badge--info">この端末</span>
+                  {% endif %}
+                </td>
+                <td>{{ item.last_seen_at|date:"Y-m-d H:i:s" }}</td>
+                <td>{{ item.last_ip|default:"-" }}</td>
+                <td>{{ item.first_seen_at|date:"Y-m-d H:i:s" }}</td>
+                <td>
+                  {% if item.is_trusted %}
+                    <span class="app-status-badge app-status-badge--success">信頼中（〜{{ item.trusted_until|date:"Y-m-d H:i" }}）</span>
+                  {% else %}
+                    <span class="app-status-badge app-status-badge--muted">信頼なし</span>
+                  {% endif %}
+                </td>
+                <td>
+                  <div class="app-btn-group">
+                    {% if item.is_trusted %}
+                      <form method="post" action="{% url 'accounts:login_device_revoke' device_id=item.id %}">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="revoke">
+                        <button type="submit" class="app-btn app-btn--warning app-btn--sm">信頼を取り消す</button>
+                      </form>
+                    {% endif %}
+                    <form method="post" action="{% url 'accounts:login_device_revoke' device_id=item.id %}">
+                      {% csrf_token %}
+                      <input type="hidden" name="action" value="delete">
+                      <button type="submit" class="app-btn app-btn--danger app-btn--sm">記録を削除</button>
+                    </form>
+                  </div>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="app-muted">記録されているログイン端末はありません。</p>
+    {% endif %}
+  </section>
+
+  <div class="app-action-area">
+    {% back_all_link back %}
+    {% back_link back %}
+  </div>
+{% endblock %}
