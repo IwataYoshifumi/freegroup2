@@ -116,3 +116,40 @@ class SecuritySettingForm(forms.Form):
         required=False,
     )
 
+
+class SelfPasswordChangeForm(forms.Form):
+    """本人によるパスワード変更フォーム（Step 3 サービス層へ全判定・保存を委譲、§5.2 / §13-17）。
+
+    現在のパスワードが空でも必須チェックで止めずにサービス層へ渡して失敗計上するため、
+    全入力欄を required=False としている。
+    """
+
+    old_password = forms.CharField(
+        label="現在のパスワード",
+        required=False,
+        strip=False,
+        widget=forms.PasswordInput(
+            attrs={"class": "app-input", "autocomplete": "current-password"}
+        ),
+    )
+    new_password1 = forms.CharField(
+        label="新しいパスワード",
+        required=False,
+        strip=False,
+        widget=forms.PasswordInput(
+            attrs={"class": "app-input", "autocomplete": "new-password"}
+        ),
+    )
+    new_password2 = forms.CharField(
+        label="新しいパスワード（確認）",
+        required=False,
+        strip=False,
+        widget=forms.PasswordInput(
+            attrs={"class": "app-input", "autocomplete": "new-password"}
+        ),
+    )
+
+    def __init__(self, user=None, *args, **kwargs):
+        self.user = user
+        super().__init__(*args, **kwargs)
+

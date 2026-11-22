@@ -6,10 +6,16 @@ from django.contrib import admin
 from django.urls import include, path
 
 from accounts.views import AdminLoginRedirectView
+from accounts.views_password import (
+    AdminPasswordChangeDoneRedirectView,
+    AdminPasswordChangeRedirectView,
+)
 from home.views import HomeView
 
 urlpatterns = [
     path("admin/login/", AdminLoginRedirectView.as_view()),
+    path("admin/password_change/", AdminPasswordChangeRedirectView.as_view()),
+    path("admin/password_change/done/", AdminPasswordChangeDoneRedirectView.as_view()),
     path("admin/", admin.site.urls),
     path("", HomeView.as_view(), name="home"),
     path("accounts/", include("accounts.urls")),

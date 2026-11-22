@@ -1,7 +1,7 @@
 from django.contrib.auth import views as auth_views
 from django.urls import path
 
-from . import views, views_login_security, views_two_factor
+from . import views, views_login_security, views_password, views_two_factor
 
 app_name = "accounts"
 
@@ -14,6 +14,8 @@ urlpatterns = [
     path("two-factor/disable/", views_two_factor.TwoFactorDisableView.as_view(), name="two_factor_disable"),
     path("devices/<int:device_id>/revoke/", views_two_factor.LoginDeviceRevokeView.as_view(), name="login_device_revoke"),
     path("logout/", auth_views.LogoutView.as_view(), name="logout"),
+    path("password/change/", views_password.PasswordChangeView.as_view(), name="password_change"),
+    path("password/change/done/", views_password.PasswordChangeDoneView.as_view(), name="password_change_done"),
     path("profile/", views.ProfileView.as_view(), name="profile"),
     path("profile/signature/", views.SignatureUpdateView.as_view(), name="signature_update"),
     path("user-person/confirm/<uuid:person_id>/", views.LinkUserPersonConfirmView.as_view(), name="link_user_person_confirm"),

@@ -196,6 +196,15 @@
 
     <section class="app-card">
       <div class="app-section__header">
+        <h2>パスワード</h2>
+        {% url 'accounts:password_change' as password_change_url %}
+        <a href="{% append_back_url password_change_url back %}" class="app-btn app-btn--secondary app-btn--sm">パスワードを変更</a>
+      </div>
+      <p class="app-muted">ログイン中のアカウントのパスワードを変更します。</p>
+    </section>
+
+    <section class="app-card">
+      <div class="app-section__header">
         <h2>二段階認証</h2>
         {% url 'accounts:two_factor' as two_factor_url %}
         <a href="{% append_back_url two_factor_url back %}" class="app-btn app-btn--secondary app-btn--sm">二段階認証の設定</a>

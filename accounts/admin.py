@@ -1,6 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import GroupAdmin, UserAdmin
 from django.contrib.auth.models import Group
+from django.http import Http404
 from django.shortcuts import render
 
 from .models import (
@@ -104,17 +105,21 @@ class CustomUserAdmin(UserAdmin):
     )
 
     def get_fieldsets(self, request, obj=None):
-        """user_permissions を fieldsets から動的に除外しつつ、CustomUser 独自フィールド
-        （role / department / auth_source）の編集セクションを追加する（仕様書 §4.1 / 宿題S-(2)）。
+        """user_permissions と編集画面の password 欄を fieldsets から動的に除外しつつ、
+        CustomUser 独自フィールド（role / department / auth_source）の編集セクションを追加する
+        （仕様書 v1.5 §4.1 / パスワード仕様書 §12・§13-5）。
 
-        新規作成（obj is None）では super() が add_fieldsets を返し、そこに role を含めて
-        いるため ROLE_FIELDSET は追加しない（二重追加・department/auth_source の早期要求を回避）。
+        新規作成（obj is None）では super() が add_fieldsets を返し、初期パスワード欄と
+        role をそのまま残す。
         """
         fieldsets = super().get_fieldsets(request, obj)
+        excluded_fields = {"user_permissions"}
+        if obj is not None:
+            excluded_fields.add("password")
         cleaned = []
         for name, opts in fieldsets:
-            if "fields" in opts and "user_permissions" in opts["fields"]:
-                new_fields = tuple(f for f in opts["fields"] if f != "user_permissions")
+            if "fields" in opts and any(f in excluded_fields for f in opts["fields"]):
+                new_fields = tuple(f for f in opts["fields"] if f not in excluded_fields)
                 cleaned.append((name, {**opts, "fields": new_fields}))
             else:
                 cleaned.append((name, opts))
@@ -123,10 +128,16 @@ class CustomUserAdmin(UserAdmin):
         return tuple(cleaned)
 
     def get_form(self, request, obj=None, **kwargs):
-        """user_permissions を form base_fields からも除外（URL 直叩き保護、仕様書 §4.1）。"""
+        """user_permissions および編集時の password 欄を除外（<id>/password/ リンク・URL 保護、仕様書 §12）。"""
         form = super().get_form(request, obj, **kwargs)
         form.base_fields.pop("user_permissions", None)
+        if obj is not None:
+            form.base_fields.pop("password", None)
         return form
+
+    def user_change_password(self, request, id, form_url=""):
+        """管理画面のユーザー別パスワード変更画面（<id>/password/）を塞ぐ（仕様書 §12 / §13-5）。"""
+        raise Http404("この画面は無効化されています。")
 
     def retire_user_action(self, request, queryset):
         """選択されたユーザを退職処理する Admin アクション（インターメディエイト画面付き）。
