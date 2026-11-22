@@ -34,6 +34,10 @@ class ActionLogAction:
     ACCOUNT_UNLOCK = "account_unlock"  # ロックの手動解除
     IP_BLOCK = "ip_block"  # IP 遮断発生
     LOGIN_DEVICE_REVOKE = "login_device_revoke"  # 端末の信頼取り消し・削除
+    # パスワード変更・リセット（仕様書 v1.0 付録A）
+    PASSWORD_CHANGE = "password_change"  # 本人によるパスワード変更
+    PASSWORD_RESET_REQUEST = "password_reset_request"  # パスワードリセット申請
+    PASSWORD_RESET_COMPLETE = "password_reset_complete"  # パスワードリセット完了（再設定）
 
 
 #: admin ロールの安定キー（Role.code）。本体業務 UI からの admin 任免を禁止する

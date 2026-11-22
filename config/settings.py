@@ -336,6 +336,8 @@ EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "")
 # 共通メール送信部品（common/mail.py）の既定送信タイムアウト（秒）
 MAIL_SEND_TIMEOUT = int(os.getenv("MAIL_SEND_TIMEOUT") or "10")
+# パスワードリセットリンク（トークン）の有効期限（秒、既定 3600 = 1時間）
+PASSWORD_RESET_TIMEOUT = int(os.getenv("PASSWORD_RESET_TIMEOUT") or "3600")
 
 BOUNCE_INBOX_HOST = os.getenv("BOUNCE_INBOX_HOST", "")
 BOUNCE_INBOX_PORT = int(os.getenv("BOUNCE_INBOX_PORT", "993"))

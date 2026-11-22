@@ -461,3 +461,38 @@ class LoginAttempt(models.Model):
 
     def __str__(self):
         return f"LoginAttempt ({self.username_input}, {self.result}, {self.created_at:%Y-%m-%d %H:%M})"
+
+
+class PasswordResetRequest(models.Model):
+    """パスワードリセット申請記録（仕様書 §8.1 / 付録A）。"""
+
+    class Result(models.TextChoices):
+        SENT = "sent", "送信"
+        NO_MATCH = "no_match", "該当なし"
+        NOT_ELIGIBLE = "not_eligible", "対象外"
+        RATE_LIMITED = "rate_limited", "制限超過"
+        IP_BLOCKED = "ip_blocked", "IP遮断"
+
+    created_at = models.DateTimeField(default=timezone.now)
+    email_input = models.CharField(max_length=254, blank=True, default="")
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="password_reset_requests",
+    )
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    result = models.CharField(max_length=32, choices=Result.choices)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["created_at"]),
+            models.Index(fields=["ip_address"]),
+        ]
+        verbose_name = "パスワードリセット申請記録"
+        verbose_name_plural = "パスワードリセット申請記録"
+
+    def __str__(self):
+        return f"PasswordResetRequest ({self.result}, {self.created_at:%Y-%m-%d %H:%M})"

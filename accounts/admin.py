@@ -3,7 +3,14 @@ from django.contrib.auth.admin import GroupAdmin, UserAdmin
 from django.contrib.auth.models import Group
 from django.shortcuts import render
 
-from .models import CustomUser, Department, GroupProfile, LdapGroup, Role
+from .models import (
+    CustomUser,
+    Department,
+    GroupProfile,
+    LdapGroup,
+    PasswordResetRequest,
+    Role,
+)
 from .services import apply_role, retire_user
 
 
@@ -176,6 +183,36 @@ class CustomUserAdmin(UserAdmin):
         super().save_related(request, form, formsets, change)
         if getattr(form.instance, "_role_changed", False):
             apply_role(form.instance, form.instance.role)
+
+
+@admin.register(PasswordResetRequest)
+class PasswordResetRequestAdmin(admin.ModelAdmin):
+    """パスワードリセット申請記録（閲覧専用）。"""
+
+    list_display = ("created_at", "email_input", "user", "ip_address", "result")
+    list_filter = ("result", "created_at")
+    search_fields = ("email_input", "ip_address", "user__username", "user__email")
+    ordering = ("-created_at",)
+    readonly_fields = (
+        "id",
+        "created_at",
+        "email_input",
+        "user",
+        "ip_address",
+        "result",
+    )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def has_view_permission(self, request, obj=None):
+        return True
 
 
 # 仕様書 §13：django-otp が自動登録する TOTPDevice 管理画面（秘密鍵閲覧・編集可）を

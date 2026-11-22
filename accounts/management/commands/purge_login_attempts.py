@@ -7,7 +7,8 @@ from accounts.login_security.purge import purge_old_login_data
 
 class Command(BaseCommand):
     help = (
-        "180日超のログイン試行記録、最終ログインから1年超の端末記録、"
+        "180日超のログイン試行記録・パスワードリセット申請記録、"
+        "最終ログインから1年超の端末記録、"
         "作成から24時間超の未確定TOTP登録を削除する。"
     )
 
@@ -16,6 +17,7 @@ class Command(BaseCommand):
         self.stdout.write(
             "古いログイン関連データを削除しました: "
             f"ログイン試行記録={result.deleted_attempts}件, "
+            f"パスワードリセット申請記録={result.deleted_password_reset_requests}件, "
             f"端末記録={result.deleted_devices}件, "
             f"未確定の認証アプリ登録={result.deleted_unconfirmed_totp}件"
         )
