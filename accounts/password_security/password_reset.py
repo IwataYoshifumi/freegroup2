@@ -14,7 +14,7 @@ from enum import Enum
 from django.contrib.auth.tokens import default_token_generator
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.urls import NoReverseMatch, reverse
+from django.urls import reverse
 from django.utils import timezone
 from django.utils.encoding import force_bytes, force_str
 from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
@@ -115,13 +115,10 @@ def build_password_reset_url(
     """リクエストのホスト名と Django 標準トークンから再設定用 URL を組み立てる（仕様書 §6.3）。"""
     uidb64 = urlsafe_base64_encode(force_bytes(user.pk))
     resolved_token = token or default_token_generator.make_token(user)
-    try:
-        path = reverse(
-            "accounts:password_reset_confirm",
-            kwargs={"uidb64": uidb64, "token": resolved_token},
-        )
-    except NoReverseMatch:
-        path = f"/accounts/password/reset/{uidb64}/{resolved_token}/"
+    path = reverse(
+        "accounts:password_reset_confirm",
+        kwargs={"uidb64": uidb64, "token": resolved_token},
+    )
     return request.build_absolute_uri(path)
 
 

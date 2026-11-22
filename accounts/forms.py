@@ -153,3 +153,46 @@ class SelfPasswordChangeForm(forms.Form):
         self.user = user
         super().__init__(*args, **kwargs)
 
+
+class SelfPasswordResetRequestForm(forms.Form):
+    """パスワードリセット申請フォーム（空入力も含め Step 3 サービス層へ委譲、§6.2 / §13-16）。"""
+
+    email = forms.CharField(
+        label="メールアドレス",
+        required=False,
+        strip=False,
+        widget=forms.TextInput(
+            attrs={
+                "class": "app-input",
+                "autocomplete": "email",
+                "inputmode": "email",
+                "autofocus": True,
+            }
+        ),
+    )
+
+
+class SelfPasswordResetConfirmForm(forms.Form):
+    """パスワード再設定フォーム（Step 3 サービス層へ検証・保存を委譲、§6.4 / §13-15）。"""
+
+    new_password1 = forms.CharField(
+        label="新しいパスワード",
+        required=False,
+        strip=False,
+        widget=forms.PasswordInput(
+            attrs={"class": "app-input", "autocomplete": "new-password"}
+        ),
+    )
+    new_password2 = forms.CharField(
+        label="新しいパスワード（確認）",
+        required=False,
+        strip=False,
+        widget=forms.PasswordInput(
+            attrs={"class": "app-input", "autocomplete": "new-password"}
+        ),
+    )
+
+    def __init__(self, user=None, *args, **kwargs):
+        self.user = user
+        super().__init__(*args, **kwargs)
+

@@ -16,6 +16,18 @@ urlpatterns = [
     path("logout/", auth_views.LogoutView.as_view(), name="logout"),
     path("password/change/", views_password.PasswordChangeView.as_view(), name="password_change"),
     path("password/change/done/", views_password.PasswordChangeDoneView.as_view(), name="password_change_done"),
+    path("password/reset/", views_password.PasswordResetView.as_view(), name="password_reset"),
+    path("password/reset/done/", views_password.PasswordResetDoneView.as_view(), name="password_reset_done"),
+    path(
+        "password/reset/<uidb64>/<token>/",
+        views_password.PasswordResetConfirmView.as_view(),
+        name="password_reset_confirm",
+    ),
+    path(
+        "password/reset/complete/",
+        views_password.PasswordResetCompleteView.as_view(),
+        name="password_reset_complete",
+    ),
     path("profile/", views.ProfileView.as_view(), name="profile"),
     path("profile/signature/", views.SignatureUpdateView.as_view(), name="signature_update"),
     path("user-person/confirm/<uuid:person_id>/", views.LinkUserPersonConfirmView.as_view(), name="link_user_person_confirm"),
